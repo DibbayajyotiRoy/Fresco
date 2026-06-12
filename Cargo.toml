@@ -1,0 +1,60 @@
+[package]
+name = "fresco"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
+repository = "https://github.com/DibbayajyotiRoy/fresco"
+authors = ["Dibbayajyoti Roy"]
+
+[features]
+default = ["gui", "daemon"]
+gui = ["dep:gtk4", "dep:libadwaita"]
+daemon = ["dep:x11rb", "dep:libloading", "dep:nix"]
+
+[[bin]]
+name = "fresco"
+path = "src/bin/fresco.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "frescod"
+path = "src/bin/frescod.rs"
+required-features = ["daemon"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_json = "1"
+dirs = "6"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+gtk4 = { version = "0.9", features = ["v4_6"], optional = true }
+libadwaita = { version = "0.7", features = ["v1_1"], optional = true }
+x11rb = { version = "0.13", features = ["randr"], optional = true }
+libloading = { version = "0.8", optional = true }
+nix = { version = "0.29", features = ["process", "signal", "fs"], optional = true }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[package.metadata.deb]
+maintainer = "Dibbayajyoti Roy <maromaromuje28@gmail.com>"
+copyright = "2026, Dibbayajyoti Roy"
+section = "video"
+priority = "optional"
+depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, ffmpegthumbnailer"
+recommends = "mesa-va-drivers, intel-media-va-driver"
+extended-description = """\
+Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
+desktop wallpaper. Pick media in a simple app, click Set, close the app — \
+the wallpaper keeps playing and restores on login. Hardware-accelerated \
+decoding keeps CPU usage near zero without degrading quality."""
+assets = [
+    ["target/release/fresco", "usr/bin/", "755"],
+    ["target/release/frescod", "usr/bin/", "755"],
+    ["data/io.github.dibbayajyotiroy.Fresco.desktop", "usr/share/applications/", "644"],
+    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]

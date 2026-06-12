@@ -1,5 +1,9 @@
 pub mod autostart;
 pub mod config;
+#[cfg(feature = "daemon")]
+pub mod daemon;
+#[cfg(feature = "gui")]
+pub mod gui;
 pub mod ipc;
 
 /// Application ID used for the desktop file, autostart entry, and GTK app.

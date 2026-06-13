@@ -107,7 +107,10 @@ impl Player {
                 }
                 if let Some(first) = paths.first() {
                     unsafe {
-                        f.command(self.handle, &["loadfile", &first.to_string_lossy(), "replace"])
+                        f.command(
+                            self.handle,
+                            &["loadfile", &first.to_string_lossy(), "replace"],
+                        )
                     };
                 }
                 for p in paths.iter().skip(1) {
@@ -119,7 +122,10 @@ impl Player {
             _ => {
                 if let Some(path) = wallpaper.effective_path() {
                     unsafe {
-                        f.command(self.handle, &["loadfile", &path.to_string_lossy(), "replace"])
+                        f.command(
+                            self.handle,
+                            &["loadfile", &path.to_string_lossy(), "replace"],
+                        )
                     };
                 }
             }
@@ -131,7 +137,12 @@ impl Player {
     pub fn load_path(&self, path: &std::path::Path) {
         if let Ok(f) = fns() {
             // SAFETY: `self.handle` is valid for the lifetime of this Player.
-            unsafe { f.command(self.handle, &["loadfile", &path.to_string_lossy(), "replace"]) };
+            unsafe {
+                f.command(
+                    self.handle,
+                    &["loadfile", &path.to_string_lossy(), "replace"],
+                )
+            };
         }
     }
 

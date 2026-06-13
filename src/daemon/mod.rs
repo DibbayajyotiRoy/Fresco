@@ -140,7 +140,11 @@ impl Daemon {
             None
         };
 
-        Ok(Renderer { window, player, slideshow })
+        Ok(Renderer {
+            window,
+            player,
+            slideshow,
+        })
     }
 
     /// Main event loop. Returns when a Stop command (or signal) is received.
@@ -189,7 +193,9 @@ impl Daemon {
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
                 match self.rebuild() {
                     Ok(_) => Response::Ok,
-                    Err(e) => Response::Err { message: e.to_string() },
+                    Err(e) => Response::Err {
+                        message: e.to_string(),
+                    },
                 }
             }
             Request::Stop => Response::Ok, // teardown happens in run()
@@ -209,7 +215,10 @@ impl Daemon {
 
     fn status(&self) -> StatusReply {
         let (cpu, rss) = proc_stats();
-        let hwdec = self.renderers.first().and_then(|r| r.player.hwdec_current());
+        let hwdec = self
+            .renderers
+            .first()
+            .and_then(|r| r.player.hwdec_current());
         let error = self
             .renderers
             .iter()
@@ -322,7 +331,10 @@ fn list_images(folder: &std::path::Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| {
             matches!(
-                p.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref(),
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_lowercase)
+                    .as_deref(),
                 Some("jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff" | "gif")
             )
         })
@@ -378,18 +390,29 @@ pub fn run_once(file: PathBuf) -> Result<()> {
     let is_image = file
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| matches!(e.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp" | "bmp"))
+        .map(|e| {
+            matches!(
+                e.to_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "webp" | "bmp"
+            )
+        })
         .unwrap_or(false);
     let wallpaper = Wallpaper {
         kind: if is_image { Kind::Image } else { Kind::Video },
         path: Some(file),
         ..Default::default()
     };
-    let config = Config { wallpaper, ..Default::default() };
+    let config = Config {
+        wallpaper,
+        ..Default::default()
+    };
 
     let mut daemon = Daemon::new(config)?;
     daemon.rebuild()?;
-    log::info!("--once: rendering on {} monitor(s); Ctrl-C to quit", daemon.renderers.len());
+    log::info!(
+        "--once: rendering on {} monitor(s); Ctrl-C to quit",
+        daemon.renderers.len()
+    );
     loop {
         while let Ok(Some(event)) = daemon.conn.poll_for_event() {
             daemon.on_x11_event(event);
@@ -420,7 +443,12 @@ pub fn check() {
     match mpv::ffi::fns() {
         Ok(f) => {
             let v = f.client_api_version();
-            println!("libmpv          : {G}{}{X} (client API {}.{})", f.soname, v >> 16, v & 0xffff);
+            println!(
+                "libmpv          : {G}{}{X} (client API {}.{})",
+                f.soname,
+                v >> 16,
+                v & 0xffff
+            );
         }
         Err(e) => println!("libmpv          : {R}NOT LOADED{X} ({e})"),
     }
@@ -450,8 +478,14 @@ pub fn check() {
     match crate::ipc::request(&Request::Status) {
         Ok(Response::Status(s)) => {
             println!("Daemon          : {G}running{X}");
-            println!("  decode        : {}", s.hwdec.as_deref().unwrap_or("(none)"));
-            println!("  wallpaper     : {}", s.wallpaper.as_deref().unwrap_or("(none)"));
+            println!(
+                "  decode        : {}",
+                s.hwdec.as_deref().unwrap_or("(none)")
+            );
+            println!(
+                "  wallpaper     : {}",
+                s.wallpaper.as_deref().unwrap_or("(none)")
+            );
             println!("  RAM           : {} MB", s.rss_mb);
             if let Some(err) = s.error {
                 println!("  {R}error{X}         : {err}");

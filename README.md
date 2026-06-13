@@ -1,106 +1,122 @@
-# Fresco 🖼
+<div align="center">
 
-**Live wallpapers for Linux** — set video, GIF, image, slideshow, or playlist wallpapers on any Debian/Ubuntu-based distro, with hardware-accelerated playback and a clean GUI.
+<img src="data/icons/io.github.dibbayajyotiroy.Fresco.svg" width="96" alt="Fresco icon" />
 
-![Downloads](https://img.shields.io/github/downloads/DibbayajyotiRoy/fresco/total?style=flat-square&color=brightgreen)
+# Fresco — Live Wallpapers for Linux, Made Easy
+
+**Set any video, GIF, or image as your desktop wallpaper on Debian, Ubuntu, Pop!_OS & Mint** — a simple, GUI alternative to **Wallpaper Engine** and **Lively** for Linux, with hardware-accelerated playback.
+
+![Downloads](https://img.shields.io/github/downloads/DibbayajyotiRoy/fresco/total?style=flat-square&color=brightgreen&label=downloads)
 ![License](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-Linux%20X11-blue?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11-blue?style=flat-square)
+![Built with Rust](https://img.shields.io/badge/built%20with-Rust%20%2B%20GTK4-orange?style=flat-square)
+
+</div>
+
+> Windows has Wallpaper Engine. macOS has Lively. **Linux had nothing simple — until Fresco.**
+> Pick a video, click *Set*, close the app. Your wallpaper keeps playing and comes back on login.
+
+<!-- Add a hero GIF/screenshot here for instant comprehension:
+     ![Fresco screenshot](data/screenshots/library.png) -->
 
 ---
 
-## What it does
+## Why Fresco?
 
-- **Pick any video** (mp4, webm, mkv, gif) or image (jpg, png, webp) → it plays as your desktop wallpaper
-- **Close the app** — the wallpaper keeps playing (detached background process)
-- **Restores on login** — no manual steps after a reboot
-- **Hardware decode** — GPU-accelerated via VA-API/NVDEC, so CPU usage stays near 0%
-- **Drag-to-crop** — frame exactly the region you want before setting
-- **Playlist mode** — queue multiple videos to cycle on a loop
-- **Wallpaper library** — thumbnail grid, one-click switching, recently used section
+Every other Linux live-wallpaper option is terminal-only, abandoned, locked to one GNOME version, or breaks under the compositor. Fresco is a **proper desktop app**: install a `.deb`, open it from your app menu, pick media, done.
 
-## Supported distros
+- 🎬 **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image **slideshow**, or a multi-video **playlist**
+- ⚡ **Hardware-accelerated** — GPU video decode (VA-API / NVDEC) keeps CPU near zero without degrading quality
+- ✂️ **Drag-to-crop editor** — frame exactly the region you want (no other Linux tool has this)
+- 🖼 **Wallpaper library** — saved thumbnails, recently-used, and search
+- 🔁 **Set & forget** — close the app, the wallpaper keeps playing; restored automatically on login
+- ⏸ **Battery-aware** — pause on battery, pause/resume any time
+- 🖥 **Multi-monitor** — a different wallpaper per display
 
-| Distro | Version | Status |
-|--------|---------|--------|
+## Fresco vs other Linux options
+
+| | **Fresco** | Hidamari | Komorebi | mpvpaper | Wallpaper Engine |
+|---|:---:|:---:|:---:|:---:|:---:|
+| GUI app (no terminal) | ✅ | ✅ | ✅ | ❌ | ✅ |
+| Works on GNOME/X11 | ✅ | ✅ | ✅ | ❌ (Wayland-only) | ❌ (needs compositor off) |
+| Video quality (mpv hwdec) | ✅ | ⚠️ VLC | ⚠️ | ✅ | ✅ |
+| Drag-to-crop | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Playlists | ✅ | ❌ | ❌ | manual | ✅ |
+| Wallpaper library | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Actively maintained | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Free & open source | ✅ | ✅ | ✅ | ✅ | ❌ (paid, Windows) |
+
+## Supported distributions
+
+| Distro | Versions | Status |
+|--------|----------|--------|
 | Pop!_OS | 22.04 | ✅ Primary target |
 | Ubuntu | 22.04, 24.04 | ✅ |
 | Linux Mint | 21, 22 | ✅ |
 | Debian | 12 (Bookworm) | ✅ |
 | elementary OS | 7 | ✅ |
 
-> X11 session required. Wayland support is planned.
+> **X11 session required.** Wayland support is planned.
 
 ## Install
 
-### One-liner (recommended)
+**One-liner:**
 ```bash
 curl -fsSL https://github.com/DibbayajyotiRoy/fresco/releases/latest/download/install.sh | bash
 ```
 
-### Manual .deb
-1. Download `fresco_*.deb` from [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest)
-2. Double-click the file in your file manager, or run:
+**Or download the `.deb`** from [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) and double-click it (or `sudo apt install ./fresco_*.deb`).
+
+For the lowest CPU usage, install your GPU's hardware-decode driver:
 ```bash
-sudo apt install ./fresco_*.deb
-```
-
-### Optional: hardware decode drivers
-For the lowest CPU usage, install your GPU's VA-API driver:
-```bash
-# Intel (Skylake and newer)
-sudo apt install intel-media-va-driver
-
-# AMD / Intel (Mesa-based)
-sudo apt install mesa-va-drivers
-
-# NVIDIA — use the proprietary driver (already installed if nvidia-smi works)
+sudo apt install intel-media-va-driver   # Intel
+sudo apt install mesa-va-drivers          # AMD / Mesa
+# NVIDIA: the proprietary driver provides NVDEC
 ```
 
 ## Usage
 
-Launch **Fresco** from your application menu. On first run, drag a video onto the window or click **Add** to pick a file. Click **Set as Wallpaper** — done. Close the window; the wallpaper keeps playing.
+Launch **Fresco** from your app menu → **+ Add** → pick a video → drag a crop frame → **Set as Wallpaper** → close the window. That's it. Run `frescod --check` any time for hardware-decode diagnostics.
 
-### Diagnostics / bug reports
-```bash
-frescod --check
-```
-Prints: session type, libmpv version loaded, GPU detected, hardware decode status, current wallpaper. Paste the output when filing a bug.
+## FAQ
 
-## Supported formats
+**Is there a Wallpaper Engine for Linux?**
+Yes — Fresco is a free, open-source live-wallpaper app for Linux that works like Wallpaper Engine: pick a video, set it as your animated desktop background.
 
-| Type | Formats |
-|------|---------|
-| Video | mp4, webm, mkv, avi, mov, flv |
-| Animated | gif (treated as video) |
-| Image | jpg, png, webp, bmp, tiff |
-| Slideshow | Any folder of images |
-| Playlist | Multiple video files, cycled on a loop |
+**How do I set a video as my wallpaper on Ubuntu / Pop!_OS / Debian?**
+Install the Fresco `.deb`, open it, click **+ Add**, choose your video, and click **Set as Wallpaper**.
+
+**Does it work on Wayland or GNOME?**
+It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). Wayland support is on the roadmap.
+
+**Will a video wallpaper drain my battery or CPU?**
+Fresco uses GPU hardware decoding so CPU stays near zero, and it can **automatically pause on battery**.
+
+**What video formats are supported?**
+mp4, webm, mkv, avi, mov, plus animated GIFs, static images (jpg/png/webp), folders as slideshows, and multi-video playlists.
+
+## How it works
+
+Two binaries: `fresco` (the GTK4/libadwaita GUI you can close) and `frescod` (a lightweight daemon that paints a desktop-level X11 window with an embedded [mpv](https://mpv.io) instance per monitor). See [docs/AUDIT.md](docs/AUDIT.md) for the full design and competitive analysis, and [docs/FLATHUB.md](docs/FLATHUB.md) for Flatpak packaging.
 
 ## Building from source
 
 ```bash
-# Install build deps
 sudo apt install libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer libmpv-dev
-
-# Build
 cargo build --release
-
-# Run
 ./target/release/fresco
 ```
 
-## Architecture
+## Contributing
 
-Two binaries:
-- `fresco` — GTK4/libadwaita GUI; can be closed while wallpaper plays
-- `frescod` — headless daemon; manages X11 windows + mpv instances; communicates via Unix socket at `$XDG_RUNTIME_DIR/fresco/control.sock`
-
-See [docs/AUDIT.md](docs/AUDIT.md) for the full competitive landscape and design decisions.
+Issues and PRs welcome. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-GPL-3.0-or-later — see [LICENSE](LICENSE)
+[GPL-3.0-or-later](LICENSE) — free and open source forever.
 
 ---
 
-Made with ☕ for the Linux desktop community.
+<div align="center">
+<sub>Fresco — live wallpaper / video wallpaper / animated desktop background for Debian-based Linux. Made with ☕ for the Linux desktop community.</sub>
+</div>

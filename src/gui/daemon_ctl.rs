@@ -52,58 +52,12 @@ pub fn ensure_daemon_and_apply(config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub fn stop_daemon() -> Result<()> {
-    if ipc::daemon_alive() {
-        ipc::request(&Request::Stop)?;
-    }
-    Ok(())
-}
-
-pub fn pause_daemon() -> Result<()> {
-    if ipc::daemon_alive() {
-        ipc::request(&Request::Pause)?;
-    }
-    Ok(())
-}
-
-pub fn resume_daemon() -> Result<()> {
-    if ipc::daemon_alive() {
-        ipc::request(&Request::Resume)?;
-    }
-    Ok(())
-}
-
 /// Poll status; returns None if the daemon is not running.
 pub fn get_status() -> Option<StatusReply> {
     match ipc::request(&Request::Status) {
         Ok(Response::Status(s)) if s.running => Some(s),
         _ => None,
     }
-}
-
-/// Build a human-readable status line for the status bar.
-pub fn status_line(status: Option<&StatusReply>) -> String {
-    let Some(s) = status else {
-        return "Wallpaper stopped".to_string();
-    };
-    if s.paused {
-        return "Paused".to_string();
-    }
-    let decode = match s.hwdec.as_deref() {
-        Some("no") | None => "Software decode ⚠".to_string(),
-        Some(h) => format!("GPU decode: {h} ✓"),
-    };
-    let cpu = if s.cpu_percent > 0.1 {
-        format!(" · CPU {:.1}%", s.cpu_percent)
-    } else {
-        String::new()
-    };
-    let ram = if s.rss_mb > 0 {
-        format!(" · RAM {} MB", s.rss_mb)
-    } else {
-        String::new()
-    };
-    format!("{decode}{cpu}{ram}")
 }
 
 /// If hardware decode is not active, return a hint string.

@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -9,7 +9,7 @@ authors = ["Dibbayajyoti Roy"]
 
 [features]
 default = ["gui", "daemon"]
-gui = ["dep:gtk4", "dep:libadwaita"]
+gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel"]
 daemon = ["dep:x11rb", "dep:libloading", "dep:nix"]
 
 [[bin]]
@@ -35,6 +35,8 @@ libadwaita = { version = "0.7", features = ["v1_1"], optional = true }
 x11rb = { version = "0.13", features = ["randr", "shape"], optional = true }
 libloading = { version = "0.8", optional = true }
 nix = { version = "0.29", features = ["process", "signal", "fs"], optional = true }
+ureq = { version = "2", features = ["json"], optional = true }
+async-channel = { version = "2", optional = true }
 
 [profile.release]
 lto = "thin"
@@ -46,7 +48,7 @@ copyright = "2026, Dibbayajyoti Roy"
 section = "video"
 priority = "optional"
 depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, ffmpegthumbnailer"
-recommends = "mesa-va-drivers, intel-media-va-driver"
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav"
 extended-description = """\
 Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
 desktop wallpaper. Pick media in a simple app, click Set, close the app — \

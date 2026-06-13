@@ -1,0 +1,132 @@
+# Flatpak manifest for Fresco.
+#
+# Build & test locally:
+#   flatpak install -y flathub org.gnome.Platform//47 org.gnome.Sdk//47 \
+#       org.freedesktop.Sdk.Extension.rust-stable//24.08 \
+#       org.freedesktop.Platform.ffmpeg-full//24.08
+#   # generate offline cargo sources (Flathub builds with no network):
+#   python3 flatpak/flatpak-cargo-generator.py Cargo.lock -o flatpak/cargo-sources.json
+#   flatpak-builder --user --install --force-clean build-dir \
+#       flatpak/io.github.dibbayajyotiroy.Fresco.yaml
+#   flatpak run io.github.dibbayajyotiroy.Fresco
+#
+# NOTE: the libmpv / ffmpegthumbnailer modules below are the part most likely to
+# need iteration on first local build — see docs/FLATHUB.md.
+
+app-id: io.github.dibbayajyotiroy.Fresco
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: fresco
+
+# ffmpeg is provided by the runtime extension rather than rebuilt from scratch.
+add-extensions:
+  org.freedesktop.Platform.ffmpeg-full:
+    directory: lib/ffmpeg
+    version: "24.08"
+    add-ld-path: .
+    no-autodownload: false
+    autodelete: false
+
+finish-args:
+  # Full X11 access is required: Fresco creates a desktop-level X11 window and
+  # restacks it. (Fresco is X11-only for now.)
+  - --socket=x11
+  - --share=ipc
+  # GPU for mpv vo=gpu + hardware decode.
+  - --device=dri
+  # Read the user's media files wherever they live (the daemon opens stored
+  # paths long after the file chooser closes, so the document portal alone is
+  # not enough). See docs/FLATHUB.md for the Flathub reviewer note.
+  - --filesystem=host:ro
+  # Write the XDG autostart entry on the host so the wallpaper restores on login.
+  - --filesystem=xdg-config/autostart:create
+  # Set the GNOME desktop background (overview/lock-screen fallback) via dconf.
+  - --talk-name=ca.desrt.dconf
+  - --filesystem=xdg-run/dconf
+  - --env=DCONF_USER_CONFIG_DIR=.config/dconf
+  # Allow launching the daemon as a separate instance for autostart.
+  - --talk-name=org.freedesktop.Flatpak
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  prepend-ld-library-path: /app/lib/ffmpeg
+  env:
+    CARGO_HOME: /run/build/fresco/cargo
+
+modules:
+  # libplacebo + libass + libmpv. ffmpeg comes from the runtime extension.
+  - name: libass
+    buildsystem: autotools
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.xz
+        sha256: eae425da50f0015c21f7b3a9c7262a910f0218af469e22e2931462fed3c50959
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Dvulkan=disabled
+      - -Ddemos=false
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v6.338.2
+
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplugins=disabled
+      - -Dmanpage-build=disabled
+      - -Dlua=disabled
+      - -Djavascript=disabled
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.38.0.tar.gz
+        sha256: 86d9ef40b6058732f67b46d0bbda24a074fae860b3eaae05bab3145041303066
+
+  - name: ffmpegthumbnailer
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DENABLE_GIO=ON
+      - -DENABLE_THUMBNAILER=OFF
+    sources:
+      - type: archive
+        url: https://github.com/dirkvdb/ffmpegthumbnailer/archive/refs/tags/2.2.2.tar.gz
+        sha256: 8c4c42ab68144a9e2349710d42c0248407a87e7dc0ba4366891905322b331f92
+
+  - name: fresco
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_NET_OFFLINE: "true"
+    build-commands:
+      - cargo --offline build --release --all-features
+      - install -Dm755 target/release/fresco /app/bin/fresco
+      - install -Dm755 target/release/frescod /app/bin/frescod
+      - install -Dm644 data/io.github.dibbayajyotiroy.Fresco.desktop
+          /app/share/applications/io.github.dibbayajyotiroy.Fresco.desktop
+      - install -Dm644 data/io.github.dibbayajyotiroy.Fresco.metainfo.xml
+          /app/share/metainfo/io.github.dibbayajyotiroy.Fresco.metainfo.xml
+      - install -Dm644 data/icons/io.github.dibbayajyotiroy.Fresco.svg
+          /app/share/icons/hicolor/scalable/apps/io.github.dibbayajyotiroy.Fresco.svg
+    sources:
+      # Submission form: build from a published tag (Flathub requires `commit`
+      # pinned alongside `tag` for reproducibility). x-checker-data lets the
+      # Flathub bot auto-open update PRs when a new vX.Y.Z tag is pushed.
+      #
+      # For LOCAL testing of un-tagged changes, temporarily replace this block
+      # with:  - type: dir
+      #          path: ..
+      - type: git
+        url: https://github.com/DibbayajyotiRoy/fresco.git
+        tag: v0.0.2
+        commit: REPLACE_WITH_COMMIT_THAT_v0.0.2_TAG_POINTS_TO
+        x-checker-data:
+          type: git
+          tag-pattern: "^v([\\d.]+)$"
+      # Offline cargo dependency sources, generated from Cargo.lock — see header.
+      - cargo-sources.json

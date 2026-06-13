@@ -6,13 +6,14 @@ use gtk4::{gio, glib, prelude::*};
 use gtk4::{FileChooserAction, GestureClick, PolicyType, ResponseType};
 use libadwaita::{self as adw, prelude::*};
 
+use super::theme;
 use super::{
     daemon_ctl,
     library::{self, load_entries, save_entries, LibraryEntry},
 };
 use crate::{
     autostart,
-    config::{Config, Fit, Scaling},
+    config::{Accent, Config, Fit, Kind, Scaling, ThemeMode},
     APP_ID,
 };
 
@@ -50,6 +51,11 @@ struct AppState {
     /// this, the local `FileChooserNative` is dropped when the open function
     /// returns, so the portal's reply never reaches our handler.
     current_picker: Option<gtk4::FileChooserNative>,
+    /// Floating toast host that wraps the whole window (set once in build_ui).
+    toast: adw::ToastOverlay,
+    /// Rebuilds the library grid in place; installed by build_library_view so
+    /// the active-wallpaper highlight can update without a view switch.
+    refresh: Option<Rc<dyn Fn()>>,
 }
 
 // ─── Main window ─────────────────────────────────────────────────────────────
@@ -57,8 +63,16 @@ struct AppState {
 fn build_ui(app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some("Fresco"));
-    window.set_default_size(720, 600);
+    window.set_default_size(880, 660);
+    window.set_size_request(420, 480);
     window.set_icon_name(Some(APP_ID));
+
+    let config = Config::load().unwrap_or_default();
+
+    // Install + apply the theme before first paint so there is no flash.
+    theme::install();
+    theme::set_mode(config.theme_mode);
+    theme::apply(config.accent, theme::is_dark());
 
     // Wayland guard.
     if std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
@@ -79,171 +93,78 @@ fn build_ui(app: &adw::Application) {
         e.check_health();
     }
 
+    let toast = adw::ToastOverlay::new();
+
     let state = Rc::new(RefCell::new(AppState {
-        config: Config::load().unwrap_or_default(),
+        config,
         entries,
         editing_idx: None,
         current_picker: None,
+        toast: toast.clone(),
+        refresh: None,
     }));
+
+    // Re-apply the palette when the system light/dark resolution flips.
+    {
+        let state = state.clone();
+        adw::StyleManager::default().connect_dark_notify(move |sm| {
+            theme::apply(state.borrow().config.accent, sm.is_dark());
+        });
+    }
 
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
+    stack.set_transition_duration(220);
 
-    let (library_view, status_label) = build_library_view(app, &window, state.clone(), &stack);
+    let library_view = build_library_view(&window, state.clone(), &stack);
     let editor_view = build_editor_view(state.clone(), &stack);
 
     stack.add_named(&library_view, Some("library"));
     stack.add_named(&editor_view, Some("editor"));
 
-    window.set_content(Some(&stack));
+    toast.set_child(Some(&stack));
+    window.set_content(Some(&toast));
     window.present();
 
-    // Poll daemon status every 3 seconds; reflect decode mode + a help hint.
-    let status_label_poll = status_label.clone();
-    glib::timeout_add_local(Duration::from_secs(3), move || {
-        let status = daemon_ctl::get_status();
-        status_label_poll.set_text(&daemon_ctl::status_line(status.as_ref()));
-        status_label_poll.set_tooltip_text(daemon_ctl::hwdec_hint(status.as_ref()).as_deref());
-        glib::ControlFlow::Continue
-    });
+    // Anonymous opt-in feedback + admin-pushed notifications (Supabase).
+    run_startup_checks(&window, state);
 }
 
 // ─── Library view ─────────────────────────────────────────────────────────────
 
 fn build_library_view(
-    _app: &adw::Application,
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
     stack: &gtk4::Stack,
-) -> (gtk4::Box, gtk4::Label) {
+) -> gtk4::Box {
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     // ── Header bar ──
+    // Deliberately no pause/stop buttons: setting a wallpaper just runs it, and
+    // picking another switches it. A stray "Stop" only created a confusing
+    // dead/stopped state, so the model is kept dead-simple.
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new("Fresco", "")));
-
-    // Play/Pause toggle. Tracks the last action so one button does both.
-    let paused = Rc::new(std::cell::Cell::new(false));
-    let pause_btn = gtk4::Button::from_icon_name("media-playback-pause-symbolic");
-    pause_btn.set_tooltip_text(Some("Pause / resume wallpaper"));
-    {
-        let paused = paused.clone();
-        pause_btn.connect_clicked(move |btn| {
-            if paused.get() {
-                daemon_ctl::resume_daemon().ok();
-                paused.set(false);
-                btn.set_icon_name("media-playback-pause-symbolic");
-            } else {
-                daemon_ctl::pause_daemon().ok();
-                paused.set(true);
-                btn.set_icon_name("media-playback-start-symbolic");
-            }
-        });
-    }
-    header.pack_start(&pause_btn);
-
-    let stop_btn = gtk4::Button::from_icon_name("media-playback-stop-symbolic");
-    stop_btn.add_css_class("destructive-action");
-    stop_btn.set_tooltip_text(Some("Stop wallpaper"));
-    {
-        let state2 = state.clone();
-        stop_btn.connect_clicked(move |_| {
-            daemon_ctl::stop_daemon().ok();
-            let mut s = state2.borrow_mut();
-            s.config.enabled = false;
-            s.config.save().ok();
-        });
-    }
-    header.pack_start(&stop_btn);
+    header.set_title_widget(Some(&adw::WindowTitle::new("Fresco", "Live wallpapers")));
 
     let menu_btn = gtk4::MenuButton::new();
     menu_btn.set_icon_name("open-menu-symbolic");
-    let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    popover_box.set_margin_top(8);
-    popover_box.set_margin_bottom(8);
-    popover_box.set_margin_start(4);
-    popover_box.set_margin_end(4);
-
-    // Autostart switch row.
-    let autostart_row = menu_switch_row("Restore on login", state.borrow().config.autostart);
-    {
-        let state2 = state.clone();
-        autostart_row.connect_active_notify(move |sw| {
-            let mut s = state2.borrow_mut();
-            s.config.autostart = sw.is_active();
-            s.config.save().ok();
-            if sw.is_active() {
-                autostart::enable().ok();
-            } else {
-                autostart::disable().ok();
-            }
-        });
-    }
-    let autostart_label = gtk4::Label::new(Some("Restore on login"));
-    autostart_label.set_hexpand(true);
-    autostart_label.set_xalign(0.0);
-    let autostart_hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    autostart_hbox.set_margin_start(8);
-    autostart_hbox.set_margin_end(8);
-    autostart_hbox.append(&autostart_label);
-    autostart_hbox.append(&autostart_row);
-    popover_box.append(&autostart_hbox);
-
-    // Battery pause switch row.
-    let battery_row = menu_switch_row("Pause on battery", state.borrow().config.pause_on_battery);
-    {
-        let state2 = state.clone();
-        battery_row.connect_active_notify(move |sw| {
-            let mut s = state2.borrow_mut();
-            s.config.pause_on_battery = sw.is_active();
-            s.config.save().ok();
-        });
-    }
-    let battery_label = gtk4::Label::new(Some("Pause on battery"));
-    battery_label.set_hexpand(true);
-    battery_label.set_xalign(0.0);
-    let battery_hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    battery_hbox.set_margin_start(8);
-    battery_hbox.set_margin_end(8);
-    battery_hbox.append(&battery_label);
-    battery_hbox.append(&battery_row);
-    popover_box.append(&battery_hbox);
-
-    // Separator + Advanced.
-    popover_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    let advanced_btn = gtk4::Button::with_label("Advanced…");
-    advanced_btn.add_css_class("flat");
-    advanced_btn.set_margin_start(4);
-    advanced_btn.set_margin_end(4);
-    let state_adv = state.clone();
-    let win_adv = window.clone();
-    advanced_btn.connect_clicked(move |_| {
-        show_advanced_dialog(&win_adv, state_adv.clone());
-    });
-    popover_box.append(&advanced_btn);
-
-    let popover = gtk4::Popover::new();
-    popover.set_child(Some(&popover_box));
-    menu_btn.set_popover(Some(&popover));
+    menu_btn.add_css_class("flat");
+    menu_btn.set_popover(Some(&build_menu_popover(window, state.clone())));
     header.pack_end(&menu_btn);
     root.append(&header);
 
-    // ── Status bar ──
-    let status_label = gtk4::Label::new(Some("Checking…"));
-    status_label.add_css_class("caption");
-    status_label.set_xalign(0.0);
-    status_label.set_margin_start(12);
-    status_label.set_margin_end(12);
-    status_label.set_margin_top(4);
-    status_label.set_margin_bottom(2);
-    root.append(&status_label);
+    // ── "What's new" banner (shown once per version after an update) ──
+    if let Some(banner) = build_update_banner(window, state.clone()) {
+        root.append(&banner);
+    }
 
     // ── Search ──
     let search = gtk4::SearchEntry::new();
+    search.add_css_class("wp-search");
     search.set_placeholder_text(Some("Search wallpapers…"));
-    search.set_margin_start(12);
-    search.set_margin_end(12);
-    search.set_margin_top(4);
+    search.set_margin_start(16);
+    search.set_margin_end(16);
+    search.set_margin_top(12);
     search.set_margin_bottom(4);
     root.append(&search);
 
@@ -253,63 +174,88 @@ fn build_library_view(
     scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
+    content.set_margin_bottom(8);
 
     // Recent row.
-    let recent_label = gtk4::Label::new(Some("Recent"));
-    recent_label.add_css_class("heading");
-    recent_label.set_xalign(0.0);
-    recent_label.set_margin_start(12);
-    recent_label.set_margin_top(12);
-    recent_label.set_margin_bottom(4);
+    let recent_label = overline("Recent");
+    recent_label.set_margin_top(14);
+    recent_label.set_margin_bottom(8);
     content.append(&recent_label);
 
-    let recent_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    recent_box.set_margin_start(12);
-    recent_box.set_margin_end(12);
-    recent_box.set_margin_bottom(8);
+    let recent_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    recent_box.set_margin_bottom(10);
     content.append(&recent_box);
 
     // All wallpapers heading.
-    let all_label = gtk4::Label::new(Some("All Wallpapers"));
-    all_label.add_css_class("heading");
-    all_label.set_xalign(0.0);
-    all_label.set_margin_start(12);
+    let all_label = overline("Library");
     all_label.set_margin_top(8);
-    all_label.set_margin_bottom(4);
+    all_label.set_margin_bottom(10);
     content.append(&all_label);
 
     // FlowBox grid.
     let flow = gtk4::FlowBox::new();
     flow.set_homogeneous(true);
-    flow.set_max_children_per_line(6);
+    flow.set_max_children_per_line(5);
     flow.set_min_children_per_line(2);
     flow.set_selection_mode(gtk4::SelectionMode::None);
-    flow.set_margin_start(12);
-    flow.set_margin_end(12);
+    flow.set_valign(gtk4::Align::Start);
+    flow.set_row_spacing(14);
+    flow.set_column_spacing(14);
     flow.set_margin_bottom(12);
-    flow.set_row_spacing(8);
-    flow.set_column_spacing(8);
     content.append(&flow);
 
     // Welcome page (shown when library is empty).
     let welcome = adw::StatusPage::new();
     welcome.set_icon_name(Some("video-display-symbolic"));
     welcome.set_title("No wallpapers yet");
-    welcome.set_description(Some("Click Add to pick a video, image, or folder"));
+    welcome.set_description(Some(
+        "Add a video, GIF, image, or a folder of images to begin",
+    ));
+    welcome.set_vexpand(true);
+    let welcome_btn = gtk4::Button::with_label("Add your first wallpaper");
+    welcome_btn.add_css_class("suggested-action");
+    welcome_btn.add_css_class("pill");
+    welcome_btn.add_css_class("welcome-cta");
+    welcome_btn.set_halign(gtk4::Align::Center);
+    {
+        let state2 = state.clone();
+        let stack2 = stack.clone();
+        let win2 = window.clone();
+        welcome_btn.connect_clicked(move |_| {
+            open_file_picker(&win2, state2.clone(), stack2.clone(), None);
+        });
+    }
+    welcome.set_child(Some(&welcome_btn));
     content.append(&welcome);
 
     scroll.set_child(Some(&content));
     root.append(&scroll);
 
-    // ── Add buttons ──
-    let add_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    add_row.set_halign(gtk4::Align::End);
-    add_row.set_margin_start(12);
-    add_row.set_margin_end(12);
-    add_row.set_margin_top(8);
-    add_row.set_margin_bottom(12);
+    // ── Footer: status pill (left) + add actions (right) ──
+    let footer = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    footer.set_margin_start(16);
+    footer.set_margin_end(16);
+    footer.set_margin_top(8);
+    footer.set_margin_bottom(14);
 
-    let add_folder_btn = gtk4::Button::with_label("Add Folder…");
+    let status_pill = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    status_pill.add_css_class("status-pill");
+    status_pill.set_valign(gtk4::Align::Center);
+    let status_dot = gtk4::Label::new(Some("●"));
+    status_dot.add_css_class("dot-off");
+    let status_label = gtk4::Label::new(None);
+    status_pill.append(&status_dot);
+    status_pill.append(&status_label);
+    footer.append(&status_pill);
+
+    let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    footer.append(&spacer);
+
+    let add_folder_btn = gtk4::Button::new();
+    add_folder_btn.set_child(Some(&button_content("folder-new-symbolic", "Add folder")));
     add_folder_btn.set_tooltip_text(Some("Create an image slideshow from a folder"));
     {
         let state2 = state.clone();
@@ -319,9 +265,10 @@ fn build_library_view(
             open_folder_picker(&win2, state2.clone(), stack2.clone());
         });
     }
-    add_row.append(&add_folder_btn);
+    footer.append(&add_folder_btn);
 
-    let add_btn = gtk4::Button::with_label("+ Add");
+    let add_btn = gtk4::Button::new();
+    add_btn.set_child(Some(&button_content("list-add-symbolic", "Add")));
     add_btn.add_css_class("suggested-action");
     {
         let state2 = state.clone();
@@ -331,80 +278,290 @@ fn build_library_view(
             open_file_picker(&win2, state2.clone(), stack2.clone(), None);
         });
     }
-    add_row.append(&add_btn);
-    root.append(&add_row);
+    footer.append(&add_btn);
+    root.append(&footer);
 
-    // Search filter.
+    // ── Live-updating library populate closure ──
+    let card_names: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let refresh: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let flow = flow.clone();
+        let recent_box = recent_box.clone();
+        let recent_label = recent_label.clone();
+        let all_label = all_label.clone();
+        let welcome = welcome.clone();
+        let stack = stack.clone();
+        let card_names = card_names.clone();
+        let search = search.clone();
+        Rc::new(move || {
+            // Searching an empty library is pointless: hide the field until
+            // there's something to search.
+            search.set_visible(!state.borrow().entries.is_empty());
+            populate_library(
+                &state,
+                &flow,
+                &recent_box,
+                &recent_label,
+                &all_label,
+                &welcome,
+                &stack,
+                &card_names,
+            );
+        })
+    };
+    state.borrow_mut().refresh = Some(refresh.clone());
+    refresh();
+
+    // Search filter — match against the per-card name list by flow index.
     {
-        let flow2 = flow.clone();
+        let flow = flow.clone();
+        let card_names = card_names.clone();
         search.connect_search_changed(move |entry| {
-            let query = entry.text().to_lowercase();
-            flow2.invalidate_filter();
-            // Simple label-based filter using set_filter_func.
-            let q = query.clone();
-            flow2.set_filter_func(move |child| {
+            let q = entry.text().to_lowercase();
+            let names = card_names.clone();
+            flow.set_filter_func(move |child| {
                 if q.is_empty() {
                     return true;
                 }
-                // Get the name label from our card widget structure.
-                let name = get_card_name(child);
-                name.to_lowercase().contains(&q)
+                names
+                    .borrow()
+                    .get(child.index() as usize)
+                    .map(|n| n.contains(&q))
+                    .unwrap_or(true)
             });
+            flow.invalidate_filter();
         });
     }
 
-    // Initial population.
-    populate_library(&state, &flow, &recent_box, &recent_label, &welcome, stack);
-
-    // Repopulate whenever we return to the library view (e.g. after adding).
+    // Repopulate whenever we return to the library view (e.g. after editing).
     {
-        let state2 = state.clone();
-        let stack2 = stack.clone();
+        let refresh = refresh.clone();
         stack.connect_visible_child_name_notify(move |s| {
             if s.visible_child_name().as_deref() == Some("library") {
-                populate_library(
-                    &state2,
-                    &flow,
-                    &recent_box,
-                    &recent_label,
-                    &welcome,
-                    &stack2,
-                );
+                refresh();
             }
         });
     }
 
-    (root, status_label)
-}
-
-fn get_card_name(child: &gtk4::FlowBoxChild) -> String {
-    child
-        .child()
-        .and_then(|w| w.downcast::<gtk4::Box>().ok())
-        .and_then(|b| {
-            // Last child of the vbox is our label row (a Box with the Label inside).
-            let mut last: Option<gtk4::Widget> = None;
-            let mut cur = b.first_child();
-            while let Some(w) = cur {
-                last = Some(w.clone());
-                cur = w.next_sibling();
+    // Poll daemon status every 3s. Quiet by design: the pill is hidden while
+    // stopped, and only shows a single semantic dot + concise decode mode when
+    // a wallpaper is actually playing (no CPU/RAM churn, no "Checking…").
+    {
+        let status_label = status_label.clone();
+        let status_dot = status_dot.clone();
+        let status_pill = status_pill.clone();
+        let tick = move || {
+            let status = daemon_ctl::get_status();
+            for c in ["dot-ok", "dot-warn", "dot-off"] {
+                status_dot.remove_css_class(c);
             }
-            last
-        })
-        .and_then(|row| row.downcast::<gtk4::Box>().ok())
-        .and_then(|row_box| row_box.first_child())
-        .and_then(|w| w.downcast::<gtk4::Label>().ok())
-        .map(|l| l.text().to_string())
-        .unwrap_or_default()
+            match status.as_ref() {
+                None => status_pill.set_visible(false),
+                Some(s) if s.paused => {
+                    status_pill.set_visible(true);
+                    status_dot.add_css_class("dot-warn");
+                    status_label.set_text("Paused");
+                    status_label.set_tooltip_text(None);
+                }
+                Some(s) if matches!(s.hwdec.as_deref(), Some("no") | None) => {
+                    status_pill.set_visible(true);
+                    status_dot.add_css_class("dot-warn");
+                    status_label.set_text("Software decode");
+                    status_label
+                        .set_tooltip_text(daemon_ctl::hwdec_hint(status.as_ref()).as_deref());
+                }
+                Some(_) => {
+                    status_pill.set_visible(true);
+                    status_dot.add_css_class("dot-ok");
+                    status_label.set_text("GPU decode");
+                    status_label.set_tooltip_text(None);
+                }
+            }
+        };
+        tick();
+        glib::timeout_add_local(Duration::from_secs(3), move || {
+            tick();
+            glib::ControlFlow::Continue
+        });
+    }
+
+    root
 }
 
+/// Header menu: appearance (theme mode + accent) and behavior switches.
+fn build_menu_popover(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+) -> gtk4::Popover {
+    let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    popover_box.set_margin_top(10);
+    popover_box.set_margin_bottom(10);
+    popover_box.set_margin_start(10);
+    popover_box.set_margin_end(10);
+    popover_box.set_width_request(252);
+
+    // ── Appearance ──
+    popover_box.append(&overline("Appearance"));
+
+    let seg = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    seg.add_css_class("linked");
+    seg.add_css_class("seg");
+    seg.set_homogeneous(true);
+    let b_sys = gtk4::ToggleButton::with_label("System");
+    let b_light = gtk4::ToggleButton::with_label("Light");
+    let b_dark = gtk4::ToggleButton::with_label("Dark");
+    b_light.set_group(Some(&b_sys));
+    b_dark.set_group(Some(&b_sys));
+    match state.borrow().config.theme_mode {
+        ThemeMode::System => b_sys.set_active(true),
+        ThemeMode::Light => b_light.set_active(true),
+        ThemeMode::Dark => b_dark.set_active(true),
+    }
+    for (btn, mode) in [
+        (&b_sys, ThemeMode::System),
+        (&b_light, ThemeMode::Light),
+        (&b_dark, ThemeMode::Dark),
+    ] {
+        let state2 = state.clone();
+        btn.connect_toggled(move |b| {
+            if !b.is_active() {
+                return;
+            }
+            let accent = {
+                let mut s = state2.borrow_mut();
+                s.config.theme_mode = mode;
+                s.config.save().ok();
+                s.config.accent
+            };
+            theme::set_mode(mode);
+            theme::apply(accent, theme::is_dark());
+        });
+    }
+    seg.append(&b_sys);
+    seg.append(&b_light);
+    seg.append(&b_dark);
+    popover_box.append(&seg);
+
+    let accent_lbl = overline("Accent");
+    accent_lbl.set_margin_top(8);
+    popover_box.append(&accent_lbl);
+
+    let dot_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    dot_row.set_margin_top(2);
+    dot_row.set_margin_bottom(2);
+    let dot_btns: Rc<RefCell<Vec<(Accent, gtk4::Button)>>> = Rc::new(RefCell::new(Vec::new()));
+    for (acc, cls) in [
+        (Accent::Blue, "accent-blue"),
+        (Accent::Teal, "accent-teal"),
+        (Accent::Green, "accent-green"),
+        (Accent::Amber, "accent-amber"),
+        (Accent::Coral, "accent-coral"),
+        (Accent::Graphite, "accent-graphite"),
+    ] {
+        let b = gtk4::Button::new();
+        b.add_css_class("accent-dot");
+        b.add_css_class(cls);
+        b.set_tooltip_text(Some(accent_name(acc)));
+        if state.borrow().config.accent == acc {
+            b.add_css_class("selected");
+        }
+        {
+            let state2 = state.clone();
+            let dots = dot_btns.clone();
+            b.connect_clicked(move |_| {
+                {
+                    let mut s = state2.borrow_mut();
+                    s.config.accent = acc;
+                    s.config.save().ok();
+                }
+                theme::apply(acc, theme::is_dark());
+                for (a, btn) in dots.borrow().iter() {
+                    if *a == acc {
+                        btn.add_css_class("selected");
+                    } else {
+                        btn.remove_css_class("selected");
+                    }
+                }
+            });
+        }
+        dot_row.append(&b);
+        dot_btns.borrow_mut().push((acc, b));
+    }
+    popover_box.append(&dot_row);
+
+    let sep1 = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    sep1.set_margin_top(6);
+    sep1.set_margin_bottom(2);
+    popover_box.append(&sep1);
+
+    // ── Behavior ──
+    popover_box.append(&overline("Behavior"));
+    popover_box.append(&switch_row(
+        "Restore on login",
+        state.borrow().config.autostart,
+        {
+            let state2 = state.clone();
+            move |active| {
+                {
+                    let mut s = state2.borrow_mut();
+                    s.config.autostart = active;
+                    s.config.save().ok();
+                }
+                if active {
+                    autostart::enable().ok();
+                } else {
+                    autostart::disable().ok();
+                }
+            }
+        },
+    ));
+    popover_box.append(&switch_row(
+        "Pause on battery",
+        state.borrow().config.pause_on_battery,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.pause_on_battery = active;
+                s.config.save().ok();
+            }
+        },
+    ));
+
+    let sep2 = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    sep2.set_margin_top(2);
+    sep2.set_margin_bottom(2);
+    popover_box.append(&sep2);
+
+    let advanced_btn = gtk4::Button::with_label("Advanced…");
+    advanced_btn.add_css_class("flat");
+    advanced_btn.set_halign(gtk4::Align::Start);
+    {
+        let state_adv = state.clone();
+        let win_adv = window.clone();
+        advanced_btn.connect_clicked(move |_| {
+            show_advanced_dialog(&win_adv, state_adv.clone());
+        });
+    }
+    popover_box.append(&advanced_btn);
+
+    let popover = gtk4::Popover::new();
+    popover.set_child(Some(&popover_box));
+    popover
+}
+
+// Orchestrates a coherent bundle of library-view widgets; splitting them into
+// a struct would add ceremony without clarifying this single-caller helper.
+#[allow(clippy::too_many_arguments)]
 fn populate_library(
     state: &Rc<RefCell<AppState>>,
     flow: &gtk4::FlowBox,
     recent_box: &gtk4::Box,
     recent_label: &gtk4::Label,
+    all_label: &gtk4::Label,
     welcome: &adw::StatusPage,
     stack: &gtk4::Stack,
+    card_names: &Rc<RefCell<Vec<String>>>,
 ) {
     // Clear.
     while let Some(c) = flow.first_child() {
@@ -413,123 +570,259 @@ fn populate_library(
     while let Some(c) = recent_box.first_child() {
         recent_box.remove(&c);
     }
+    card_names.borrow_mut().clear();
 
-    let entries = state.borrow().entries.clone();
+    let (entries, cfg) = {
+        let s = state.borrow();
+        (s.entries.clone(), s.config.clone())
+    };
 
     if entries.is_empty() {
         welcome.set_visible(true);
         recent_label.set_visible(false);
+        recent_box.set_visible(false);
+        all_label.set_visible(false);
         return;
     }
     welcome.set_visible(false);
+    all_label.set_visible(true);
 
     // Recents.
     {
-        let s = state.borrow();
-        let recents = library::recent_entries(&s.entries, 5);
+        let recents = library::recent_entries(&entries, 6);
         recent_label.set_visible(!recents.is_empty());
+        recent_box.set_visible(!recents.is_empty());
         for e in recents {
-            recent_box.append(&build_mini_card(e));
+            let idx = entries.iter().position(|x| x.id == e.id).unwrap_or(0);
+            let active = entry_is_active(e, &cfg);
+            recent_box.append(&build_mini_card(
+                e,
+                idx,
+                state.clone(),
+                stack.clone(),
+                active,
+            ));
         }
     }
 
     // All entries.
+    let mut names = card_names.borrow_mut();
     for (idx, entry) in entries.iter().enumerate() {
-        let card = build_library_card(entry, idx, state.clone(), stack.clone());
+        let active = entry_is_active(entry, &cfg);
+        let card = build_library_card(entry, idx, state.clone(), stack.clone(), active);
         flow.append(&card);
+        names.push(entry.name.to_lowercase());
     }
 }
 
-fn build_mini_card(entry: &LibraryEntry) -> gtk4::Box {
-    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    vbox.set_size_request(88, 88);
+/// Compact recent-row card: thumbnail + title scrim, click to apply.
+fn build_mini_card(
+    entry: &LibraryEntry,
+    idx: usize,
+    state: Rc<RefCell<AppState>>,
+    stack: gtk4::Stack,
+    active: bool,
+) -> gtk4::Overlay {
+    let overlay = gtk4::Overlay::new();
+    overlay.add_css_class("wp-mini");
+    if active {
+        overlay.add_css_class("active");
+    }
+    overlay.set_overflow(gtk4::Overflow::Hidden);
+    overlay.set_size_request(150, 84);
 
     let pic = gtk4::Picture::new();
-    pic.set_size_request(88, 64);
-    pic.set_hexpand(false);
+    pic.add_css_class("wp-thumb");
+    pic.set_size_request(150, 84);
+    pic.set_can_shrink(true);
+    pic.set_keep_aspect_ratio(true);
     if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
         pic.set_file(Some(&gio::File::for_path(thumb)));
     }
-    vbox.append(&pic);
+    overlay.set_child(Some(&pic));
 
-    let label = gtk4::Label::new(Some(&truncate(&entry.name, 11)));
-    label.add_css_class("caption");
-    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    vbox.append(&label);
-    vbox
+    let scrim = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    scrim.add_css_class("wp-scrim");
+    scrim.set_valign(gtk4::Align::End);
+    let title = gtk4::Label::new(Some(&entry.name));
+    title.add_css_class("wp-title");
+    title.set_xalign(0.0);
+    title.set_halign(gtk4::Align::Start);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    scrim.append(&title);
+    overlay.add_overlay(&scrim);
+
+    let click = GestureClick::new();
+    {
+        let state_c = state.clone();
+        let stack_c = stack.clone();
+        click.connect_released(move |_, n_press, _, _| {
+            if n_press == 1 {
+                apply_entry_by_idx(state_c.clone(), idx);
+            } else if n_press == 2 {
+                state_c.borrow_mut().editing_idx = Some(idx);
+                stack_c.set_visible_child_name("editor");
+            }
+        });
+    }
+    overlay.add_controller(click);
+
+    overlay
 }
 
+/// Cinematic 16:9 library card: poster thumbnail, gradient title scrim, kind
+/// badge, active-wallpaper accent ring + pill, and a hover-revealed Edit button.
 fn build_library_card(
     entry: &LibraryEntry,
     idx: usize,
     state: Rc<RefCell<AppState>>,
     stack: gtk4::Stack,
-) -> gtk4::Box {
-    let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    frame.set_size_request(148, 128);
-    frame.add_css_class("card");
+    active: bool,
+) -> gtk4::Overlay {
+    let overlay = gtk4::Overlay::new();
+    overlay.add_css_class("wp-card");
+    if active {
+        overlay.add_css_class("active");
+    }
+    overlay.set_overflow(gtk4::Overflow::Hidden);
+    // Fixed 16:9 poster footprint, top-aligned so the FlowBox never stretches
+    // cards to fill the viewport (vexpand on the child would propagate upward).
+    overlay.set_size_request(230, 130);
+    overlay.set_valign(gtk4::Align::Start);
 
     let pic = gtk4::Picture::new();
-    pic.set_size_request(148, 96);
-    pic.set_hexpand(true);
+    pic.add_css_class("wp-thumb");
+    pic.set_size_request(230, 130);
+    pic.set_can_shrink(true);
+    pic.set_keep_aspect_ratio(true);
     if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
         pic.set_file(Some(&gio::File::for_path(thumb)));
     }
-    frame.append(&pic);
+    overlay.set_child(Some(&pic));
 
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-    row.set_margin_start(4);
-    row.set_margin_end(4);
-    row.set_margin_bottom(4);
+    // Bottom gradient scrim + title.
+    let scrim = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    scrim.add_css_class("wp-scrim");
+    scrim.set_valign(gtk4::Align::End);
+    scrim.set_hexpand(true);
+    let title = gtk4::Label::new(Some(&entry.name));
+    title.add_css_class("wp-title");
+    title.set_xalign(0.0);
+    title.set_halign(gtk4::Align::Start);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    scrim.append(&title);
+    overlay.add_overlay(&scrim);
 
-    let name = gtk4::Label::new(Some(&truncate(&entry.name, 18)));
-    name.set_hexpand(true);
-    name.set_xalign(0.0);
-    name.add_css_class("caption");
-    name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    row.append(&name);
+    // Kind badge (top-left).
+    let badge = gtk4::Label::new(Some(kind_badge(entry.kind)));
+    badge.add_css_class("wp-badge");
+    badge.set_halign(gtk4::Align::Start);
+    badge.set_valign(gtk4::Align::Start);
+    overlay.add_overlay(&badge);
 
-    if entry.broken {
-        let badge = gtk4::Label::new(Some("⚠"));
-        badge.add_css_class("warning");
-        badge.set_tooltip_text(entry.error.as_deref().or(Some("File not found")));
-        row.append(&badge);
+    // Active pill (top-right).
+    if active {
+        let pill = gtk4::Label::new(Some("ACTIVE"));
+        pill.add_css_class("wp-active-pill");
+        pill.set_halign(gtk4::Align::End);
+        pill.set_valign(gtk4::Align::Start);
+        overlay.add_overlay(&pill);
     }
-    frame.append(&row);
+
+    // Missing-source warning.
+    if entry.broken {
+        let warn = gtk4::Label::new(Some("MISSING"));
+        warn.add_css_class("wp-badge");
+        warn.add_css_class("warning");
+        warn.set_halign(gtk4::Align::Start);
+        warn.set_valign(gtk4::Align::End);
+        warn.set_tooltip_text(entry.error.as_deref().or(Some("Source file not found")));
+        overlay.add_overlay(&warn);
+        overlay.set_opacity(0.65);
+    }
+
+    // Hover-revealed Edit button (bottom-right).
+    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
+    edit.add_css_class("wp-edit");
+    edit.add_css_class("circular");
+    edit.set_halign(gtk4::Align::End);
+    edit.set_valign(gtk4::Align::End);
+    edit.set_visible(false);
+    edit.set_tooltip_text(Some("Edit & crop"));
+    {
+        let state_e = state.clone();
+        let stack_e = stack.clone();
+        edit.connect_clicked(move |_| {
+            state_e.borrow_mut().editing_idx = Some(idx);
+            stack_e.set_visible_child_name("editor");
+        });
+    }
+    overlay.add_overlay(&edit);
+
+    let motion = gtk4::EventControllerMotion::new();
+    {
+        let edit = edit.clone();
+        motion.connect_enter(move |_, _, _| edit.set_visible(true));
+    }
+    {
+        let edit = edit.clone();
+        motion.connect_leave(move |_| edit.set_visible(false));
+    }
+    overlay.add_controller(motion);
 
     // Single click = apply; double click = open editor.
     let click = GestureClick::new();
-    let state_click = state.clone();
-    let stack_click = stack.clone();
-    click.connect_released(move |_, n_press, _, _| {
-        if n_press == 1 {
-            apply_entry_by_idx(state_click.clone(), idx);
-        } else if n_press == 2 {
-            state_click.borrow_mut().editing_idx = Some(idx);
-            stack_click.set_visible_child_name("editor");
-        }
-    });
-    frame.add_controller(click);
+    {
+        let state_c = state.clone();
+        let stack_c = stack.clone();
+        click.connect_released(move |_, n_press, _, _| {
+            if n_press == 1 {
+                apply_entry_by_idx(state_c.clone(), idx);
+            } else if n_press == 2 {
+                state_c.borrow_mut().editing_idx = Some(idx);
+                stack_c.set_visible_child_name("editor");
+            }
+        });
+    }
+    overlay.add_controller(click);
 
-    frame
+    overlay
 }
 
 fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
-    let mut s = state.borrow_mut();
-    let Some(entry) = s.entries.get_mut(idx) else {
-        return;
+    let name = {
+        let mut s = state.borrow_mut();
+        let Some(entry) = s.entries.get_mut(idx) else {
+            return;
+        };
+        if entry.broken {
+            return;
+        }
+        entry.touch();
+        let wallpaper = entry.to_wallpaper();
+        let name = entry.name.clone();
+        s.config.wallpaper = wallpaper;
+        s.config.enabled = true;
+        name
     };
-    if entry.broken {
-        return;
+    let ok = {
+        let s = state.borrow();
+        let r = daemon_ctl::ensure_daemon_and_apply(&s.config);
+        save_entries(&s.entries).ok();
+        if let Err(e) = &r {
+            log::error!("failed to apply wallpaper: {e}");
+        }
+        r.is_ok()
+    };
+    if ok {
+        show_toast(&state, &format!("“{name}” set as wallpaper"));
+    } else {
+        show_toast(&state, "Couldn’t start the wallpaper. Run frescod --check");
     }
-    entry.touch();
-    let wallpaper = entry.to_wallpaper();
-    s.config.wallpaper = wallpaper;
-    s.config.enabled = true;
-    drop(s);
-    let s2 = state.borrow();
-    daemon_ctl::ensure_daemon_and_apply(&s2.config).ok();
-    save_entries(&s2.entries).ok();
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
 }
 
 // ─── Editor view ──────────────────────────────────────────────────────────────
@@ -538,8 +831,10 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new("Edit Wallpaper", "")));
+    let title_widget = adw::WindowTitle::new("Edit wallpaper", "");
+    header.set_title_widget(Some(&title_widget));
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
+    back.add_css_class("flat");
     back.set_tooltip_text(Some("Back to library"));
     {
         let stack2 = stack.clone();
@@ -550,34 +845,45 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     header.pack_start(&back);
     root.append(&header);
 
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(680);
+    clamp.set_tightening_threshold(560);
+
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    body.set_margin_start(16);
+    body.set_margin_end(16);
+    body.set_margin_top(16);
+    body.set_margin_bottom(16);
+
     // Crop editor.
     let crop_editor = super::preview::CropEditor::new(None);
-    crop_editor.overlay.set_size_request(-1, 250);
-    crop_editor.overlay.set_margin_start(12);
-    crop_editor.overlay.set_margin_end(12);
-    crop_editor.overlay.set_margin_top(12);
-    root.append(&crop_editor.overlay);
+    crop_editor.overlay.add_css_class("wp-thumb");
+    crop_editor.overlay.add_css_class("crop-frame");
+    crop_editor.overlay.set_overflow(gtk4::Overflow::Hidden);
+    crop_editor.overlay.set_size_request(-1, 300);
+    body.append(&crop_editor.overlay);
 
     let reset_crop = gtk4::Button::with_label("Reset crop");
     reset_crop.add_css_class("flat");
     reset_crop.set_halign(gtk4::Align::End);
-    reset_crop.set_margin_end(12);
-    reset_crop.set_margin_top(4);
+    reset_crop.set_margin_top(6);
     {
         let ce = crop_editor.clone();
         reset_crop.connect_clicked(move |_| ce.reset());
     }
-    root.append(&reset_crop);
+    body.append(&reset_crop);
 
     // Preferences group.
     let prefs = adw::PreferencesGroup::new();
-    prefs.set_margin_start(12);
-    prefs.set_margin_end(12);
-    prefs.set_margin_top(12);
+    prefs.set_margin_top(14);
 
     let fit_row = adw::ComboRow::new();
     fit_row.set_title("Fit");
-    fit_row.set_subtitle("How to fill the screen");
+    fit_row.set_subtitle("How the media fills the screen");
     fit_row.set_model(Some(&gtk4::StringList::new(&[
         "Cover", "Contain", "Stretch",
     ])));
@@ -597,51 +903,102 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     let vol_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 100.0, 5.0);
     vol_scale.set_value(50.0);
     vol_scale.set_hexpand(true);
-    vol_scale.set_size_request(160, -1);
+    vol_scale.set_size_request(180, -1);
+    vol_scale.set_valign(gtk4::Align::Center);
     vol_row.add_suffix(&vol_scale);
     prefs.add(&vol_row);
 
-    root.append(&prefs);
+    // Slideshow cadence (shown only for slideshows; see the on-enter handler).
+    let interval_row = adw::ComboRow::new();
+    interval_row.set_title("Interval");
+    interval_row.set_subtitle("How often the slideshow advances");
+    interval_row.set_model(Some(&gtk4::StringList::new(&[
+        "5 seconds",
+        "15 seconds",
+        "30 seconds",
+        "1 minute",
+        "5 minutes",
+        "10 minutes",
+    ])));
+    interval_row.set_selected(2);
+    prefs.add(&interval_row);
+
+    body.append(&prefs);
 
     // Set Wallpaper button.
-    let set_btn = gtk4::Button::with_label("Set as Wallpaper");
+    let set_btn = gtk4::Button::with_label("Set as wallpaper");
     set_btn.add_css_class("suggested-action");
-    set_btn.set_margin_start(12);
-    set_btn.set_margin_end(12);
-    set_btn.set_margin_top(12);
-    set_btn.set_margin_bottom(12);
+    set_btn.add_css_class("pill");
+    set_btn.add_css_class("set-btn");
+    set_btn.set_margin_top(18);
 
-    let state_set = state.clone();
-    let stack_set = stack.clone();
-    let crop_ref = crop_editor.clone();
-    let fit_ref = fit_row.clone();
-    let mute_ref = mute_sw.clone();
-    let vol_ref = vol_scale.clone();
-    set_btn.connect_clicked(move |_| {
-        let crop = crop_ref.crop();
-        let fit = match fit_ref.selected() {
-            1 => Fit::Contain,
-            2 => Fit::Stretch,
-            _ => Fit::Cover,
-        };
-        let mut s = state_set.borrow_mut();
-        s.config.wallpaper.crop = crop;
-        s.config.wallpaper.fit = fit;
-        s.config.wallpaper.mute = mute_ref.is_active();
-        s.config.wallpaper.volume = vol_ref.value() as u8;
-        s.config.enabled = true;
-        drop(s);
-        let s2 = state_set.borrow();
-        match daemon_ctl::ensure_daemon_and_apply(&s2.config) {
-            Ok(_) => {
-                log::info!("Wallpaper set — close this window, it keeps playing");
-                drop(s2);
+    {
+        let state_set = state.clone();
+        let stack_set = stack.clone();
+        let crop_ref = crop_editor.clone();
+        let fit_ref = fit_row.clone();
+        let mute_ref = mute_sw.clone();
+        let vol_ref = vol_scale.clone();
+        let interval_ref = interval_row.clone();
+        set_btn.connect_clicked(move |_| {
+            let crop = crop_ref.crop();
+            let fit = match fit_ref.selected() {
+                1 => Fit::Contain,
+                2 => Fit::Stretch,
+                _ => Fit::Cover,
+            };
+            let interval = interval_secs(interval_ref.selected());
+            let name = {
+                let mut s = state_set.borrow_mut();
+                s.config.wallpaper.crop = crop;
+                s.config.wallpaper.fit = fit;
+                s.config.wallpaper.mute = mute_ref.is_active();
+                s.config.wallpaper.volume = vol_ref.value() as u8;
+                s.config.enabled = true;
+                if let Some(ss) = s.config.wallpaper.slideshow.as_mut() {
+                    ss.interval_s = interval;
+                }
+                let idx = s.editing_idx;
+                if let Some(e) = idx.and_then(|i| s.entries.get_mut(i)) {
+                    if e.kind == Kind::Slideshow {
+                        e.interval_s = Some(interval);
+                    }
+                }
+                save_entries(&s.entries).ok();
+                idx.and_then(|i| s.entries.get(i))
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default()
+            };
+            let ok = {
+                let s = state_set.borrow();
+                match daemon_ctl::ensure_daemon_and_apply(&s.config) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        log::error!("failed to apply: {e}");
+                        false
+                    }
+                }
+            };
+            if ok {
+                log::info!("Wallpaper set; close this window, it keeps playing");
+                show_toast(
+                    &state_set,
+                    &format!("“{name}” set. Close the window; it keeps playing"),
+                );
                 stack_set.set_visible_child_name("library");
+            } else {
+                show_toast(
+                    &state_set,
+                    "Couldn’t start the wallpaper. Run frescod --check",
+                );
             }
-            Err(e) => log::error!("Failed to apply: {e}"),
-        }
-    });
-    root.append(&set_btn);
+        });
+    }
+    body.append(&set_btn);
+
+    clamp.set_child(Some(&body));
+    scroll.set_child(Some(&clamp));
+    root.append(&scroll);
 
     // When entering the editor, load the selected entry's preview + settings.
     {
@@ -649,6 +1006,10 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let fit_ref = fit_row.clone();
         let mute_ref = mute_sw.clone();
         let vol_ref = vol_scale.clone();
+        let interval_ref = interval_row.clone();
+        let mute_row_ref = mute_row.clone();
+        let vol_row_ref = vol_row.clone();
+        let title_ref = title_widget.clone();
         let state2 = state.clone();
         stack.connect_visible_child_name_notify(move |s| {
             if s.visible_child_name().as_deref() != Some("editor") {
@@ -657,10 +1018,25 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             let st = state2.borrow();
             // Show the thumbnail (videos) or the image itself as the crop preview.
             if let Some(entry) = st.editing_idx.and_then(|i| st.entries.get(i)) {
+                title_ref.set_subtitle(&entry.name);
                 if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
                     ce.set_media(thumb);
-                } else if let Some(p) = entry.path.as_deref().filter(|p| p.exists()) {
+                } else if let Some(p) = entry
+                    .path
+                    .as_deref()
+                    .or_else(|| entry.paths.first().map(|p| p.as_path()))
+                    .filter(|p| p.exists())
+                {
                     ce.set_media(p);
+                }
+                // Audio rows only apply to video; interval only to slideshows.
+                let has_audio = matches!(entry.kind, Kind::Video | Kind::Playlist);
+                mute_row_ref.set_visible(has_audio);
+                vol_row_ref.set_visible(has_audio);
+                let is_slideshow = entry.kind == Kind::Slideshow;
+                interval_ref.set_visible(is_slideshow);
+                if is_slideshow {
+                    interval_ref.set_selected(interval_index(entry.interval_s.unwrap_or(30)));
                 }
             }
             ce.set_crop(st.config.wallpaper.crop);
@@ -782,7 +1158,13 @@ fn open_file_picker(
         }
 
         let mut entry = if paths.len() > 1 {
-            library::LibraryEntry::new_playlist(paths)
+            // All images → an image slideshow that loops on a timer. Mixed/videos
+            // → a video playlist (images in a playlist would flash every second).
+            if paths.iter().all(|p| library::is_image(p)) {
+                library::LibraryEntry::new_image_set(paths)
+            } else {
+                library::LibraryEntry::new_playlist(paths)
+            }
         } else {
             let p = paths.remove(0);
             if library::is_video(&p) {
@@ -850,17 +1232,552 @@ fn open_folder_picker(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-fn menu_switch_row(_label: &str, active: bool) -> gtk4::Switch {
-    let sw = gtk4::Switch::new();
-    sw.set_active(active);
-    sw
+/// Uppercase section label styled as an overline (see theme.rs `.overline`).
+fn overline(text: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(&text.to_uppercase()));
+    l.add_css_class("overline");
+    l.set_xalign(0.0);
+    l.set_halign(gtk4::Align::Start);
+    l
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", chars[..max].iter().collect::<String>())
+/// Icon + label content for a button (Adwaita ButtonContent).
+fn button_content(icon: &str, label: &str) -> adw::ButtonContent {
+    let c = adw::ButtonContent::new();
+    c.set_icon_name(icon);
+    c.set_label(label);
+    c
+}
+
+/// A label + trailing switch row for the menu popover.
+fn switch_row<F: Fn(bool) + 'static>(label: &str, active: bool, on_toggle: F) -> gtk4::Box {
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    hbox.set_margin_start(4);
+    hbox.set_margin_end(4);
+    let lbl = gtk4::Label::new(Some(label));
+    lbl.set_hexpand(true);
+    lbl.set_xalign(0.0);
+    let sw = gtk4::Switch::new();
+    sw.set_active(active);
+    sw.set_valign(gtk4::Align::Center);
+    sw.connect_active_notify(move |sw| on_toggle(sw.is_active()));
+    hbox.append(&lbl);
+    hbox.append(&sw);
+    hbox
+}
+
+fn show_toast(state: &Rc<RefCell<AppState>>, msg: &str) {
+    let toast = adw::Toast::new(msg);
+    toast.set_timeout(4);
+    state.borrow().toast.add_toast(toast);
+}
+
+fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
+    if !cfg.enabled {
+        return false;
     }
+    let w = &cfg.wallpaper;
+    if entry.kind != w.kind {
+        return false;
+    }
+    match entry.kind {
+        Kind::Video | Kind::Image => entry.path.is_some() && entry.path == w.path,
+        Kind::Playlist => !entry.paths.is_empty() && entry.paths == w.paths,
+        Kind::Slideshow => match w.slideshow.as_ref() {
+            Some(s) if !entry.paths.is_empty() => s.paths == entry.paths,
+            Some(s) => entry.folder.is_some() && s.folder == entry.folder,
+            None => false,
+        },
+    }
+}
+
+fn kind_badge(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Video => "VIDEO",
+        Kind::Image => "IMAGE",
+        Kind::Playlist => "PLAYLIST",
+        Kind::Slideshow => "SLIDES",
+    }
+}
+
+fn accent_name(accent: Accent) -> &'static str {
+    match accent {
+        Accent::Blue => "Blue",
+        Accent::Teal => "Teal",
+        Accent::Green => "Green",
+        Accent::Amber => "Amber",
+        Accent::Coral => "Coral",
+        Accent::Graphite => "Graphite",
+    }
+}
+
+/// Slideshow interval choices (seconds), matched 1:1 with the editor combo rows
+/// "5 seconds / 15 seconds / 30 seconds / 1 minute / 5 minutes / 10 minutes".
+const INTERVAL_OPTIONS: [u64; 6] = [5, 15, 30, 60, 300, 600];
+
+fn interval_secs(index: u32) -> u64 {
+    INTERVAL_OPTIONS.get(index as usize).copied().unwrap_or(30)
+}
+
+fn interval_index(secs: u64) -> u32 {
+    INTERVAL_OPTIONS
+        .iter()
+        .position(|&s| s == secs)
+        .unwrap_or(2) as u32
+}
+
+// ─── "What's new" on-update notice ────────────────────────────────────────────
+
+/// The CHANGELOG, embedded at build time so the notes ship inside the binary.
+const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
+
+/// Extract the changelog section for `version` (Keep a Changelog format:
+/// `## [x.y.z] …` up to the next `## [`).
+fn changelog_for(version: &str) -> Option<String> {
+    let header = format!("## [{version}]");
+    let start = CHANGELOG.find(&header)?;
+    let rest = &CHANGELOG[start..];
+    let body = &rest[header.len()..];
+    let end = body
+        .find("\n## [")
+        .map(|i| header.len() + i)
+        .unwrap_or(rest.len());
+    let section = rest[..end].trim();
+    if section.is_empty() {
+        None
+    } else {
+        Some(section.to_string())
+    }
+}
+
+/// A dismissible banner shown once per version after the app updates. Returns
+/// None if the current version's notes have already been seen (or are absent).
+fn build_update_banner(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+) -> Option<gtk4::Widget> {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    if state.borrow().config.last_seen_version == current {
+        return None;
+    }
+    let notes = changelog_for(&current)?;
+
+    let bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+    bar.add_css_class("banner");
+    bar.set_margin_start(16);
+    bar.set_margin_end(16);
+    bar.set_margin_top(8);
+
+    let icon = gtk4::Image::from_icon_name("software-update-available-symbolic");
+    bar.append(&icon);
+
+    let label = gtk4::Label::new(Some(&format!("Fresco updated to {current}")));
+    label.set_hexpand(true);
+    label.set_xalign(0.0);
+
+    let details = gtk4::Button::with_label("See what's new");
+    details.add_css_class("suggested-action");
+
+    let close = gtk4::Button::from_icon_name("window-close-symbolic");
+    close.add_css_class("flat");
+    close.set_tooltip_text(Some("Dismiss"));
+
+    bar.append(&label);
+    bar.append(&details);
+    bar.append(&close);
+
+    // Mark the current version seen and persist it.
+    let mark_seen = {
+        let state = state.clone();
+        let current = current.clone();
+        move || {
+            let mut s = state.borrow_mut();
+            if s.config.last_seen_version != current {
+                s.config.last_seen_version = current.clone();
+                s.config.save().ok();
+            }
+        }
+    };
+
+    {
+        let bar = bar.clone();
+        let win = window.clone();
+        let mark = mark_seen.clone();
+        let version = current.clone();
+        details.connect_clicked(move |_| {
+            show_changelog_modal(&win, &version, &notes);
+            mark();
+            bar.set_visible(false);
+        });
+    }
+    {
+        let bar = bar.clone();
+        close.connect_clicked(move |_| {
+            mark_seen();
+            bar.set_visible(false);
+        });
+    }
+
+    Some(bar.upcast())
+}
+
+/// Modal showing the changelog notes for `version`.
+/// One parsed changelog block.
+enum Note {
+    /// A `### Section` heading.
+    Section(String),
+    /// A `- ` bullet (may have spanned several wrapped source lines).
+    Bullet(String),
+    /// A plain paragraph.
+    Para(String),
+}
+
+/// Parse a Keep-a-Changelog section into blocks, coalescing soft-wrapped
+/// source lines back into single bullets/paragraphs and dropping the redundant
+/// `## [version]` header (the modal title already shows it).
+fn parse_notes(notes: &str) -> Vec<Note> {
+    let mut blocks: Vec<Note> = Vec::new();
+    let mut cur: Option<Note> = None;
+    let flush = |cur: &mut Option<Note>, blocks: &mut Vec<Note>| {
+        if let Some(b) = cur.take() {
+            blocks.push(b);
+        }
+    };
+    for raw in notes.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            flush(&mut cur, &mut blocks);
+        } else if let Some(rest) = line.strip_prefix("### ") {
+            flush(&mut cur, &mut blocks);
+            blocks.push(Note::Section(rest.to_string()));
+        } else if line.starts_with("## ") {
+            flush(&mut cur, &mut blocks); // version header — title already shows it
+        } else if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            flush(&mut cur, &mut blocks);
+            cur = Some(Note::Bullet(rest.to_string()));
+        } else {
+            match &mut cur {
+                Some(Note::Bullet(s)) | Some(Note::Para(s)) => {
+                    s.push(' ');
+                    s.push_str(line);
+                }
+                _ => cur = Some(Note::Para(line.to_string())),
+            }
+        }
+    }
+    flush(&mut cur, &mut blocks);
+    blocks
+}
+
+/// Wrap each `delim`-delimited span in `open`/`close` tags, toggling on/off.
+fn wrap_pairs(s: &str, delim: &str, open: &str, close: &str) -> String {
+    let mut out = String::new();
+    let mut on = false;
+    for (i, seg) in s.split(delim).enumerate() {
+        if i > 0 {
+            out.push_str(if on { close } else { open });
+            on = !on;
+        }
+        out.push_str(seg);
+    }
+    if on {
+        out.push_str(close);
+    }
+    out
+}
+
+/// Render inline markdown (`**bold**`, `*italic*`) as Pango markup, escaping
+/// the rest and normalising em/en dashes to plain hyphens.
+fn pango_inline(raw: &str) -> String {
+    let normalised = raw.replace(['—', '–'], "-");
+    let escaped = glib::markup_escape_text(&normalised).to_string();
+    let bolded = wrap_pairs(&escaped, "**", "<b>", "</b>");
+    wrap_pairs(&bolded, "*", "<i>", "</i>")
+}
+
+/// Modal showing the changelog notes for `version`, rendered as styled widgets
+/// rather than raw markdown text.
+fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &str) {
+    let dialog = adw::Window::new();
+    dialog.set_transient_for(Some(window));
+    dialog.set_modal(true);
+    dialog.set_title(Some(&format!("What's new in {version}")));
+    dialog.set_default_size(460, 500);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.append(&adw::HeaderBar::new());
+
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 7);
+    list.set_margin_start(22);
+    list.set_margin_end(22);
+    list.set_margin_top(10);
+    list.set_margin_bottom(22);
+
+    for note in parse_notes(notes) {
+        match note {
+            Note::Section(text) => {
+                let h = overline(&text);
+                h.set_margin_top(10);
+                list.append(&h);
+            }
+            Note::Bullet(text) => {
+                let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 9);
+                let bullet = gtk4::Label::new(Some("•"));
+                bullet.add_css_class("dim");
+                bullet.set_valign(gtk4::Align::Start);
+                let body = gtk4::Label::new(None);
+                body.set_markup(&pango_inline(&text));
+                body.set_wrap(true);
+                body.set_xalign(0.0);
+                body.set_hexpand(true);
+                row.append(&bullet);
+                row.append(&body);
+                list.append(&row);
+            }
+            Note::Para(text) => {
+                let p = gtk4::Label::new(None);
+                p.set_markup(&pango_inline(&text));
+                p.set_wrap(true);
+                p.set_xalign(0.0);
+                list.append(&p);
+            }
+        }
+    }
+
+    scroll.set_child(Some(&list));
+    content.append(&scroll);
+
+    dialog.set_content(Some(&content));
+    dialog.present();
+}
+
+// ─── Feedback prompt + admin notifications (Supabase) ──────────────────────────
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// One-time opt-in feedback prompt (after a week of use) + a poll for
+/// admin-pushed notifications. Runs once at startup.
+fn run_startup_checks(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    let now = unix_now();
+    {
+        let mut s = state.borrow_mut();
+        if s.config.first_run_epoch == 0 {
+            s.config.first_run_epoch = now;
+            s.config.save().ok();
+        }
+    }
+    let (first_run, prompted, enabled) = {
+        let s = state.borrow();
+        (
+            s.config.first_run_epoch,
+            s.config.feedback_prompted,
+            s.config.enabled,
+        )
+    };
+    const WEEK: u64 = 7 * 24 * 60 * 60;
+    if !prompted && enabled && now.saturating_sub(first_run) >= WEEK {
+        show_feedback_dialog(window, state.clone());
+    }
+    poll_notifications(window, state);
+}
+
+fn submit_feedback_async(rating: i8, comment: &gtk4::Entry, state: &Rc<RefCell<AppState>>) {
+    let text = comment.text().to_string();
+    let note = if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    };
+    std::thread::spawn(move || {
+        crate::supabase::submit_feedback(rating, note).ok();
+    });
+    state
+        .borrow()
+        .toast
+        .add_toast(adw::Toast::new("Thanks for the feedback!"));
+}
+
+fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        s.config.feedback_prompted = true; // ask at most once
+        s.config.save().ok();
+    }
+
+    let dialog = adw::Window::new();
+    dialog.set_transient_for(Some(window));
+    dialog.set_modal(true);
+    dialog.set_title(Some("Feedback"));
+    dialog.set_default_size(420, -1);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.append(&adw::HeaderBar::new());
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
+    inner.set_margin_start(24);
+    inner.set_margin_end(24);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(22);
+
+    let heading = gtk4::Label::new(Some("Enjoying Fresco?"));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    inner.append(&heading);
+
+    let prompt = gtk4::Label::new(Some(
+        "Your rating is anonymous. An optional note helps shape what comes next.",
+    ));
+    prompt.add_css_class("dialog-sub");
+    prompt.set_wrap(true);
+    prompt.set_xalign(0.0);
+    inner.append(&prompt);
+
+    let comment = gtk4::Entry::new();
+    comment.set_placeholder_text(Some("Anything we should know? (optional)"));
+    comment.set_margin_top(4);
+    inner.append(&comment);
+
+    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    buttons.set_margin_top(6);
+    let later = gtk4::Button::with_label("Not now");
+    later.add_css_class("flat");
+    let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    let down = gtk4::Button::new();
+    down.set_child(Some(&button_content("face-sad-symbolic", "Not great")));
+    down.add_css_class("feedback-btn");
+    let up = gtk4::Button::new();
+    up.set_child(Some(&button_content("face-laugh-symbolic", "Loving it")));
+    up.add_css_class("feedback-btn");
+    up.add_css_class("suggested-action");
+    buttons.append(&later);
+    buttons.append(&spacer);
+    buttons.append(&down);
+    buttons.append(&up);
+    inner.append(&buttons);
+
+    content.append(&inner);
+    dialog.set_content(Some(&content));
+
+    {
+        let comment = comment.clone();
+        let state = state.clone();
+        let d = dialog.clone();
+        up.connect_clicked(move |_| {
+            submit_feedback_async(1, &comment, &state);
+            d.close();
+        });
+    }
+    {
+        let comment = comment.clone();
+        let state = state.clone();
+        let d = dialog.clone();
+        down.connect_clicked(move |_| {
+            submit_feedback_async(-1, &comment, &state);
+            d.close();
+        });
+    }
+    {
+        let d = dialog.clone();
+        later.connect_clicked(move |_| d.close());
+    }
+
+    dialog.present();
+}
+
+fn poll_notifications(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let list = crate::supabase::fetch_notifications().unwrap_or_default();
+        let _ = tx.send_blocking(list);
+    });
+    let window = window.clone();
+    glib::spawn_future_local(async move {
+        let Ok(list) = rx.recv().await else {
+            return;
+        };
+        let next = {
+            let s = state.borrow();
+            list.into_iter()
+                .find(|n| !s.config.seen_notifications.contains(&n.id))
+        };
+        if let Some(n) = next {
+            show_notification(&window, state, n);
+        }
+    });
+}
+
+fn show_notification(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    notif: crate::supabase::Notification,
+) {
+    {
+        let mut s = state.borrow_mut();
+        s.config.seen_notifications.push(notif.id.clone());
+        s.config.save().ok();
+    }
+    // AdwToast's button triggers a GAction (not a signal in this binding), so
+    // register a window action that opens the details modal.
+    let action = gio::SimpleAction::new("fresco-notif-details", None);
+    {
+        let window = window.clone();
+        let notif = notif.clone();
+        action.connect_activate(move |_, _| show_notification_modal(&window, &notif));
+    }
+    window.add_action(&action);
+
+    let toast = adw::Toast::new(&notif.title);
+    toast.set_button_label(Some("Details"));
+    toast.set_action_name(Some("win.fresco-notif-details"));
+    toast.set_timeout(0);
+    state.borrow().toast.add_toast(toast);
+}
+
+fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supabase::Notification) {
+    let dialog = adw::Window::new();
+    dialog.set_transient_for(Some(window));
+    dialog.set_modal(true);
+    dialog.set_title(Some(&notif.title));
+    dialog.set_default_size(440, -1);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.append(&adw::HeaderBar::new());
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+    inner.set_margin_start(20);
+    inner.set_margin_end(20);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(20);
+
+    let body = gtk4::Label::new(Some(&notif.body));
+    body.set_wrap(true);
+    body.set_xalign(0.0);
+    body.set_selectable(true);
+    inner.append(&body);
+
+    if let Some(url) = notif.url.clone() {
+        let open = gtk4::Button::with_label("Open link");
+        open.add_css_class("suggested-action");
+        open.set_halign(gtk4::Align::Start);
+        let d = dialog.clone();
+        open.connect_clicked(move |_| {
+            let _ = gio::AppInfo::launch_default_for_uri(&url, None::<&gio::AppLaunchContext>);
+            d.close();
+        });
+        inner.append(&open);
+    }
+
+    content.append(&inner);
+    dialog.set_content(Some(&content));
+    dialog.present();
 }

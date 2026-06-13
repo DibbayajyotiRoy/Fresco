@@ -123,7 +123,7 @@ impl Daemon {
 
         let slideshow = if wallpaper.kind == Kind::Slideshow {
             wallpaper.slideshow.as_ref().map(|s| {
-                let images = list_images(&s.folder);
+                let images = slideshow_images(s);
                 if let Some(first) = images.first() {
                     player.load_path(first);
                 }
@@ -251,8 +251,7 @@ impl Daemon {
             Kind::Slideshow => w
                 .slideshow
                 .as_ref()
-                .and_then(|s| s.folder.file_name())
-                .map(|n| format!("Slideshow: {}", n.to_string_lossy())),
+                .map(|s| format!("Slideshow ({} images)", slideshow_images(s).len())),
         }
     }
 
@@ -326,6 +325,18 @@ impl Daemon {
         self.teardown_renderers();
         std::fs::remove_file(crate::ipc::socket_path()).ok();
         log::info!("frescod stopped");
+    }
+}
+
+/// Resolve a slideshow's image list: explicit hand-picked `paths`, else a scan
+/// of its `folder`.
+fn slideshow_images(s: &crate::config::Slideshow) -> Vec<PathBuf> {
+    if !s.paths.is_empty() {
+        s.paths.clone()
+    } else if let Some(folder) = &s.folder {
+        list_images(folder)
+    } else {
+        Vec::new()
     }
 }
 

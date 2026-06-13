@@ -33,6 +33,9 @@ pub struct LibraryEntry {
     /// Load-failure message from the daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Slideshow cycle interval in seconds; only meaningful for Kind::Slideshow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_s: Option<u64>,
 }
 
 impl LibraryEntry {
@@ -52,6 +55,7 @@ impl LibraryEntry {
             last_used: 0,
             broken: false,
             error: None,
+            interval_s: None,
         }
     }
 
@@ -71,6 +75,7 @@ impl LibraryEntry {
             last_used: 0,
             broken: false,
             error: None,
+            interval_s: None,
         }
     }
 
@@ -97,6 +102,7 @@ impl LibraryEntry {
             last_used: 0,
             broken: false,
             error: None,
+            interval_s: None,
         }
     }
 
@@ -116,6 +122,25 @@ impl LibraryEntry {
             last_used: 0,
             broken: false,
             error: None,
+            interval_s: Some(30),
+        }
+    }
+
+    /// A slideshow built from hand-picked image files (no folder).
+    pub fn new_image_set(paths: Vec<PathBuf>) -> Self {
+        let name = format!("Slideshow ({} images)", paths.len());
+        Self {
+            id: make_id(),
+            name,
+            kind: Kind::Slideshow,
+            path: None,
+            paths,
+            folder: None,
+            thumbnail: None,
+            last_used: 0,
+            broken: false,
+            error: None,
+            interval_s: Some(30),
         }
     }
 
@@ -123,7 +148,13 @@ impl LibraryEntry {
         self.broken = match self.kind {
             Kind::Video | Kind::Image => self.path.as_ref().is_none_or(|p| !p.exists()),
             Kind::Playlist => self.paths.is_empty() || !self.paths.iter().any(|p| p.exists()),
-            Kind::Slideshow => self.folder.as_ref().is_none_or(|f| !f.exists()),
+            Kind::Slideshow => {
+                if !self.paths.is_empty() {
+                    !self.paths.iter().any(|p| p.exists())
+                } else {
+                    self.folder.as_ref().is_none_or(|f| !f.exists())
+                }
+            }
         };
     }
 
@@ -147,10 +178,12 @@ impl LibraryEntry {
                 self.path.clone().or_else(|| self.paths.first().cloned())
             }
             Kind::Image => self.path.clone(),
-            Kind::Slideshow => self.folder.as_ref().and_then(|f| {
-                fs::read_dir(f).ok()?.flatten().find_map(|e| {
-                    let p = e.path();
-                    is_image(&p).then_some(p)
+            Kind::Slideshow => self.paths.first().cloned().or_else(|| {
+                self.folder.as_ref().and_then(|f| {
+                    fs::read_dir(f).ok()?.flatten().find_map(|e| {
+                        let p = e.path();
+                        is_image(&p).then_some(p)
+                    })
                 })
             }),
         };
@@ -191,10 +224,15 @@ impl LibraryEntry {
             crop: None,
             mute: true,
             volume: 50,
-            slideshow: self.folder.as_ref().map(|f| Slideshow {
-                folder: f.clone(),
-                interval_s: 600,
-            }),
+            slideshow: if self.kind == Kind::Slideshow {
+                Some(Slideshow {
+                    folder: self.folder.clone(),
+                    paths: self.paths.clone(),
+                    interval_s: self.interval_s.unwrap_or(30),
+                })
+            } else {
+                None
+            },
         }
     }
 }

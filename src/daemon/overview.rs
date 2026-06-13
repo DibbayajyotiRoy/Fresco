@@ -53,8 +53,8 @@ pub fn restore() {
 fn render_still(w: &Wallpaper) -> Option<PathBuf> {
     let src = match w.kind {
         Kind::Slideshow => {
-            let folder = &w.slideshow.as_ref()?.folder;
-            super::list_images(folder).into_iter().next()?
+            let s = w.slideshow.as_ref()?;
+            super::slideshow_images(s).into_iter().next()?
         }
         _ => w.effective_path()?.to_path_buf(),
     };

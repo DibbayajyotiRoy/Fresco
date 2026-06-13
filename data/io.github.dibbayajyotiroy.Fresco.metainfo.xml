@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata required by Flathub. Validate with:
+     appstreamcli validate data/io.github.dibbayajyotiroy.Fresco.metainfo.xml -->
+<component type="desktop-application">
+  <id>io.github.dibbayajyotiroy.Fresco</id>
+
+  <name>Fresco</name>
+  <summary>Set videos and images as live wallpapers</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Fresco turns videos, GIFs, images, slideshows, and video playlists into
+      your desktop wallpaper. Pick media in a simple app, click Set, then close
+      the app — the wallpaper keeps playing and is restored on login.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Looping video, animated GIF, static image, image slideshow, and video playlist wallpapers</li>
+      <li>Hardware-accelerated playback (VA-API / NVDEC) for low CPU usage without quality loss</li>
+      <li>A drag-to-crop editor to frame exactly the region you want</li>
+      <li>A wallpaper library with thumbnails, a recently-used row, and search</li>
+      <li>Pause / resume and pause-on-battery</li>
+      <li>Multi-monitor support with per-display wallpapers</li>
+    </ul>
+    <p>Fresco currently targets X11 sessions.</p>
+  </description>
+
+  <launchable type="desktop-id">io.github.dibbayajyotiroy.Fresco.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/DibbayajyotiRoy/fresco/main/data/screenshots/library.png</image>
+      <caption>The wallpaper library</caption>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://github.com/DibbayajyotiRoy/fresco</url>
+  <url type="bugtracker">https://github.com/DibbayajyotiRoy/fresco/issues</url>
+  <url type="vcs-browser">https://github.com/DibbayajyotiRoy/fresco</url>
+
+  <developer id="io.github.dibbayajyotiroy">
+    <name>Dibbayajyoti Roy</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <branding>
+    <color type="primary" scheme_preference="light">#d76d77</color>
+    <color type="primary" scheme_preference="dark">#3a1c71</color>
+  </branding>
+
+  <releases>
+    <release version="0.0.2" date="2026-06-13">
+      <description>
+        <p>Bug-fix release.</p>
+        <ul>
+          <li>Fixed a freeze/crash when changing the wallpaper.</li>
+          <li>Add and Add Folder now work; the file dialog shows videos and images by default.</li>
+          <li>The GNOME overview and lock screen now match the live wallpaper.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.0.1" date="2026-06-13">
+      <description>
+        <p>Initial release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -31,6 +31,29 @@ pub enum Scaling {
     High,
 }
 
+/// Light/dark preference. `System` follows the desktop's color scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeMode {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// Accent color applied across the UI (works in both light and dark).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Accent {
+    #[default]
+    Blue,
+    Teal,
+    Green,
+    Amber,
+    Coral,
+    Graphite,
+}
+
 /// Normalized crop rectangle (all values in 0.0..=1.0, relative to source).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Crop {
@@ -69,15 +92,20 @@ impl Crop {
     }
 }
 
+/// A set of images cycled on a timer. Either a `folder` (all images inside) or
+/// an explicit `paths` list of hand-picked images.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Slideshow {
-    pub folder: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<PathBuf>,
     #[serde(default = "default_interval")]
     pub interval_s: u64,
 }
 
 fn default_interval() -> u64 {
-    600
+    30
 }
 
 fn default_volume() -> u8 {
@@ -150,8 +178,26 @@ pub struct Config {
     pub pause_on_battery: bool,
     #[serde(default)]
     pub scaling: Scaling,
+    /// Light/dark preference (System follows the desktop).
+    #[serde(default)]
+    pub theme_mode: ThemeMode,
+    /// UI accent color.
+    #[serde(default)]
+    pub accent: Accent,
     #[serde(default)]
     pub wallpaper: Wallpaper,
+    /// Last app version whose "What's new" notes the user has already seen.
+    #[serde(default)]
+    pub last_seen_version: String,
+    /// Unix epoch (seconds) of first run; drives the one-time feedback prompt.
+    #[serde(default)]
+    pub first_run_epoch: u64,
+    /// True once the (one-time, opt-in) feedback prompt has been shown.
+    #[serde(default)]
+    pub feedback_prompted: bool,
+    /// IDs of admin notifications already shown, so each appears only once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seen_notifications: Vec<String>,
     /// Per-monitor overrides keyed by RandR connector name (e.g. "HDMI-1").
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub monitors: BTreeMap<String, Wallpaper>,
@@ -169,7 +215,13 @@ impl Default for Config {
             enabled: true,
             pause_on_battery: false,
             scaling: Scaling::default(),
+            theme_mode: ThemeMode::default(),
+            accent: Accent::default(),
             wallpaper: Wallpaper::default(),
+            last_seen_version: String::new(),
+            first_run_epoch: 0,
+            feedback_prompted: false,
+            seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
         }
     }

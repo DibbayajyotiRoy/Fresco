@@ -1,0 +1,169 @@
+name: Distro matrix
+
+# Verifies Fresco builds, packages, installs, and runs on every supported
+# distro from the README "Supported distros" table. GitHub only offers Ubuntu
+# runners, so each distro runs inside its own container.
+#
+# Per distro we do TWO things, because they answer two different questions:
+#   build  — does it compile and pass tests against THIS distro's libraries?
+#   install — on a CLEAN machine, do the declared runtime deps resolve and do
+#             the binaries actually load (frescod --check + ldd -r)?
+#
+# Each distro builds its OWN .deb. We do NOT build once and install everywhere:
+# Ubuntu 22.04 ships libmpv.so.1 while 24.04/Debian 12 ship libmpv.so.2, so a
+# cross-distro .deb would fail at load for native-packaging reasons, not bugs.
+#
+# Pop!_OS and elementary OS have no official container images; both are Ubuntu
+# 22.04 derivatives, so we run them on ubuntu:22.04 and add their repos.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1' # weekly, Monday 06:00 UTC — catch upstream package drift
+
+env:
+  RUST_VERSION: '1.91.0'
+  # Build deps mirror .github/workflows/ci.yml so the two stay in sync.
+  BUILD_DEPS: >-
+    libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer
+    libmpv-dev libx11-dev libxrandr-dev
+
+jobs:
+  build:
+    name: build · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: ubuntu-2204,   name: 'Ubuntu 22.04',   image: 'ubuntu:22.04' }
+          - { id: ubuntu-2404,   name: 'Ubuntu 24.04',   image: 'ubuntu:24.04' }
+          - { id: debian-12,     name: 'Debian 12',      image: 'debian:12' }
+          - { id: mint-21,       name: 'Linux Mint 21',  image: 'linuxmintd/mint21-amd64' }
+          - { id: mint-22,       name: 'Linux Mint 22',  image: 'linuxmintd/mint22-amd64' }
+          - { id: popos-2204,    name: 'Pop!_OS 22.04',  image: 'ubuntu:22.04', repo: 'ppa:system76/pop' }
+          - { id: elementary-7,  name: 'elementary OS 7', image: 'ubuntu:22.04', repo: 'ppa:elementary-os/stable' }
+    steps:
+      - name: Bootstrap container
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl build-essential pkg-config git
+
+      - name: Add distro repo (Pop!_OS / elementary)
+        if: matrix.repo != ''
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        # Best-effort: these PPAs reflect each distro's real package set, but a
+        # Launchpad hiccup must not fail an otherwise-valid build.
+        run: |
+          apt-get install -y --no-install-recommends software-properties-common
+          add-apt-repository -y "${{ matrix.repo }}" || echo "::warning::could not add ${{ matrix.repo }}"
+          apt-get update -q || true
+
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get install -y --no-install-recommends $BUILD_DEPS
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain "$RUST_VERSION" --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build (all features)
+        run: cargo build --release --all-features
+
+      - name: Test (daemon)
+        run: cargo test --no-default-features --features daemon
+
+      - name: Package .deb
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.id }}
+          path: target/debian/fresco_*.deb
+          if-no-files-found: error
+
+  install:
+    name: install · ${{ matrix.name }}
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: ubuntu-2204,   name: 'Ubuntu 22.04',   image: 'ubuntu:22.04' }
+          - { id: ubuntu-2404,   name: 'Ubuntu 24.04',   image: 'ubuntu:24.04' }
+          - { id: debian-12,     name: 'Debian 12',      image: 'debian:12' }
+          - { id: mint-21,       name: 'Linux Mint 21',  image: 'linuxmintd/mint21-amd64' }
+          - { id: mint-22,       name: 'Linux Mint 22',  image: 'linuxmintd/mint22-amd64' }
+          - { id: popos-2204,    name: 'Pop!_OS 22.04',  image: 'ubuntu:22.04', repo: 'ppa:system76/pop' }
+          - { id: elementary-7,  name: 'elementary OS 7', image: 'ubuntu:22.04', repo: 'ppa:elementary-os/stable' }
+    steps:
+      # NOTE: a CLEAN container — no -dev packages. apt must resolve every
+      # runtime dependency declared in Cargo.toml [package.metadata.deb] on its
+      # own. This is the real "is it installable & usable" test.
+      - name: Bootstrap container
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends ca-certificates binutils
+
+      - name: Add distro repo (Pop!_OS / elementary)
+        if: matrix.repo != ''
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get install -y --no-install-recommends software-properties-common
+          add-apt-repository -y "${{ matrix.repo }}" || echo "::warning::could not add ${{ matrix.repo }}"
+          apt-get update -q || true
+
+      - name: Download .deb
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-${{ matrix.id }}
+          path: deb
+
+      - name: Install .deb
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        # ./ prefix so apt treats it as a local file, not a package name.
+        run: |
+          DEB="./$(ls deb/fresco_*.deb | head -1)"
+          echo "Installing $DEB"
+          apt-get install -y "$DEB"
+
+      - name: Smoke test — binaries load all shared libraries
+        # ldd -r resolves data + function relocations; a missing lib or symbol
+        # prints "not found" / "undefined symbol". Fail loudly if any appear.
+        run: |
+          set -e
+          for bin in fresco frescod; do
+            echo "== ldd -r $bin =="
+            out="$(ldd -r "$(command -v "$bin")")"
+            echo "$out"
+            if echo "$out" | grep -E 'not found|undefined symbol'; then
+              echo "::error::$bin has unresolved shared-library dependencies"
+              exit 1
+            fi
+          done
+
+      - name: Smoke test — frescod --check runs
+        # Headless: no X11, no GPU. --check dlopens libmpv and prints
+        # diagnostics, exiting 0 regardless — proves libmpv resolves at runtime.
+        run: frescod --check

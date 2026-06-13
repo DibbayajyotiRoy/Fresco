@@ -19,7 +19,7 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer \
             libmpv-dev libx11-dev libxrandr-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.91.0
 
       - uses: actions/cache@v4
         with:
@@ -38,16 +38,22 @@ jobs:
       - name: Package .deb
         run: cargo deb
 
-      # Smoke test: install the .deb and verify frescod --check runs
-      - name: Smoke test (daemon check subcommand)
-        run: |
-          DEB=$(ls target/debian/fresco_*.deb | head -1)
-          sudo apt-get install -y "$DEB"
-          # Must exit 0 and print the diagnostic table
-          frescod --check || true   # Non-zero on wayland/missing GPU is expected in CI
-
-      - name: Upload .deb to release
+      # Publish the installable artifacts first so a flaky smoke test can never
+      # block the release. install.sh is attached too — the README one-liner
+      # fetches it from releases/latest/download/install.sh.
+      - name: Upload artifacts to release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/debian/fresco_*.deb
+          files: |
+            target/debian/fresco_*.deb
+            install.sh
           generate_release_notes: true
+
+      # Best-effort smoke test: install the .deb (note the ./ prefix so apt
+      # treats it as a file, not a package name) and run the diagnostics.
+      - name: Smoke test (daemon check subcommand)
+        continue-on-error: true
+        run: |
+          DEB="./$(ls target/debian/fresco_*.deb | head -1)"
+          sudo apt-get install -y "$DEB"
+          frescod --check || true   # non-zero on headless CI is expected

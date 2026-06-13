@@ -245,7 +245,7 @@ pub fn save_entries(entries: &[LibraryEntry]) -> Result<()> {
 /// Up to `limit` entries sorted by most recently used.
 pub fn recent_entries(entries: &[LibraryEntry], limit: usize) -> Vec<&LibraryEntry> {
     let mut sorted: Vec<&LibraryEntry> = entries.iter().filter(|e| e.last_used > 0).collect();
-    sorted.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+    sorted.sort_by_key(|e| std::cmp::Reverse(e.last_used));
     sorted.truncate(limit);
     sorted
 }

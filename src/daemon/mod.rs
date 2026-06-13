@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::Screen;
-use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
 use crate::config::{Config, Kind, Scaling, Wallpaper};
@@ -82,9 +81,7 @@ impl Daemon {
     /// Tear down all renderers and rebuild them from the current config and the
     /// current monitor layout. Reveals the native wallpaper momentarily.
     fn rebuild(&mut self) -> Result<()> {
-        for r in self.renderers.drain(..) {
-            r.window.destroy(&self.conn);
-        }
+        self.teardown_renderers();
         let screen = self.screen();
         self.monitors = monitors::list_monitors(&self.conn, screen.root)?;
 
@@ -166,9 +163,11 @@ impl Daemon {
                 }
             }
 
-            while let Ok(Some(event)) = self.conn.poll_for_event() {
-                self.on_x11_event(event);
-            }
+            // Drain X11 events so the queue can't grow unbounded. We must NOT
+            // re-lower in response: lowering emits a ConfigureNotify on our own
+            // window, which would re-enter and storm the compositor (laptop
+            // freeze). The periodic re-lower below handles stacking instead.
+            while let Ok(Some(_)) = self.conn.poll_for_event() {}
 
             let now = Instant::now();
             if now.duration_since(self.last_lower) >= LOWER_INTERVAL {
@@ -271,11 +270,17 @@ impl Daemon {
         let _ = self.conn.flush();
     }
 
-    fn on_x11_event(&mut self, event: Event) {
-        // Restacking activity (e.g. ding remapping) → re-lower our windows.
-        if matches!(event, Event::ConfigureNotify(_) | Event::MapNotify(_)) {
-            self.lower_all();
+    /// Tear down all renderers, terminating each mpv instance BEFORE destroying
+    /// its X window. mpv's vo=gpu context is bound to the window; destroying the
+    /// window first can hang or leak the GPU context (notably on NVIDIA), which
+    /// otherwise piles up on every wallpaper change.
+    fn teardown_renderers(&mut self) {
+        for r in self.renderers.drain(..) {
+            let Renderer { window, player, .. } = r;
+            drop(player);
+            window.destroy(&self.conn);
         }
+        let _ = self.conn.flush();
     }
 
     fn check_hotplug(&mut self) {
@@ -318,10 +323,7 @@ impl Daemon {
 
     fn shutdown(&mut self) {
         overview::restore();
-        for r in self.renderers.drain(..) {
-            r.window.destroy(&self.conn);
-        }
-        let _ = self.conn.flush();
+        self.teardown_renderers();
         std::fs::remove_file(crate::ipc::socket_path()).ok();
         log::info!("frescod stopped");
     }
@@ -423,9 +425,7 @@ pub fn run_once(file: PathBuf) -> Result<()> {
         daemon.renderers.len()
     );
     loop {
-        while let Ok(Some(event)) = daemon.conn.poll_for_event() {
-            daemon.on_x11_event(event);
-        }
+        while let Ok(Some(_)) = daemon.conn.poll_for_event() {}
         if Instant::now().duration_since(daemon.last_lower) >= LOWER_INTERVAL {
             daemon.lower_all();
             daemon.last_lower = Instant::now();

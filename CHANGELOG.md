@@ -9,6 +9,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.0.2] — Bug fixes
 
 ### Fixed
+- **Fixed a freeze/crash when changing the wallpaper.** Re-lowering the desktop
+  window in response to X11 stacking events caused an infinite restack loop that
+  flooded the compositor; stacking is now handled by a periodic pass instead.
+  Also, each mpv instance is now terminated *before* its window is destroyed
+  (the GPU context is bound to the window), so switching wallpapers no longer
+  leaks stuck decoders.
 - **Add / Add Folder now work.** The native file chooser is kept alive until it
   responds, so files you pick actually register and open the editor (previously
   the portal's reply was dropped because the chooser was freed too early).

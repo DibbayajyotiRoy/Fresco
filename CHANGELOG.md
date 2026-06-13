@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.2] — Bug fixes
+
+### Fixed
+- **Add / Add Folder now work.** The native file chooser is kept alive until it
+  responds, so files you pick actually register and open the editor (previously
+  the portal's reply was dropped because the chooser was freed too early).
+- The file picker now defaults to an **"All supported"** filter showing both
+  videos and images (it was videos-only before).
+- **GNOME overview, workspace switcher, and lock screen** now show a still frame
+  matching the live wallpaper instead of the old desktop background. Your
+  original background is saved and restored when you press Stop.
+
+### Changed
+- CI toolchain pinned to Rust 1.91 for reproducible lint results; fixed a
+  clippy lint and the release workflow's smoke-test step.
+
 ## [0.0.1] — Initial release
 
 First public release. A GUI-first live-wallpaper setter for Debian-based Linux
@@ -37,5 +53,6 @@ First public release. A GUI-first live-wallpaper setter for Debian-based Linux
 - X11 sessions only — Wayland support is planned for a future release.
 - Web/HTML wallpapers are out of scope for this release.
 
-[Unreleased]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/DibbayajyotiRoy/fresco/releases/tag/v0.0.1

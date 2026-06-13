@@ -46,6 +46,10 @@ struct AppState {
     config: Config,
     entries: Vec<LibraryEntry>,
     editing_idx: Option<usize>,
+    /// Keeps the native file/folder chooser alive until it responds. Without
+    /// this, the local `FileChooserNative` is dropped when the open function
+    /// returns, so the portal's reply never reaches our handler.
+    current_picker: Option<gtk4::FileChooserNative>,
 }
 
 // ─── Main window ─────────────────────────────────────────────────────────────
@@ -79,6 +83,7 @@ fn build_ui(app: &adw::Application) {
         config: Config::load().unwrap_or_default(),
         entries,
         editing_idx: None,
+        current_picker: None,
     }));
 
     let stack = gtk4::Stack::new();
@@ -723,22 +728,38 @@ fn open_file_picker(
     );
     chooser.set_select_multiple(true);
 
+    let video_pat = ["*.mp4", "*.webm", "*.mkv", "*.avi", "*.mov", "*.gif"];
+    let image_pat = ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"];
+
+    // "All supported" first → it's the default filter, so videos AND images
+    // both show without the user switching the dropdown.
+    let allf = gtk4::FileFilter::new();
+    allf.set_name(Some("All supported"));
+    for p in video_pat.iter().chain(image_pat.iter()) {
+        allf.add_pattern(p);
+    }
+    chooser.add_filter(&allf);
+
     let vf = gtk4::FileFilter::new();
     vf.set_name(Some("Video files"));
-    for p in &["*.mp4", "*.webm", "*.mkv", "*.avi", "*.mov", "*.gif"] {
+    for p in &video_pat {
         vf.add_pattern(p);
     }
     chooser.add_filter(&vf);
 
     let imf = gtk4::FileFilter::new();
     imf.set_name(Some("Image files"));
-    for p in &["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"] {
+    for p in &image_pat {
         imf.add_pattern(p);
     }
     chooser.add_filter(&imf);
 
     let state_cb = state.clone();
     chooser.connect_response(move |ch, resp| {
+        // Release the keep-alive ref now that the dialog has answered (also
+        // breaks the chooser↔state reference cycle). GTK keeps `ch` valid for
+        // the duration of this handler.
+        state_cb.borrow_mut().current_picker = None;
         if resp != ResponseType::Accept {
             return;
         }
@@ -786,6 +807,7 @@ fn open_file_picker(
         drop(s);
         stack.set_visible_child_name("editor");
     });
+    state.borrow_mut().current_picker = Some(chooser.clone());
     chooser.show();
 }
 
@@ -804,6 +826,7 @@ fn open_folder_picker(
     );
     let state_cb = state.clone();
     chooser.connect_response(move |ch, resp| {
+        state_cb.borrow_mut().current_picker = None;
         if resp != ResponseType::Accept {
             return;
         }
@@ -821,6 +844,7 @@ fn open_folder_picker(
         drop(s);
         stack.set_visible_child_name("editor");
     });
+    state.borrow_mut().current_picker = Some(chooser.clone());
     chooser.show();
 }
 

@@ -4,6 +4,7 @@
 mod control;
 pub mod monitors;
 pub mod mpv;
+mod overview;
 mod x11win;
 
 use std::path::PathBuf;
@@ -151,6 +152,7 @@ impl Daemon {
     pub fn run(&mut self) -> Result<()> {
         let commands = control::start_server()?;
         self.rebuild()?;
+        overview::apply(&self.config.wallpaper);
         log::info!("frescod started with {} renderer(s)", self.renderers.len());
 
         loop {
@@ -192,7 +194,10 @@ impl Daemon {
             Request::Apply => {
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
                 match self.rebuild() {
-                    Ok(_) => Response::Ok,
+                    Ok(_) => {
+                        overview::apply(&self.config.wallpaper);
+                        Response::Ok
+                    }
                     Err(e) => Response::Err {
                         message: e.to_string(),
                     },
@@ -312,6 +317,7 @@ impl Daemon {
     }
 
     fn shutdown(&mut self) {
+        overview::restore();
         for r in self.renderers.drain(..) {
             r.window.destroy(&self.conn);
         }
@@ -377,6 +383,9 @@ pub fn run() -> Result<()> {
     }
     let config = Config::load().unwrap_or_default();
     if !config.enabled {
+        // Safety net: if a prior run was killed (not Stopped) it may have left
+        // our static frame as the background — put the user's original back.
+        overview::restore();
         log::info!("wallpaper disabled (enabled=false) — exiting");
         return Ok(());
     }

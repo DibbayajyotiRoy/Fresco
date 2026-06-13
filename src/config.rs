@@ -41,6 +41,20 @@ pub struct Crop {
 }
 
 impl Crop {
+    /// Convert this crop rect to mpv `(video-zoom, video-pan-x, video-pan-y)`.
+    /// Uses VO-side zoom/pan so hardware decode stays zero-copy (never `vf=crop`).
+    /// The daemon sets these as mpv properties.
+    pub fn to_mpv_zoom_pan(&self) -> (f64, f64, f64) {
+        // video-zoom = log2(1/w): zoom so crop.w of the source fills the screen width.
+        let zoom = (1.0_f64 / self.w).log2();
+        let cx = self.x + self.w / 2.0;
+        let cy = self.y + self.h / 2.0;
+        // mpv pan is in post-zoom display units: (0.5 - center) / size.
+        let pan_x = (0.5 - cx) / self.w;
+        let pan_y = (0.5 - cy) / self.h;
+        (zoom, pan_x, pan_y)
+    }
+
     /// Clamp to sane bounds; returns None if the rect is degenerate.
     pub fn sanitized(self) -> Option<Crop> {
         let w = self.w.clamp(0.01, 1.0);
@@ -94,6 +108,16 @@ pub struct Wallpaper {
     pub volume: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slideshow: Option<Slideshow>,
+}
+
+impl Wallpaper {
+    /// The single media path to load for video/image/playlist-of-one.
+    /// Returns None for slideshows (the daemon drives those frame by frame).
+    pub fn effective_path(&self) -> Option<&std::path::Path> {
+        self.path
+            .as_deref()
+            .or_else(|| self.paths.first().map(|p| p.as_path()))
+    }
 }
 
 impl Default for Wallpaper {
@@ -167,8 +191,8 @@ impl Config {
         if !path.exists() {
             return Ok(Config::default());
         }
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let cfg: Config =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         Ok(cfg)
@@ -215,11 +239,20 @@ mod tests {
         let mut cfg = Config::default();
         cfg.wallpaper.kind = Kind::Playlist;
         cfg.wallpaper.paths = vec!["/a.mp4".into(), "/b.webm".into()];
-        cfg.wallpaper.crop = Some(Crop { x: 0.1, y: 0.2, w: 0.5, h: 0.5 });
+        cfg.wallpaper.crop = Some(Crop {
+            x: 0.1,
+            y: 0.2,
+            w: 0.5,
+            h: 0.5,
+        });
         cfg.pause_on_battery = true;
         cfg.monitors.insert(
             "HDMI-1".into(),
-            Wallpaper { kind: Kind::Image, path: Some("/p.png".into()), ..Default::default() },
+            Wallpaper {
+                kind: Kind::Image,
+                path: Some("/p.png".into()),
+                ..Default::default()
+            },
         );
         let text = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
@@ -239,13 +272,58 @@ mod tests {
     }
 
     #[test]
+    fn crop_to_mpv_zoom_pan() {
+        // Full frame: no zoom, no pan.
+        let (z, px, py) = (Crop {
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+        })
+        .to_mpv_zoom_pan();
+        assert!(z.abs() < 1e-9 && px.abs() < 1e-9 && py.abs() < 1e-9);
+        // Center 50%: zoom 1 stop, no pan.
+        let (z, px, py) = (Crop {
+            x: 0.25,
+            y: 0.25,
+            w: 0.5,
+            h: 0.5,
+        })
+        .to_mpv_zoom_pan();
+        assert!((z - 1.0).abs() < 1e-9 && px.abs() < 1e-9 && py.abs() < 1e-9);
+        // Top-left quarter: zoom 1 stop, pan right+down by 0.5.
+        let (z, px, py) = (Crop {
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+        })
+        .to_mpv_zoom_pan();
+        assert!((z - 1.0).abs() < 1e-9 && (px - 0.5).abs() < 1e-9 && (py - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
     fn crop_sanitize() {
         // Out-of-bounds rect gets clamped.
-        let c = Crop { x: 0.9, y: -0.5, w: 0.5, h: 0.5 }.sanitized().unwrap();
+        let c = Crop {
+            x: 0.9,
+            y: -0.5,
+            w: 0.5,
+            h: 0.5,
+        }
+        .sanitized()
+        .unwrap();
         assert!((c.x + c.w) <= 1.0 + f64::EPSILON);
         assert!(c.y >= 0.0);
         // Full-frame crop collapses to None.
-        assert!(Crop { x: 0.0, y: 0.0, w: 1.0, h: 1.0 }.sanitized().is_none());
+        assert!(Crop {
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0
+        }
+        .sanitized()
+        .is_none());
     }
 
     #[test]
@@ -254,9 +332,15 @@ mod tests {
         cfg.wallpaper.path = Some("/default.mp4".into());
         cfg.monitors.insert(
             "DP-2".into(),
-            Wallpaper { path: Some("/other.mp4".into()), ..Default::default() },
+            Wallpaper {
+                path: Some("/other.mp4".into()),
+                ..Default::default()
+            },
         );
-        assert_eq!(cfg.wallpaper_for("DP-2").path.as_deref().unwrap().to_str(), Some("/other.mp4"));
+        assert_eq!(
+            cfg.wallpaper_for("DP-2").path.as_deref().unwrap().to_str(),
+            Some("/other.mp4")
+        );
         assert_eq!(
             cfg.wallpaper_for("eDP-1").path.as_deref().unwrap().to_str(),
             Some("/default.mp4")

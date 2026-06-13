@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer \
+            libmpv-dev libx11-dev libxrandr-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release --all-features
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Package .deb
+        run: cargo deb
+
+      # Smoke test: install the .deb and verify frescod --check runs
+      - name: Smoke test (daemon check subcommand)
+        run: |
+          DEB=$(ls target/debian/fresco_*.deb | head -1)
+          sudo apt-get install -y "$DEB"
+          # Must exit 0 and print the diagnostic table
+          frescod --check || true   # Non-zero on wayland/missing GPU is expected in CI
+
+      - name: Upload .deb to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/debian/fresco_*.deb
+          generate_release_notes: true

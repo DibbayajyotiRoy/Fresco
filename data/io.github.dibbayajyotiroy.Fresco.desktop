@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Fresco
+GenericName=Live Wallpaper
+Comment=Set video, GIF, and image wallpapers with hardware-accelerated playback
+Exec=fresco %F
+Icon=io.github.dibbayajyotiroy.Fresco
+Terminal=false
+Categories=AudioVideo;
+Keywords=wallpaper;live;video;background;animated;
+MimeType=video/mp4;video/webm;video/x-matroska;image/gif;image/png;image/jpeg;image/webp;
+StartupNotify=true
+StartupWMClass=fresco

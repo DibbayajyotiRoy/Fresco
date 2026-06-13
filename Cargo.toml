@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -32,7 +32,7 @@ log = "0.4"
 env_logger = "0.11"
 gtk4 = { version = "0.9", features = ["v4_6"], optional = true }
 libadwaita = { version = "0.7", features = ["v1_1"], optional = true }
-x11rb = { version = "0.13", features = ["randr"], optional = true }
+x11rb = { version = "0.13", features = ["randr", "shape"], optional = true }
 libloading = { version = "0.8", optional = true }
 nix = { version = "0.29", features = ["process", "signal", "fs"], optional = true }
 

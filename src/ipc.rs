@@ -72,7 +72,9 @@ pub fn request(req: &Request) -> Result<Response> {
     stream.write_all(line.as_bytes())?;
     let mut reader = BufReader::new(stream);
     let mut reply = String::new();
-    reader.read_line(&mut reply).context("reading daemon reply")?;
+    reader
+        .read_line(&mut reply)
+        .context("reading daemon reply")?;
     let resp: Response = serde_json::from_str(reply.trim()).context("parsing daemon reply")?;
     Ok(resp)
 }
@@ -88,8 +90,14 @@ mod tests {
 
     #[test]
     fn request_json_shape() {
-        assert_eq!(serde_json::to_string(&Request::Apply).unwrap(), r#"{"cmd":"apply"}"#);
-        assert_eq!(serde_json::to_string(&Request::Status).unwrap(), r#"{"cmd":"status"}"#);
+        assert_eq!(
+            serde_json::to_string(&Request::Apply).unwrap(),
+            r#"{"cmd":"apply"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::Status).unwrap(),
+            r#"{"cmd":"status"}"#
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/wordmark";
-import { GITHUB_URL, LICENSE_URL, PORTFOLIO_URL, AUTHOR_NAME } from "@/lib/site";
+import { GITHUB_URL, LICENSE_URL } from "@/lib/site";
 
 const FOOTER_LINKS = [
   { href: GITHUB_URL, label: "GitHub" },
@@ -11,22 +11,12 @@ export function SiteFooter() {
   return (
     <footer className="py-12">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 px-5 sm:flex-row">
-        <div className="flex flex-col items-center gap-1.5 sm:items-start">
-          <div className="flex items-center gap-2">
-            <Wordmark className="h-6 w-6" />
-            <span className="text-sm font-semibold tracking-tight">Fresco</span>
-            <span className="ml-1 text-xs text-muted-foreground">
-              Made with Rust + GTK4
-            </span>
-          </div>
-          <a
-            href={PORTFOLIO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-muted-foreground transition-colors hover:text-primary"
-          >
-            Built by {AUTHOR_NAME}
-          </a>
+        <div className="flex items-center gap-2">
+          <Wordmark className="h-6 w-6" />
+          <span className="text-sm font-semibold tracking-tight">Fresco</span>
+          <span className="ml-2 text-xs text-muted-foreground">
+            Made with Rust + GTK4
+          </span>
         </div>
 
         <nav className="flex items-center gap-6">

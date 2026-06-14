@@ -23,6 +23,9 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.1.1
         version: 1.2.5(@types/react@19.2.17)(react@19.2.7)
+      '@roy-ui/ui':
+        specifier: ^0.0.16
+        version: 0.0.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@vercel/analytics':
         specifier: ^1.4.1
         version: 1.6.1(next@15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)
@@ -558,6 +561,12 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@roy-ui/ui@0.0.16':
+    resolution: {integrity: sha512-2A7JUpDgjwdpYHcoW46JeqwXH+QJkyHOFHq5ayq1idNTVrIrEvA/JW1t4vgL8yJBc8cYWUa42ydYhwm677eWPw==}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
@@ -2499,6 +2508,11 @@ snapshots:
       react: 19.2.7
     optionalDependencies:
       '@types/react': 19.2.17
+
+  '@roy-ui/ui@0.0.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
 
   '@rtsao/scc@1.1.0': {}
 

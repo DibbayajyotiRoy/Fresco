@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Bricolage_Grotesque } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SmoothScroll } from "@/components/smooth-scroll";
+import { MadeBy } from "@roy-ui/ui/made-by";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -108,6 +109,13 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${bricolage.variable} font-sans antialiased`}
       >
         <SmoothScroll>{children}</SmoothScroll>
+        <MadeBy
+          name="Dibbayajyoti Roy"
+          href="https://dibbayajyoti.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          nameFont="var(--font-bricolage)"
+        />
         <Analytics />
       </body>
     </html>

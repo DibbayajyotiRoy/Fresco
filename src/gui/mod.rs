@@ -1,4 +1,5 @@
 mod daemon_ctl;
+mod hover_preview;
 mod library;
 mod preview;
 mod theme;

@@ -189,23 +189,10 @@ fn build_library_view(
     recent_box.set_margin_bottom(10);
     content.append(&recent_box);
 
-    // All wallpapers heading.
-    let all_label = overline("Library");
-    all_label.set_margin_top(8);
-    all_label.set_margin_bottom(10);
-    content.append(&all_label);
-
-    // FlowBox grid.
-    let flow = gtk4::FlowBox::new();
-    flow.set_homogeneous(true);
-    flow.set_max_children_per_line(5);
-    flow.set_min_children_per_line(2);
-    flow.set_selection_mode(gtk4::SelectionMode::None);
-    flow.set_valign(gtk4::Align::Start);
-    flow.set_row_spacing(14);
-    flow.set_column_spacing(14);
-    flow.set_margin_bottom(12);
-    content.append(&flow);
+    // Per-type sections (Images / Videos / GIFs); rebuilt by populate_library.
+    let sections_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sections_box.set_margin_bottom(12);
+    content.append(&sections_box);
 
     // Welcome page (shown when library is empty).
     let welcome = adw::StatusPage::new();
@@ -282,55 +269,43 @@ fn build_library_view(
     footer.append(&add_btn);
     root.append(&footer);
 
-    // ── Live-updating library populate closure ──
-    let card_names: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    // ── Live-updating sectioned library ──
+    let home_query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let refresh: Rc<dyn Fn()> = {
         let state = state.clone();
-        let flow = flow.clone();
+        let sections_box = sections_box.clone();
         let recent_box = recent_box.clone();
         let recent_label = recent_label.clone();
-        let all_label = all_label.clone();
         let welcome = welcome.clone();
         let stack = stack.clone();
-        let card_names = card_names.clone();
+        let home_query = home_query.clone();
         let search = search.clone();
         Rc::new(move || {
             // Searching an empty library is pointless: hide the field until
             // there's something to search.
             search.set_visible(!state.borrow().entries.is_empty());
+            let q = home_query.borrow();
             populate_library(
                 &state,
-                &flow,
+                &sections_box,
                 &recent_box,
                 &recent_label,
-                &all_label,
                 &welcome,
                 &stack,
-                &card_names,
+                q.as_str(),
             );
         })
     };
     state.borrow_mut().refresh = Some(refresh.clone());
     refresh();
 
-    // Search filter — match against the per-card name list by flow index.
+    // Search re-runs populate with the query (rebuilds the matching sections).
     {
-        let flow = flow.clone();
-        let card_names = card_names.clone();
+        let home_query = home_query.clone();
+        let refresh = refresh.clone();
         search.connect_search_changed(move |entry| {
-            let q = entry.text().to_lowercase();
-            let names = card_names.clone();
-            flow.set_filter_func(move |child| {
-                if q.is_empty() {
-                    return true;
-                }
-                names
-                    .borrow()
-                    .get(child.index() as usize)
-                    .map(|n| n.contains(&q))
-                    .unwrap_or(true)
-            });
-            flow.invalidate_filter();
+            *home_query.borrow_mut() = entry.text().to_string();
+            refresh();
         });
     }
 
@@ -551,27 +526,25 @@ fn build_menu_popover(
     popover
 }
 
-// Orchestrates a coherent bundle of library-view widgets; splitting them into
-// a struct would add ceremony without clarifying this single-caller helper.
+// Orchestrates a coherent bundle of library-view widgets; splitting them into a
+// struct would add ceremony without clarifying this single-caller helper.
 #[allow(clippy::too_many_arguments)]
 fn populate_library(
     state: &Rc<RefCell<AppState>>,
-    flow: &gtk4::FlowBox,
+    sections_box: &gtk4::Box,
     recent_box: &gtk4::Box,
     recent_label: &gtk4::Label,
-    all_label: &gtk4::Label,
     welcome: &adw::StatusPage,
     stack: &gtk4::Stack,
-    card_names: &Rc<RefCell<Vec<String>>>,
+    query: &str,
 ) {
     // Clear.
-    while let Some(c) = flow.first_child() {
-        flow.remove(&c);
+    while let Some(c) = sections_box.first_child() {
+        sections_box.remove(&c);
     }
     while let Some(c) = recent_box.first_child() {
         recent_box.remove(&c);
     }
-    card_names.borrow_mut().clear();
 
     let (entries, cfg) = {
         let s = state.borrow();
@@ -582,17 +555,23 @@ fn populate_library(
         welcome.set_visible(true);
         recent_label.set_visible(false);
         recent_box.set_visible(false);
-        all_label.set_visible(false);
         return;
     }
     welcome.set_visible(false);
-    all_label.set_visible(true);
 
-    // Recents.
+    let q = query.to_lowercase();
+    let searching = !q.is_empty();
+
+    // Recents (hidden while searching, to focus on the matches).
     {
-        let recents = library::recent_entries(&entries, 6);
-        recent_label.set_visible(!recents.is_empty());
-        recent_box.set_visible(!recents.is_empty());
+        let recents = if searching {
+            Vec::new()
+        } else {
+            library::recent_entries(&entries, 6)
+        };
+        let show = !recents.is_empty();
+        recent_label.set_visible(show);
+        recent_box.set_visible(show);
         for e in recents {
             let idx = entries.iter().position(|x| x.id == e.id).unwrap_or(0);
             let active = entry_is_active(e, &cfg);
@@ -606,13 +585,43 @@ fn populate_library(
         }
     }
 
-    // All entries.
-    let mut names = card_names.borrow_mut();
-    for (idx, entry) in entries.iter().enumerate() {
-        let active = entry_is_active(entry, &cfg);
-        let card = build_library_card(entry, idx, state.clone(), stack.clone(), active);
-        flow.append(&card);
-        names.push(entry.name.to_lowercase());
+    // One section per non-empty category: Images, Videos, GIFs.
+    let mut first_section = true;
+    for cat in CATEGORY_ORDER {
+        let matches: Vec<(usize, &LibraryEntry)> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                entry_category(e) == cat && (q.is_empty() || e.name.to_lowercase().contains(&q))
+            })
+            .collect();
+        if matches.is_empty() {
+            continue;
+        }
+
+        let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        let header = overline(category_label(cat));
+        header.set_margin_top(if first_section { 12 } else { 16 });
+        header.set_margin_bottom(10);
+        first_section = false;
+        section.append(&header);
+
+        let flow = gtk4::FlowBox::new();
+        flow.set_homogeneous(true);
+        flow.set_max_children_per_line(6);
+        flow.set_min_children_per_line(2);
+        flow.set_selection_mode(gtk4::SelectionMode::None);
+        flow.set_valign(gtk4::Align::Start);
+        flow.set_row_spacing(14);
+        flow.set_column_spacing(14);
+        flow.set_margin_bottom(8);
+        for (idx, entry) in matches {
+            let active = entry_is_active(entry, &cfg);
+            let card = build_library_card(entry, idx, state.clone(), stack.clone(), active);
+            flow.append(&card);
+        }
+        section.append(&flow);
+        sections_box.append(&section);
     }
 }
 
@@ -800,7 +809,61 @@ fn build_library_card(
     }
     overlay.add_controller(rclick);
 
+    // Video/GIF cards play a muted, looping preview while hovered.
+    if let Some(video) = preview_video_path(entry) {
+        super::hover_preview::attach(&overlay, &pic, video, entry.thumbnail.clone());
+    }
+
     overlay
+}
+
+/// Home sections, in display order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Category {
+    Images,
+    Videos,
+    Gifs,
+}
+
+const CATEGORY_ORDER: [Category; 3] = [Category::Images, Category::Videos, Category::Gifs];
+
+fn category_label(c: Category) -> &'static str {
+    match c {
+        Category::Images => "Images",
+        Category::Videos => "Videos",
+        Category::Gifs => "GIFs",
+    }
+}
+
+fn is_gif(p: &std::path::Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("gif"))
+        .unwrap_or(false)
+}
+
+fn entry_category(entry: &LibraryEntry) -> Category {
+    match entry.kind {
+        Kind::Image | Kind::Slideshow => Category::Images,
+        Kind::Playlist => Category::Videos,
+        Kind::Video => {
+            if entry.path.as_deref().map(is_gif).unwrap_or(false) {
+                Category::Gifs
+            } else {
+                Category::Videos
+            }
+        }
+    }
+}
+
+/// The video file to preview on hover, if this entry is a (non-slideshow) video
+/// or GIF. Images and slideshows have nothing to play.
+fn preview_video_path(entry: &LibraryEntry) -> Option<PathBuf> {
+    match entry.kind {
+        Kind::Video => entry.path.clone(),
+        Kind::Playlist => entry.paths.first().cloned(),
+        _ => None,
+    }
 }
 
 /// Right-click context menu for a library card.
@@ -1814,7 +1877,7 @@ fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
     dialog.set_title(Some(&format!("What's new in {version}")));
-    dialog.set_default_size(460, 500);
+    dialog.set_default_size(660, 680);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     content.append(&adw::HeaderBar::new());
@@ -1823,25 +1886,37 @@ fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &
     scroll.set_vexpand(true);
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
 
-    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 7);
-    list.set_margin_start(22);
-    list.set_margin_end(22);
-    list.set_margin_top(10);
-    list.set_margin_bottom(22);
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    list.set_margin_start(28);
+    list.set_margin_end(28);
+    list.set_margin_top(14);
+    list.set_margin_bottom(28);
+
+    // Prominent version title at the top of the notes.
+    let title = gtk4::Label::new(Some(&format!("Version {version}")));
+    title.add_css_class("changelog-title");
+    title.set_xalign(0.0);
+    title.set_margin_bottom(2);
+    list.append(&title);
 
     for note in parse_notes(notes) {
         match note {
             Note::Section(text) => {
-                let h = overline(&text);
-                h.set_margin_top(10);
+                let h = gtk4::Label::new(Some(&text.to_uppercase()));
+                h.add_css_class("changelog-section");
+                h.set_xalign(0.0);
+                h.set_halign(gtk4::Align::Start);
+                h.set_margin_top(16);
                 list.append(&h);
             }
             Note::Bullet(text) => {
-                let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 9);
+                let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
                 let bullet = gtk4::Label::new(Some("•"));
                 bullet.add_css_class("dim");
+                bullet.add_css_class("changelog-body");
                 bullet.set_valign(gtk4::Align::Start);
                 let body = gtk4::Label::new(None);
+                body.add_css_class("changelog-body");
                 body.set_markup(&pango_inline(&text));
                 body.set_wrap(true);
                 body.set_xalign(0.0);
@@ -1852,6 +1927,7 @@ fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &
             }
             Note::Para(text) => {
                 let p = gtk4::Label::new(None);
+                p.add_css_class("changelog-body");
                 p.set_markup(&pango_inline(&text));
                 p.set_wrap(true);
                 p.set_xalign(0.0);

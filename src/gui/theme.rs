@@ -179,6 +179,11 @@ window.glass .background {{ background: transparent; }}
 .dialog-heading {{ font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }}
 .dialog-sub {{ color: @dim_fg; font-size: 13px; }}
 
+/* ===== Changelog modal (bigger, readable) ===== */
+.changelog-title {{ font-size: 23px; font-weight: 700; letter-spacing: -0.01em; }}
+.changelog-section {{ font-size: 13px; font-weight: 700; letter-spacing: 0.07em; color: @accent_color; }}
+.changelog-body {{ font-size: 15px; }}
+
 /* ===== Wallpaper card ===== */
 .wp-card {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 14px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease; }}
 .wp-card:hover {{ background-color: @card_hover; border-color: alpha(@accent_bg_color,0.45); box-shadow: 0 6px 18px {shadow_md}; }}

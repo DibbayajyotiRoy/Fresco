@@ -168,6 +168,12 @@ fn build_css(accent: Accent, dark: bool) -> String {
 window, .background {{ background-color: @window_bg_color; color: @window_fg_color; font-family: \"Inter\", \"Adwaita Sans\", \"Cantarell\", sans-serif; }}
 headerbar, headerbar.flat {{ background-color: @headerbar_bg_color; box-shadow: none; border-bottom: 1px solid @card_border; }}
 
+/* ===== Glass modals ===== translucent surface (readable), glass edge + sheen.
+   GTK4 CSS has no backdrop blur, so this is a high-opacity smoked-glass look. */
+window.glass {{ background-color: alpha(@window_bg_color, 0.86); border: 1px solid alpha(@window_fg_color, 0.14); border-radius: 22px; box-shadow: inset 0 1px 0 alpha(@window_fg_color, 0.08), 0 32px 80px {shadow_md}, 0 4px 14px {shadow_sm}; }}
+window.glass headerbar, window.glass headerbar.flat {{ background: transparent; box-shadow: none; border-bottom: 1px solid alpha(@window_fg_color, 0.07); }}
+window.glass .background {{ background: transparent; }}
+
 .overline {{ font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: @dim_fg; }}
 .dim {{ color: @dim_fg; }}
 .dialog-heading {{ font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }}

@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Fit, Kind, Slideshow, Wallpaper};
+use crate::config::{Fit, Kind, Slideshow, Transition, Wallpaper};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -36,6 +36,9 @@ pub struct LibraryEntry {
     /// Slideshow cycle interval in seconds; only meaningful for Kind::Slideshow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_s: Option<u64>,
+    /// Slideshow transition effect; only meaningful for Kind::Slideshow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Transition>,
 }
 
 impl LibraryEntry {
@@ -56,6 +59,7 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: None,
+            transition: None,
         }
     }
 
@@ -76,6 +80,7 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: None,
+            transition: None,
         }
     }
 
@@ -103,6 +108,7 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: None,
+            transition: None,
         }
     }
 
@@ -123,6 +129,7 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: Some(30),
+            transition: Some(Transition::Crossfade),
         }
     }
 
@@ -141,6 +148,7 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: Some(30),
+            transition: Some(Transition::Crossfade),
         }
     }
 
@@ -229,6 +237,7 @@ impl LibraryEntry {
                     folder: self.folder.clone(),
                     paths: self.paths.clone(),
                     interval_s: self.interval_s.unwrap_or(30),
+                    transition: self.transition.unwrap_or_default(),
                 })
             } else {
                 None

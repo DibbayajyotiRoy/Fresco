@@ -41,6 +41,9 @@ impl CropEditor {
         // We set the picture to fill the container by expanding it.
         picture.set_hexpand(true);
         picture.set_vexpand(true);
+        // Without this the Picture's minimum size is the media's full pixel size,
+        // which would force the editor preview pane wider than the window.
+        picture.set_can_shrink(true);
 
         let drawing = DrawingArea::new();
         drawing.set_can_target(true);

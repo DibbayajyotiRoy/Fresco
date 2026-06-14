@@ -15,7 +15,7 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::Screen;
 use x11rb::rust_connection::RustConnection;
 
-use crate::config::{Config, Kind, Scaling, Wallpaper};
+use crate::config::{Config, Kind, Scaling, Transition, Wallpaper};
 use crate::ipc::{Request, Response, StatusReply};
 
 use monitors::Monitor;
@@ -27,11 +27,53 @@ const LOWER_INTERVAL: Duration = Duration::from_secs(2);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 const BATTERY_INTERVAL: Duration = Duration::from_secs(30);
 
+/// During a transition the loop ticks at ~60fps for buttery, eased motion.
+const ANIM_TICK: Duration = Duration::from_millis(16);
+/// Transition durations in ~16ms steps (≈ FADE 0.37s, CROSSFADE 0.2s, SLIDE 0.45s/side).
+const FADE_STEPS: u32 = 22;
+const CROSSFADE_STEPS: u32 = 12;
+const SLIDE_STEPS: u32 = 28;
+/// Ken Burns zoom travel (mpv `video-zoom` log2 units) over one interval.
+const KEN_BURNS_ZOOM: f64 = 0.16;
+/// Subtle scale "punch" layered onto slide/fade for cinematic depth (~4%).
+const SLIDE_PUNCH: f64 = 0.06;
+
+/// Premium ease-in-out (gentle acceleration + deceleration). Linear motion is
+/// the #1 tell of amateur animation; everything cinematic eases.
+fn ease_in_out_cubic(t: f64) -> f64 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
+}
+
+/// Softer ease for the continuous Ken Burns drift.
+fn smoothstep(t: f64) -> f64 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Animation phase of a slideshow's current transition.
+#[derive(Clone, Copy)]
+enum Phase {
+    Hold,
+    FadeOut { step: u32, total: u32 },
+    FadeIn { step: u32, total: u32 },
+    SlideOut { step: u32 },
+    SlideIn { step: u32 },
+}
+
 struct Slideshow {
     images: Vec<PathBuf>,
     idx: usize,
     interval: Duration,
     last_advance: Instant,
+    transition: Transition,
+    phase: Phase,
+    /// Base zoom/pan from the configured crop; animations compose on top.
+    base_zoom: f64,
+    base_pan_x: f64,
+    base_pan_y: f64,
 }
 
 struct Renderer {
@@ -127,11 +169,21 @@ impl Daemon {
                 if let Some(first) = images.first() {
                     player.load_path(first);
                 }
+                let (base_zoom, base_pan_x, base_pan_y) = wallpaper
+                    .crop
+                    .and_then(|c| c.sanitized())
+                    .map(|c| c.to_mpv_zoom_pan())
+                    .unwrap_or((0.0, 0.0, 0.0));
                 Slideshow {
                     images,
                     idx: 0,
                     interval: Duration::from_secs(s.interval_s.max(2)),
                     last_advance: Instant::now(),
+                    transition: s.transition,
+                    phase: Phase::Hold,
+                    base_zoom,
+                    base_pan_x,
+                    base_pan_y,
                 }
             })
         } else {
@@ -182,9 +234,9 @@ impl Daemon {
                 self.check_battery();
                 self.last_battery_check = now;
             }
-            self.advance_slideshows(now);
+            let animating = self.advance_slideshows(now);
 
-            std::thread::sleep(TICK);
+            std::thread::sleep(if animating { ANIM_TICK } else { TICK });
         }
     }
 
@@ -308,16 +360,155 @@ impl Daemon {
         }
     }
 
-    fn advance_slideshows(&mut self, now: Instant) {
+    /// Advance slideshows and drive transition animations. Returns true while
+    /// any renderer is mid-animation, so the caller can tick faster (~30fps).
+    fn advance_slideshows(&mut self, now: Instant) -> bool {
+        let mut animating = false;
         for r in &mut self.renderers {
-            if let Some(s) = &mut r.slideshow {
-                if s.images.len() > 1 && now.duration_since(s.last_advance) >= s.interval {
-                    s.idx = (s.idx + 1) % s.images.len();
-                    r.player.load_path(&s.images[s.idx]);
-                    s.last_advance = now;
+            let Some(s) = r.slideshow.as_mut() else {
+                continue;
+            };
+            if s.images.len() <= 1 {
+                continue;
+            }
+            let next = (s.idx + 1) % s.images.len();
+            let due = now.duration_since(s.last_advance) >= s.interval;
+            match s.phase {
+                Phase::Hold => match s.transition {
+                    Transition::KenBurns => {
+                        // Continuous eased zoom + gentle diagonal drift that
+                        // alternates direction each image, so it never feels
+                        // mechanical. (smoothstep gives a soft start and finish.)
+                        let frac = (now.duration_since(s.last_advance).as_secs_f64()
+                            / s.interval.as_secs_f64())
+                        .clamp(0.0, 1.0);
+                        let e = smoothstep(frac);
+                        let dir = if s.idx % 2 == 0 { 1.0 } else { -1.0 };
+                        r.player.set_zoom_pan(
+                            s.base_zoom + KEN_BURNS_ZOOM * e,
+                            s.base_pan_x + dir * 0.10 * (e - 0.5),
+                            s.base_pan_y + dir * 0.05 * (e - 0.5),
+                        );
+                        animating = true;
+                        if due {
+                            s.idx = next;
+                            r.player.load_path(&s.images[s.idx]);
+                            r.player
+                                .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
+                            s.last_advance = now;
+                        }
+                    }
+                    Transition::None => {
+                        if due {
+                            s.idx = next;
+                            r.player.load_path(&s.images[s.idx]);
+                            s.last_advance = now;
+                        }
+                    }
+                    Transition::Fade | Transition::Crossfade => {
+                        if due {
+                            let total = if matches!(s.transition, Transition::Crossfade) {
+                                CROSSFADE_STEPS
+                            } else {
+                                FADE_STEPS
+                            };
+                            s.phase = Phase::FadeOut { step: 0, total };
+                            animating = true;
+                        }
+                    }
+                    Transition::Slide => {
+                        if due {
+                            s.phase = Phase::SlideOut { step: 0 };
+                            animating = true;
+                        }
+                    }
+                },
+                Phase::FadeOut { step, total } => {
+                    animating = true;
+                    let e = ease_in_out_cubic(step as f64 / total as f64);
+                    r.player.set_gamma((-100.0 * e) as i32);
+                    // Subtle inward "breath" while dimming — cinematic depth.
+                    r.player.set_zoom_pan(
+                        s.base_zoom + SLIDE_PUNCH * e,
+                        s.base_pan_x,
+                        s.base_pan_y,
+                    );
+                    if step >= total {
+                        s.idx = next;
+                        r.player.load_path(&s.images[s.idx]);
+                        s.phase = Phase::FadeIn { step: 0, total };
+                    } else {
+                        s.phase = Phase::FadeOut {
+                            step: step + 1,
+                            total,
+                        };
+                    }
+                }
+                Phase::FadeIn { step, total } => {
+                    animating = true;
+                    let e = ease_in_out_cubic(step as f64 / total as f64);
+                    r.player.set_gamma((-100.0 * (1.0 - e)) as i32);
+                    // Settle the breath back to base as it brightens.
+                    r.player.set_zoom_pan(
+                        s.base_zoom + SLIDE_PUNCH * (1.0 - e),
+                        s.base_pan_x,
+                        s.base_pan_y,
+                    );
+                    if step >= total {
+                        r.player.set_gamma(0);
+                        r.player
+                            .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
+                        s.phase = Phase::Hold;
+                        s.last_advance = now;
+                    } else {
+                        s.phase = Phase::FadeIn {
+                            step: step + 1,
+                            total,
+                        };
+                    }
+                }
+                Phase::SlideOut { step } => {
+                    animating = true;
+                    // Eased push out with a slight zoom — a "push", not a flat slide.
+                    let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
+                    r.player.set_zoom_pan(
+                        s.base_zoom + SLIDE_PUNCH * e,
+                        s.base_pan_x - e,
+                        s.base_pan_y,
+                    );
+                    if step >= SLIDE_STEPS {
+                        s.idx = next;
+                        r.player.load_path(&s.images[s.idx]);
+                        r.player.set_zoom_pan(
+                            s.base_zoom + SLIDE_PUNCH,
+                            s.base_pan_x + 1.0,
+                            s.base_pan_y,
+                        );
+                        s.phase = Phase::SlideIn { step: 0 };
+                    } else {
+                        s.phase = Phase::SlideOut { step: step + 1 };
+                    }
+                }
+                Phase::SlideIn { step } => {
+                    animating = true;
+                    let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
+                    r.player.set_zoom_pan(
+                        s.base_zoom + SLIDE_PUNCH * (1.0 - e),
+                        s.base_pan_x + (1.0 - e),
+                        s.base_pan_y,
+                    );
+                    if step >= SLIDE_STEPS {
+                        r.player
+                            .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
+                        s.phase = Phase::Hold;
+                        s.last_advance = now;
+                    } else {
+                        s.phase = Phase::SlideIn { step: step + 1 };
+                    }
                 }
             }
         }
+        animating
     }
 
     fn shutdown(&mut self) {
@@ -390,10 +581,39 @@ fn proc_stats() -> (f32, u64) {
 // ─── Entry points called by frescod.rs ───────────────────────────────────────
 
 /// Normal daemon start: honor `enabled`, guard Wayland, run the loop.
+/// Hybrid Intel+NVIDIA laptops are a common Linux config where libva probes the
+/// NVIDIA render node (no VA-API) and fails, leaving mpv on software decode —
+/// which is what makes the wallpaper eat CPU and RAM. If an Intel GPU is present
+/// and no driver is pinned, force the Intel media driver so hardware decode
+/// works. No-op on single-GPU / AMD / NVIDIA-only systems.
+fn setup_vaapi_env() {
+    if std::env::var_os("LIBVA_DRIVER_NAME").is_some() {
+        return;
+    }
+    let Ok(dir) = std::fs::read_dir("/sys/class/drm") else {
+        return;
+    };
+    for entry in dir.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("card") {
+            continue;
+        }
+        let vendor =
+            std::fs::read_to_string(entry.path().join("device/vendor")).unwrap_or_default();
+        if vendor.trim() == "0x8086" {
+            // Intel: iHD (Gen8+/Broadwell and newer, incl. Alder Lake).
+            std::env::set_var("LIBVA_DRIVER_NAME", "iHD");
+            log::info!("VA-API: pinned Intel iHD driver for hardware decode");
+            return;
+        }
+    }
+}
+
 pub fn run() -> Result<()> {
     if std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
         anyhow::bail!("Fresco requires an X11 session (Wayland not yet supported)");
     }
+    setup_vaapi_env();
     let config = Config::load().unwrap_or_default();
     if !config.enabled {
         // Safety net: if a prior run was killed (not Stopped) it may have left
@@ -409,6 +629,7 @@ pub fn run() -> Result<()> {
 /// `--once <file>`: render one file on every monitor until Ctrl-C.
 /// Used for the M1 renderer spike; ignores config and IPC.
 pub fn run_once(file: PathBuf) -> Result<()> {
+    setup_vaapi_env();
     let is_image = file
         .extension()
         .and_then(|e| e.to_str())

@@ -42,8 +42,12 @@ impl Player {
             ("ytdl", "no"),
             ("config", "no"), // never read the user's ~/.config/mpv/mpv.conf
             ("terminal", "no"),
-            ("demuxer-max-bytes", "64MiB"),
-            ("demuxer-max-back-bytes", "16MiB"),
+            // Memory: a looping wallpaper doesn't need big read-ahead caches.
+            // Small caps cut tens of MB of RSS with no visible effect on a loop.
+            ("cache", "no"),
+            ("demuxer-max-bytes", "16MiB"),
+            ("demuxer-max-back-bytes", "4MiB"),
+            ("demuxer-readahead-secs", "1"),
         ];
         // SAFETY: `handle` is the live, non-null handle just created above and
         // is not destroyed until `Drop`. This invariant holds for every mpv
@@ -64,10 +68,12 @@ impl Player {
                 f.set_option(handle, "loop-file", "inf");
             }
 
-            // Audio.
+            // Audio. When muted (the default) skip audio entirely — no decoder,
+            // buffers, output device, or thread — which trims RAM noticeably.
             f.set_option(handle, "mute", if wallpaper.mute { "yes" } else { "no" });
             f.set_option(handle, "volume", &wallpaper.volume.to_string());
             if wallpaper.mute {
+                f.set_option(handle, "aid", "no");
                 // No audio clock → smoother looping.
                 f.set_option(handle, "video-sync", "display-resample");
             }
@@ -165,6 +171,28 @@ impl Player {
                     f.set_property(self.handle, "video-pan-x", "0");
                     f.set_property(self.handle, "video-pan-y", "0");
                 }
+            }
+        }
+    }
+
+    /// Set the VO gamma (-100..=100). Driving it to -100 yields true black on
+    /// the GPU; used by the fade-through-black slideshow transition.
+    pub fn set_gamma(&self, gamma: i32) {
+        if let Ok(f) = fns() {
+            // SAFETY: `self.handle` is valid for the lifetime of this Player.
+            unsafe { f.set_property(self.handle, "gamma", &gamma.to_string()) };
+        }
+    }
+
+    /// Set VO zoom/pan directly (composed on top of any crop's base values);
+    /// used by the slide and Ken Burns slideshow transitions.
+    pub fn set_zoom_pan(&self, zoom: f64, pan_x: f64, pan_y: f64) {
+        if let Ok(f) = fns() {
+            // SAFETY: `self.handle` is valid for the lifetime of this Player.
+            unsafe {
+                f.set_property(self.handle, "video-zoom", &format!("{zoom:.6}"));
+                f.set_property(self.handle, "video-pan-x", &format!("{pan_x:.6}"));
+                f.set_property(self.handle, "video-pan-y", &format!("{pan_y:.6}"));
             }
         }
     }

@@ -39,7 +39,10 @@ ureq = { version = "2", features = ["json"], optional = true }
 async-channel = { version = "2", optional = true }
 
 [profile.release]
-lto = "thin"
+opt-level = 3
+lto = "fat"          # whole-program optimization across crates
+codegen-units = 1    # best optimization (slower compile, smaller/faster binary)
+panic = "abort"      # drop unwinding tables: smaller binary, and safer across the GTK/mpv FFI boundary
 strip = true
 
 [package.metadata.deb]

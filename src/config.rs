@@ -92,6 +92,18 @@ impl Crop {
     }
 }
 
+/// Transition effect played when a slideshow advances to the next image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Transition {
+    #[default]
+    None,
+    Crossfade,
+    Fade,
+    Slide,
+    KenBurns,
+}
+
 /// A set of images cycled on a timer. Either a `folder` (all images inside) or
 /// an explicit `paths` list of hand-picked images.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +114,8 @@ pub struct Slideshow {
     pub paths: Vec<PathBuf>,
     #[serde(default = "default_interval")]
     pub interval_s: u64,
+    #[serde(default)]
+    pub transition: Transition,
 }
 
 fn default_interval() -> u64 {

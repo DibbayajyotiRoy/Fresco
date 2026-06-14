@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.3] — Theming, polish & performance
+
+### Added
+- **Theme & accent colors** — light / dark / system, with six accent palettes.
+- **Right-click context menu** on library cards: Set, Edit / Crop, Rename,
+  and Remove from library (deletes the entry + thumbnail, not your media file).
+- **Multi-image slideshows** — pick several images (or a folder) and loop them on
+  an adjustable interval (default 30s).
+- **In-app feedback** (anonymous, opt-in) and **update notifications**.
+- **"What's new" modal** after an update; **glass (translucent) modals**.
+
+### Changed
+- **Big memory drop.** Hardware decode auto-enabled on Intel hybrid laptops
+  (auto-pins the `iHD` VA-API driver), audio fully skipped when muted, and mpv
+  read-ahead caches trimmed — typical RSS dropped from ~215 MB toward ~120–150 MB.
+- **~20% smaller binaries** (fat LTO, single codegen unit, `panic=abort`).
+- **Simpler controls** — removed the Pause/Stop buttons; setting a wallpaper just
+  runs it and picking another switches it (no more "stuck/stopped" state).
+
 ## [0.0.2] — Bug fixes
 
 ### Fixed
@@ -59,6 +78,7 @@ First public release. A GUI-first live-wallpaper setter for Debian-based Linux
 - X11 sessions only — Wayland support is planned for a future release.
 - Web/HTML wallpapers are out of scope for this release.
 
-[Unreleased]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/DibbayajyotiRoy/fresco/releases/tag/v0.0.1

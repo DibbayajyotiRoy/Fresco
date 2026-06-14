@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use super::{
 };
 use crate::{
     autostart,
-    config::{Accent, Config, Fit, Kind, Scaling, ThemeMode},
+    config::{Accent, Config, Fit, Kind, Scaling, ThemeMode, Transition},
     APP_ID,
 };
 
@@ -786,7 +787,193 @@ fn build_library_card(
     }
     overlay.add_controller(click);
 
+    // Right click = context menu (Set / Edit / Rename / Remove).
+    let rclick = GestureClick::new();
+    rclick.set_button(gtk4::gdk::BUTTON_SECONDARY);
+    {
+        let state_c = state.clone();
+        let stack_c = stack.clone();
+        let overlay_c = overlay.clone();
+        rclick.connect_pressed(move |_, _, x, y| {
+            show_card_menu(&overlay_c, state_c.clone(), stack_c.clone(), idx, x, y);
+        });
+    }
+    overlay.add_controller(rclick);
+
     overlay
+}
+
+/// Right-click context menu for a library card.
+fn show_card_menu(
+    parent: &gtk4::Overlay,
+    state: Rc<RefCell<AppState>>,
+    stack: gtk4::Stack,
+    idx: usize,
+    x: f64,
+    y: f64,
+) {
+    let pop = gtk4::Popover::new();
+    pop.set_parent(parent);
+    pop.set_has_arrow(false);
+    pop.set_halign(gtk4::Align::Start);
+    pop.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+
+    let menu = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    menu.set_margin_top(4);
+    menu.set_margin_bottom(4);
+    menu.set_margin_start(4);
+    menu.set_margin_end(4);
+
+    let item = |label: &str| {
+        let b = gtk4::Button::with_label(label);
+        b.add_css_class("flat");
+        if let Some(lbl) = b.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
+            lbl.set_xalign(0.0);
+        }
+        b
+    };
+
+    let set = item("Set as wallpaper");
+    {
+        let s = state.clone();
+        let p = pop.clone();
+        set.connect_clicked(move |_| {
+            apply_entry_by_idx(s.clone(), idx);
+            p.popdown();
+        });
+    }
+    menu.append(&set);
+
+    let edit = item("Edit / Crop…");
+    {
+        let s = state.clone();
+        let st = stack.clone();
+        let p = pop.clone();
+        edit.connect_clicked(move |_| {
+            s.borrow_mut().editing_idx = Some(idx);
+            st.set_visible_child_name("editor");
+            p.popdown();
+        });
+    }
+    menu.append(&edit);
+
+    let rename = item("Rename…");
+    {
+        let s = state.clone();
+        let p = pop.clone();
+        let parent = parent.clone();
+        rename.connect_clicked(move |_| {
+            p.popdown();
+            rename_entry(&parent, s.clone(), idx);
+        });
+    }
+    menu.append(&rename);
+
+    menu.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+
+    let remove = item("Remove from library");
+    remove.add_css_class("destructive-action");
+    {
+        let s = state.clone();
+        let p = pop.clone();
+        remove.connect_clicked(move |_| {
+            remove_entry_by_idx(s.clone(), idx);
+            p.popdown();
+        });
+    }
+    menu.append(&remove);
+
+    pop.set_child(Some(&menu));
+    pop.connect_closed(|p| p.unparent());
+    pop.popup();
+}
+
+/// Remove a library entry (and its cached thumbnail). Does not touch the
+/// original media file. Refreshes the grid afterwards.
+fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
+    {
+        let mut s = state.borrow_mut();
+        if idx >= s.entries.len() {
+            return;
+        }
+        let entry = s.entries.remove(idx);
+        if let Some(thumb) = &entry.thumbnail {
+            std::fs::remove_file(thumb).ok();
+        }
+        save_entries(&s.entries).ok();
+    }
+    show_toast(&state, "Removed from library");
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Small inline popover to rename a library entry.
+fn rename_entry(parent: &gtk4::Overlay, state: Rc<RefCell<AppState>>, idx: usize) {
+    let current = state
+        .borrow()
+        .entries
+        .get(idx)
+        .map(|e| e.name.clone())
+        .unwrap_or_default();
+
+    let pop = gtk4::Popover::new();
+    pop.set_parent(parent);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    row.set_margin_top(6);
+    row.set_margin_bottom(6);
+    row.set_margin_start(6);
+    row.set_margin_end(6);
+
+    let entry = gtk4::Entry::new();
+    entry.set_text(&current);
+    entry.set_hexpand(true);
+    let save = gtk4::Button::from_icon_name("emblem-ok-symbolic");
+    save.add_css_class("suggested-action");
+    row.append(&entry);
+    row.append(&save);
+    pop.set_child(Some(&row));
+
+    {
+        let state = state.clone();
+        let entry = entry.clone();
+        let pop = pop.clone();
+        save.connect_clicked(move |_| {
+            commit_rename(&state, idx, &entry.text());
+            pop.popdown();
+        });
+    }
+    {
+        let state = state.clone();
+        let pop = pop.clone();
+        entry.connect_activate(move |e| {
+            commit_rename(&state, idx, &e.text());
+            pop.popdown();
+        });
+    }
+
+    pop.connect_closed(|p| p.unparent());
+    pop.popup();
+    entry.grab_focus();
+}
+
+fn commit_rename(state: &Rc<RefCell<AppState>>, idx: usize, name: &str) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    {
+        let mut s = state.borrow_mut();
+        if let Some(e) = s.entries.get_mut(idx) {
+            e.name = name.to_string();
+        }
+        save_entries(&s.entries).ok();
+    }
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
 }
 
 fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
@@ -845,27 +1032,52 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     header.pack_start(&back);
     root.append(&header);
 
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_vexpand(true);
-    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    // Full-width two-pane editor: a large preview on the left, controls on the
+    // right. Slideshows show a looping transition preview; other media show the
+    // crop editor.
+    let split = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    split.set_vexpand(true);
 
-    let clamp = adw::Clamp::new();
-    clamp.set_maximum_size(680);
-    clamp.set_tightening_threshold(560);
+    let preview_pane = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    preview_pane.set_hexpand(true);
+    preview_pane.set_vexpand(true);
+    preview_pane.set_valign(gtk4::Align::Center);
+    preview_pane.set_margin_start(20);
+    preview_pane.set_margin_end(16);
+    preview_pane.set_margin_top(20);
+    preview_pane.set_margin_bottom(20);
 
-    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    body.set_margin_start(16);
-    body.set_margin_end(16);
-    body.set_margin_top(16);
-    body.set_margin_bottom(16);
+    // Looping transition preview (shown for slideshows in place of the crop tool).
+    let transition_preview = Rc::new(super::transition_preview::TransitionPreview::new());
+    let tp_frame = gtk4::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
+    tp_frame.set_child(Some(&transition_preview.root));
+    tp_frame.set_vexpand(false);
+    tp_frame.set_hexpand(true);
+    tp_frame.set_visible(false);
 
-    // Crop editor.
-    let crop_editor = super::preview::CropEditor::new(None);
+    let controls = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    controls.set_width_request(360);
+    controls.set_valign(gtk4::Align::Center);
+    controls.set_margin_start(8);
+    controls.set_margin_end(20);
+    controls.set_margin_top(20);
+    controls.set_margin_bottom(20);
+
+    // Crop editor, framed at the desktop's 16:9 aspect so the preview reads as a
+    // monitor — not a tall, phone-shaped box. AspectFrame locks the ratio at any
+    // window height; vexpand(false) stops the inner Picture's vexpand from
+    // stretching it vertically. The crop rectangle is constrained to 16:9 too, so
+    // what you frame matches what fills the screen.
+    let crop_editor = super::preview::CropEditor::new(Some(16.0 / 9.0));
     crop_editor.overlay.add_css_class("wp-thumb");
     crop_editor.overlay.add_css_class("crop-frame");
     crop_editor.overlay.set_overflow(gtk4::Overflow::Hidden);
-    crop_editor.overlay.set_size_request(-1, 300);
-    body.append(&crop_editor.overlay);
+    let crop_frame = gtk4::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
+    crop_frame.set_child(Some(&crop_editor.overlay));
+    crop_frame.set_vexpand(false);
+    crop_frame.set_hexpand(true);
+    preview_pane.append(&crop_frame);
+    preview_pane.append(&tp_frame);
 
     let reset_crop = gtk4::Button::with_label("Reset crop");
     reset_crop.add_css_class("flat");
@@ -875,7 +1087,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let ce = crop_editor.clone();
         reset_crop.connect_clicked(move |_| ce.reset());
     }
-    body.append(&reset_crop);
+    preview_pane.append(&reset_crop);
 
     // Preferences group.
     let prefs = adw::PreferencesGroup::new();
@@ -923,7 +1135,20 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     interval_row.set_selected(2);
     prefs.add(&interval_row);
 
-    body.append(&prefs);
+    // Slideshow transition effect (shown only for slideshows).
+    let transition_row = adw::ComboRow::new();
+    transition_row.set_title("Transition");
+    transition_row.set_subtitle("Effect when the image changes");
+    transition_row.set_model(Some(&gtk4::StringList::new(&[
+        "None",
+        "Crossfade",
+        "Fade to black",
+        "Ken Burns",
+    ])));
+    transition_row.set_selected(1);
+    prefs.add(&transition_row);
+
+    controls.append(&prefs);
 
     // Set Wallpaper button.
     let set_btn = gtk4::Button::with_label("Set as wallpaper");
@@ -940,6 +1165,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let mute_ref = mute_sw.clone();
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
+        let transition_ref = transition_row.clone();
         set_btn.connect_clicked(move |_| {
             let crop = crop_ref.crop();
             let fit = match fit_ref.selected() {
@@ -948,6 +1174,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 _ => Fit::Cover,
             };
             let interval = interval_secs(interval_ref.selected());
+            let transition = transition_from_index(transition_ref.selected());
             let name = {
                 let mut s = state_set.borrow_mut();
                 s.config.wallpaper.crop = crop;
@@ -957,11 +1184,13 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 s.config.enabled = true;
                 if let Some(ss) = s.config.wallpaper.slideshow.as_mut() {
                     ss.interval_s = interval;
+                    ss.transition = transition;
                 }
                 let idx = s.editing_idx;
                 if let Some(e) = idx.and_then(|i| s.entries.get_mut(i)) {
                     if e.kind == Kind::Slideshow {
                         e.interval_s = Some(interval);
+                        e.transition = Some(transition);
                     }
                 }
                 save_entries(&s.entries).ok();
@@ -994,11 +1223,21 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             }
         });
     }
-    body.append(&set_btn);
+    controls.append(&set_btn);
 
-    clamp.set_child(Some(&body));
-    scroll.set_child(Some(&clamp));
-    root.append(&scroll);
+    // Bound the preview width with a Clamp: it grows with the window but never
+    // past `maximum_size`. This keeps the controls column on-screen no matter how
+    // big the media is, and gives the transition preview's stage a stable size so
+    // its per-frame sizing can't feed back into the layout.
+    let preview_clamp = adw::Clamp::new();
+    preview_clamp.set_maximum_size(1600);
+    preview_clamp.set_tightening_threshold(1100);
+    preview_clamp.set_hexpand(true);
+    preview_clamp.set_child(Some(&preview_pane));
+
+    split.append(&preview_clamp);
+    split.append(&controls);
+    root.append(&split);
 
     // When entering the editor, load the selected entry's preview + settings.
     {
@@ -1007,12 +1246,18 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let mute_ref = mute_sw.clone();
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
+        let transition_ref = transition_row.clone();
         let mute_row_ref = mute_row.clone();
         let vol_row_ref = vol_row.clone();
         let title_ref = title_widget.clone();
+        let crop_frame_ref = crop_frame.clone();
+        let tp_frame_ref = tp_frame.clone();
+        let reset_crop_ref = reset_crop.clone();
+        let tp = transition_preview.clone();
         let state2 = state.clone();
         stack.connect_visible_child_name_notify(move |s| {
             if s.visible_child_name().as_deref() != Some("editor") {
+                tp.stop(); // free the preview timer when leaving the editor
                 return;
             }
             let st = state2.borrow();
@@ -1035,8 +1280,22 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 vol_row_ref.set_visible(has_audio);
                 let is_slideshow = entry.kind == Kind::Slideshow;
                 interval_ref.set_visible(is_slideshow);
+                transition_ref.set_visible(is_slideshow);
+                // Slideshows preview the transition; other media show the crop tool.
+                crop_frame_ref.set_visible(!is_slideshow);
+                reset_crop_ref.set_visible(!is_slideshow);
+                tp_frame_ref.set_visible(is_slideshow);
                 if is_slideshow {
                     interval_ref.set_selected(interval_index(entry.interval_s.unwrap_or(30)));
+                    let (a, b) = slideshow_preview_images(entry);
+                    tp.set_images(a, b);
+                    transition_ref
+                        .set_selected(transition_index(entry.transition.unwrap_or_default()));
+                    // Follow the combo (never the raw entry) so a removed
+                    // transition like Slide can't reach the preview.
+                    tp.set_transition(transition_from_index(transition_ref.selected()));
+                } else {
+                    tp.stop();
                 }
             }
             ce.set_crop(st.config.wallpaper.crop);
@@ -1050,7 +1309,39 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         });
     }
 
+    // Live-preview the transition the moment the user picks one.
+    {
+        let tp = transition_preview.clone();
+        transition_row.connect_selected_notify(move |row| {
+            tp.set_transition(transition_from_index(row.selected()));
+        });
+    }
+
     root
+}
+
+/// The first two images of a slideshow entry, for the editor's transition
+/// preview. Falls back the second to the first when only one image is present.
+fn slideshow_preview_images(entry: &LibraryEntry) -> (Option<PathBuf>, Option<PathBuf>) {
+    let mut imgs: Vec<PathBuf> = if !entry.paths.is_empty() {
+        entry.paths.iter().take(2).cloned().collect()
+    } else if let Some(folder) = &entry.folder {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| library::is_image(p))
+            .collect();
+        v.sort();
+        v.truncate(2);
+        v
+    } else {
+        Vec::new()
+    };
+    let first = (!imgs.is_empty()).then(|| imgs.remove(0));
+    let second = imgs.into_iter().next().or_else(|| first.clone());
+    (first, second)
 }
 
 // ─── Advanced dialog ──────────────────────────────────────────────────────────
@@ -1326,6 +1617,26 @@ fn interval_index(secs: u64) -> u32 {
         .unwrap_or(2) as u32
 }
 
+fn transition_from_index(index: u32) -> Transition {
+    match index {
+        1 => Transition::Crossfade,
+        2 => Transition::Fade,
+        3 => Transition::KenBurns,
+        _ => Transition::None,
+    }
+}
+
+fn transition_index(t: Transition) -> u32 {
+    match t {
+        Transition::None => 0,
+        Transition::Crossfade => 1,
+        Transition::Fade => 2,
+        Transition::KenBurns => 3,
+        // Slide was removed from the picker; show legacy entries as Crossfade.
+        Transition::Slide => 1,
+    }
+}
+
 // ─── "What's new" on-update notice ────────────────────────────────────────────
 
 /// The CHANGELOG, embedded at build time so the notes ship inside the binary.
@@ -1499,6 +1810,7 @@ fn pango_inline(raw: &str) -> String {
 /// rather than raw markdown text.
 fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &str) {
     let dialog = adw::Window::new();
+    dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
     dialog.set_title(Some(&format!("What's new in {version}")));
@@ -1614,6 +1926,7 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     }
 
     let dialog = adw::Window::new();
+    dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
     dialog.set_title(Some("Feedback"));
@@ -1745,6 +2058,7 @@ fn show_notification(
 
 fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supabase::Notification) {
     let dialog = adw::Window::new();
+    dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
     dialog.set_title(Some(&notif.title));

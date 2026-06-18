@@ -43,7 +43,12 @@ jobs:
         run: cargo install cargo-deb
 
       - name: Package .deb
-        run: cargo deb
+        # Everything is already built above (cargo build --release + build-mpvpaper.sh).
+        # --no-build stops cargo-deb from treating the bundled `mpvpaper` asset path
+        # (target/release/mpvpaper) as a cargo [[bin]] target it must compile — it
+        # isn't one. --no-strip leaves the prebuilt binaries (already stripped via the
+        # release profile) untouched.
+        run: cargo deb --no-build --no-strip
 
       # Publish the installable artifacts first so a flaky smoke test can never
       # block the release. install.sh is attached too — the README one-liner

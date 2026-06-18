@@ -29,11 +29,12 @@ ok "Debian-based distro detected"
 # 2. Check session type
 SESSION="${XDG_SESSION_TYPE:-unknown}"
 if [[ "$SESSION" == "wayland" ]]; then
-  warn "Wayland session detected — Fresco currently requires X11"
-  warn "Log out and select 'Pop (on Xorg)' or similar at your login screen"
-  exit 1
+  info "Wayland session detected"
+  info "Live wallpapers work on layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6)"
+  info "GNOME Wayland shows a static frame; for full live playback log out and choose the Xorg session"
+else
+  ok "X11 session: $SESSION"
 fi
-ok "X11 session: $SESSION"
 
 # 3. Fetch latest .deb URL from GitHub Releases API
 info "Fetching latest release from GitHub…"

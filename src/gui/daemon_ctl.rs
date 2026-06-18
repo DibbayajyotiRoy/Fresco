@@ -3,7 +3,7 @@ use std::process::Command;
 
 use crate::{
     config::Config,
-    ipc::{self, Request, Response, StatusReply},
+    ipc::{self, Request, Response},
 };
 use anyhow::Result;
 
@@ -50,25 +50,4 @@ pub fn ensure_daemon_and_apply(config: &Config) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Poll status; returns None if the daemon is not running.
-pub fn get_status() -> Option<StatusReply> {
-    match ipc::request(&Request::Status) {
-        Ok(Response::Status(s)) if s.running => Some(s),
-        _ => None,
-    }
-}
-
-/// If hardware decode is not active, return a hint string.
-pub fn hwdec_hint(status: Option<&StatusReply>) -> Option<String> {
-    let s = status?;
-    if matches!(s.hwdec.as_deref(), Some("no") | None) {
-        Some(
-            "Install intel-media-va-driver or mesa-va-drivers to enable hardware decode"
-                .to_string(),
-        )
-    } else {
-        None
-    }
 }

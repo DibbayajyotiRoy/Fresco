@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 import {
   type ChartConfig,
@@ -35,17 +28,11 @@ export function DownloadsChart({ releases }: { releases: Release[] }) {
       config={chartConfig}
       className="aspect-auto h-[280px] w-full"
     >
-      <ComposedChart
+      <LineChart
         accessibilityLayer
         data={data}
         margin={{ left: 4, right: 8, top: 8 }}
       >
-        <defs>
-          <linearGradient id="downloadsFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-downloads)" stopOpacity={0.25} />
-            <stop offset="100%" stopColor="var(--color-downloads)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
         <CartesianGrid
           vertical={false}
           strokeDasharray="3 3"
@@ -65,26 +52,19 @@ export function DownloadsChart({ releases }: { releases: Release[] }) {
           allowDecimals={false}
         />
         <ChartTooltip
-          cursor={false}
-          content={<ChartTooltipContent indicator="dot" />}
-        />
-        <Area
-          type="monotone"
-          dataKey="downloads"
-          stroke="none"
-          fill="url(#downloadsFill)"
-          isAnimationActive={false}
+          cursor={{ strokeDasharray: "3 3" }}
+          content={<ChartTooltipContent indicator="line" />}
         />
         <Line
           type="monotone"
           dataKey="downloads"
           stroke="var(--color-downloads)"
           strokeWidth={2}
-          dot={{ r: 3, strokeWidth: 0, fill: "var(--color-downloads)" }}
+          dot={false}
           activeDot={{ r: 4, strokeWidth: 0 }}
           isAnimationActive={false}
         />
-      </ComposedChart>
+      </LineChart>
     </ChartContainer>
   );
 }

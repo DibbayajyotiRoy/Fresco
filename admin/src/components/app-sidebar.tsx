@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Bell,
+  Bug,
   ChatCircle,
   SquaresFour,
   Waves,
@@ -28,6 +29,7 @@ const NAV = [
   { title: "Overview", href: "/", icon: SquaresFour },
   { title: "Notifications", href: "/notifications", icon: Bell },
   { title: "Feedback", href: "/feedback", icon: ChatCircle },
+  { title: "Issues", href: "/issues", icon: Bug },
 ] as const;
 
 export function AppSidebar() {

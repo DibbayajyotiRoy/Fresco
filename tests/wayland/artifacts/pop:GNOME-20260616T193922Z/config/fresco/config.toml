@@ -1,0 +1,5 @@
+enabled = true
+[wallpaper]
+kind = "video"
+path = "/tmp/opencode/test-animated.gif"
+mute = true

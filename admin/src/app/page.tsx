@@ -37,6 +37,10 @@ export default async function OverviewPage() {
   const notifications = notificationsRes.ok ? notificationsRes.data : [];
 
   const totalDownloads = releases.reduce((s, r) => s + r.downloads, 0);
+  // Cumulative downloads across releases (oldest -> newest) — a real growth
+  // curve for the KPI sparkline. Draws only with >= 2 releases.
+  let runningDownloads = 0;
+  const downloadsTrend = releases.map((r) => (runningDownloads += r.downloads));
   const up = feedback.filter((f) => f.rating > 0).length;
   const down = feedback.filter((f) => f.rating < 0).length;
   const satisfaction = up + down > 0 ? Math.round((up / (up + down)) * 100) : 0;
@@ -62,6 +66,7 @@ export default async function OverviewPage() {
                 : releasesRes.error
             }
             icon={DownloadSimple}
+            data={downloadsTrend}
           />
           <StatCard
             label="Total feedback"

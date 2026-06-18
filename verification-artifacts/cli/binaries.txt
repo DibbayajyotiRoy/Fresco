@@ -1,0 +1,6 @@
+############ PHASE 1 — Binary Identification ############
+which fresco:
+/usr/bin/fresco
+find target -name fresco -type f:
+target/release/fresco
+target/debug/fresco

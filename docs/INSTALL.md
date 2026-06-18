@@ -1,7 +1,12 @@
 # Installing Fresco
 
 Fresco runs on Debian-based distributions (Pop!_OS, Ubuntu, Linux Mint, Debian,
-elementary OS) running an **X11** session.
+elementary OS) running an **X11** or **Wayland** session.
+
+- **X11:** full live wallpapers (embedded mpv).
+- **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6): live
+  wallpapers via the bundled `mpvpaper` backend.
+- **GNOME Wayland:** static-frame fallback (Mutter has no live wallpaper surface).
 
 ## Quick install (one-liner)
 
@@ -50,22 +55,25 @@ If something isn't working, run:
 frescod --check
 ```
 
-It prints your session type, the libmpv version in use, detected GPUs, VA-API
-availability, config validity, and the live daemon status. Include this output
-when filing a bug report.
+It prints your session type, backend capability, mpvpaper availability (on
+Wayland), the libmpv version in use, detected GPUs, VA-API availability, config
+validity, and the live daemon status. Include this output when filing a bug
+report.
 
 ## X11 vs Wayland
 
-Fresco currently requires an **X11** session. To check:
+Run:
 
 ```bash
-echo $XDG_SESSION_TYPE     # should print: x11
+echo $XDG_SESSION_TYPE     # x11 or wayland
 ```
 
-If it prints `wayland`, log out, and on the login screen click the gear/settings
-icon and choose the **Xorg** session (e.g. "Pop (on Xorg)" or
-"Ubuntu on Xorg"), then log back in. Wayland support is planned for a future
-release.
+- **X11:** everything works out of the box.
+- **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6): live
+  wallpapers work out of the box using the bundled `mpvpaper` backend.
+- **GNOME Wayland:** Fresco sets a static frame as the desktop background. For
+  full live playback on GNOME, log out and choose the **Xorg** session on the
+  login screen (e.g. "Pop (on Xorg)" or "Ubuntu on Xorg").
 
 ## FAQ / troubleshooting
 

@@ -118,6 +118,21 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* @roy-ui StatCard KPI tiles — map the library's own tokens onto the dashboard
+   theme variables so the cards follow the same light/dark toggle as the rest of
+   the UI. Scoped under `body` so it beats the library's built-in theme classes
+   regardless of stylesheet import order. */
+body .royui-statcard {
+  --royui-statcard-bg: var(--card);
+  --royui-statcard-bg-hover: var(--card);
+  --royui-statcard-fg: var(--foreground);
+  --royui-statcard-label: var(--muted-foreground);
+  --royui-statcard-faint: var(--muted-foreground);
+  --royui-statcard-line: var(--border);
+  --royui-statcard-line-hover: var(--border);
+  --royui-statcard-accent: var(--brand);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

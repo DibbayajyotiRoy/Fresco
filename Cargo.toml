@@ -10,7 +10,12 @@ authors = ["Dibbayajyoti Roy"]
 [features]
 default = ["gui", "daemon"]
 gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel"]
-daemon = ["dep:x11rb", "dep:libloading", "dep:nix"]
+daemon = [
+    "dep:x11rb", "dep:libloading", "dep:nix", "dep:wayland-client",
+    # Event-driven push: the daemon subscribes to Supabase Realtime over a
+    # blocking websocket and raises native desktop notifications.
+    "dep:ureq", "dep:tungstenite", "dep:notify-rust", "dep:semver",
+]
 
 [[bin]]
 name = "fresco"
@@ -35,8 +40,13 @@ libadwaita = { version = "0.7", features = ["v1_1"], optional = true }
 x11rb = { version = "0.13", features = ["randr", "shape"], optional = true }
 libloading = { version = "0.8", optional = true }
 nix = { version = "0.29", features = ["process", "signal", "fs"], optional = true }
+wayland-client = { version = "0.31", optional = true }
 ureq = { version = "2", features = ["json"], optional = true }
 async-channel = { version = "2", optional = true }
+# Daemon-side event-driven notifications (Supabase Realtime + desktop notifs).
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
+notify-rust = { version = "4", optional = true }
+semver = { version = "1", optional = true }
 
 [profile.release]
 opt-level = 3
@@ -50,7 +60,10 @@ maintainer = "Dibbayajyoti Roy <maromaromuje28@gmail.com>"
 copyright = "2026, Dibbayajyoti Roy"
 section = "video"
 priority = "optional"
-depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, ffmpegthumbnailer"
+# All of these exist in Debian/Ubuntu/Pop!_OS/Mint repos. mpvpaper itself is NOT
+# in the repos, so we BUNDLE its binary (see assets → usr/lib/fresco/mpvpaper)
+# and only depend on the shared libraries it links at runtime.
+depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer"
 recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav"
 extended-description = """\
 Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
@@ -60,6 +73,12 @@ decoding keeps CPU usage near zero without degrading quality."""
 assets = [
     ["target/release/fresco", "usr/bin/", "755"],
     ["target/release/frescod", "usr/bin/", "755"],
+    # Bundled Wayland renderer. NOT in /usr/bin (so it can't collide with a
+    # user-installed mpvpaper); frescod finds it via mpvpaper_command().
+    # Built by scripts/build-mpvpaper.sh → target/release/mpvpaper before `cargo deb`.
+    ["target/release/mpvpaper", "usr/lib/fresco/mpvpaper", "755"],
+    # Auto-updater run by frescod via pkexec when a newer release is published.
+    ["scripts/fresco-update.sh", "usr/lib/fresco/fresco-update.sh", "755"],
     ["data/io.github.dibbayajyotiroy.Fresco.desktop", "usr/share/applications/", "644"],
     ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
 ]

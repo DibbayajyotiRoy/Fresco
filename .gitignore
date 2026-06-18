@@ -3,3 +3,4 @@
 .claude/settings.json
 .claude/settings.local.json
 node_modules/
+.gstack/

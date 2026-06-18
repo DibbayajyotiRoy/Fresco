@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-06-16T02:54:25Z",
+  "hostname": "pop-os",
+  "kernel": "Linux 6.17.9-76061709-generic",
+  "compositor": "pop:GNOME",
+  "desktop_session": "pop",
+  "session_type": "x11",
+  "wayland_display": "unset",
+  "fresco_version": "0.0.3",
+  "commit": "93572f2",
+  "mpvpaper_version": "not found"
+}

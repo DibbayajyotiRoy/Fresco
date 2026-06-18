@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Wayland live wallpaper support** on layer-shell compositors (COSMIC,
+  Hyprland, Sway, KDE Plasma 6) via the bundled `mpvpaper` backend. The backend
+  is enabled by default and supervised over mpv's IPC socket.
+- **Wayland capability probe**: when `wayland-info`/`weston-info` is installed,
+  Fresco checks the registry for `zwlr_layer_shell_v1` instead of guessing from
+  the desktop name.
+- **Build helper** `scripts/build-mpvpaper.sh` for source builds on Wayland.
+
+### Changed
+- **GNOME Wayland** now uses the existing static-frame fallback instead of
+  blocking the app; the live limitation is explained in the UI and `doctor`.
+- `fresco doctor` and `frescod --check` report the detected backend capability
+  and mpvpaper availability.
+- The installer no longer refuses to run on Wayland; it explains live vs static
+  behavior and continues.
+
 ## [0.0.3] — Theming, polish & performance
 
 ### Added

@@ -62,8 +62,13 @@ fn libc_getuid() -> u32 {
 /// Blocking request to the daemon. Returns Err if the daemon isn't running
 /// (connection refused / socket missing) — callers treat that as "not running".
 pub fn request(req: &Request) -> Result<Response> {
-    let path = socket_path();
-    let mut stream = UnixStream::connect(&path)
+    request_at(&socket_path(), req)
+}
+
+/// Send `req` to the daemon listening at `path`. Split out from `request` so
+/// tests can target an isolated (guaranteed-absent) socket deterministically.
+fn request_at(path: &std::path::Path, req: &Request) -> Result<Response> {
+    let mut stream = UnixStream::connect(path)
         .with_context(|| format!("daemon not reachable at {}", path.display()))?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -117,8 +122,11 @@ mod tests {
 
     #[test]
     fn unreachable_daemon_errors() {
-        // No daemon in the test environment — must error, not hang.
-        let res = request(&Request::Status);
-        assert!(res.is_err() || !daemon_alive());
+        // Target a socket path with no listener so the result is deterministic
+        // even when a real frescod is running on this machine.
+        let path =
+            std::env::temp_dir().join(format!("fresco-absent-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(request_at(&path, &Request::Status).is_err());
     }
 }

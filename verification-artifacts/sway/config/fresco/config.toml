@@ -1,0 +1,5 @@
+enabled = true
+[wallpaper]
+kind = "video"
+path = "/tmp/fresco-t1.mp4"
+mute = true

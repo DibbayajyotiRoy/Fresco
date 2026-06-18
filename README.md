@@ -8,7 +8,7 @@
 
 ![Downloads](https://img.shields.io/github/downloads/DibbayajyotiRoy/fresco/total?style=flat-square&color=brightgreen&label=downloads)
 ![License](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11-blue?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11%20%26%20Wayland-blue?style=flat-square)
 ![Built with Rust](https://img.shields.io/badge/built%20with-Rust%20%2B%20GTK4-orange?style=flat-square)
 
 </div>
@@ -56,7 +56,7 @@ Every other Linux live-wallpaper option is terminal-only, abandoned, locked to o
 | Debian | 12 (Bookworm) | ✅ |
 | elementary OS | 7 | ✅ |
 
-> **X11 session required.** Wayland support is planned.
+> **Wayland support:** live wallpapers on layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6) via bundled `mpvpaper`. GNOME Wayland shows a static frame fallback.
 
 ## Install
 
@@ -87,7 +87,7 @@ Yes — Fresco is a free, open-source live-wallpaper app for Linux that works li
 Install the Fresco `.deb`, open it, click **+ Add**, choose your video, and click **Set as Wallpaper**.
 
 **Does it work on Wayland or GNOME?**
-It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). Wayland support is on the roadmap.
+It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). On **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6) live wallpapers work via the bundled `mpvpaper` backend. **GNOME Wayland** shows a static-frame fallback because Mutter does not expose a live wallpaper surface.
 
 **Will a video wallpaper drain my battery or CPU?**
 Fresco uses GPU hardware decoding so CPU stays near zero, and it can **automatically pause on battery**.
@@ -97,13 +97,21 @@ mp4, webm, mkv, avi, mov, plus animated GIFs, static images (jpg/png/webp), fold
 
 ## How it works
 
-Two binaries: `fresco` (the GTK4/libadwaita GUI you can close) and `frescod` (a lightweight daemon that paints a desktop-level X11 window with an embedded [mpv](https://mpv.io) instance per monitor). See [docs/AUDIT.md](docs/AUDIT.md) for the full design and competitive analysis, and [docs/FLATHUB.md](docs/FLATHUB.md) for Flatpak packaging.
+Two binaries: `fresco` (the GTK4/libadwaita GUI you can close) and `frescod` (a lightweight daemon).
+
+- **X11:** `frescod` paints a desktop-level X11 window with an embedded [mpv](https://mpv.io) instance per monitor.
+- **Wayland (layer-shell):** `frescod` supervises the bundled [mpvpaper](https://github.com/GhostNaN/mpvpaper) process and steers it over mpv's IPC socket.
+- **GNOME Wayland:** a static frame is set as the desktop background (Mutter has no live wallpaper surface).
+
+See [docs/AUDIT.md](docs/AUDIT.md) for the full design and competitive analysis, and [docs/FLATHUB.md](docs/FLATHUB.md) for Flatpak packaging.
 
 ## Building from source
 
 ```bash
 sudo apt install libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer libmpv-dev
 cargo build --release
+# On Wayland, also build the bundled mpvpaper backend:
+scripts/build-mpvpaper.sh
 ./target/release/fresco
 ```
 

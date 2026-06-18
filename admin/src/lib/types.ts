@@ -17,6 +17,22 @@ export type Notification = {
   published: boolean;
 };
 
+export type Issue = {
+  /** Issue number, e.g. 42 */
+  number: number;
+  title: string;
+  /** "open" | "closed" */
+  state: string;
+  /** Link to the issue on GitHub. */
+  url: string;
+  /** Reporter's GitHub login, or null. */
+  author: string | null;
+  comments: number;
+  /** ISO created date. */
+  createdAt: string;
+  labels: string[];
+};
+
 export type Release = {
   /** Release tag, e.g. "v0.0.3" */
   tag: string;

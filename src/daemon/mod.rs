@@ -4,7 +4,10 @@
 mod control;
 pub mod monitors;
 pub mod mpv;
+mod mpvpaper;
+mod notifier;
 mod overview;
+mod wayland_outputs;
 mod x11win;
 
 use std::path::PathBuf;
@@ -20,6 +23,7 @@ use crate::ipc::{Request, Response, StatusReply};
 
 use monitors::Monitor;
 use mpv::Player;
+use mpvpaper::WaylandPlayer;
 use x11win::{Atoms, WallpaperWindow};
 
 const TICK: Duration = Duration::from_millis(100);
@@ -78,8 +82,65 @@ struct Slideshow {
 
 struct Renderer {
     window: WallpaperWindow,
-    player: Player,
+    player: PlayerHandle,
     slideshow: Option<Slideshow>,
+}
+
+/// The control surface the slideshow/battery engine drives — identical for both
+/// backends, so one engine drives either with no per-call-site branching.
+/// X11 = in-process mpv (`Player`); Wayland = mpvpaper over its IPC socket
+/// (`WaylandPlayer`). All methods are `&self` (the Wayland side uses interior
+/// mutability), matching the X11 `Player` API exactly.
+enum PlayerHandle {
+    X11(Player),
+    Wayland(WaylandPlayer),
+}
+
+impl PlayerHandle {
+    fn load_path(&self, path: &std::path::Path) {
+        match self {
+            PlayerHandle::X11(p) => p.load_path(path),
+            PlayerHandle::Wayland(p) => p.load_path(path),
+        }
+    }
+    fn set_zoom_pan(&self, zoom: f64, pan_x: f64, pan_y: f64) {
+        match self {
+            PlayerHandle::X11(p) => p.set_zoom_pan(zoom, pan_x, pan_y),
+            PlayerHandle::Wayland(p) => p.set_zoom_pan(zoom, pan_x, pan_y),
+        }
+    }
+    fn set_gamma(&self, gamma: i32) {
+        match self {
+            PlayerHandle::X11(p) => p.set_gamma(gamma),
+            PlayerHandle::Wayland(p) => p.set_gamma(gamma),
+        }
+    }
+    fn set_paused(&self, paused: bool) {
+        match self {
+            PlayerHandle::X11(p) => p.set_paused(paused),
+            PlayerHandle::Wayland(p) => p.set_paused(paused),
+        }
+    }
+    fn hwdec_current(&self) -> Option<String> {
+        match self {
+            PlayerHandle::X11(p) => p.hwdec_current(),
+            PlayerHandle::Wayland(p) => p.hwdec_current(),
+        }
+    }
+    fn load_failed(&self) -> bool {
+        match self {
+            PlayerHandle::X11(p) => p.load_failed(),
+            PlayerHandle::Wayland(p) => p.load_failed(),
+        }
+    }
+    /// X11's in-process mpv lives with the daemon; the Wayland renderer is a
+    /// separate process the supervisor must watch.
+    fn is_alive(&self) -> bool {
+        match self {
+            PlayerHandle::X11(_) => true,
+            PlayerHandle::Wayland(p) => p.is_alive(),
+        }
+    }
 }
 
 pub struct Daemon {
@@ -161,35 +222,8 @@ impl Daemon {
         scaling: Scaling,
     ) -> Result<Renderer> {
         let window = WallpaperWindow::create(conn, screen, atoms, monitor)?;
-        let player = Player::new(window.window, wallpaper, scaling)?;
-
-        let slideshow = if wallpaper.kind == Kind::Slideshow {
-            wallpaper.slideshow.as_ref().map(|s| {
-                let images = slideshow_images(s);
-                if let Some(first) = images.first() {
-                    player.load_path(first);
-                }
-                let (base_zoom, base_pan_x, base_pan_y) = wallpaper
-                    .crop
-                    .and_then(|c| c.sanitized())
-                    .map(|c| c.to_mpv_zoom_pan())
-                    .unwrap_or((0.0, 0.0, 0.0));
-                Slideshow {
-                    images,
-                    idx: 0,
-                    interval: Duration::from_secs(s.interval_s.max(2)),
-                    last_advance: Instant::now(),
-                    transition: s.transition,
-                    phase: Phase::Hold,
-                    base_zoom,
-                    base_pan_x,
-                    base_pan_y,
-                }
-            })
-        } else {
-            None
-        };
-
+        let player = PlayerHandle::X11(Player::new(window.window, wallpaper, scaling)?);
+        let slideshow = build_slideshow(wallpaper, &player);
         Ok(Renderer {
             window,
             player,
@@ -360,20 +394,38 @@ impl Daemon {
         }
     }
 
-    /// Advance slideshows and drive transition animations. Returns true while
-    /// any renderer is mid-animation, so the caller can tick faster (~30fps).
+    /// Advance every renderer's slideshow. Returns true while any is mid-
+    /// animation, so the caller can tick faster (~30fps).
     fn advance_slideshows(&mut self, now: Instant) -> bool {
         let mut animating = false;
         for r in &mut self.renderers {
-            let Some(s) = r.slideshow.as_mut() else {
-                continue;
-            };
-            if s.images.len() <= 1 {
-                continue;
+            if let Some(s) = r.slideshow.as_mut() {
+                animating |= advance_slideshow(&r.player, s, now);
             }
-            let next = (s.idx + 1) % s.images.len();
-            let due = now.duration_since(s.last_advance) >= s.interval;
-            match s.phase {
+        }
+        animating
+    }
+
+    fn shutdown(&mut self) {
+        overview::restore();
+        self.teardown_renderers();
+        std::fs::remove_file(crate::ipc::socket_path()).ok();
+        log::info!("frescod stopped");
+    }
+}
+
+/// One slideshow's per-tick step — the shared transition state machine. Both
+/// backends call this with their own `PlayerHandle`, so the engine is written
+/// once. Returns true while mid-animation.
+fn advance_slideshow(player: &PlayerHandle, s: &mut Slideshow, now: Instant) -> bool {
+    if s.images.len() <= 1 {
+        return false;
+    }
+    let next = (s.idx + 1) % s.images.len();
+    let due = now.duration_since(s.last_advance) >= s.interval;
+    let mut animating = false;
+    {
+        match s.phase {
                 Phase::Hold => match s.transition {
                     Transition::KenBurns => {
                         // Continuous eased zoom + gentle diagonal drift that
@@ -383,8 +435,8 @@ impl Daemon {
                             / s.interval.as_secs_f64())
                         .clamp(0.0, 1.0);
                         let e = smoothstep(frac);
-                        let dir = if s.idx % 2 == 0 { 1.0 } else { -1.0 };
-                        r.player.set_zoom_pan(
+                        let dir = if s.idx.is_multiple_of(2) { 1.0 } else { -1.0 };
+                        player.set_zoom_pan(
                             s.base_zoom + KEN_BURNS_ZOOM * e,
                             s.base_pan_x + dir * 0.10 * (e - 0.5),
                             s.base_pan_y + dir * 0.05 * (e - 0.5),
@@ -392,8 +444,8 @@ impl Daemon {
                         animating = true;
                         if due {
                             s.idx = next;
-                            r.player.load_path(&s.images[s.idx]);
-                            r.player
+                            player.load_path(&s.images[s.idx]);
+                            player
                                 .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
                             s.last_advance = now;
                         }
@@ -401,7 +453,7 @@ impl Daemon {
                     Transition::None => {
                         if due {
                             s.idx = next;
-                            r.player.load_path(&s.images[s.idx]);
+                            player.load_path(&s.images[s.idx]);
                             s.last_advance = now;
                         }
                     }
@@ -426,16 +478,16 @@ impl Daemon {
                 Phase::FadeOut { step, total } => {
                     animating = true;
                     let e = ease_in_out_cubic(step as f64 / total as f64);
-                    r.player.set_gamma((-100.0 * e) as i32);
+                    player.set_gamma((-100.0 * e) as i32);
                     // Subtle inward "breath" while dimming — cinematic depth.
-                    r.player.set_zoom_pan(
+                    player.set_zoom_pan(
                         s.base_zoom + SLIDE_PUNCH * e,
                         s.base_pan_x,
                         s.base_pan_y,
                     );
                     if step >= total {
                         s.idx = next;
-                        r.player.load_path(&s.images[s.idx]);
+                        player.load_path(&s.images[s.idx]);
                         s.phase = Phase::FadeIn { step: 0, total };
                     } else {
                         s.phase = Phase::FadeOut {
@@ -447,16 +499,16 @@ impl Daemon {
                 Phase::FadeIn { step, total } => {
                     animating = true;
                     let e = ease_in_out_cubic(step as f64 / total as f64);
-                    r.player.set_gamma((-100.0 * (1.0 - e)) as i32);
+                    player.set_gamma((-100.0 * (1.0 - e)) as i32);
                     // Settle the breath back to base as it brightens.
-                    r.player.set_zoom_pan(
+                    player.set_zoom_pan(
                         s.base_zoom + SLIDE_PUNCH * (1.0 - e),
                         s.base_pan_x,
                         s.base_pan_y,
                     );
                     if step >= total {
-                        r.player.set_gamma(0);
-                        r.player
+                        player.set_gamma(0);
+                        player
                             .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
                         s.phase = Phase::Hold;
                         s.last_advance = now;
@@ -471,15 +523,15 @@ impl Daemon {
                     animating = true;
                     // Eased push out with a slight zoom — a "push", not a flat slide.
                     let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
-                    r.player.set_zoom_pan(
+                    player.set_zoom_pan(
                         s.base_zoom + SLIDE_PUNCH * e,
                         s.base_pan_x - e,
                         s.base_pan_y,
                     );
                     if step >= SLIDE_STEPS {
                         s.idx = next;
-                        r.player.load_path(&s.images[s.idx]);
-                        r.player.set_zoom_pan(
+                        player.load_path(&s.images[s.idx]);
+                        player.set_zoom_pan(
                             s.base_zoom + SLIDE_PUNCH,
                             s.base_pan_x + 1.0,
                             s.base_pan_y,
@@ -492,13 +544,13 @@ impl Daemon {
                 Phase::SlideIn { step } => {
                     animating = true;
                     let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
-                    r.player.set_zoom_pan(
+                    player.set_zoom_pan(
                         s.base_zoom + SLIDE_PUNCH * (1.0 - e),
                         s.base_pan_x + (1.0 - e),
                         s.base_pan_y,
                     );
                     if step >= SLIDE_STEPS {
-                        r.player
+                        player
                             .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
                         s.phase = Phase::Hold;
                         s.last_advance = now;
@@ -511,12 +563,34 @@ impl Daemon {
         animating
     }
 
-    fn shutdown(&mut self) {
-        overview::restore();
-        self.teardown_renderers();
-        std::fs::remove_file(crate::ipc::socket_path()).ok();
-        log::info!("frescod stopped");
+/// Build a `Slideshow` state machine for a slideshow wallpaper, loading its
+/// first image into `player`. `None` for non-slideshow wallpapers. Shared by
+/// both backends so slideshow setup is written once.
+fn build_slideshow(wallpaper: &Wallpaper, player: &PlayerHandle) -> Option<Slideshow> {
+    if wallpaper.kind != Kind::Slideshow {
+        return None;
     }
+    let s = wallpaper.slideshow.as_ref()?;
+    let images = slideshow_images(s);
+    if let Some(first) = images.first() {
+        player.load_path(first);
+    }
+    let (base_zoom, base_pan_x, base_pan_y) = wallpaper
+        .crop
+        .and_then(|c| c.sanitized())
+        .map(|c| c.to_mpv_zoom_pan())
+        .unwrap_or((0.0, 0.0, 0.0));
+    Some(Slideshow {
+        images,
+        idx: 0,
+        interval: Duration::from_secs(s.interval_s.max(2)),
+        last_advance: Instant::now(),
+        transition: s.transition,
+        phase: Phase::Hold,
+        base_zoom,
+        base_pan_x,
+        base_pan_y,
+    })
 }
 
 /// Resolve a slideshow's image list: explicit hand-picked `paths`, else a scan
@@ -610,9 +684,31 @@ fn setup_vaapi_env() {
 }
 
 pub fn run() -> Result<()> {
-    if std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
-        anyhow::bail!("Fresco requires an X11 session (Wayland not yet supported)");
+    use crate::capability::{detect, Capability};
+    // Event-driven admin notifications + update prompts over Supabase Realtime.
+    // Background thread; never blocks the wallpaper loop.
+    notifier::spawn();
+    let capability = detect();
+    log::info!("session capability: {}", capability.id());
+    match capability {
+        Capability::X11 => run_x11(),
+        Capability::WaylandGnomeStatic => run_gnome_static(),
+        Capability::WaylandLayerShell => {
+            if wayland_backend_enabled() {
+                run_wayland_layershell()
+            } else {
+                // FRESCO_WAYLAND=0 explicitly disables the live backend.
+                log::info!(
+                    "Wayland layer-shell session detected; FRESCO_WAYLAND=0 disables the live backend"
+                );
+                Ok(())
+            }
+        }
     }
+}
+
+/// X11 daemon: the original in-process mpv backend (behavior unchanged).
+fn run_x11() -> Result<()> {
     setup_vaapi_env();
     let config = Config::load().unwrap_or_default();
     if !config.enabled {
@@ -624,6 +720,429 @@ pub fn run() -> Result<()> {
     }
     let mut daemon = Daemon::new(config)?;
     daemon.run()
+}
+
+/// GNOME-on-Wayland fallback: GNOME Mutter has no layer-shell, so a live
+/// wallpaper window is impossible. Reuse the existing still-frame path (set as
+/// the desktop background via gsettings) and serve IPC so the GUI can
+/// apply/stop. Blocks on the control channel between commands → ~0% CPU.
+fn run_gnome_static() -> Result<()> {
+    let mut config = Config::load().unwrap_or_default();
+    if !config.enabled {
+        overview::restore();
+        log::info!("wallpaper disabled (enabled=false) — exiting");
+        return Ok(());
+    }
+    let commands = control::start_server()?;
+    overview::apply(&config.wallpaper);
+    log::info!("frescod started (GNOME Wayland static-frame mode)");
+
+    while let Ok((req, reply)) = commands.recv() {
+        let is_stop = matches!(req, Request::Stop);
+        let resp = match req {
+            Request::Apply => {
+                config = Config::load().unwrap_or_else(|_| config.clone());
+                if config.enabled {
+                    overview::apply(&config.wallpaper);
+                } else {
+                    overview::restore();
+                }
+                Response::Ok
+            }
+            // A static frame has nothing to pause.
+            Request::Pause | Request::Resume => Response::Ok,
+            Request::Status => Response::Status(static_status(&config)),
+            Request::Stop => Response::Ok,
+        };
+        let _ = reply.send(resp);
+        if is_stop {
+            break;
+        }
+    }
+
+    overview::restore();
+    std::fs::remove_file(crate::ipc::socket_path()).ok();
+    log::info!("frescod stopped");
+    Ok(())
+}
+
+/// Minimal status for the GNOME static-frame fallback mode.
+fn static_status(config: &Config) -> StatusReply {
+    let (cpu, rss) = proc_stats();
+    let wallpaper = config
+        .wallpaper
+        .effective_path()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .or_else(|| Some("Static frame".to_string()));
+    StatusReply {
+        running: true,
+        paused: false,
+        hwdec: None,
+        wallpaper,
+        cpu_percent: cpu,
+        rss_mb: rss,
+        monitors: Vec::new(),
+        error: None,
+    }
+}
+
+/// The experimental Wayland (mpvpaper) backend is opt-in while it stabilizes.
+fn wayland_backend_enabled() -> bool {
+    // Live Wayland wallpapers are enabled by default on layer-shell compositors.
+    // Set FRESCO_WAYLAND=0 (or no/false) to force the old behaviour.
+    !matches!(
+        std::env::var("FRESCO_WAYLAND"),
+        Ok(v) if v.eq_ignore_ascii_case("0")
+            || v.eq_ignore_ascii_case("no")
+            || v.eq_ignore_ascii_case("false")
+    )
+}
+
+/// Wayland layer-shell backend: supervise one `mpvpaper ALL` process and steer
+/// it over its mpv IPC socket. Self-contained — does not touch the X11 path.
+/// Uses `ALL` outputs (no per-monitor enumeration / hotplug in this phase).
+fn run_wayland_layershell() -> Result<()> {
+    use std::collections::BTreeMap;
+    use std::sync::mpsc::RecvTimeoutError;
+    const MAX_RESTARTS: u32 = 5;
+    const SUPERVISE: Duration = Duration::from_secs(2);
+    const TICK: Duration = Duration::from_millis(100);
+    const ANIM_TICK: Duration = Duration::from_millis(33);
+
+    setup_vaapi_env();
+    let mut config = Config::load().unwrap_or_default();
+    if !config.enabled {
+        log::info!("wallpaper disabled (enabled=false) — exiting");
+        return Ok(());
+    }
+
+    let commands = control::start_server()?;
+
+    // Enumerate outputs once (Phase 2 = static snapshot; live hotplug is Phase 3).
+    let monitors = wayland_outputs::list_outputs().unwrap_or_else(|e| {
+        log::warn!("output enumeration failed ({e:#}); targeting all outputs as one");
+        vec![Monitor { connector: "ALL".into(), x: 0, y: 0, width: 0, height: 0 }]
+    });
+    log::info!(
+        "Wayland outputs: [{}]",
+        monitors.iter().map(|m| m.connector.as_str()).collect::<Vec<_>>().join(", ")
+    );
+
+    let mut user_paused = false;
+    let mut battery_paused = false;
+    let mut last_supervise = Instant::now() - SUPERVISE;
+
+    // One supervised mpvpaper per output, keyed by connector name.
+    let mut outputs: BTreeMap<String, WlOutput> = BTreeMap::new();
+    for m in &monitors {
+        let wallpaper = config.wallpaper_for(&m.connector).clone();
+        if wallpaper.effective_path().is_none()
+            && wallpaper.paths.is_empty()
+            && wallpaper.kind != Kind::Slideshow
+        {
+            continue; // nothing configured for this output
+        }
+        let mut out = WlOutput::new(m.connector.clone(), wallpaper, config.scaling);
+        out.respawn(false, false);
+        outputs.insert(m.connector.clone(), out);
+    }
+    log::info!(
+        "frescod started (Wayland layer-shell / mpvpaper, {} output(s))",
+        outputs.len()
+    );
+
+    loop {
+        let tick = if outputs.values().any(|o| o.animating) {
+            ANIM_TICK
+        } else {
+            TICK
+        };
+        match commands.recv_timeout(tick) {
+            Ok((req, reply)) => {
+                let is_stop = matches!(req, Request::Stop);
+                let resp = match req {
+                    Request::Apply => {
+                        config = Config::load().unwrap_or_else(|_| config.clone());
+                        let paused = user_paused || battery_paused;
+                        if config.enabled {
+                            // Reconcile config × the (static) output set.
+                            for m in &monitors {
+                                let wp = config.wallpaper_for(&m.connector).clone();
+                                let has = wp.effective_path().is_some()
+                                    || !wp.paths.is_empty()
+                                    || wp.kind == Kind::Slideshow;
+                                match (outputs.get_mut(&m.connector), has) {
+                                    (Some(o), true) => o.apply_wallpaper(wp, config.scaling, paused),
+                                    (Some(_), false) => {
+                                        outputs.remove(&m.connector);
+                                    }
+                                    (None, true) => {
+                                        let mut o =
+                                            WlOutput::new(m.connector.clone(), wp, config.scaling);
+                                        o.respawn(paused, false);
+                                        outputs.insert(m.connector.clone(), o);
+                                    }
+                                    (None, false) => {}
+                                }
+                            }
+                        } else {
+                            outputs.clear(); // kills every mpvpaper
+                        }
+                        Response::Ok
+                    }
+                    Request::Pause => {
+                        user_paused = true;
+                        for o in outputs.values() {
+                            o.set_paused(true);
+                        }
+                        Response::Ok
+                    }
+                    Request::Resume => {
+                        user_paused = false;
+                        for o in outputs.values() {
+                            o.set_paused(battery_paused);
+                        }
+                        Response::Ok
+                    }
+                    Request::Status => {
+                        Response::Status(wayland_status(&outputs, user_paused || battery_paused))
+                    }
+                    Request::Stop => Response::Ok,
+                };
+                let _ = reply.send(resp);
+                if is_stop {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        let now = Instant::now();
+
+        // Slideshow engine (shared with the X11 path via advance_slideshow).
+        for o in outputs.values_mut() {
+            o.advance(now);
+        }
+
+        // Battery + per-output supervision on a coarse cadence.
+        if now.duration_since(last_supervise) >= SUPERVISE {
+            last_supervise = now;
+
+            if config.pause_on_battery {
+                let discharging = on_battery();
+                if discharging != battery_paused {
+                    battery_paused = discharging;
+                    let paused = user_paused || battery_paused;
+                    for o in outputs.values() {
+                        o.set_paused(paused);
+                    }
+                    log::info!("battery pause = {discharging}");
+                }
+            } else if battery_paused {
+                battery_paused = false;
+                for o in outputs.values() {
+                    o.set_paused(user_paused);
+                }
+            }
+
+            let paused = user_paused || battery_paused;
+            for o in outputs.values_mut() {
+                o.supervise(paused, MAX_RESTARTS);
+            }
+        }
+    }
+
+    outputs.clear(); // kill every mpvpaper before we exit
+    std::fs::remove_file(crate::ipc::socket_path()).ok();
+    log::info!("frescod stopped");
+    Ok(())
+}
+
+/// One supervised output: its mpvpaper renderer (or none, in static fallback),
+/// its slideshow state, and per-output restart bookkeeping.
+struct WlOutput {
+    connector: String,
+    wallpaper: Wallpaper,
+    scaling: Scaling,
+    player: Option<PlayerHandle>,
+    slideshow: Option<Slideshow>,
+    restarts: u32,
+    static_fallback: bool,
+    error: Option<String>,
+    animating: bool,
+}
+
+impl WlOutput {
+    fn new(connector: String, wallpaper: Wallpaper, scaling: Scaling) -> WlOutput {
+        WlOutput {
+            connector,
+            wallpaper,
+            scaling,
+            player: None,
+            slideshow: None,
+            restarts: 0,
+            static_fallback: false,
+            error: None,
+            animating: false,
+        }
+    }
+
+    /// (Re)spawn the mpvpaper for this output. `paused` applies the current pause
+    /// state; `static_frame` spawns then pauses (holds frame one) — the no-black
+    /// per-output fallback when live playback keeps failing.
+    fn respawn(&mut self, paused: bool, static_frame: bool) {
+        drop(self.player.take());
+        self.slideshow = None;
+        self.animating = false;
+        // The initial file mpvpaper opens: for a slideshow it's the first image
+        // (subsequent ones arrive via loadfile-replace); otherwise the media.
+        let file = if self.wallpaper.kind == Kind::Slideshow {
+            self.wallpaper
+                .slideshow
+                .as_ref()
+                .and_then(|s| slideshow_images(s).into_iter().next())
+        } else {
+            self.wallpaper
+                .effective_path()
+                .map(|p| p.to_path_buf())
+                .or_else(|| self.wallpaper.paths.first().cloned())
+        };
+        let Some(file) = file else {
+            log::error!("[{}] no playable file configured", self.connector);
+            self.error = Some(format!("{}: no playable file configured", self.connector));
+            self.player = None;
+            return;
+        };
+        match WaylandPlayer::spawn(&self.connector, &self.wallpaper, self.scaling, &file) {
+            Ok(p) => {
+                let handle = PlayerHandle::Wayland(p);
+                if paused || static_frame {
+                    handle.set_paused(true);
+                }
+                if !static_frame {
+                    self.slideshow = build_slideshow(&self.wallpaper, &handle);
+                    self.error = None;
+                }
+                self.player = Some(handle);
+            }
+            Err(e) => {
+                log::error!("[{}] {e:#}", self.connector);
+                if self.error.is_none() {
+                    self.error = Some(e.to_string());
+                }
+                self.player = None;
+            }
+        }
+    }
+
+    /// Apply a (possibly changed) wallpaper. If only the media changed, switch in
+    /// place via `loadfile replace`; otherwise respawn (fit/crop/scaling are
+    /// spawn-time mpv options).
+    fn apply_wallpaper(&mut self, new: Wallpaper, scaling: Scaling, paused: bool) {
+        let media_only = self.player.is_some()
+            && !self.static_fallback
+            && scaling == self.scaling
+            && new.fit == self.wallpaper.fit
+            && new.mute == self.wallpaper.mute
+            && new.volume == self.wallpaper.volume
+            && new.crop == self.wallpaper.crop
+            && new.kind == self.wallpaper.kind
+            && new.kind != Kind::Slideshow;
+        self.wallpaper = new;
+        self.scaling = scaling;
+        if media_only {
+            if let (Some(p), Some(path)) = (self.player.as_ref(), self.wallpaper.effective_path()) {
+                p.load_path(path);
+            }
+        } else {
+            self.restarts = 0;
+            self.static_fallback = false;
+            self.respawn(paused, false);
+        }
+    }
+
+    fn advance(&mut self, now: Instant) {
+        if let (Some(player), Some(s)) = (self.player.as_ref(), self.slideshow.as_mut()) {
+            self.animating = advance_slideshow(player, s, now);
+        }
+    }
+
+    fn set_paused(&self, paused: bool) {
+        if let Some(p) = &self.player {
+            p.set_paused(paused);
+        }
+    }
+
+    /// Per-output supervision: restart a dead renderer with an anti-flap cap;
+    /// after `max` consecutive failures fall back to a paused static frame (so
+    /// the output never goes black) and surface the error in `Status`.
+    fn supervise(&mut self, paused: bool, max: u32) {
+        let alive = self.player.as_ref().map(|p| p.is_alive()).unwrap_or(false);
+        if alive {
+            if !self.static_fallback {
+                self.restarts = 0;
+            }
+            return;
+        }
+        // Renderer is dead or never started.
+        if self.restarts < max {
+            self.restarts += 1;
+            log::warn!(
+                "[{}] renderer exited; restarting ({}/{max})",
+                self.connector,
+                self.restarts
+            );
+            self.respawn(paused, false);
+        } else if self.restarts == max {
+            // Crossed the cap once: try to hold a paused static frame, then stop
+            // retrying (anti-flap). If even that can't spawn, the compositor's own
+            // background shows — Fresco never paints black itself.
+            self.restarts += 1; // sentinel — no further attempts
+            self.static_fallback = true;
+            self.error = Some(format!(
+                "{}: renderer failed {max}× — held a static frame (or fell back to the compositor background)",
+                self.connector
+            ));
+            log::error!(
+                "[{}] giving up live playback; attempting a static frame",
+                self.connector
+            );
+            self.respawn(true, true);
+        }
+        // restarts > max → given up; do nothing (anti-flap). Error stays in Status.
+    }
+}
+
+/// Aggregate `Status` across all Wayland outputs for the GUI / diagnostics.
+fn wayland_status(
+    outputs: &std::collections::BTreeMap<String, WlOutput>,
+    paused: bool,
+) -> StatusReply {
+    let (cpu, rss) = proc_stats();
+    let hwdec = outputs
+        .values()
+        .find_map(|o| o.player.as_ref().and_then(|p| p.hwdec_current()));
+    let wallpaper = outputs
+        .values()
+        .next()
+        .and_then(|o| {
+            o.wallpaper
+                .effective_path()
+                .or_else(|| o.wallpaper.paths.first().map(|p| p.as_path()))
+        })
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+    let error = outputs.values().find_map(|o| o.error.clone());
+    StatusReply {
+        running: true,
+        paused,
+        hwdec,
+        wallpaper,
+        cpu_percent: cpu,
+        rss_mb: rss,
+        monitors: outputs.keys().cloned().collect(),
+        error,
+    }
 }
 
 /// `--once <file>`: render one file on every monitor until Ctrl-C.
@@ -677,9 +1196,23 @@ pub fn check() {
     println!("{BLD}Fresco diagnostics{X}");
     println!("──────────────────");
 
+    use crate::capability::{detect, Capability};
+    let cap = detect();
     let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into());
-    let color = if session == "x11" { G } else { R };
-    println!("Session         : {color}{session}{X}");
+    let session_color = if session == "x11" { G } else { Y };
+    println!(
+        "Session         : {session_color}{session}{X} ({})",
+        cap.id()
+    );
+
+    if matches!(cap, Capability::WaylandLayerShell) {
+        match crate::mpvpaper_resolved() {
+            Some(p) => println!("mpvpaper        : {G}{}{X}", p.display()),
+            None => println!(
+                "mpvpaper        : {R}not found{X} (live wallpapers need mpvpaper installed or bundled)"
+            ),
+        }
+    }
 
     match mpv::ffi::fns() {
         Ok(f) => {

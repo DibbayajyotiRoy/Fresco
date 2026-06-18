@@ -31,9 +31,11 @@ add-extensions:
     autodelete: false
 
 finish-args:
-  # Full X11 access is required: Fresco creates a desktop-level X11 window and
-  # restacks it. (Fresco is X11-only for now.)
+  # X11 for the embedded-mpv backend (desktop-level window we restack); Wayland
+  # for the layer-shell backend (bundled mpvpaper). Fresco picks the right one
+  # per session at runtime.
   - --socket=x11
+  - --socket=wayland
   - --share=ipc
   # GPU for mpv vo=gpu + hardware decode.
   - --device=dri
@@ -49,6 +51,11 @@ finish-args:
   - --env=DCONF_USER_CONFIG_DIR=.config/dconf
   # Allow launching the daemon as a separate instance for autostart.
   - --talk-name=org.freedesktop.Flatpak
+  # Reach Supabase for anonymous feedback + the event-driven notification
+  # websocket (Realtime) and update prompts.
+  - --share=network
+  # Raise native desktop notifications (admin announcements + update prompts).
+  - --talk-name=org.freedesktop.Notifications
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
@@ -87,6 +94,19 @@ modules:
       - type: archive
         url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.38.0.tar.gz
         sha256: 86d9ef40b6058732f67b46d0bbda24a074fae860b3eaae05bab3145041303066
+
+  # Bundled so users never install it themselves — Fresco supervises mpvpaper on
+  # Wayland (layer-shell) sessions and steers it over its mpv IPC socket. Built
+  # after mpv so it links the libmpv bundled above.
+  - name: mpvpaper
+    buildsystem: meson
+    sources:
+      - type: git
+        url: https://github.com/GhostNaN/mpvpaper.git
+        # TODO(flathub): pin to a verified release tag + commit before submission
+        # (Flathub requires a commit alongside the tag for reproducibility).
+        tag: "1.4"
+        commit: "8678234c163d0b0b616ec9ff6e5e0e1c87e0e6f4"
 
   - name: ffmpegthumbnailer
     buildsystem: cmake-ninja

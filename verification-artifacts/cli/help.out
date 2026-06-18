@@ -1,0 +1,8 @@
+Usage:
+  fresco [OPTION…]
+
+Help Options:
+  -h, --help                 Show help options
+  --help-all                 Show all help options
+  --help-gapplication        Show GApplication options
+

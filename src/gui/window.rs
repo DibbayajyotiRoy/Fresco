@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
 
 use gtk4::{gio, glib, prelude::*};
 use gtk4::{FileChooserAction, GestureClick, PolicyType, ResponseType};
@@ -75,18 +74,9 @@ fn build_ui(app: &adw::Application) {
     theme::set_mode(config.theme_mode);
     theme::apply(config.accent, theme::is_dark());
 
-    // Wayland guard.
-    if std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
-        let status = adw::StatusPage::new();
-        status.set_icon_name(Some("dialog-information-symbolic"));
-        status.set_title("X11 session required");
-        status.set_description(Some(
-            "Fresco currently works on X11 sessions only. Log out and select the Xorg session at login.",
-        ));
-        window.set_content(Some(&status));
-        window.present();
-        return;
-    }
+    // Session capability drives the UI: every session gets the full app; the
+    // limited ones (Wayland) also get an informational banner. No hard block.
+    let capability = crate::capability::detect();
 
     // Mark broken entries (missing source files) before showing the library.
     let mut entries = load_entries().unwrap_or_default();
@@ -124,11 +114,45 @@ fn build_ui(app: &adw::Application) {
     stack.add_named(&editor_view, Some("editor"));
 
     toast.set_child(Some(&stack));
-    window.set_content(Some(&toast));
+    match capability_banner_text(capability) {
+        Some(text) => {
+            // Stack the capability banner above the toast-wrapped content.
+            let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            let banner = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            banner.add_css_class("capability-banner");
+            banner.set_margin_start(12);
+            banner.set_margin_end(12);
+            banner.set_margin_top(10);
+            let icon = gtk4::Image::from_icon_name("dialog-information-symbolic");
+            icon.set_valign(gtk4::Align::Start);
+            let label = gtk4::Label::new(Some(text));
+            label.set_wrap(true);
+            label.set_xalign(0.0);
+            label.set_hexpand(true);
+            banner.append(&icon);
+            banner.append(&label);
+            outer.append(&banner);
+            outer.append(&toast);
+            window.set_content(Some(&outer));
+        }
+        None => window.set_content(Some(&toast)),
+    }
     window.present();
 
     // Anonymous opt-in feedback + admin-pushed notifications (Supabase).
     run_startup_checks(&window, state);
+}
+
+/// Informational banner text for sessions where live playback is limited.
+/// `None` for X11 (full live support — no banner needed).
+fn capability_banner_text(cap: crate::capability::Capability) -> Option<&'static str> {
+    use crate::capability::Capability;
+    match cap {
+        Capability::X11 | Capability::WaylandLayerShell => None,
+        Capability::WaylandGnomeStatic => Some(
+            "On GNOME Wayland, wallpapers are shown as a static frame. For live playback, use an X11 session or a layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma).",
+        ),
+    }
 }
 
 // ─── Library view ─────────────────────────────────────────────────────────────
@@ -221,22 +245,12 @@ fn build_library_view(
     scroll.set_child(Some(&content));
     root.append(&scroll);
 
-    // ── Footer: status pill (left) + add actions (right) ──
+    // ── Footer: add actions (right-aligned) ──
     let footer = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     footer.set_margin_start(16);
     footer.set_margin_end(16);
     footer.set_margin_top(8);
     footer.set_margin_bottom(14);
-
-    let status_pill = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    status_pill.add_css_class("status-pill");
-    status_pill.set_valign(gtk4::Align::Center);
-    let status_dot = gtk4::Label::new(Some("●"));
-    status_dot.add_css_class("dot-off");
-    let status_label = gtk4::Label::new(None);
-    status_pill.append(&status_dot);
-    status_pill.append(&status_label);
-    footer.append(&status_pill);
 
     let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
@@ -316,48 +330,6 @@ fn build_library_view(
             if s.visible_child_name().as_deref() == Some("library") {
                 refresh();
             }
-        });
-    }
-
-    // Poll daemon status every 3s. Quiet by design: the pill is hidden while
-    // stopped, and only shows a single semantic dot + concise decode mode when
-    // a wallpaper is actually playing (no CPU/RAM churn, no "Checking…").
-    {
-        let status_label = status_label.clone();
-        let status_dot = status_dot.clone();
-        let status_pill = status_pill.clone();
-        let tick = move || {
-            let status = daemon_ctl::get_status();
-            for c in ["dot-ok", "dot-warn", "dot-off"] {
-                status_dot.remove_css_class(c);
-            }
-            match status.as_ref() {
-                None => status_pill.set_visible(false),
-                Some(s) if s.paused => {
-                    status_pill.set_visible(true);
-                    status_dot.add_css_class("dot-warn");
-                    status_label.set_text("Paused");
-                    status_label.set_tooltip_text(None);
-                }
-                Some(s) if matches!(s.hwdec.as_deref(), Some("no") | None) => {
-                    status_pill.set_visible(true);
-                    status_dot.add_css_class("dot-warn");
-                    status_label.set_text("Software decode");
-                    status_label
-                        .set_tooltip_text(daemon_ctl::hwdec_hint(status.as_ref()).as_deref());
-                }
-                Some(_) => {
-                    status_pill.set_visible(true);
-                    status_dot.add_css_class("dot-ok");
-                    status_label.set_text("GPU decode");
-                    status_label.set_tooltip_text(None);
-                }
-            }
-        };
-        tick();
-        glib::timeout_add_local(Duration::from_secs(3), move || {
-            tick();
-            glib::ControlFlow::Continue
         });
     }
 
@@ -520,6 +492,40 @@ fn build_menu_popover(
         });
     }
     popover_box.append(&advanced_btn);
+
+    // ── Help & feedback ──
+    // A user-initiated path: the feedback dialog otherwise auto-prompts only once
+    // (after a week), so without this a user can neither send feedback nor reach
+    // support. "Send feedback" reuses the anonymous one-way dialog (→ dashboard);
+    // "Report a problem" opens the issue tracker (the two-way support channel).
+    let sep3 = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    sep3.set_margin_top(6);
+    sep3.set_margin_bottom(6);
+    popover_box.append(&sep3);
+    popover_box.append(&overline("Help & feedback"));
+
+    let feedback_btn = gtk4::Button::with_label("Send feedback…");
+    feedback_btn.add_css_class("flat");
+    feedback_btn.set_halign(gtk4::Align::Start);
+    {
+        let state_fb = state.clone();
+        let win_fb = window.clone();
+        feedback_btn.connect_clicked(move |_| {
+            show_feedback_dialog(&win_fb, state_fb.clone());
+        });
+    }
+    popover_box.append(&feedback_btn);
+
+    let help_btn = gtk4::Button::with_label("Report a problem…");
+    help_btn.add_css_class("flat");
+    help_btn.set_halign(gtk4::Align::Start);
+    help_btn.set_tooltip_text(Some("Opens the Fresco issue tracker in your browser"));
+    help_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("xdg-open")
+            .arg("https://github.com/DibbayajyotiRoy/fresco/issues")
+            .spawn();
+    });
+    popover_box.append(&help_btn);
 
     let popover = gtk4::Popover::new();
     popover.set_child(Some(&popover_box));

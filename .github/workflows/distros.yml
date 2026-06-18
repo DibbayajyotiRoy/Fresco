@@ -23,10 +23,13 @@ on:
 
 env:
   RUST_VERSION: '1.91.0'
-  # Build deps mirror .github/workflows/ci.yml so the two stay in sync.
+  # Fresco's own build deps, plus (last two lines) what scripts/build-mpvpaper.sh
+  # needs to compile the bundled Wayland renderer.
   BUILD_DEPS: >-
     libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer
     libmpv-dev libx11-dev libxrandr-dev
+    meson ninja-build libwayland-dev wayland-protocols
+    libegl1-mesa-dev libgl1-mesa-dev
 
 jobs:
   build:
@@ -83,6 +86,11 @@ jobs:
 
       - name: Test (daemon)
         run: cargo test --no-default-features --features daemon
+
+      # Build mpvpaper → target/release/mpvpaper so `cargo deb` bundles it under
+      # /usr/lib/fresco/mpvpaper (not in the apt repos, so we ship it ourselves).
+      - name: Build bundled mpvpaper (Wayland backend)
+        run: scripts/build-mpvpaper.sh
 
       - name: Package .deb
         run: |

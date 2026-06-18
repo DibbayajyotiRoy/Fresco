@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import type { Feedback, Notification, Release } from "@/lib/types";
+import type { Feedback, Issue, Notification, Release } from "@/lib/types";
 
 export type DataResult<T> =
   | { ok: true; data: T }
@@ -110,6 +110,67 @@ export async function getReleases(): Promise<DataResult<Release[]>> {
     });
 
     return { ok: true, data: releases };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, error: `Failed to reach GitHub: ${message}` };
+  }
+}
+
+type GitHubIssue = {
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  user: { login: string } | null;
+  comments: number;
+  created_at: string;
+  labels: ({ name: string } | string)[];
+  /** Present only on pull requests — GitHub lists PRs under /issues too. */
+  pull_request?: unknown;
+};
+
+/**
+ * Fetch OPEN GitHub issues for the repo, newest first. Pull requests (which the
+ * issues endpoint also returns) are filtered out. Fetched fresh (`no-store`).
+ */
+export async function getIssues(): Promise<DataResult<Issue[]>> {
+  const repo = process.env.GITHUB_REPO || "DibbayajyotiRoy/fresco";
+  const token = process.env.GITHUB_TOKEN;
+
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/issues?state=open&per_page=50&sort=created&direction=desc`,
+      { headers, cache: "no-store" }
+    );
+
+    if (!res.ok) {
+      return { ok: false, error: `GitHub API ${res.status}: ${res.statusText}` };
+    }
+
+    const json = (await res.json()) as GitHubIssue[];
+
+    const issues: Issue[] = json
+      .filter((i) => !i.pull_request)
+      .map((i) => ({
+        number: i.number,
+        title: i.title,
+        state: i.state,
+        url: i.html_url,
+        author: i.user?.login ?? null,
+        comments: i.comments,
+        createdAt: i.created_at,
+        labels: (i.labels ?? []).map((l) => (typeof l === "string" ? l : l.name)),
+      }));
+
+    return { ok: true, data: issues };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, error: `Failed to reach GitHub: ${message}` };

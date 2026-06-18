@@ -1,0 +1,50 @@
+[2026-06-13T19:25:36Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781378736036.png
+--- frescod start ---
+--- frescod start ---
+--- frescod start ---
+[2026-06-13T19:46:43Z INFO  fresco::daemon] VA-API: pinned Intel iHD driver for hardware decode
+[2026-06-13T19:46:44Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380003211.png
+[2026-06-13T19:46:44Z INFO  fresco::daemon] frescod started with 1 renderer(s)
+[2026-06-13T19:49:51Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380191135.png
+[2026-06-13T19:50:27Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380226448.png
+[2026-06-13T19:50:35Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380234807.png
+[2026-06-13T19:50:57Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380256532.png
+[2026-06-13T19:51:02Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380261744.png
+[2026-06-13T20:00:45Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380844809.png
+[2026-06-13T20:00:53Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380852877.png
+[2026-06-13T20:00:58Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380857709.png
+[2026-06-13T20:01:04Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781380864737.png
+--- frescod start ---
+[2026-06-13T20:06:05Z INFO  fresco::daemon] VA-API: pinned Intel iHD driver for hardware decode
+[2026-06-13T20:06:05Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781381165413.png
+[2026-06-13T20:06:05Z INFO  fresco::daemon] frescod started with 1 renderer(s)
+[2026-06-13T20:06:28Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781381187961.png
+--- frescod start ---
+[2026-06-14T05:34:02Z INFO  fresco::daemon] VA-API: pinned Intel iHD driver for hardware decode
+[2026-06-14T05:34:03Z INFO  fresco::daemon::overview] overview background set to /home/roy/.cache/fresco/overview-1781415243000.png
+[2026-06-14T05:34:03Z INFO  fresco::daemon] frescod started with 1 renderer(s)
+--- frescod start ---
+--- frescod start ---
+[2026-06-16T02:02:56Z INFO  fresco::daemon] session capability: wayland-layer-shell
+[2026-06-16T02:02:56Z INFO  fresco::daemon] Wayland layer-shell session detected; live Wayland wallpaper is not available in this build yet
+--- frescod start ---
+[2026-06-16T02:02:56Z INFO  fresco::daemon] session capability: wayland-layer-shell
+[2026-06-16T02:02:56Z INFO  fresco::daemon] Wayland layer-shell session detected; live Wayland wallpaper is not available in this build yet
+--- frescod start ---
+[2026-06-16T02:04:20Z INFO  fresco::daemon] session capability: wayland-layer-shell
+[2026-06-16T02:04:20Z INFO  fresco::daemon] Wayland layer-shell session detected; live Wayland wallpaper is not available in this build yet
+--- frescod start ---
+[2026-06-16T02:18:35Z INFO  fresco::daemon] session capability: wayland-layer-shell
+[2026-06-16T02:18:35Z INFO  fresco::daemon] Wayland layer-shell session detected; the experimental mpvpaper backend is off — set FRESCO_WAYLAND=1 to enable it
+--- frescod start ---
+[2026-06-16T02:21:24Z INFO  fresco::daemon] session capability: wayland-layer-shell
+[2026-06-16T02:21:24Z INFO  fresco::daemon] VA-API: pinned Intel iHD driver for hardware decode
+[2026-06-16T02:21:24Z INFO  fresco::daemon::mpvpaper] spawning: mpvpaper -o "input-ipc-server=/tmp/fresco-spike-run/fresco/mpvpaper.sock hwdec=auto-safe image-display-duration=inf background=#000000 loop-file=inf mute=yes aid=no keepaspect=yes panscan=1.0 scale=lanczos cscale=lanczos" ALL /home/roy/Pictures/Wallpapers/wallpaper2.jpeg
+[2026-06-16T02:21:24Z ERROR fresco::daemon] mpvpaper backend failed to start: failed to spawn mpvpaper — is it installed and on PATH?: No such file or directory (os error 2)
+[2026-06-16T02:21:24Z INFO  fresco::daemon] frescod started (Wayland layer-shell / mpvpaper backend)
+[2026-06-16T02:21:26Z INFO  fresco::daemon::mpvpaper] spawning: mpvpaper -o "input-ipc-server=/tmp/fresco-spike-run/fresco/mpvpaper.sock hwdec=auto-safe image-display-duration=inf background=#000000 loop-file=inf mute=yes aid=no keepaspect=yes panscan=1.0 scale=lanczos cscale=lanczos" ALL /home/roy/Pictures/Wallpapers/wallpaper2.jpeg
+[2026-06-16T02:21:26Z ERROR fresco::daemon] mpvpaper restart failed: failed to spawn mpvpaper — is it installed and on PATH?: No such file or directory (os error 2)
+[2026-06-16T02:21:28Z INFO  fresco::daemon::mpvpaper] spawning: mpvpaper -o "input-ipc-server=/tmp/fresco-spike-run/fresco/mpvpaper.sock hwdec=auto-safe image-display-duration=inf background=#000000 loop-file=inf mute=yes aid=no keepaspect=yes panscan=1.0 scale=lanczos cscale=lanczos" ALL /home/roy/Pictures/Wallpapers/wallpaper2.jpeg
+[2026-06-16T02:21:28Z ERROR fresco::daemon] mpvpaper restart failed: failed to spawn mpvpaper — is it installed and on PATH?: No such file or directory (os error 2)
+[2026-06-16T02:21:30Z INFO  fresco::daemon::mpvpaper] spawning: mpvpaper -o "input-ipc-server=/tmp/fresco-spike-run/fresco/mpvpaper.sock hwdec=auto-safe image-display-duration=inf background=#000000 loop-file=inf mute=yes aid=no keepaspect=yes panscan=1.0 scale=lanczos cscale=lanczos" ALL /home/roy/Pictures/Wallpapers/wallpaper2.jpeg
+[2026-06-16T02:21:30Z ERROR fresco::daemon] mpvpaper restart failed: failed to spawn mpvpaper — is it installed and on PATH?: No such file or directory (os error 2)

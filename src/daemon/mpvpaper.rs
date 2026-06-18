@@ -84,7 +84,9 @@ impl WaylandPlayer {
         for _ in 0..50 {
             if let Ok(Some(status)) = child.try_wait() {
                 std::fs::remove_file(&socket_path).ok();
-                return Err(anyhow!("mpvpaper for {connector} exited immediately ({status})"));
+                return Err(anyhow!(
+                    "mpvpaper for {connector} exited immediately ({status})"
+                ));
             }
             if ipc.connect_retry(1).is_ok() {
                 connected = true;
@@ -109,7 +111,11 @@ impl WaylandPlayer {
         // Playlist: queue the remaining files after the first.
         if wallpaper.kind == Kind::Playlist {
             for p in wallpaper.paths.iter().skip(1) {
-                player.command(&[json!("loadfile"), json!(p.to_string_lossy().as_ref()), json!("append")]);
+                player.command(&[
+                    json!("loadfile"),
+                    json!(p.to_string_lossy().as_ref()),
+                    json!("append"),
+                ]);
             }
         }
         Ok(player)
@@ -195,7 +201,13 @@ impl Drop for WaylandPlayer {
 fn sanitize(connector: &str) -> String {
     connector
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -389,11 +401,24 @@ mod tests {
         let _ = child.wait();
         let _ = std::fs::remove_file(&sock);
 
-        assert!(connected.is_ok(), "should connect to mpv IPC: {connected:?}");
-        assert_eq!(paused.as_deref(), Some("true"), "pause must round-trip via IPC (T3)");
-        assert_eq!(idle.as_deref(), Some("true"), "idle-active should read back");
         assert!(
-            zoom.as_deref().map(|z| z.starts_with("-0.5")).unwrap_or(false),
+            connected.is_ok(),
+            "should connect to mpv IPC: {connected:?}"
+        );
+        assert_eq!(
+            paused.as_deref(),
+            Some("true"),
+            "pause must round-trip via IPC (T3)"
+        );
+        assert_eq!(
+            idle.as_deref(),
+            Some("true"),
+            "idle-active should read back"
+        );
+        assert!(
+            zoom.as_deref()
+                .map(|z| z.starts_with("-0.5"))
+                .unwrap_or(false),
             "video-zoom (crop, T4) should read back ~-0.5, got {zoom:?}"
         );
     }
@@ -426,7 +451,13 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
         // T8: a missing backend binary fails gracefully (Err, never a panic).
         std::env::set_var("FRESCO_MPVPAPER", "/nonexistent/fresco/mpvpaper");
         assert!(
-            WaylandPlayer::spawn("HEADLESS-1", &wp, Scaling::Balanced, &std::env::temp_dir().join("fresco-none.mp4")).is_err(),
+            WaylandPlayer::spawn(
+                "HEADLESS-1",
+                &wp,
+                Scaling::Balanced,
+                &std::env::temp_dir().join("fresco-none.mp4")
+            )
+            .is_err(),
             "spawn must fail gracefully when the backend binary is missing (T8)"
         );
 
@@ -444,12 +475,23 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
         std::env::set_var("FRESCO_MPVPAPER", &fake);
         std::env::set_var("FRESCO_TEST_PIDFILE", &pidfile);
 
-        let player = WaylandPlayer::spawn("HEADLESS-1", &wp, Scaling::Balanced, &std::env::temp_dir().join("fresco-none.mp4"))
-            .expect("spawn the fake mpvpaper backend");
-        assert!(player.is_alive(), "backend should be alive right after spawn");
+        let player = WaylandPlayer::spawn(
+            "HEADLESS-1",
+            &wp,
+            Scaling::Balanced,
+            &std::env::temp_dir().join("fresco-none.mp4"),
+        )
+        .expect("spawn the fake mpvpaper backend");
+        assert!(
+            player.is_alive(),
+            "backend should be alive right after spawn"
+        );
 
         // Simulate a crash: kill the backend process out from under us.
-        let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+        let pid = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .to_string();
         let _ = Command::new("kill").arg("-9").arg(&pid).status();
         std::thread::sleep(Duration::from_millis(600));
         assert!(

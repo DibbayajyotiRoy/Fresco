@@ -233,9 +233,7 @@ fn handle(n: &Notification) {
     if n.kind == "update" {
         if let Some(version) = &n.version {
             if !is_newer(version) {
-                log::info!(
-                    "notifier: update {version} not newer than {CURRENT_VERSION}; ignoring"
-                );
+                log::info!("notifier: update {version} not newer than {CURRENT_VERSION}; ignoring");
                 return;
             }
         }
@@ -314,7 +312,10 @@ fn run_updater() {
         open_url(RELEASES_URL);
         return;
     };
-    log::info!("notifier: launching updater via pkexec: {}", script.display());
+    log::info!(
+        "notifier: launching updater via pkexec: {}",
+        script.display()
+    );
     match std::process::Command::new("pkexec").arg(&script).status() {
         Ok(status) if status.success() => {
             notify(

@@ -426,142 +426,135 @@ fn advance_slideshow(player: &PlayerHandle, s: &mut Slideshow, now: Instant) -> 
     let mut animating = false;
     {
         match s.phase {
-                Phase::Hold => match s.transition {
-                    Transition::KenBurns => {
-                        // Continuous eased zoom + gentle diagonal drift that
-                        // alternates direction each image, so it never feels
-                        // mechanical. (smoothstep gives a soft start and finish.)
-                        let frac = (now.duration_since(s.last_advance).as_secs_f64()
-                            / s.interval.as_secs_f64())
-                        .clamp(0.0, 1.0);
-                        let e = smoothstep(frac);
-                        let dir = if s.idx.is_multiple_of(2) { 1.0 } else { -1.0 };
-                        player.set_zoom_pan(
-                            s.base_zoom + KEN_BURNS_ZOOM * e,
-                            s.base_pan_x + dir * 0.10 * (e - 0.5),
-                            s.base_pan_y + dir * 0.05 * (e - 0.5),
-                        );
+            Phase::Hold => match s.transition {
+                Transition::KenBurns => {
+                    // Continuous eased zoom + gentle diagonal drift that
+                    // alternates direction each image, so it never feels
+                    // mechanical. (smoothstep gives a soft start and finish.)
+                    let frac = (now.duration_since(s.last_advance).as_secs_f64()
+                        / s.interval.as_secs_f64())
+                    .clamp(0.0, 1.0);
+                    let e = smoothstep(frac);
+                    let dir = if s.idx.is_multiple_of(2) { 1.0 } else { -1.0 };
+                    player.set_zoom_pan(
+                        s.base_zoom + KEN_BURNS_ZOOM * e,
+                        s.base_pan_x + dir * 0.10 * (e - 0.5),
+                        s.base_pan_y + dir * 0.05 * (e - 0.5),
+                    );
+                    animating = true;
+                    if due {
+                        s.idx = next;
+                        player.load_path(&s.images[s.idx]);
+                        player.set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
+                        s.last_advance = now;
+                    }
+                }
+                Transition::None => {
+                    if due {
+                        s.idx = next;
+                        player.load_path(&s.images[s.idx]);
+                        s.last_advance = now;
+                    }
+                }
+                Transition::Fade | Transition::Crossfade => {
+                    if due {
+                        let total = if matches!(s.transition, Transition::Crossfade) {
+                            CROSSFADE_STEPS
+                        } else {
+                            FADE_STEPS
+                        };
+                        s.phase = Phase::FadeOut { step: 0, total };
                         animating = true;
-                        if due {
-                            s.idx = next;
-                            player.load_path(&s.images[s.idx]);
-                            player
-                                .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
-                            s.last_advance = now;
-                        }
-                    }
-                    Transition::None => {
-                        if due {
-                            s.idx = next;
-                            player.load_path(&s.images[s.idx]);
-                            s.last_advance = now;
-                        }
-                    }
-                    Transition::Fade | Transition::Crossfade => {
-                        if due {
-                            let total = if matches!(s.transition, Transition::Crossfade) {
-                                CROSSFADE_STEPS
-                            } else {
-                                FADE_STEPS
-                            };
-                            s.phase = Phase::FadeOut { step: 0, total };
-                            animating = true;
-                        }
-                    }
-                    Transition::Slide => {
-                        if due {
-                            s.phase = Phase::SlideOut { step: 0 };
-                            animating = true;
-                        }
-                    }
-                },
-                Phase::FadeOut { step, total } => {
-                    animating = true;
-                    let e = ease_in_out_cubic(step as f64 / total as f64);
-                    player.set_gamma((-100.0 * e) as i32);
-                    // Subtle inward "breath" while dimming — cinematic depth.
-                    player.set_zoom_pan(
-                        s.base_zoom + SLIDE_PUNCH * e,
-                        s.base_pan_x,
-                        s.base_pan_y,
-                    );
-                    if step >= total {
-                        s.idx = next;
-                        player.load_path(&s.images[s.idx]);
-                        s.phase = Phase::FadeIn { step: 0, total };
-                    } else {
-                        s.phase = Phase::FadeOut {
-                            step: step + 1,
-                            total,
-                        };
                     }
                 }
-                Phase::FadeIn { step, total } => {
-                    animating = true;
-                    let e = ease_in_out_cubic(step as f64 / total as f64);
-                    player.set_gamma((-100.0 * (1.0 - e)) as i32);
-                    // Settle the breath back to base as it brightens.
-                    player.set_zoom_pan(
-                        s.base_zoom + SLIDE_PUNCH * (1.0 - e),
-                        s.base_pan_x,
-                        s.base_pan_y,
-                    );
-                    if step >= total {
-                        player.set_gamma(0);
-                        player
-                            .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
-                        s.phase = Phase::Hold;
-                        s.last_advance = now;
-                    } else {
-                        s.phase = Phase::FadeIn {
-                            step: step + 1,
-                            total,
-                        };
+                Transition::Slide => {
+                    if due {
+                        s.phase = Phase::SlideOut { step: 0 };
+                        animating = true;
                     }
                 }
-                Phase::SlideOut { step } => {
-                    animating = true;
-                    // Eased push out with a slight zoom — a "push", not a flat slide.
-                    let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
-                    player.set_zoom_pan(
-                        s.base_zoom + SLIDE_PUNCH * e,
-                        s.base_pan_x - e,
-                        s.base_pan_y,
-                    );
-                    if step >= SLIDE_STEPS {
-                        s.idx = next;
-                        player.load_path(&s.images[s.idx]);
-                        player.set_zoom_pan(
-                            s.base_zoom + SLIDE_PUNCH,
-                            s.base_pan_x + 1.0,
-                            s.base_pan_y,
-                        );
-                        s.phase = Phase::SlideIn { step: 0 };
-                    } else {
-                        s.phase = Phase::SlideOut { step: step + 1 };
-                    }
+            },
+            Phase::FadeOut { step, total } => {
+                animating = true;
+                let e = ease_in_out_cubic(step as f64 / total as f64);
+                player.set_gamma((-100.0 * e) as i32);
+                // Subtle inward "breath" while dimming — cinematic depth.
+                player.set_zoom_pan(s.base_zoom + SLIDE_PUNCH * e, s.base_pan_x, s.base_pan_y);
+                if step >= total {
+                    s.idx = next;
+                    player.load_path(&s.images[s.idx]);
+                    s.phase = Phase::FadeIn { step: 0, total };
+                } else {
+                    s.phase = Phase::FadeOut {
+                        step: step + 1,
+                        total,
+                    };
                 }
-                Phase::SlideIn { step } => {
-                    animating = true;
-                    let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
+            }
+            Phase::FadeIn { step, total } => {
+                animating = true;
+                let e = ease_in_out_cubic(step as f64 / total as f64);
+                player.set_gamma((-100.0 * (1.0 - e)) as i32);
+                // Settle the breath back to base as it brightens.
+                player.set_zoom_pan(
+                    s.base_zoom + SLIDE_PUNCH * (1.0 - e),
+                    s.base_pan_x,
+                    s.base_pan_y,
+                );
+                if step >= total {
+                    player.set_gamma(0);
+                    player.set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
+                    s.phase = Phase::Hold;
+                    s.last_advance = now;
+                } else {
+                    s.phase = Phase::FadeIn {
+                        step: step + 1,
+                        total,
+                    };
+                }
+            }
+            Phase::SlideOut { step } => {
+                animating = true;
+                // Eased push out with a slight zoom — a "push", not a flat slide.
+                let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
+                player.set_zoom_pan(
+                    s.base_zoom + SLIDE_PUNCH * e,
+                    s.base_pan_x - e,
+                    s.base_pan_y,
+                );
+                if step >= SLIDE_STEPS {
+                    s.idx = next;
+                    player.load_path(&s.images[s.idx]);
                     player.set_zoom_pan(
-                        s.base_zoom + SLIDE_PUNCH * (1.0 - e),
-                        s.base_pan_x + (1.0 - e),
+                        s.base_zoom + SLIDE_PUNCH,
+                        s.base_pan_x + 1.0,
                         s.base_pan_y,
                     );
-                    if step >= SLIDE_STEPS {
-                        player
-                            .set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
-                        s.phase = Phase::Hold;
-                        s.last_advance = now;
-                    } else {
-                        s.phase = Phase::SlideIn { step: step + 1 };
-                    }
+                    s.phase = Phase::SlideIn { step: 0 };
+                } else {
+                    s.phase = Phase::SlideOut { step: step + 1 };
+                }
+            }
+            Phase::SlideIn { step } => {
+                animating = true;
+                let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
+                player.set_zoom_pan(
+                    s.base_zoom + SLIDE_PUNCH * (1.0 - e),
+                    s.base_pan_x + (1.0 - e),
+                    s.base_pan_y,
+                );
+                if step >= SLIDE_STEPS {
+                    player.set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
+                    s.phase = Phase::Hold;
+                    s.last_advance = now;
+                } else {
+                    s.phase = Phase::SlideIn { step: step + 1 };
                 }
             }
         }
-        animating
     }
+    animating
+}
 
 /// Build a `Slideshow` state machine for a slideshow wallpaper, loading its
 /// first image into `player`. `None` for non-slideshow wallpapers. Shared by
@@ -821,11 +814,21 @@ fn run_wayland_layershell() -> Result<()> {
     // Enumerate outputs once (Phase 2 = static snapshot; live hotplug is Phase 3).
     let monitors = wayland_outputs::list_outputs().unwrap_or_else(|e| {
         log::warn!("output enumeration failed ({e:#}); targeting all outputs as one");
-        vec![Monitor { connector: "ALL".into(), x: 0, y: 0, width: 0, height: 0 }]
+        vec![Monitor {
+            connector: "ALL".into(),
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        }]
     });
     log::info!(
         "Wayland outputs: [{}]",
-        monitors.iter().map(|m| m.connector.as_str()).collect::<Vec<_>>().join(", ")
+        monitors
+            .iter()
+            .map(|m| m.connector.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
 
     let mut user_paused = false;
@@ -872,7 +875,9 @@ fn run_wayland_layershell() -> Result<()> {
                                     || !wp.paths.is_empty()
                                     || wp.kind == Kind::Slideshow;
                                 match (outputs.get_mut(&m.connector), has) {
-                                    (Some(o), true) => o.apply_wallpaper(wp, config.scaling, paused),
+                                    (Some(o), true) => {
+                                        o.apply_wallpaper(wp, config.scaling, paused)
+                                    }
                                     (Some(_), false) => {
                                         outputs.remove(&m.connector);
                                     }

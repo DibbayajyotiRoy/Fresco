@@ -98,10 +98,7 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
-        let info = state
-            .outputs
-            .entry(output.id().protocol_id())
-            .or_default();
+        let info = state.outputs.entry(output.id().protocol_id()).or_default();
         match event {
             wl_output::Event::Geometry { x, y, .. } => {
                 info.x = x;
@@ -114,7 +111,8 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
                 ..
             } => {
                 // Only the current mode defines the output's pixel size.
-                let current = matches!(flags, WEnum::Value(m) if m.contains(wl_output::Mode::Current));
+                let current =
+                    matches!(flags, WEnum::Value(m) if m.contains(wl_output::Mode::Current));
                 if current || info.width == 0 {
                     info.width = width;
                     info.height = height;

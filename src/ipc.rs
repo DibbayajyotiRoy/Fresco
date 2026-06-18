@@ -124,8 +124,7 @@ mod tests {
     fn unreachable_daemon_errors() {
         // Target a socket path with no listener so the result is deterministic
         // even when a real frescod is running on this machine.
-        let path =
-            std::env::temp_dir().join(format!("fresco-absent-{}.sock", std::process::id()));
+        let path = std::env::temp_dir().join(format!("fresco-absent-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         assert!(request_at(&path, &Request::Status).is_err());
     }

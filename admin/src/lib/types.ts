@@ -33,6 +33,21 @@ export type Issue = {
   labels: string[];
 };
 
+export type Repo = {
+  /** Stargazer count. */
+  stars: number;
+  /** Fork count. */
+  forks: number;
+  /** Watchers (subscribers) — people who get notifications. */
+  watchers: number;
+  /** Open issues + PRs, as GitHub reports them. */
+  openIssues: number;
+  /** Link to the repo on GitHub. */
+  url: string;
+  /** ISO timestamp of the last push, or null. */
+  pushedAt: string | null;
+};
+
 export type Release = {
   /** Release tag, e.g. "v0.0.3" */
   tag: string;

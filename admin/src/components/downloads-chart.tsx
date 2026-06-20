@@ -1,6 +1,6 @@
 "use client";
 
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import {
   type ChartConfig,
@@ -24,47 +24,40 @@ export function DownloadsChart({ releases }: { releases: Release[] }) {
   }));
 
   return (
-    <ChartContainer
-      config={chartConfig}
-      className="aspect-auto h-[280px] w-full"
-    >
-      <LineChart
+    <ChartContainer config={chartConfig} className="aspect-auto h-[200px] w-full">
+      <BarChart
         accessibilityLayer
         data={data}
-        margin={{ left: 4, right: 8, top: 8 }}
+        margin={{ left: 4, right: 8, top: 4, bottom: 0 }}
       >
-        <CartesianGrid
-          vertical={false}
-          strokeDasharray="3 3"
-          strokeOpacity={0.15}
-        />
+        <CartesianGrid vertical={false} strokeDasharray="3 3" strokeOpacity={0.12} />
         <XAxis
           dataKey="tag"
           tickLine={false}
           axisLine={false}
           tickMargin={8}
           minTickGap={4}
+          className="text-xs"
         />
         <YAxis
           tickLine={false}
           axisLine={false}
-          width={40}
+          width={36}
           allowDecimals={false}
+          className="text-xs"
         />
         <ChartTooltip
-          cursor={{ strokeDasharray: "3 3" }}
-          content={<ChartTooltipContent indicator="line" />}
+          cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+          content={<ChartTooltipContent indicator="dot" />}
         />
-        <Line
-          type="monotone"
+        <Bar
           dataKey="downloads"
-          stroke="var(--color-downloads)"
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 4, strokeWidth: 0 }}
+          fill="var(--color-downloads)"
+          radius={[4, 4, 0, 0]}
+          maxBarSize={56}
           isAnimationActive={false}
         />
-      </LineChart>
+      </BarChart>
     </ChartContainer>
   );
 }

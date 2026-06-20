@@ -42,15 +42,15 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/">
-                <div className="from-brand text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br to-sky-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]">
-                  <Waves className="size-4" weight="duotone" />
+                <div className="bg-foreground text-background flex aspect-square size-7 items-center justify-center rounded-md">
+                  <Waves className="size-4" weight="fill" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate font-serif text-base font-medium tracking-tight">
-                    Fresco Admin
+                  <span className="truncate text-sm font-semibold tracking-tight">
+                    Fresco
                   </span>
                   <span className="text-muted-foreground truncate text-xs">
-                    Live wallpaper
+                    Admin
                   </span>
                 </div>
               </Link>

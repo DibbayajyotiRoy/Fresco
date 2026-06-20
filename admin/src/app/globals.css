@@ -7,7 +7,9 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
-  --font-serif: var(--font-fraunces);
+  /* No display serif in this UI; keep the token pointed at the sans stack so
+     any residual `font-serif` utility degrades gracefully. */
+  --font-serif: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --color-brand: var(--brand);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -45,92 +47,82 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ── Geist (light) ──────────────────────────────────────────────────────────
+   Vercel's design language: near-neutral surfaces, hairline borders, a single
+   blue accent reserved for links / focus / live state. Hierarchy comes from
+   tonal greys and borders, not shadows. */
 :root {
-  --radius: 0.625rem;
-  /* Brand accent — used for the live indicator, chart line, and ambient glows. */
-  --brand: oklch(0.62 0.19 256);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --radius: 0.5rem;
+  /* blue-700 #006bff — the lone accent. Big numbers stay foreground, not blue. */
+  --brand: oklch(0.576 0.214 257);
+  --background: oklch(1 0 0); /* background-100 #ffffff */
+  --foreground: oklch(0.205 0 0); /* gray-1000 #171717 */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.205 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.205 0 0); /* near-black solid fill */
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.97 0 0); /* gray-100 #f2f2f2 */
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.522 0 0); /* gray-900 #666 */
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
+  --destructive: oklch(0.55 0.225 27); /* red-800 #ea001d */
+  --border: oklch(0.922 0 0); /* gray-300 #e6e6e6 */
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
+  --ring: oklch(0.576 0.214 257);
+  --chart-1: oklch(0.576 0.214 257);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar: oklch(0.985 0 0); /* background-200 #fafafa */
+  --sidebar-foreground: oklch(0.205 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: oklch(0.576 0.214 257);
 }
 
+/* ── Geist (dark) ───────────────────────────────────────────────────────────
+   Near-black page, faintly lighter card surface, 10% white hairlines. */
 .dark {
-  /* Brand accent — a luminous periwinkle that reads on the dark glass. */
-  --brand: oklch(0.68 0.17 262);
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
+  --brand: oklch(0.66 0.18 256); /* brighter blue for dark surfaces */
+  --background: oklch(0.145 0 0); /* ~#1c1c1c page */
+  --foreground: oklch(0.97 0 0); /* #ededed */
+  --card: oklch(0.185 0 0); /* surface, a touch above the page */
+  --card-foreground: oklch(0.97 0 0);
   --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.97 0 0); /* white solid fill */
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.24 0 0);
+  --muted-foreground: oklch(0.68 0 0); /* #a1a1a1 */
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.66 0.18 256);
+  --chart-1: oklch(0.66 0.18 256);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.165 0 0); /* slightly off the page background */
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.66 0.18 256);
+  --sidebar-primary-foreground: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.24 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
-/* @roy-ui StatCard KPI tiles — map the library's own tokens onto the dashboard
-   theme variables so the cards follow the same light/dark toggle as the rest of
-   the UI. Scoped under `body` so it beats the library's built-in theme classes
-   regardless of stylesheet import order. */
-body .royui-statcard {
-  --royui-statcard-bg: var(--card);
-  --royui-statcard-bg-hover: var(--card);
-  --royui-statcard-fg: var(--foreground);
-  --royui-statcard-label: var(--muted-foreground);
-  --royui-statcard-faint: var(--muted-foreground);
-  --royui-statcard-line: var(--border);
-  --royui-statcard-line-hover: var(--border);
-  --royui-statcard-accent: var(--brand);
+  --sidebar-ring: oklch(0.66 0.18 256);
 }
 
 @layer base {
@@ -139,27 +131,14 @@ body .royui-statcard {
   }
   body {
     @apply bg-background text-foreground;
-    /* Ambient dark base + two faint accent glows so glass surfaces read. */
-    background-image:
-      radial-gradient(
-        circle at 15% 0%,
-        oklch(0.68 0.17 262 / 0.1),
-        transparent 40%
-      ),
-      radial-gradient(
-        circle at 85% 0%,
-        oklch(0.7 0.13 200 / 0.07),
-        transparent 42%
-      );
-    background-attachment: fixed;
-    background-repeat: no-repeat;
   }
 }
 
-/* Glassy scrollbars — slim, rounded, translucent to match the surfaces. */
+/* Slim, neutral scrollbars that read in both light and dark mode. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent)
+    transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -169,27 +148,17 @@ body .royui-statcard {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: color-mix(in oklch, var(--foreground) 18%, transparent);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: color-mix(in oklch, var(--foreground) 32%, transparent);
   background-clip: content-box;
 }
 
-/* Accessibility: drop the blur/translucency when the OS asks for it. */
-@media (prefers-reduced-transparency: reduce) {
-  [data-slot="card"],
-  [data-slot="sidebar-inner"],
-  [data-sidebar="sidebar"] {
-    background-color: var(--card) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-  [data-slot="sidebar-inner"],
-  [data-sidebar="sidebar"] {
-    background-color: var(--sidebar) !important;
-  }
+/* Tabular figures everywhere numbers carry meaning — KPIs, tables, charts. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

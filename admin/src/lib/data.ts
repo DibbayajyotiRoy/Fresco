@@ -1,7 +1,20 @@
 import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import type { Feedback, Issue, Notification, Release } from "@/lib/types";
+import type { Feedback, Issue, Notification, Release, Repo } from "@/lib/types";
+
+const GITHUB_REPO = process.env.GITHUB_REPO || "DibbayajyotiRoy/fresco";
+
+function githubHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+  return headers;
+}
 
 export type DataResult<T> =
   | { ok: true; data: T }
@@ -45,6 +58,48 @@ export async function getNotifications(): Promise<DataResult<Notification[]>> {
   }
 
   return { ok: true, data: (data ?? []) as Notification[] };
+}
+
+type GitHubRepo = {
+  stargazers_count: number;
+  forks_count: number;
+  subscribers_count: number;
+  open_issues_count: number;
+  html_url: string;
+  pushed_at: string | null;
+};
+
+/**
+ * Fetch top-level repo stats (stars, forks, watchers, open issues). Fetched
+ * fresh (`no-store`) so the dashboard always shows the live star count.
+ */
+export async function getRepo(): Promise<DataResult<Repo>> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}`, {
+      headers: githubHeaders(),
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      return { ok: false, error: `GitHub API ${res.status}: ${res.statusText}` };
+    }
+
+    const r = (await res.json()) as GitHubRepo;
+    return {
+      ok: true,
+      data: {
+        stars: r.stargazers_count ?? 0,
+        forks: r.forks_count ?? 0,
+        watchers: r.subscribers_count ?? 0,
+        openIssues: r.open_issues_count ?? 0,
+        url: r.html_url,
+        pushedAt: r.pushed_at,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, error: `Failed to reach GitHub: ${message}` };
+  }
 }
 
 type GitHubAsset = { download_count: number };

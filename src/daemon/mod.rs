@@ -2,6 +2,7 @@
 //! reconciles them against the config, and serves IPC control commands.
 
 mod control;
+mod fullscreen;
 pub mod monitors;
 pub mod mpv;
 mod mpvpaper;
@@ -795,12 +796,15 @@ fn wayland_backend_enabled() -> bool {
 /// it over its mpv IPC socket. Self-contained — does not touch the X11 path.
 /// Uses `ALL` outputs (no per-monitor enumeration / hotplug in this phase).
 fn run_wayland_layershell() -> Result<()> {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
     use std::sync::mpsc::RecvTimeoutError;
     const MAX_RESTARTS: u32 = 5;
     const SUPERVISE: Duration = Duration::from_secs(2);
     const TICK: Duration = Duration::from_millis(100);
     const ANIM_TICK: Duration = Duration::from_millis(33);
+    // How often to re-poll fullscreen state (coarse — pausing is not latency
+    // critical, and this bounds the per-tick roundtrip cost).
+    const FS_POLL: Duration = Duration::from_millis(250);
 
     setup_vaapi_env();
     let mut config = Config::load().unwrap_or_default();
@@ -834,6 +838,20 @@ fn run_wayland_layershell() -> Result<()> {
     let mut user_paused = false;
     let mut battery_paused = false;
     let mut last_supervise = Instant::now() - SUPERVISE;
+
+    // Pause the wallpaper on any output that has a fullscreen window. Available on
+    // wlroots/KWin; absent on GNOME (which uses the static path, not this one).
+    let mut fs_watch = fullscreen::FullscreenWatch::new();
+    log::info!(
+        "fullscreen auto-pause: {}",
+        if fs_watch.is_some() {
+            "enabled (wlr-foreign-toplevel)"
+        } else {
+            "unavailable (compositor lacks wlr-foreign-toplevel-management)"
+        }
+    );
+    let mut hidden: HashSet<String> = HashSet::new();
+    let mut last_fs_poll = Instant::now() - FS_POLL;
 
     // One supervised mpvpaper per output, keyed by connector name.
     let mut outputs: BTreeMap<String, WlOutput> = BTreeMap::new();
@@ -897,16 +915,10 @@ fn run_wayland_layershell() -> Result<()> {
                     }
                     Request::Pause => {
                         user_paused = true;
-                        for o in outputs.values() {
-                            o.set_paused(true);
-                        }
                         Response::Ok
                     }
                     Request::Resume => {
                         user_paused = false;
-                        for o in outputs.values() {
-                            o.set_paused(battery_paused);
-                        }
                         Response::Ok
                     }
                     Request::Status => {
@@ -938,23 +950,31 @@ fn run_wayland_layershell() -> Result<()> {
                 let discharging = on_battery();
                 if discharging != battery_paused {
                     battery_paused = discharging;
-                    let paused = user_paused || battery_paused;
-                    for o in outputs.values() {
-                        o.set_paused(paused);
-                    }
                     log::info!("battery pause = {discharging}");
                 }
             } else if battery_paused {
                 battery_paused = false;
-                for o in outputs.values() {
-                    o.set_paused(user_paused);
-                }
             }
 
             let paused = user_paused || battery_paused;
             for o in outputs.values_mut() {
                 o.supervise(paused, MAX_RESTARTS);
             }
+        }
+
+        // Refresh fullscreen state on a coarse cadence, then reconcile every
+        // output: paused = user || battery || fullscreen-on-this-output. This is
+        // the single place pause is applied (reconcile_pause is change-gated), so
+        // the three sources never fight over the player's pause property.
+        if let Some(w) = fs_watch.as_mut() {
+            if now.duration_since(last_fs_poll) >= FS_POLL {
+                last_fs_poll = now;
+                hidden = w.fullscreen_connectors();
+            }
+        }
+        let base_paused = user_paused || battery_paused;
+        for (connector, o) in &outputs {
+            o.reconcile_pause(base_paused || hidden.contains(connector));
         }
     }
 
@@ -976,6 +996,9 @@ struct WlOutput {
     static_fallback: bool,
     error: Option<String>,
     animating: bool,
+    /// Last pause state we applied to the player — lets `reconcile_pause` send IPC
+    /// only on change. `Cell` so reconcile can stay `&self` like `set_paused`.
+    applied_paused: std::cell::Cell<bool>,
 }
 
 impl WlOutput {
@@ -990,6 +1013,7 @@ impl WlOutput {
             static_fallback: false,
             error: None,
             animating: false,
+            applied_paused: std::cell::Cell::new(false),
         }
     }
 
@@ -1030,6 +1054,7 @@ impl WlOutput {
                     self.error = None;
                 }
                 self.player = Some(handle);
+                self.applied_paused.set(paused || static_frame);
             }
             Err(e) => {
                 log::error!("[{}] {e:#}", self.connector);
@@ -1076,6 +1101,20 @@ impl WlOutput {
     fn set_paused(&self, paused: bool) {
         if let Some(p) = &self.player {
             p.set_paused(paused);
+        }
+    }
+
+    /// Apply the desired pause state, but only on change and never to a static
+    /// fallback frame (which must stay held/paused). This is the supervisor's one
+    /// authority over the player's pause property — it folds the user, battery,
+    /// and fullscreen sources into a single decision so they never fight.
+    fn reconcile_pause(&self, desired: bool) {
+        if self.static_fallback {
+            return;
+        }
+        if self.applied_paused.get() != desired {
+            self.set_paused(desired);
+            self.applied_paused.set(desired);
         }
     }
 

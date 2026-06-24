@@ -144,6 +144,15 @@ impl WallpaperWindow {
         lower(conn, window)?;
         conn.flush()?;
 
+        // Wait until the window is actually viewable before the caller embeds mpv
+        // in it. On a cold boot the X server + WM are slow to process the map; if
+        // mpv brings up its display-synced video output (vo=gpu, video-sync=
+        // display-resample) on a not-yet-viewable window, it stalls on the first
+        // frame and stays frozen until the next rebuild — the "wallpaper is static
+        // after reboot until I reselect it" bug. Bounded poll: returns immediately
+        // once mapped (the warm / reselect case) and never blocks startup for long.
+        wait_until_viewable(conn, window);
+
         Ok(WallpaperWindow {
             window,
             connector: monitor.connector.clone(),
@@ -153,6 +162,22 @@ impl WallpaperWindow {
     pub fn destroy<C: Connection>(&self, conn: &C) {
         let _ = conn.destroy_window(self.window);
         let _ = conn.flush();
+    }
+}
+
+/// Poll until `window` is viewable, up to ~3s. Best-effort: any error or a
+/// timeout just proceeds — we never block the daemon's startup indefinitely.
+fn wait_until_viewable<C: Connection>(conn: &C, window: Window) {
+    for _ in 0..60 {
+        match conn.get_window_attributes(window) {
+            Ok(cookie) => match cookie.reply() {
+                Ok(attrs) if attrs.map_state == MapState::VIEWABLE => return,
+                Ok(_) => {}
+                Err(_) => return,
+            },
+            Err(_) => return,
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 

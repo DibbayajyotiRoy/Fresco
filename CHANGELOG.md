@@ -4,12 +4,25 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.7] — 2026-06-24
+
+### Fixed
+- **X11: the live wallpaper no longer comes up frozen after a reboot.** On a
+  cold boot the X server and window manager could leave the wallpaper window
+  not-yet-viewable when mpv started, so its display-synced video output stalled
+  on the first frame and stayed static until you re-selected the wallpaper. The
+  daemon now waits for the window to become viewable before embedding mpv.
 
 ### Added
 - **Wayland live wallpaper support** on layer-shell compositors (COSMIC,
   Hyprland, Sway, KDE Plasma 6) via the bundled `mpvpaper` backend. The backend
   is enabled by default and supervised over mpv's IPC socket.
+- **Auto-pause on fullscreen** (wlroots / KDE Plasma 6 / COSMIC): the wallpaper
+  on an output pauses while a window there is fullscreen and resumes when it
+  leaves, reclaiming hardware-decode cost while hidden. GNOME doesn't expose the
+  protocol, so it's inactive there.
+- **Event-driven update notifications**: the daemon raises a desktop prompt when
+  a newer version is published, with one-click update on `.deb` installs.
 - **Wayland capability probe**: when `wayland-info`/`weston-info` is installed,
   Fresco checks the registry for `zwlr_layer_shell_v1` instead of guessing from
   the desktop name.
@@ -95,7 +108,7 @@ First public release. A GUI-first live-wallpaper setter for Debian-based Linux
 - X11 sessions only — Wayland support is planned for a future release.
 - Web/HTML wallpapers are out of scope for this release.
 
-[Unreleased]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.3...HEAD
+[0.0.7]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.3...v0.0.7
 [0.0.3]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/DibbayajyotiRoy/fresco/releases/tag/v0.0.1

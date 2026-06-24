@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "fresco"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anyhow",
  "async-channel",

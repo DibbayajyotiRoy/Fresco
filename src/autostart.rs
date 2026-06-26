@@ -33,8 +33,26 @@ fn exec_command() -> String {
     if is_flatpak() {
         format!("flatpak run --command=frescod {APP_ID}")
     } else {
-        "frescod".to_string()
+        // Use an absolute path: the login session's PATH often does not include
+        // where frescod lives (e.g. ~/.cargo/bin), so a bare `frescod` would
+        // silently fail to start at boot. Fall back to the bare name only if we
+        // can't resolve our own location.
+        frescod_abs_path().unwrap_or_else(|| "frescod".to_string())
     }
+}
+
+/// Absolute path to the `frescod` binary, resolved from the running executable —
+/// `frescod` itself when the daemon writes the entry, or its sibling when the GUI
+/// does. Returns `None` if neither can be found.
+fn frescod_abs_path() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    if exe.file_name().map(|n| n == "frescod").unwrap_or(false) {
+        return Some(exe.to_string_lossy().into_owned());
+    }
+    let sibling = exe.parent()?.join("frescod");
+    sibling
+        .is_file()
+        .then(|| sibling.to_string_lossy().into_owned())
 }
 
 /// Install the login-restore entry. Delay lets desktop-icon extensions

@@ -220,6 +220,14 @@ impl Player {
         unsafe { fns().ok()?.get_property(self.handle, "hwdec-current") }
     }
 
+    /// Current playback position in seconds, if known. Used to detect a cold-boot
+    /// VO stall (position frozen while not paused).
+    pub fn time_pos(&self) -> Option<f64> {
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        let s = unsafe { fns().ok()?.get_property(self.handle, "time-pos") }?;
+        s.trim().parse().ok()
+    }
+
     /// True if mpv reports an idle/failed state (no file loaded).
     pub fn load_failed(&self) -> bool {
         // After a failed loadfile, mpv goes idle: "idle-active" == "yes".

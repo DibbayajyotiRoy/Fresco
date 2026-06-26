@@ -31,6 +31,11 @@ const TICK: Duration = Duration::from_millis(100);
 const LOWER_INTERVAL: Duration = Duration::from_secs(2);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 const BATTERY_INTERVAL: Duration = Duration::from_secs(30);
+// Cold-boot stall self-heal: how long after login to watch for a frozen video,
+// how often to check, and how many recovery rebuilds to attempt.
+const HEAL_WINDOW: Duration = Duration::from_secs(60);
+const HEAL_INTERVAL: Duration = Duration::from_secs(3);
+const MAX_HEALS: u32 = 5;
 
 /// During a transition the loop ticks at ~60fps for buttery, eased motion.
 const ANIM_TICK: Duration = Duration::from_millis(16);
@@ -85,6 +90,9 @@ struct Renderer {
     window: WallpaperWindow,
     player: PlayerHandle,
     slideshow: Option<Slideshow>,
+    /// Last observed playback position — used to detect a cold-boot VO stall
+    /// (a video whose position isn't advancing shortly after login).
+    last_time_pos: std::cell::Cell<Option<f64>>,
 }
 
 /// The control surface the slideshow/battery engine drives — identical for both
@@ -122,6 +130,15 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.set_paused(paused),
         }
     }
+    /// Current playback position in seconds (X11 in-process mpv). Used only by the
+    /// X11 cold-boot stall self-heal, so the Wayland arm (separately supervised)
+    /// returns `None`.
+    fn time_pos(&self) -> Option<f64> {
+        match self {
+            PlayerHandle::X11(p) => p.time_pos(),
+            PlayerHandle::Wayland(_) => None,
+        }
+    }
     fn hwdec_current(&self) -> Option<String> {
         match self {
             PlayerHandle::X11(p) => p.hwdec_current(),
@@ -156,6 +173,9 @@ pub struct Daemon {
     last_monitor_check: Instant,
     last_battery_check: Instant,
     monitors: Vec<Monitor>,
+    started_at: Instant,
+    last_heal_check: Instant,
+    heals: u32,
 }
 
 impl Daemon {
@@ -175,6 +195,9 @@ impl Daemon {
             last_monitor_check: Instant::now(),
             last_battery_check: Instant::now() - BATTERY_INTERVAL,
             monitors: Vec::new(),
+            started_at: Instant::now(),
+            last_heal_check: Instant::now(),
+            heals: 0,
         })
     }
 
@@ -229,6 +252,7 @@ impl Daemon {
             window,
             player,
             slideshow,
+            last_time_pos: std::cell::Cell::new(None),
         })
     }
 
@@ -269,6 +293,7 @@ impl Daemon {
                 self.check_battery();
                 self.last_battery_check = now;
             }
+            self.check_cold_boot_stall(now);
             let animating = self.advance_slideshows(now);
 
             std::thread::sleep(if animating { ANIM_TICK } else { TICK });
@@ -392,6 +417,50 @@ impl Daemon {
             self.battery_paused = discharging;
             self.apply_pause();
             log::info!("battery pause = {discharging}");
+        }
+    }
+
+    /// Recover from the cold-boot VO stall. Right after login the X server / WM
+    /// may not have the wallpaper window paint-ready when mpv starts, so a video
+    /// can freeze on its first frame and stay static until the user re-selects it.
+    /// Here we watch the playback position for the first minute and, if a video
+    /// isn't advancing, rebuild it — exactly what a manual reselect does — a few
+    /// times at most. Images/slideshows hold a frame on purpose, so they're skipped.
+    fn check_cold_boot_stall(&mut self, now: Instant) {
+        if self.heals >= MAX_HEALS
+            || now.duration_since(self.started_at) > HEAL_WINDOW
+            || now.duration_since(self.last_heal_check) < HEAL_INTERVAL
+            || self.user_paused
+            || self.battery_paused
+        {
+            return;
+        }
+        self.last_heal_check = now;
+
+        let mut stalled = false;
+        for r in &self.renderers {
+            let kind = self.config.wallpaper_for(&r.window.connector).kind;
+            if !matches!(kind, Kind::Video | Kind::Playlist) {
+                continue;
+            }
+            let cur = r.player.time_pos();
+            let prev = r.last_time_pos.replace(cur);
+            // Two readings the same → position frozen → stalled. (None means mpv
+            // hasn't reported a position yet; wait for the next check.)
+            if let (Some(p), Some(c)) = (prev, cur) {
+                if (c - p).abs() < 1e-3 {
+                    stalled = true;
+                }
+            }
+        }
+
+        if stalled {
+            self.heals += 1;
+            log::warn!(
+                "video playback not advancing after start; recovering from cold-boot stall (rebuild {}/{MAX_HEALS})",
+                self.heals
+            );
+            let _ = self.rebuild();
         }
     }
 
@@ -682,6 +751,16 @@ pub fn run() -> Result<()> {
     // Event-driven admin notifications + update prompts over Supabase Realtime.
     // Background thread; never blocks the wallpaper loop.
     notifier::spawn();
+
+    // Self-heal the login-restore entry: if the user wants the wallpaper restored
+    // on login (and hasn't stopped it), make sure the autostart entry actually
+    // exists. Fixes installs where config says autostart=true but the .desktop
+    // entry was never written, so the daemon silently failed to start on boot.
+    if let Ok(cfg) = Config::load() {
+        if cfg.autostart && cfg.enabled {
+            crate::autostart::enable().ok();
+        }
+    }
     let capability = detect();
     log::info!("session capability: {}", capability.id());
     match capability {

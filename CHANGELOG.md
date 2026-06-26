@@ -4,6 +4,19 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] — 2026-06-26
+
+### Fixed
+- **The wallpaper now actually restores on login.** With `autostart` enabled,
+  the login-restore entry was only written when you toggled the setting in the
+  app — so a default/fresh install never got one and the daemon never started
+  on boot (you'd see a static still-frame until you opened the app). The daemon
+  now ensures the entry exists on startup, and the entry uses an **absolute
+  path** to `frescod` so it launches even when `frescod` isn't on the login PATH.
+- **Cold-boot video stall self-heal (X11).** If a video isn't advancing shortly
+  after login, the daemon rebuilds it automatically — what re-selecting the
+  wallpaper used to do by hand.
+
 ## [0.0.7] — 2026-06-24
 
 ### Fixed
@@ -108,6 +121,7 @@ First public release. A GUI-first live-wallpaper setter for Debian-based Linux
 - X11 sessions only — Wayland support is planned for a future release.
 - Web/HTML wallpapers are out of scope for this release.
 
+[0.0.8]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.3...v0.0.7
 [0.0.3]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.1...v0.0.2

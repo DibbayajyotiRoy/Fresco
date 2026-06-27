@@ -33,18 +33,18 @@ export function StatsStrip({ stats }: { stats: GitHubStats }) {
   return (
     <section
       aria-label="Project stats"
-      className="border-b border-border/60 bg-secondary/20"
+      className="border-b border-border bg-surface-1/40"
     >
-      <div className="mx-auto grid max-w-6xl grid-cols-2 divide-x divide-y divide-border/60 sm:grid-cols-4 sm:divide-y-0">
+      <div className="mx-auto grid max-w-6xl grid-cols-2 divide-x divide-y divide-border sm:grid-cols-4 sm:divide-y-0">
         {cells.map((cell) => (
           <div key={cell.label} className="px-5 py-7 text-center sm:text-left">
             <div className="flex items-center justify-center gap-2 sm:justify-start">
-              <cell.icon className="size-4 text-primary" aria-hidden />
-              <span className="text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">
+              <cell.icon className="size-4 text-ink-subtle" aria-hidden />
+              <span className="text-2xl font-semibold tracking-tight tabular-nums text-ink sm:text-3xl">
                 {cell.value}
               </span>
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">{cell.label}</p>
+            <p className="mt-1.5 text-xs text-ink-subtle">{cell.label}</p>
           </div>
         ))}
       </div>

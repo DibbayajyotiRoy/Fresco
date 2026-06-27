@@ -22,33 +22,33 @@ export function Download() {
       <div className="mx-auto max-w-6xl px-5">
         <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
           <div className="max-w-2xl">
-            <p className="text-sm font-medium text-primary">Download</p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+            <p className="text-sm font-medium text-ink-subtle">Download</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
               Install on Debian, Ubuntu, Pop!_OS &amp; Mint.
             </h2>
           </div>
-          <Badge variant="outline" className="text-muted-foreground">
-            X11 sessions · Wayland coming
+          <Badge variant="outline" className="border-border text-ink-subtle">
+            X11 and Wayland
           </Badge>
         </div>
 
         <div className="mt-12 grid gap-5 lg:grid-cols-2">
           {/* .deb / GitHub releases */}
-          <Card className="flex flex-col p-7">
+          <Card className="flex flex-col p-7 shadow-none">
             <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <div className="flex size-10 items-center justify-center rounded-lg border border-border bg-surface-2 text-ink">
                 <Package className="size-5" />
               </div>
               <div>
-                <h3 className="font-semibold tracking-tight">
+                <h3 className="font-semibold tracking-tight text-ink">
                   Download the .deb
                 </h3>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-ink-subtle">
                   From GitHub releases
                 </p>
               </div>
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">
+            <p className="mt-4 text-sm text-ink-subtle">
               Grab the latest <code className="font-mono text-xs">.deb</code>{" "}
               and double-click it, or install from the terminal:
             </p>
@@ -76,14 +76,14 @@ export function Download() {
           </Card>
 
           {/* Flathub, not published yet */}
-          <Card className="flex flex-col p-7">
+          <Card className="flex flex-col p-7 shadow-none">
             <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <div className="flex size-10 items-center justify-center rounded-lg border border-border bg-surface-2 text-ink-subtle">
                 <Terminal className="size-5" />
               </div>
               <div>
-                <h3 className="font-semibold tracking-tight">Flathub</h3>
-                <p className="text-xs text-muted-foreground">
+                <h3 className="font-semibold tracking-tight text-ink">Flathub</h3>
+                <p className="text-xs text-ink-subtle">
                   Sandboxed Flatpak build
                 </p>
               </div>

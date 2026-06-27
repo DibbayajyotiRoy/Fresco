@@ -6,7 +6,7 @@
  */
 
 const REPO = "DibbayajyotiRoy/fresco";
-const FALLBACK_VERSION = "0.0.3";
+const FALLBACK_VERSION = "0.0.9";
 const RELEASES_LATEST = `https://github.com/${REPO}/releases/latest`;
 
 export type GitHubStats = {

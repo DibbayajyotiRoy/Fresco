@@ -3,55 +3,60 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
+/*
+ * Linear-style dark product surface. One locked theme (Linear ships no light
+ * mode): deepest near-black canvas, a four-step surface ladder for lift,
+ * hairline borders for separation, and a single lavender-blue accent reserved
+ * for the brand mark, primary CTA, focus rings, and link emphasis.
+ * :root and .dark hold the same values so the page renders dark regardless.
+ */
+:root,
+.dark {
   --radius: 0.75rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  /* Surface ladder (canvas -> surface-4) */
+  --canvas: #010102;
+  --surface-1: #0c0d11;
+  --surface-2: #131419;
+  --surface-3: #1b1c22;
+  --surface-4: #23242b;
+  --hairline: #23252a;
+  --hairline-strong: #2c2f37;
 
-  /* Brand accent: rose from the Fresco logo gradient (deep indigo -> rose) */
-  --primary: oklch(0.63 0.14 12);
-  --primary-foreground: oklch(0.99 0.01 20);
+  /* Ink ramp */
+  --ink: #f7f8f8;
+  --ink-muted: #d0d6e0;
+  --ink-subtle: #8a8f98;
+  --ink-tertiary: #62666d;
 
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.63 0.14 12);
-}
+  /* Lavender-blue accent (scarce: brand, primary CTA, focus, link) */
+  --accent-lavender: #5e6ad2;
+  --accent-lavender-hover: #828fff;
+  --accent-lavender-focus: #5e69d1;
+  --success: #27a644;
 
-.dark {
-  --background: oklch(0.16 0.006 285);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0.006 285);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0.006 285);
-  --popover-foreground: oklch(0.985 0 0);
+  /* shadcn semantic tokens mapped onto the Linear ladder */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--surface-1);
+  --card-foreground: var(--ink);
+  --popover: var(--surface-2);
+  --popover-foreground: var(--ink);
 
-  --primary: oklch(0.71 0.13 13);
-  --primary-foreground: oklch(0.17 0.02 300);
+  --primary: var(--accent-lavender);
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.27 0.006 285);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.27 0.006 285);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.27 0.006 285);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--ink-subtle);
+  --accent: var(--surface-3);
+  --accent-foreground: var(--ink);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.71 0.13 13);
+  --border: var(--hairline);
+  --input: var(--hairline-strong);
+  --ring: var(--accent-lavender-focus);
 }
 
 @theme inline {
@@ -75,15 +80,33 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  /* Linear surface ladder + ink ramp + accent, exposed as Tailwind colors
+     (e.g. bg-surface-2, text-ink-subtle, border-hairline, text-lavender). */
+  --color-canvas: var(--canvas);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-tertiary: var(--ink-tertiary);
+  --color-lavender: var(--accent-lavender);
+  --color-lavender-hover: var(--accent-lavender-hover);
+  --color-success: var(--success);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
+  /* Linear runs one continuous sans voice from display to body (Geist as the
+     open substitute for Linear's custom cut). No separate display family. */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-  --font-display: var(--font-bricolage), var(--font-geist-sans), ui-sans-serif,
-    system-ui, sans-serif;
+  --font-display: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
@@ -120,19 +143,19 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  /* World-class display type: Bricolage Grotesque for every heading, with
-     tightened tracking and balanced wrapping. Body stays Geist. */
+  /* One sans voice (Geist), Linear-style: aggressive negative tracking that
+     scales with size. Headings hold the same family as body. */
   h1,
   h2,
   h3,
   h4 {
     font-family: var(--font-display);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     text-wrap: balance;
   }
   ::selection {
-    background-color: color-mix(in oklch, var(--primary) 30%, transparent);
-    color: oklch(0.99 0 0);
+    background-color: color-mix(in oklch, var(--primary) 35%, transparent);
+    color: var(--ink);
   }
   @media (prefers-reduced-motion: reduce) {
     html {
@@ -141,10 +164,8 @@
   }
 }
 
-/* Logo-gradient accent text (deep indigo to rose), rationed to one phrase. */
-.text-sunset {
-  background-image: linear-gradient(100deg, #b58cff, #d76d77 62%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+/* Lavender accent for a single emphasized phrase in display headlines.
+   Linear emphasizes with color in the same family, not a gradient. */
+.text-lavender-accent {
+  color: var(--accent-lavender-hover);
 }

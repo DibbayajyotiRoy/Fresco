@@ -22,13 +22,13 @@ export function JsonLd({
     applicationCategory: "UtilitiesApplication",
     operatingSystem: "Linux",
     description:
-      "Fresco is a free, open-source live-wallpaper app for Linux. It sets video, GIF, image, slideshow, and playlist wallpapers as your animated desktop background, with hardware-accelerated playback. A free Wallpaper Engine alternative for Pop!_OS, Ubuntu, Linux Mint, Debian, and elementary OS on X11.",
+      "Fresco is a free, open-source live-wallpaper app for Linux. It sets video, GIF, image, slideshow, and playlist wallpapers as your animated desktop background, with hardware-accelerated playback. A free Wallpaper Engine alternative for Pop!_OS, Ubuntu, Linux Mint, Debian, and elementary OS, on X11 and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6).",
     url: SITE_URL,
     downloadUrl: RELEASES_URL,
     softwareVersion: version,
     releaseNotes: `${GITHUB_URL}/blob/main/CHANGELOG.md`,
     softwareRequirements:
-      "X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS)",
+      "Linux on X11, or a Wayland layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma 6)",
     featureList: FEATURE_LIST,
     screenshot: `${SITE_URL}/opengraph-image`,
     image: `${SITE_URL}/opengraph-image`,
@@ -40,7 +40,7 @@ export function JsonLd({
     codeRepository: GITHUB_URL,
     programmingLanguage: ["Rust"],
     keywords:
-      "live wallpaper linux, video wallpaper linux, animated wallpaper ubuntu, wallpaper engine alternative linux, hidamari alternative",
+      "live wallpaper linux, video wallpaper linux, animated wallpaper ubuntu, wallpaper engine alternative linux, hidamari alternative, live wallpaper wayland, hyprland live wallpaper, kde plasma live wallpaper",
   };
 
   if (typeof downloads === "number") {

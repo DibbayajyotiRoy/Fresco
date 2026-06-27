@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Bricolage_Grotesque } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SmoothScroll } from "@/components/smooth-scroll";
 import { MadeBy } from "@roy-ui/ui/made-by";
@@ -15,12 +15,6 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-bricolage",
-  subsets: ["latin"],
-  display: "swap",
-});
-
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
 
 export const metadata: Metadata = {
@@ -32,7 +26,7 @@ export const metadata: Metadata = {
     template: "%s | Fresco",
   },
   description:
-    "Fresco is a free, open-source live wallpaper app for Linux. Set videos, GIFs, images, slideshows, and playlists as your desktop background. GUI-first, hardware-accelerated, near-zero CPU. X11.",
+    "Fresco is a free, open-source live wallpaper app for Linux. Set videos, GIFs, images, slideshows, and playlists as your desktop background. GUI-first, hardware-accelerated, near-zero CPU. Works on X11 and Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6).",
   keywords: [
     "live wallpaper linux",
     "video wallpaper linux",
@@ -46,6 +40,10 @@ export const metadata: Metadata = {
     "gif wallpaper linux",
     "desktop slideshow linux",
     "live wallpaper linux mint",
+    "live wallpaper wayland",
+    "hyprland live wallpaper",
+    "kde plasma live wallpaper",
+    "sway wallpaper video",
     "GTK4",
     "Rust",
     "mpv",
@@ -80,7 +78,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Fresco - Live Wallpapers for Linux",
     description:
-      "Video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated, near-zero-CPU playback. A free Wallpaper Engine alternative.",
+      "Video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated, near-zero-CPU playback, on X11 and Wayland. A free Wallpaper Engine alternative.",
     url: SITE_URL,
     siteName: "Fresco",
     locale: "en_US",
@@ -90,12 +88,12 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Fresco - Live Wallpapers for Linux",
     description:
-      "Hardware-accelerated live wallpapers for Linux. A free, open-source Wallpaper Engine alternative.",
+      "Hardware-accelerated live wallpapers for Linux, on X11 and Wayland. A free, open-source Wallpaper Engine alternative.",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1c1c2e",
+  themeColor: "#010102",
 };
 
 export default function RootLayout({
@@ -106,7 +104,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${bricolage.variable} font-sans antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <SmoothScroll>{children}</SmoothScroll>
         <MadeBy
@@ -114,7 +112,7 @@ export default function RootLayout({
           href="https://dibbayajyoti.com/"
           target="_blank"
           rel="noopener noreferrer"
-          nameFont="var(--font-bricolage)"
+          nameFont="var(--font-geist-sans)"
         />
         <Analytics />
       </body>

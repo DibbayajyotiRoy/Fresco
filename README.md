@@ -13,7 +13,7 @@
 
 </div>
 
-> Windows has Wallpaper Engine. macOS has Lively. **Linux had nothing simple — until Fresco.**
+> Windows has Wallpaper Engine and Lively. **Linux had nothing simple — until Fresco.**
 > Pick a video, click *Set*, close the app. Your wallpaper keeps playing and comes back on login.
 
 <!-- Add a hero GIF/screenshot here for instant comprehension:
@@ -27,11 +27,15 @@ Every other Linux live-wallpaper option is terminal-only, abandoned, locked to o
 
 - 🎬 **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image **slideshow**, or a multi-video **playlist**
 - ⚡ **Hardware-accelerated** — GPU video decode (VA-API / NVDEC) keeps CPU near zero without degrading quality
-- ✂️ **Drag-to-crop editor** — frame exactly the region you want (no other Linux tool has this)
+- 🐧 **X11 _and_ Wayland** — desktop-window backend on X11, plus a bundled `mpvpaper` layer-shell backend for COSMIC, Hyprland, Sway & KDE Plasma 6
+- ✂️ **Crop & rotate editor** — drag a frame to pick the exact region, and rotate 90° to fix sideways phone clips (no other Linux tool has this)
+- 🔊 **Per-wallpaper sound** — unmute a video and set its volume; the choice is remembered for that wallpaper
+- 🎞 **Slideshow transitions** — crossfade, fade, slide, or a slow Ken Burns pan between images
 - 🖼 **Wallpaper library** — saved thumbnails, recently-used, and search
 - 🔁 **Set & forget** — close the app, the wallpaper keeps playing; restored automatically on login
-- ⏸ **Battery-aware** — pause on battery, pause/resume any time
-- 🖥 **Multi-monitor** — a different wallpaper per display
+- ⏸ **Power-aware** — pause on battery, and auto-pause per monitor when a window there goes fullscreen
+- 🖥 **Multi-monitor** — a different wallpaper per display, with live hotplug handling
+- 🎨 **Themes & accents** — light / dark / system with six accent palettes
 
 ## Fresco vs other Linux options
 
@@ -39,8 +43,10 @@ Every other Linux live-wallpaper option is terminal-only, abandoned, locked to o
 |---|:---:|:---:|:---:|:---:|:---:|
 | GUI app (no terminal) | ✅ | ✅ | ✅ | ❌ | ✅ |
 | Works on GNOME/X11 | ✅ | ✅ | ✅ | ❌ (Wayland-only) | ❌ (needs compositor off) |
+| Works on Wayland (layer-shell) | ✅ | ⚠️ partial | ❌ | ✅ | ❌ |
 | Video quality (mpv hwdec) | ✅ | ⚠️ VLC | ⚠️ | ✅ | ✅ |
-| Drag-to-crop | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Crop & rotate | ✅ | ❌ | ❌ | ❌ | ⚠️ crop only |
+| Per-wallpaper audio | ✅ | ✅ | ❌ | ⚠️ manual | ✅ |
 | Playlists | ✅ | ❌ | ❌ | manual | ✅ |
 | Wallpaper library | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Actively maintained | ✅ | ✅ | ❌ | ✅ | ✅ |
@@ -90,10 +96,16 @@ Install the Fresco `.deb`, open it, click **+ Add**, choose your video, and clic
 It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). On **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6) live wallpapers work via the bundled `mpvpaper` backend. **GNOME Wayland** shows a static-frame fallback because Mutter does not expose a live wallpaper surface.
 
 **Will a video wallpaper drain my battery or CPU?**
-Fresco uses GPU hardware decoding so CPU stays near zero, and it can **automatically pause on battery**.
+Fresco uses GPU hardware decoding so CPU stays near zero. It can **automatically pause on battery**, and it **auto-pauses per monitor** when a window there goes fullscreen.
+
+**Can a video wallpaper play sound?**
+Yes. Each wallpaper remembers its own mute state and volume, so you can unmute one specific video and the choice sticks. Wallpapers start muted by default.
+
+**Can I crop or rotate a wallpaper?**
+Yes. The editor has a **drag-to-crop** frame and a **90° rotate** (great for sideways phone videos). Both run on the GPU and are remembered per wallpaper.
 
 **What video formats are supported?**
-mp4, webm, mkv, avi, mov, plus animated GIFs, static images (jpg/png/webp), folders as slideshows, and multi-video playlists.
+mp4, webm, mkv, avi, mov, plus animated GIFs, static images (jpg/png/webp), folders as slideshows (with crossfade / fade / slide / Ken Burns transitions), and multi-video playlists.
 
 ## How it works
 

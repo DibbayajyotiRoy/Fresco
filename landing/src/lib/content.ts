@@ -14,31 +14,39 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How do I set a video as my wallpaper on Ubuntu or Pop!_OS?",
-    a: "Install the Fresco .deb, open it from your app menu, click Add, choose your video, optionally crop it, then click Set as Wallpaper. Close the app and the video keeps playing as your desktop background.",
+    a: "Install the Fresco .deb, open it from your app menu, click Add, choose your video, optionally crop or rotate it, then click Set as Wallpaper. Close the app and the video keeps playing as your desktop background.",
   },
   {
     q: "Will a video wallpaper drain my CPU or battery?",
-    a: "No. Fresco decodes video on the GPU through mpv (VA-API and NVDEC), so CPU usage stays near zero and memory sits around 120 to 150 MB. It can also pause automatically while you are on battery.",
+    a: "No. Fresco decodes video on the GPU through mpv (VA-API and NVDEC), so CPU usage stays near zero and memory sits around 120 to 150 MB. It can pause automatically while you are on battery, and it auto-pauses on any monitor that has a fullscreen window.",
   },
   {
     q: "Does it work on Wayland or GNOME?",
-    a: "Fresco runs on GNOME and any X11 session today, including Pop!_OS, Ubuntu, Linux Mint, Debian, and elementary OS. Wayland support is on the roadmap.",
+    a: "Both, with one caveat. Fresco runs on any X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS) and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6) through a bundled mpvpaper backend. GNOME on Wayland shows a static frame instead, because Mutter does not expose a live wallpaper surface.",
+  },
+  {
+    q: "Can a video wallpaper play sound?",
+    a: "Yes. Each wallpaper remembers its own mute state and volume, so you can unmute one specific video and the choice sticks every time it is set. Wallpapers start muted by default.",
+  },
+  {
+    q: "Can I crop or rotate a wallpaper?",
+    a: "Yes. The editor has a drag-to-crop frame and a 90-degree rotate, so you can pick the exact region or turn a sideways phone video upright. Both are applied on the GPU and remembered per wallpaper.",
   },
   {
     q: "Will the wallpaper stay after I reboot?",
-    a: "Yes. Fresco adds an autostart entry that restores your live wallpaper automatically on login. You can turn this off in settings.",
+    a: "Yes. Fresco adds an autostart entry that restores your live wallpaper automatically on login, and self-heals the entry if it is missing. You can turn this off in settings.",
   },
   {
     q: "What media formats are supported?",
-    a: "Looping video (mp4, webm, mkv, avi, mov), animated GIFs, static images (jpg, png, webp), a folder of images as a slideshow, and multi-video playlists.",
+    a: "Looping video (mp4, webm, mkv, avi, mov), animated GIFs, static images (jpg, png, webp), a folder of images as a slideshow with crossfade, fade, slide, or Ken Burns transitions, and multi-video playlists.",
   },
   {
     q: "Does it support multiple monitors?",
-    a: "Yes. You can set a different wallpaper on each display, and Fresco handles monitor hotplug live.",
+    a: "Yes. You can set a different wallpaper on each display, Fresco handles monitor hotplug live, and it pauses the wallpaper per output when a window there goes fullscreen.",
   },
   {
     q: "How is Fresco different from Hidamari, Komorebi, and mpvpaper?",
-    a: "Fresco is GUI-first, hardware-accelerated, and handles video, GIF, image, slideshow, and playlist wallpapers in one app. It is actively maintained, unlike Komorebi, and needs no command line, unlike mpvpaper.",
+    a: "Fresco is GUI-first, hardware-accelerated, and handles video, GIF, image, slideshow, and playlist wallpapers in one app, on both X11 and Wayland. It is actively maintained, unlike Komorebi, and needs no command line, unlike mpvpaper.",
   },
   {
     q: "Is Fresco free?",
@@ -62,27 +70,27 @@ export const INSTALL_STEPS: { name: string; text: string }[] = [
   },
 ];
 
-/** Highlights from the 0.0.3 release, used by the What's New section. */
+/** Highlights from the latest releases (0.0.7 to 0.0.9), for the What's New section. */
 export const WHATS_NEW: { icon: string; title: string; body: string }[] = [
   {
-    icon: "palette",
-    title: "Themes and accents",
-    body: "Light, dark, or follow the system, with six accent palettes.",
+    icon: "wayland",
+    title: "Wayland live wallpapers",
+    body: "Live video on COSMIC, Hyprland, Sway, and KDE Plasma 6 via a bundled mpvpaper backend.",
   },
   {
-    icon: "images",
-    title: "Image slideshows",
-    body: "Pick several images or a whole folder and loop them on an adjustable timer.",
+    icon: "audio",
+    title: "Per-wallpaper sound",
+    body: "Unmute a video and set its volume. Fresco remembers the choice for that wallpaper.",
   },
   {
-    icon: "gauge",
-    title: "Much lighter",
-    body: "Memory dropped toward 120 to 150 MB and binaries are about 20 percent smaller.",
+    icon: "rotate",
+    title: "Rotate 90 degrees",
+    body: "Turn a sideways phone video or photo upright, with hardware decoding intact.",
   },
   {
-    icon: "pointer",
-    title: "Right-click menu",
-    body: "Set, Edit, Rename, or Remove any wallpaper straight from its library card.",
+    icon: "pause",
+    title: "Fullscreen auto-pause",
+    body: "The wallpaper pauses on any monitor with a fullscreen window and resumes when it leaves.",
   },
 ];
 
@@ -90,11 +98,14 @@ export const WHATS_NEW: { icon: string; title: string; body: string }[] = [
 export const FEATURE_LIST = [
   "Video, GIF, image, slideshow, and playlist wallpapers",
   "Hardware-accelerated playback (VA-API, NVDEC)",
-  "Drag-to-crop editor",
+  "Works on X11 and Wayland layer-shell compositors",
+  "Drag-to-crop and 90-degree rotate editor",
+  "Per-wallpaper sound and volume",
+  "Slideshow transitions (crossfade, fade, slide, Ken Burns)",
   "Wallpaper library with search",
-  "Multi-monitor support",
-  "Pause on battery",
-  "Restores on login",
+  "Different wallpaper per monitor",
+  "Pause on battery and auto-pause on fullscreen",
+  "Restores automatically on login",
   "Themes and accent colors",
 ];
 
@@ -135,9 +146,10 @@ export const COMPARISON: {
   note: "Wallpaper Engine is a paid, Windows-first product. Komorebi is no longer maintained.",
   rows: [
     { label: "GUI app, no terminal", values: [true, true, true, false, true] },
-    { label: "Works on GNOME and X11", values: [true, true, true, "Wayland only", "Compositor off"] },
+    { label: "Works on X11", values: [true, true, true, false, "Compositor off"] },
+    { label: "Works on Wayland (layer-shell)", values: [true, "Partial", false, true, false] },
     { label: "Hardware decode, low CPU", values: [true, "Partial", "Partial", true, true] },
-    { label: "Drag-to-crop", values: [true, false, false, false, true] },
+    { label: "Drag-to-crop and rotate", values: [true, false, false, false, "Crop only"] },
     { label: "Playlists", values: [true, false, false, "Manual", true] },
     { label: "Image slideshow", values: [true, false, false, false, true] },
     { label: "Wallpaper library", values: [true, false, false, false, true] },

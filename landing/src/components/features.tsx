@@ -1,15 +1,17 @@
 import Image from "next/image";
 import {
   Cpu,
+  Crop,
   Film,
   Images,
+  Layers,
   ListVideo,
+  Monitor,
   Palette,
-  RotateCcw,
-  Sparkles,
+  PauseCircle,
+  Volume2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 
 type Feature = {
   icon: React.ComponentType<{ className?: string }>;
@@ -25,9 +27,8 @@ const MEDIA_FEATURES: Feature[] = [
   },
   {
     icon: Images,
-    title: "Image slideshows",
-    description:
-      "Point at a folder and rotate through stills on your own interval.",
+    title: "Slideshows with transitions",
+    description: "Rotate a folder of images with crossfade, fade, or Ken Burns.",
   },
   {
     icon: ListVideo,
@@ -38,31 +39,51 @@ const MEDIA_FEATURES: Feature[] = [
 
 const SECONDARY_FEATURES: Feature[] = [
   {
-    icon: Sparkles,
-    title: "Slideshow transitions",
-    description: "Crossfade, fade, or a slow Ken Burns pan between images.",
+    icon: Layers,
+    title: "X11 and Wayland",
+    description:
+      "A desktop-window backend on X11, plus a layer-shell backend for COSMIC, Hyprland, Sway, and KDE Plasma 6.",
+  },
+  {
+    icon: Crop,
+    title: "Crop and rotate",
+    description:
+      "Drag a frame to pick the region, rotate 90 degrees to fix sideways clips. Both stay zero-copy on the GPU.",
+  },
+  {
+    icon: Volume2,
+    title: "Per-wallpaper sound",
+    description:
+      "Unmute a video and set its volume. Fresco remembers the choice for that wallpaper.",
+  },
+  {
+    icon: Monitor,
+    title: "Multi-monitor",
+    description:
+      "A different wallpaper on every display, with live handling when you plug or unplug one.",
+  },
+  {
+    icon: PauseCircle,
+    title: "Power-aware",
+    description:
+      "Pause on battery, and auto-pause per monitor when a window there goes fullscreen.",
   },
   {
     icon: Palette,
-    title: "Theme & accent picker",
-    description: "Light or dark, with an accent color that suits your setup.",
-  },
-  {
-    icon: RotateCcw,
-    title: "Restores on login",
-    description: "Set it once and close the app. It comes back every session.",
+    title: "Themes and accents",
+    description: "Light, dark, or follow the system, with six accent palettes.",
   },
 ];
 
 function FeatureRow({ icon: Icon, title, description }: Feature) {
   return (
     <div className="flex gap-4">
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-secondary/40 text-primary">
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-ink-muted">
         <Icon className="size-5" />
       </div>
       <div>
-        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        <h3 className="text-sm font-semibold tracking-tight text-ink">{title}</h3>
+        <p className="mt-1 text-sm text-ink-subtle">{description}</p>
       </div>
     </div>
   );
@@ -70,40 +91,38 @@ function FeatureRow({ icon: Icon, title, description }: Feature) {
 
 export function Features() {
   return (
-    <section
-      id="features"
-      className="border-b border-border/60 py-20 sm:py-28"
-    >
+    <section id="features" className="border-b border-border py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <p className="text-sm font-medium text-primary">Features</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <p className="text-sm font-medium text-ink-subtle">Features</p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
             Any media. Any monitor. No CPU drama.
           </h2>
-          <p className="mt-4 text-pretty text-muted-foreground">
+          <p className="mt-4 text-pretty text-ink-subtle">
             Fresco plays your wallpaper through mpv with GPU hardware decoding,
             so a 4K video costs about as much as a static image.
           </p>
         </div>
 
-        {/* Highlight card: hardware decoding */}
+        {/* Highlight bento: hardware decoding lifted to surface-2 for hierarchy,
+            media types alongside it. Lift, not color, carries the emphasis. */}
         <div className="mt-12 grid gap-5 lg:grid-cols-5">
-          <Card className="flex flex-col justify-between overflow-hidden lg:col-span-3">
+          <Card className="flex flex-col justify-between overflow-hidden border-hairline-strong bg-surface-2 shadow-none lg:col-span-3">
             <div className="p-7">
-              <div className="flex size-11 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <div className="flex size-11 items-center justify-center rounded-lg border border-border bg-surface-3 text-ink">
                 <Cpu className="size-6" />
               </div>
-              <h3 className="mt-5 text-xl font-semibold tracking-tight">
+              <h3 className="mt-5 text-xl font-semibold tracking-tight text-ink">
                 Hardware-accelerated, near-zero CPU
               </h3>
-              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              <p className="mt-2 max-w-md text-sm text-ink-subtle">
                 Decoding runs on the GPU through VA-API or NVDEC. Your processor
                 stays free for everything else, with no loss of quality.
               </p>
             </div>
-            <div className="relative mt-2 h-44 w-full overflow-hidden border-t border-border/60 sm:h-52">
+            <div className="relative mt-2 h-44 w-full overflow-hidden border-t border-border sm:h-52">
               <Image
-                src="https://picsum.photos/seed/fresco-decode/1000/420"
+                src="https://picsum.photos/seed/fresco-4k-decode/1000/420"
                 alt="A high-resolution live wallpaper running smoothly on the desktop"
                 fill
                 sizes="(max-width: 1024px) 100vw, 60vw"
@@ -113,9 +132,9 @@ export function Features() {
           </Card>
 
           {/* Media types */}
-          <Card className="lg:col-span-2">
+          <Card className="shadow-none lg:col-span-2">
             <div className="flex h-full flex-col gap-6 p-7">
-              <p className="text-sm font-medium text-muted-foreground">
+              <p className="text-sm font-medium text-ink-subtle">
                 Set anything as your wallpaper
               </p>
               <div className="flex flex-col gap-6">
@@ -127,16 +146,10 @@ export function Features() {
           </Card>
         </div>
 
-        {/* Secondary feature trio */}
+        {/* Secondary feature grid: 6 cells, no empty slots. */}
         <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {SECONDARY_FEATURES.map((feature, i) => (
-            <Card
-              key={feature.title}
-              className={cn(
-                "p-7",
-                i === 2 && "sm:col-span-2 lg:col-span-1"
-              )}
-            >
+          {SECONDARY_FEATURES.map((feature) => (
+            <Card key={feature.title} className="p-7 shadow-none">
               <FeatureRow {...feature} />
             </Card>
           ))}

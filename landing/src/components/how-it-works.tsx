@@ -43,12 +43,12 @@ export function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="border-b border-border/60 bg-secondary/20 py-20 sm:py-28"
+      className="border-b border-border bg-surface-1/40 py-20 sm:py-28"
     >
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <p className="text-sm font-medium text-primary">How it works</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <p className="text-sm font-medium text-ink-subtle">How it works</p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
             Three clicks, then forget about it.
           </h2>
         </div>
@@ -69,7 +69,7 @@ export function HowItWorks() {
           {/* Connector line that draws across the nodes on scroll (desktop). */}
           <motion.div
             aria-hidden
-            className="pointer-events-none absolute left-[15%] right-[15%] top-7 hidden h-px origin-left bg-gradient-to-r from-primary/60 via-primary/25 to-primary/60 md:block"
+            className="pointer-events-none absolute left-[15%] right-[15%] top-7 hidden h-px origin-left bg-gradient-to-r from-hairline-strong via-hairline to-hairline-strong md:block"
             initial={reduce ? false : { scaleX: 0 }}
             whileInView={{ scaleX: 1 }}
             viewport={{ once: true, amount: 0.6 }}
@@ -92,7 +92,7 @@ export function HowItWorks() {
                 }}
                 onHoverStart={() => refs[i].current?.play()}
               >
-                <div className="relative z-10 flex size-14 items-center justify-center rounded-2xl border border-border/70 bg-card text-primary shadow-sm ring-1 ring-inset ring-white/5 transition-colors group-hover:border-primary/40">
+                <div className="relative z-10 flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-2 text-ink-muted shadow-none ring-1 ring-inset ring-white/5 transition-colors group-hover:border-hairline-strong">
                   <Icon ref={refs[i]} className="size-7" />
                   <span className="absolute -right-2 -top-2 flex size-5 items-center justify-center rounded-full border border-border/70 bg-background font-mono text-[10px] text-muted-foreground">
                     {i + 1}

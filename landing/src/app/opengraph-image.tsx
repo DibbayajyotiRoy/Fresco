@@ -5,8 +5,9 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 /**
- * Dynamic OpenGraph card. Dark ground with the app's coral-orange sunset glow,
- * system fonts only (no external fetch). No em-dashes in any text.
+ * Dynamic OpenGraph card in the Linear-style dark system: near-black canvas,
+ * a single lavender-blue accent, system fonts only (no external fetch).
+ * No em-dashes in any text.
  */
 export default function Image() {
   return new ImageResponse(
@@ -19,10 +20,8 @@ export default function Image() {
           flexDirection: "column",
           justifyContent: "center",
           padding: "80px",
-          backgroundColor: "#181618",
-          backgroundImage:
-            "radial-gradient(60% 70% at 75% 10%, rgba(215,109,119,0.34), transparent 60%), radial-gradient(50% 60% at 10% 100%, rgba(58,28,113,0.5), transparent 55%)",
-          color: "#f3f2f8",
+          backgroundColor: "#010102",
+          color: "#f7f8f8",
           fontFamily: "system-ui, sans-serif",
         }}
       >
@@ -33,10 +32,10 @@ export default function Image() {
               width: 26,
               height: 26,
               borderRadius: 8,
-              background: "linear-gradient(135deg, #3a1c71, #d76d77)",
+              background: "#5e6ad2",
             }}
           />
-          <div style={{ display: "flex", fontSize: 30, color: "#c9c8d6" }}>
+          <div style={{ display: "flex", fontSize: 30, color: "#d0d6e0" }}>
             Fresco
           </div>
         </div>
@@ -44,35 +43,35 @@ export default function Image() {
         <div
           style={{
             display: "flex",
-            fontSize: 84,
+            fontSize: 80,
             fontWeight: 700,
-            letterSpacing: "-0.03em",
+            letterSpacing: "-0.035em",
             lineHeight: 1.05,
             marginTop: 28,
-            maxWidth: 900,
+            maxWidth: 940,
           }}
         >
-          Live wallpapers for Linux.
+          Finally, live wallpapers that just work on Linux.
         </div>
 
         <div
           style={{
             display: "flex",
-            fontSize: 34,
-            color: "#a6a6bd",
-            marginTop: 24,
-            maxWidth: 940,
+            fontSize: 33,
+            color: "#8a8f98",
+            marginTop: 26,
+            maxWidth: 960,
           }}
         >
           Video, GIF, image, slideshow, and playlist wallpapers. Hardware
-          accelerated, near zero CPU.
+          accelerated, near zero CPU, on X11 and Wayland.
         </div>
 
         <div
           style={{
             display: "flex",
             fontSize: 24,
-            color: "#d76d77",
+            color: "#828fff",
             marginTop: 40,
           }}
         >

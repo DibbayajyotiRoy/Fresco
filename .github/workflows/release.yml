@@ -1,5 +1,8 @@
 name: Release
 
+# Manual / explicit release path: pushing a v* tag builds and publishes that
+# tag. The automatic path (publish.yml) calls the same reusable _release.yml
+# after the push-to-main test gate passes, so both routes are identical.
 on:
   push:
     tags: ['v*']
@@ -8,94 +11,8 @@ permissions:
   contents: write
 
 jobs:
-  build-deb:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system deps
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer \
-            libmpv-dev libx11-dev libxrandr-dev \
-            meson ninja-build pkg-config libwayland-dev wayland-protocols \
-            libegl1-mesa-dev libgl1-mesa-dev
-
-      - uses: dtolnay/rust-toolchain@1.91.0
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-
-      - name: Build release
-        run: cargo build --release --all-features
-
-      # Build mpvpaper into target/release/mpvpaper so `cargo deb` can bundle it
-      # under /usr/lib/fresco/mpvpaper (it is not in the apt repos).
-      - name: Build bundled mpvpaper (Wayland backend)
-        run: scripts/build-mpvpaper.sh
-
-      - name: Install cargo-deb
-        run: cargo install cargo-deb
-
-      - name: Package .deb
-        # Everything is already built above (cargo build --release + build-mpvpaper.sh).
-        # --no-build stops cargo-deb from treating the bundled `mpvpaper` asset path
-        # (target/release/mpvpaper) as a cargo [[bin]] target it must compile — it
-        # isn't one. --no-strip leaves the prebuilt binaries (already stripped via the
-        # release profile) untouched.
-        run: cargo deb --no-build --no-strip
-
-      # Publish the installable artifacts first so a flaky smoke test can never
-      # block the release. install.sh is attached too — the README one-liner
-      # fetches it from releases/latest/download/install.sh.
-      - name: Upload artifacts to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            target/debian/fresco_*.deb
-            install.sh
-          generate_release_notes: true
-
-      # Best-effort smoke test: install the .deb (note the ./ prefix so apt
-      # treats it as a file, not a package name) and run the diagnostics.
-      - name: Smoke test (daemon check subcommand)
-        continue-on-error: true
-        run: |
-          DEB="./$(ls target/debian/fresco_*.deb | head -1)"
-          sudo apt-get install -y "$DEB"
-          frescod --check || true   # non-zero on headless CI is expected
-
-      # Fire the "update available" event: insert one published `update` row into
-      # Supabase. Running clients are pushed it instantly over Realtime (no polling)
-      # and self-update / link to this release. Best-effort and gated on the secret,
-      # so a missing key or a Supabase hiccup never blocks a release.
-      - name: Notify clients of new release (Supabase)
-        continue-on-error: true
-        env:
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_URL: https://mmoxgmvrpiaflfnsrynx.supabase.co
-        run: |
-          if [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ]; then
-            echo "SUPABASE_SERVICE_ROLE_KEY not set — skipping release notification."
-            exit 0
-          fi
-          TAG="${{ github.ref_name }}"          # e.g. v0.0.4
-          VERSION="${TAG#v}"                     # e.g. 0.0.4
-          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/tag/${TAG}"
-          payload=$(jq -n \
-            --arg title "Fresco ${TAG} is available" \
-            --arg body  "A new version of Fresco is ready. Update to get the latest features and fixes." \
-            --arg version "$VERSION" \
-            --arg url "$RELEASE_URL" \
-            '{title:$title, body:$body, kind:"update", version:$version, url:$url, published:true}')
-          curl -sS -X POST "${SUPABASE_URL}/rest/v1/notifications" \
-            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "Content-Type: application/json" \
-            -H "Prefer: return=minimal" \
-            -d "$payload"
+  release:
+    uses: ./.github/workflows/_release.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

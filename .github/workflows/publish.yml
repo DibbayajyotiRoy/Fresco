@@ -1,0 +1,67 @@
+name: Publish
+
+# Pushing/merging to main automatically builds, tests across desktop
+# environments, and publishes a new version — gated:
+#
+#   1. checks        — strict fmt/clippy/test/build/doc (_ci.yml)
+#   2. environments  — headless X11/Sway/Hyprland/KDE/Weston matrix; AT LEAST 3
+#                      must pass (_environments.yml)
+#   3. version       — is Cargo.toml's version newer than the latest tag?
+#   4. release       — only if (1) and (2) passed AND (3) says the version is new:
+#                      build the .deb, create the tag + GitHub release, notify
+#                      clients (_release.yml).
+#
+# Version-gated on purpose: bump `version` in Cargo.toml in the change you merge
+# and a release ships; merges that don't bump the version still run the full gate
+# but publish nothing (so routine commits never spam a release / update prompt).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    uses: ./.github/workflows/_ci.yml
+
+  environments:
+    uses: ./.github/workflows/_environments.yml
+    with:
+      min_pass: '3'
+
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_publish: ${{ steps.v.outputs.should_publish }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full tag history to tell if this version is new
+      - id: v
+        run: |
+          VERSION="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' Cargo.toml | head -1)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not read version from Cargo.toml"; exit 1
+          fi
+          TAG="v$VERSION"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists — nothing new to publish."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Cargo.toml is at $TAG with no matching tag — will publish."
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    # `needs` makes this run only when checks AND the environment gate succeed;
+    # `if` then limits it to commits that actually bumped the version.
+    needs: [checks, environments, version]
+    if: needs.version.outputs.should_publish == 'true'
+    uses: ./.github/workflows/_release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      target: ${{ github.sha }}
+    secrets: inherit

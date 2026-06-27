@@ -716,11 +716,14 @@ fn build_library_card(
     }
     overlay.set_child(Some(&pic));
 
-    // Bottom gradient scrim + title.
+    // Bottom gradient scrim + title. Decoration only — never a pointer target, so
+    // crossing it can't emit spurious hover leave/enter (preview-flicker) and
+    // clicks on it still reach the card.
     let scrim = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     scrim.add_css_class("wp-scrim");
     scrim.set_valign(gtk4::Align::End);
     scrim.set_hexpand(true);
+    scrim.set_can_target(false);
     let title = gtk4::Label::new(Some(&entry.name));
     title.add_css_class("wp-title");
     title.set_xalign(0.0);
@@ -1150,13 +1153,22 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
 
     let reset_crop = gtk4::Button::with_label("Reset crop");
     reset_crop.add_css_class("flat");
-    reset_crop.set_halign(gtk4::Align::End);
-    reset_crop.set_margin_top(6);
     {
         let ce = crop_editor.clone();
         reset_crop.connect_clicked(move |_| ce.reset());
     }
-    preview_pane.append(&reset_crop);
+    let rotate_btn = gtk4::Button::with_label("Rotate 90°");
+    rotate_btn.add_css_class("flat");
+    {
+        let ce = crop_editor.clone();
+        rotate_btn.connect_clicked(move |_| ce.set_rotation((ce.rotation() + 90) % 360));
+    }
+    let edit_actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    edit_actions.set_halign(gtk4::Align::End);
+    edit_actions.set_margin_top(6);
+    edit_actions.append(&rotate_btn);
+    edit_actions.append(&reset_crop);
+    preview_pane.append(&edit_actions);
 
     // Preferences group.
     let prefs = adw::PreferencesGroup::new();
@@ -1247,6 +1259,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             let name = {
                 let mut s = state_set.borrow_mut();
                 s.config.wallpaper.crop = crop;
+                s.config.wallpaper.rotation = crop_ref.rotation();
                 s.config.wallpaper.fit = fit;
                 s.config.wallpaper.mute = mute_ref.is_active();
                 s.config.wallpaper.volume = vol_ref.value() as u8;
@@ -1260,6 +1273,12 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     if e.kind == Kind::Slideshow {
                         e.interval_s = Some(interval);
                         e.transition = Some(transition);
+                    } else {
+                        // Remember audio + orientation so a later gallery set (which
+                        // rebuilds from the entry) keeps what was chosen here.
+                        e.mute = Some(mute_ref.is_active());
+                        e.volume = Some(vol_ref.value() as u8);
+                        e.rotation = Some(crop_ref.rotation());
                     }
                 }
                 save_entries(&s.entries).ok();
@@ -1321,7 +1340,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let title_ref = title_widget.clone();
         let crop_frame_ref = crop_frame.clone();
         let tp_frame_ref = tp_frame.clone();
-        let reset_crop_ref = reset_crop.clone();
+        let edit_actions_ref = edit_actions.clone();
         let tp = transition_preview.clone();
         let state2 = state.clone();
         stack.connect_visible_child_name_notify(move |s| {
@@ -1352,7 +1371,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 transition_ref.set_visible(is_slideshow);
                 // Slideshows preview the transition; other media show the crop tool.
                 crop_frame_ref.set_visible(!is_slideshow);
-                reset_crop_ref.set_visible(!is_slideshow);
+                edit_actions_ref.set_visible(!is_slideshow);
                 tp_frame_ref.set_visible(is_slideshow);
                 if is_slideshow {
                     interval_ref.set_selected(interval_index(entry.interval_s.unwrap_or(30)));
@@ -1367,14 +1386,22 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     tp.stop();
                 }
             }
+            let ent = st.editing_idx.and_then(|i| st.entries.get(i));
             ce.set_crop(st.config.wallpaper.crop);
+            ce.set_rotation(
+                ent.and_then(|e| e.rotation)
+                    .unwrap_or(st.config.wallpaper.rotation),
+            );
             fit_ref.set_selected(match st.config.wallpaper.fit {
                 Fit::Cover => 0,
                 Fit::Contain => 1,
                 Fit::Stretch => 2,
             });
-            mute_ref.set_active(st.config.wallpaper.mute);
-            vol_ref.set_value(st.config.wallpaper.volume as f64);
+            mute_ref.set_active(ent.and_then(|e| e.mute).unwrap_or(st.config.wallpaper.mute));
+            vol_ref.set_value(
+                ent.and_then(|e| e.volume)
+                    .unwrap_or(st.config.wallpaper.volume) as f64,
+            );
         });
     }
 

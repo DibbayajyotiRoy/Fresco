@@ -142,6 +142,9 @@ pub struct Wallpaper {
     pub shuffle: bool,
     #[serde(default)]
     pub fit: Fit,
+    /// Clockwise rotation in degrees: 0, 90, 180, or 270.
+    #[serde(default)]
+    pub rotation: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
     #[serde(default = "default_true")]
@@ -170,6 +173,7 @@ impl Default for Wallpaper {
             paths: Vec::new(),
             shuffle: false,
             fit: Fit::default(),
+            rotation: 0,
             crop: None,
             mute: true,
             volume: default_volume(),
@@ -329,8 +333,10 @@ mod tests {
     fn save_load_file() {
         let dir = std::env::temp_dir().join(format!("fresco-test-{}", std::process::id()));
         let path = dir.join("config.toml");
-        let mut cfg = Config::default();
-        cfg.enabled = false;
+        let cfg = Config {
+            enabled: false,
+            ..Default::default()
+        };
         cfg.save_to(&path).unwrap();
         let back = Config::load_from(&path).unwrap();
         assert_eq!(cfg, back);

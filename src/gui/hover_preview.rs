@@ -17,12 +17,18 @@
 //! plugins are installed the media simply never produces frames and the card
 //! shows no motion — nothing breaks.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gtk4::prelude::*;
 use gtk4::EventControllerMotion;
+
+/// Grace period before a hover-leave restores the thumbnail. Moving the pointer
+/// across the card's revealed Edit button / overlays emits brief leave→enter
+/// crossings; without this debounce the preview swaps back and forth (the glitch).
+const LEAVE_GRACE: Duration = Duration::from_millis(140);
 
 /// Attach hover-to-play to a card.
 ///
@@ -45,13 +51,18 @@ pub fn attach(
 ) {
     // One lazily-created MediaFile per card, shared between enter/leave.
     let media: Rc<RefCell<Option<gtk4::MediaFile>>> = Rc::new(RefCell::new(None));
+    // Whether the pointer is currently over the card. The leave handler defers to
+    // this after the grace period, so transient crossings don't restart the swap.
+    let hovered = Rc::new(Cell::new(false));
 
     let controller = EventControllerMotion::new();
 
     // Enter: create the media if needed, show it, and start playing.
     let media_enter = media.clone();
     let thumb_enter = thumb.clone();
+    let hovered_enter = hovered.clone();
     controller.connect_enter(move |_controller, _x, _y| {
+        hovered_enter.set(true);
         let mut slot = media_enter.borrow_mut();
         let media = slot.get_or_insert_with(|| {
             let media = gtk4::MediaFile::for_filename(video.to_string_lossy().as_ref());
@@ -63,17 +74,29 @@ pub fn attach(
         media.play();
     });
 
-    // Leave: pause and restore the static thumbnail. Keep the MediaFile around.
+    // Leave: after a short grace period (so a flicker across the Edit button /
+    // overlays doesn't count), if the pointer really left, pause and restore the
+    // static thumbnail. Keep the MediaFile around for snappy re-hover.
     let media_leave = media;
     let thumb_leave = thumb.clone();
     controller.connect_leave(move |_controller| {
-        if let Some(media) = media_leave.borrow().as_ref() {
-            media.pause();
-        }
-        match &thumb_file {
-            Some(path) => thumb_leave.set_file(Some(&gtk4::gio::File::for_path(path))),
-            None => thumb_leave.set_paintable(gtk4::gdk::Paintable::NONE),
-        }
+        hovered.set(false);
+        let media_leave = media_leave.clone();
+        let thumb_leave = thumb_leave.clone();
+        let thumb_file = thumb_file.clone();
+        let hovered = hovered.clone();
+        gtk4::glib::timeout_add_local_once(LEAVE_GRACE, move || {
+            if hovered.get() {
+                return; // pointer came back within the grace period — keep playing
+            }
+            if let Some(media) = media_leave.borrow().as_ref() {
+                media.pause();
+            }
+            match &thumb_file {
+                Some(path) => thumb_leave.set_file(Some(&gtk4::gio::File::for_path(path))),
+                None => thumb_leave.set_paintable(gtk4::gdk::Paintable::NONE),
+            }
+        });
     });
 
     card.add_controller(controller);

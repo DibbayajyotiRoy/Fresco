@@ -1,5 +1,5 @@
-use std::cell::RefCell;
-use std::path::Path;
+use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -32,6 +32,10 @@ pub struct CropEditor {
     pub picture: Picture,
     pub drawing: DrawingArea,
     pub state: Rc<RefCell<CropState>>,
+    /// Clockwise preview rotation in degrees (0/90/180/270).
+    rotation: Rc<Cell<u16>>,
+    /// Current media path, kept so a rotation change can re-render it.
+    source: Rc<RefCell<Option<PathBuf>>>,
 }
 
 impl CropEditor {
@@ -142,12 +146,62 @@ impl CropEditor {
             picture,
             drawing,
             state,
+            rotation: Rc::new(Cell::new(0)),
+            source: Rc::new(RefCell::new(None)),
         }
     }
 
     pub fn set_media(&self, path: &Path) {
-        let file = gtk4::gio::File::for_path(path);
-        self.picture.set_file(Some(&file));
+        *self.source.borrow_mut() = Some(path.to_path_buf());
+        self.render();
+    }
+
+    /// Clockwise rotation in degrees (0/90/180/270) applied to the preview only;
+    /// the daemon applies the same angle to the real wallpaper via `video-rotate`.
+    pub fn set_rotation(&self, degrees: u16) {
+        self.rotation.set(degrees % 360);
+        self.render();
+    }
+
+    pub fn rotation(&self) -> u16 {
+        self.rotation.get()
+    }
+
+    /// Render the source into the Picture at the current rotation. 0° uses the
+    /// file directly (GTK scales it efficiently); other angles rotate a bounded
+    /// pixbuf so we never decode a huge image at full size just to spin it.
+    fn render(&self) {
+        let src = self.source.borrow();
+        let Some(path) = src.as_deref() else { return };
+        let file = || gtk4::gio::File::for_path(path);
+        let rot = self.rotation.get();
+        if rot == 0 {
+            self.picture.set_file(Some(&file()));
+            return;
+        }
+        let pix = match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(path, 1600, 1600, true) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("rotate preview: {e}; showing unrotated");
+                self.picture.set_file(Some(&file()));
+                return;
+            }
+        };
+        // gdk-pixbuf names rotations by counterclockwise degrees, so its
+        // `Clockwise` variant is a 90° clockwise turn — matching mpv `video-rotate`.
+        let turn = match rot {
+            90 => gtk4::gdk_pixbuf::PixbufRotation::Clockwise,
+            180 => gtk4::gdk_pixbuf::PixbufRotation::Upsidedown,
+            270 => gtk4::gdk_pixbuf::PixbufRotation::Counterclockwise,
+            _ => gtk4::gdk_pixbuf::PixbufRotation::None,
+        };
+        match pix.rotate_simple(turn) {
+            Some(rotated) => {
+                let texture = gtk4::gdk::Texture::for_pixbuf(&rotated);
+                self.picture.set_paintable(Some(&texture));
+            }
+            None => self.picture.set_file(Some(&file())),
+        }
     }
 
     pub fn set_crop(&self, crop: Option<Crop>) {

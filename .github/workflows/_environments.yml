@@ -1,0 +1,141 @@
+name: _environments
+
+# Reusable "does Fresco actually work here?" gate. Spins up each target desktop
+# environment HEADLESSLY on a runner and runs the runtime smoke harness
+# (tests/ci/with-compositor.sh + tests/ci/env-smoke.sh) inside it:
+#
+#   x11       Xvfb                        → expect capability: x11
+#   sway      Sway, headless wlroots      → expect capability: wayland-layer-shell
+#   hyprland  Hyprland, headless wlroots  → expect capability: wayland-layer-shell
+#   kde       KWin, virtual backend       → expect capability: wayland-layer-shell
+#   weston    Weston, headless backend    → expect capability: wayland-gnome-static
+#
+# The matrix is fail-fast:false and each leg records PASS/FAIL as an artifact
+# rather than failing its job, so the `gate` job can require AT LEAST `min_pass`
+# environments to succeed (default 3). The robust trio (x11/sway/weston) reliably
+# carries the gate; kde/hyprland add coverage when their packages/headless modes
+# cooperate on the runner.
+on:
+  workflow_call:
+    inputs:
+      min_pass:
+        description: Minimum environments that must pass for the gate to succeed.
+        type: string
+        default: '3'
+    outputs:
+      passed:
+        description: Number of environments that passed.
+        value: ${{ jobs.gate.outputs.passed }}
+  workflow_dispatch:
+    inputs:
+      min_pass:
+        description: Minimum environments that must pass.
+        type: string
+        default: '3'
+
+jobs:
+  smoke:
+    name: env · ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: x11,      name: 'X11 (Xvfb)',         expect: x11,                  comp: 'xvfb x11-utils' }
+          - { id: sway,     name: 'Sway (wlroots)',     expect: wayland-layer-shell,  comp: 'sway grim' }
+          - { id: hyprland, name: 'Hyprland (wlroots)', expect: wayland-layer-shell,  comp: 'hyprland' }
+          - { id: kde,      name: 'KDE Plasma (KWin)',  expect: wayland-layer-shell,  comp: 'kwin-wayland dbus-x11' }
+          - { id: weston,   name: 'Weston (fallback)',  expect: wayland-gnome-static, comp: 'weston dbus-x11' }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libmpv-dev libx11-dev libxrandr-dev \
+            libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev \
+            libgl1-mesa-dri ffmpeg
+
+      # Best-effort: a missing/unavailable compositor package just means this
+      # environment reports FAIL — the >=min_pass gate tolerates that.
+      - name: Compositor — ${{ matrix.id }}
+        run: |
+          sudo apt-get install -y --no-install-recommends ${{ matrix.comp }} \
+            || echo "::warning::could not install '${{ matrix.comp }}' — ${{ matrix.id }} will report FAIL"
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-env-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build frescod (daemon)
+        run: cargo build --no-default-features --features daemon --bin frescod --locked
+
+      - name: Build mpvpaper (Wayland renderer)
+        if: matrix.id != 'x11'
+        run: |
+          sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config
+          scripts/build-mpvpaper.sh || echo "::warning::mpvpaper build failed — live Wayland checks will degrade"
+
+      - name: Smoke test — ${{ matrix.id }}
+        run: |
+          mkdir -p results
+          export FRESCOD="$PWD/target/debug/frescod"
+          [ -x "$PWD/target/release/mpvpaper" ] && export FRESCO_MPVPAPER="$PWD/target/release/mpvpaper"
+          if bash tests/ci/with-compositor.sh "${{ matrix.id }}" -- \
+               bash tests/ci/env-smoke.sh "${{ matrix.id }}" "${{ matrix.expect }}"; then
+            echo "PASS ${{ matrix.id }}" > "results/result-${{ matrix.id }}.txt"
+          else
+            echo "FAIL ${{ matrix.id }}" > "results/result-${{ matrix.id }}.txt"
+          fi
+          cat "results/result-${{ matrix.id }}.txt"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-result-${{ matrix.id }}
+          path: results/result-${{ matrix.id }}.txt
+          if-no-files-found: warn
+
+  gate:
+    name: gate (need ${{ inputs.min_pass }} passing)
+    needs: smoke
+    if: always()
+    runs-on: ubuntu-24.04
+    outputs:
+      passed: ${{ steps.count.outputs.passed }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+          pattern: env-result-*
+          merge-multiple: true
+
+      - id: count
+        run: |
+          min="${{ inputs.min_pass }}"
+          [ -n "$min" ] || min=3
+          passed=$(cat results/result-*.txt 2>/dev/null | grep -c '^PASS' || true)
+          [ -n "$passed" ] || passed=0
+          echo "passed=$passed" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Fresco environment gate"
+            echo
+            echo '```'
+            cat results/result-*.txt 2>/dev/null || echo "(no results)"
+            echo '```'
+            echo
+            echo "**$passed environment(s) passed — minimum required: $min.**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$passed" -lt "$min" ]; then
+            echo "::error::only $passed/$min environments passed — gate failed"
+            exit 1
+          fi
+          echo "gate OK: $passed/$min environments passed"

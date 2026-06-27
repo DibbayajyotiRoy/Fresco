@@ -5,8 +5,8 @@
 //!  - Everything else (wlroots, KDE Plasma 6, COSMIC, …) uses the mpvpaper
 //!    layer-shell backend for live wallpapers.
 //!
-//! When `wayland-info` / `weston-info` is installed we probe the registry for
-//! `zwlr_layer_shell_v1` and trust that over the desktop-name heuristic.
+//! On Wayland we probe the live registry for `zwlr_layer_shell_v1` ourselves (no
+//! external tools) and trust that over the desktop-name heuristic.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
@@ -93,21 +93,47 @@ fn is_gnome(desktop: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-/// Probe the Wayland registry for `zwlr_layer_shell_v1`.
-/// Returns `Some(true/false)` if a probe tool answered; `None` if none is
-/// installed, leaving the decision to the desktop-name heuristic.
+/// Probe the live Wayland registry for `zwlr_layer_shell_v1` — no external tools.
+/// `Some(true/false)` when we could talk to the compositor; `None` only if we
+/// couldn't connect at all, leaving the decision to the desktop-name heuristic.
+#[cfg(feature = "daemon")]
 fn probe_layer_shell() -> Option<bool> {
-    for probe in ["wayland-info", "weston-info"] {
-        let Ok(out) = std::process::Command::new(probe)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .output()
-        else {
-            continue;
-        };
-        let text = String::from_utf8_lossy(&out.stdout);
-        return Some(text.contains("zwlr_layer_shell_v1"));
+    use wayland_client::protocol::wl_registry;
+    use wayland_client::{Connection, Dispatch, QueueHandle};
+
+    #[derive(Default)]
+    struct Probe {
+        found: bool,
     }
+    impl Dispatch<wl_registry::WlRegistry, ()> for Probe {
+        fn event(
+            state: &mut Self,
+            _: &wl_registry::WlRegistry,
+            event: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            if let wl_registry::Event::Global { interface, .. } = event {
+                if interface == "zwlr_layer_shell_v1" {
+                    state.found = true;
+                }
+            }
+        }
+    }
+
+    let conn = Connection::connect_to_env().ok()?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let _registry = conn.display().get_registry(&qh, ());
+    let mut probe = Probe::default();
+    queue.roundtrip(&mut probe).ok()?;
+    Some(probe.found)
+}
+
+/// GUI-only builds don't link `wayland-client`; fall back to the name heuristic.
+#[cfg(not(feature = "daemon"))]
+fn probe_layer_shell() -> Option<bool> {
     None
 }
 

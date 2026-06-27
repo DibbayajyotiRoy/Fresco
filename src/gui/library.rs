@@ -39,6 +39,14 @@ pub struct LibraryEntry {
     /// Slideshow transition effect; only meaningful for Kind::Slideshow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
+    /// Remembered audio + orientation (video/playlist), so setting from the
+    /// gallery keeps what you chose in the editor. None = sensible default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mute: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<u16>,
 }
 
 impl LibraryEntry {
@@ -60,6 +68,9 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            mute: None,
+            volume: None,
+            rotation: None,
         }
     }
 
@@ -81,6 +92,9 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            mute: None,
+            volume: None,
+            rotation: None,
         }
     }
 
@@ -109,6 +123,9 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            mute: None,
+            volume: None,
+            rotation: None,
         }
     }
 
@@ -130,6 +147,9 @@ impl LibraryEntry {
             error: None,
             interval_s: Some(30),
             transition: Some(Transition::Crossfade),
+            mute: None,
+            volume: None,
+            rotation: None,
         }
     }
 
@@ -149,6 +169,9 @@ impl LibraryEntry {
             error: None,
             interval_s: Some(30),
             transition: Some(Transition::Crossfade),
+            mute: None,
+            volume: None,
+            rotation: None,
         }
     }
 
@@ -229,9 +252,10 @@ impl LibraryEntry {
             paths: self.paths.clone(),
             shuffle: false,
             fit: Fit::Cover,
+            rotation: self.rotation.unwrap_or(0),
             crop: None,
-            mute: true,
-            volume: 50,
+            mute: self.mute.unwrap_or(true),
+            volume: self.volume.unwrap_or(50),
             slideshow: if self.kind == Kind::Slideshow {
                 Some(Slideshow {
                     folder: self.folder.clone(),

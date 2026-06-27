@@ -27,6 +27,8 @@ impl Player {
         let opts: &[(&str, &str)] = &[
             ("wid", &wid.to_string()),
             ("vo", "gpu"),
+            // Clockwise rotation in degrees; applied before crop (zoom/pan).
+            ("video-rotate", &(wallpaper.rotation % 360).to_string()),
             ("hwdec", "auto-safe"),
             ("profile", "low-latency"), // small demuxer queues; we override caches below
             ("image-display-duration", "inf"),

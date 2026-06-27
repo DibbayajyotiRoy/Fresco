@@ -178,6 +178,19 @@ impl WaylandPlayer {
         false
     }
 
+    /// Current playback position in seconds, read live over the IPC socket. Used
+    /// by the supervisor to detect a frozen-but-alive mpvpaper (dead GL context /
+    /// stopped decode) whose process still passes `is_alive`.
+    pub fn time_pos(&self) -> Option<f64> {
+        self.inner
+            .borrow_mut()
+            .ipc
+            .get("playback-time")?
+            .trim()
+            .parse()
+            .ok()
+    }
+
     fn command(&self, args: &[Value]) {
         let _ = self.inner.borrow_mut().ipc.command(args);
     }
@@ -249,6 +262,8 @@ fn build_mpv_opts(w: &Wallpaper, scaling: Scaling, sock: &Path) -> String {
         o.push("scale=lanczos".into());
         o.push("cscale=lanczos".into());
     }
+    // Clockwise rotation in degrees; applied before crop (zoom/pan).
+    o.push(format!("video-rotate={}", w.rotation % 360));
     o.join(" ")
 }
 

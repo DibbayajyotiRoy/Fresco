@@ -1,0 +1,112 @@
+name: _release
+
+# Reusable release builder: builds the release binaries + bundled mpvpaper,
+# packages the .deb, attaches it (and install.sh) to a GitHub release for `tag`
+# (creating the tag at `target` if it does not yet exist), then notifies running
+# clients over Supabase. Called by:
+#   - release.yml  (a pushed v* tag — manual release)
+#   - publish.yml  (auto release after the push-to-main test gate passes)
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.0.9
+        required: true
+        type: string
+      target:
+        description: Commit-ish to create the tag at (blank = default branch).
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer \
+            libmpv-dev libx11-dev libxrandr-dev \
+            meson ninja-build pkg-config libwayland-dev wayland-protocols \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release --all-features --locked
+
+      # Build mpvpaper into target/release/mpvpaper so `cargo deb` bundles it
+      # under /usr/lib/fresco/mpvpaper (it is not in the apt repos).
+      - name: Build bundled mpvpaper (Wayland backend)
+        run: scripts/build-mpvpaper.sh
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Package .deb
+        # Everything is already built above; --no-build stops cargo-deb from
+        # treating the bundled mpvpaper asset as a cargo target, --no-strip leaves
+        # the already-stripped release binaries alone.
+        run: cargo deb --no-build --no-strip
+
+      # Publish the installable artifacts first so a flaky smoke test can never
+      # block the release.
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ inputs.target }}
+          files: |
+            target/debian/fresco_*.deb
+            install.sh
+          generate_release_notes: true
+
+      - name: Smoke test (daemon check subcommand)
+        continue-on-error: true
+        run: |
+          DEB="./$(ls target/debian/fresco_*.deb | head -1)"
+          sudo apt-get install -y "$DEB"
+          frescod --check || true   # non-zero on headless CI is expected
+
+      # Fire the "update available" event so running clients self-update.
+      # Best-effort and gated on the secret, so a missing key or a Supabase hiccup
+      # never blocks a release.
+      - name: Notify clients of new release (Supabase)
+        continue-on-error: true
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: https://mmoxgmvrpiaflfnsrynx.supabase.co
+        run: |
+          if [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ]; then
+            echo "SUPABASE_SERVICE_ROLE_KEY not set — skipping release notification."
+            exit 0
+          fi
+          TAG="${{ inputs.tag }}"                 # e.g. v0.0.9
+          VERSION="${TAG#v}"                       # e.g. 0.0.9
+          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/tag/${TAG}"
+          payload=$(jq -n \
+            --arg title "Fresco ${TAG} is available" \
+            --arg body  "A new version of Fresco is ready. Update to get the latest features and fixes." \
+            --arg version "$VERSION" \
+            --arg url "$RELEASE_URL" \
+            '{title:$title, body:$body, kind:"update", version:$version, url:$url, published:true}')
+          curl -sS -X POST "${SUPABASE_URL}/rest/v1/notifications" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "$payload"

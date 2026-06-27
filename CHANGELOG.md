@@ -4,6 +4,27 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] — 2026-06-27
+
+### Added
+- **Rotate a video or image wallpaper.** A new "Rotate 90°" button in the editor
+  turns the media — fixing sideways phone photos and videos — with hardware
+  decoding intact. The orientation is remembered per wallpaper.
+
+### Fixed
+- **Video wallpaper sound now works.** Setting a video from the gallery always
+  re-muted it, so audio never came out unless you went through the editor every
+  time. Your mute/volume choice is now remembered per wallpaper, so turning sound
+  on sticks.
+- **Gallery hover no longer glitches.** Hovering a video card flickered between the
+  thumbnail and the inline video preview as the pointer crossed the card's
+  buttons; the preview now holds steady.
+
+### Changed
+- **More reliable Wayland detection.** Fresco now probes the compositor's
+  protocols directly instead of shelling out to an external tool, so live-wallpaper
+  support is detected correctly even on minimal sessions.
+
 ## [0.0.8] — 2026-06-26
 
 ### Fixed
@@ -121,6 +142,7 @@ First public release. A GUI-first live-wallpaper setter for Debian-based Linux
 - X11 sessions only — Wayland support is planned for a future release.
 - Web/HTML wallpapers are out of scope for this release.
 
+[0.0.9]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.3...v0.0.7
 [0.0.3]: https://github.com/DibbayajyotiRoy/fresco/compare/v0.0.2...v0.0.3

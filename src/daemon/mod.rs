@@ -36,6 +36,10 @@ const BATTERY_INTERVAL: Duration = Duration::from_secs(30);
 const HEAL_WINDOW: Duration = Duration::from_secs(60);
 const HEAL_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_HEALS: u32 = 5;
+// Wayland frozen-but-alive: consecutive SUPERVISE ticks (~2s each) with no
+// playback progress before treating a still-running mpvpaper as wedged. 3 ≈ 6s,
+// high enough that a normally looping clip never trips it.
+const STALL_STRIKES: u32 = 3;
 
 /// During a transition the loop ticks at ~60fps for buttery, eased motion.
 const ANIM_TICK: Duration = Duration::from_millis(16);
@@ -130,13 +134,12 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.set_paused(paused),
         }
     }
-    /// Current playback position in seconds (X11 in-process mpv). Used only by the
-    /// X11 cold-boot stall self-heal, so the Wayland arm (separately supervised)
-    /// returns `None`.
+    /// Current playback position in seconds, used by both backends' stall
+    /// detectors (X11 cold-boot self-heal; Wayland frozen-but-alive supervision).
     fn time_pos(&self) -> Option<f64> {
         match self {
             PlayerHandle::X11(p) => p.time_pos(),
-            PlayerHandle::Wayland(_) => None,
+            PlayerHandle::Wayland(p) => p.time_pos(),
         }
     }
     fn hwdec_current(&self) -> Option<String> {
@@ -1078,6 +1081,10 @@ struct WlOutput {
     /// Last pause state we applied to the player — lets `reconcile_pause` send IPC
     /// only on change. `Cell` so reconcile can stay `&self` like `set_paused`.
     applied_paused: std::cell::Cell<bool>,
+    /// Frozen-but-alive detection: consecutive supervise ticks with no playback
+    /// progress, plus the last sampled position.
+    stall_strikes: u32,
+    last_pos: Option<f64>,
 }
 
 impl WlOutput {
@@ -1093,6 +1100,8 @@ impl WlOutput {
             error: None,
             animating: false,
             applied_paused: std::cell::Cell::new(false),
+            stall_strikes: 0,
+            last_pos: None,
         }
     }
 
@@ -1103,6 +1112,8 @@ impl WlOutput {
         drop(self.player.take());
         self.slideshow = None;
         self.animating = false;
+        self.stall_strikes = 0;
+        self.last_pos = None;
         // The initial file mpvpaper opens: for a slideshow it's the first image
         // (subsequent ones arrive via loadfile-replace); otherwise the media.
         let file = if self.wallpaper.kind == Kind::Slideshow {
@@ -1153,6 +1164,7 @@ impl WlOutput {
             && !self.static_fallback
             && scaling == self.scaling
             && new.fit == self.wallpaper.fit
+            && new.rotation == self.wallpaper.rotation
             && new.mute == self.wallpaper.mute
             && new.volume == self.wallpaper.volume
             && new.crop == self.wallpaper.crop
@@ -1197,18 +1209,48 @@ impl WlOutput {
         }
     }
 
-    /// Per-output supervision: restart a dead renderer with an anti-flap cap;
-    /// after `max` consecutive failures fall back to a paused static frame (so
-    /// the output never goes black) and surface the error in `Status`.
+    /// Sample playback position; returns true once it has failed to advance for
+    /// `STALL_STRIKES` consecutive supervise ticks — a wedged-but-alive renderer
+    /// (dead GL context / stopped decode that still passes `is_alive`).
+    fn check_stall(&mut self) -> bool {
+        let pos = self.player.as_ref().and_then(|p| p.time_pos());
+        match (pos, self.last_pos) {
+            (Some(cur), Some(prev)) if (cur - prev).abs() < 1e-3 => self.stall_strikes += 1,
+            (Some(_), _) => self.stall_strikes = 0,
+            (None, _) => {} // couldn't read the position; don't penalize
+        }
+        self.last_pos = pos;
+        self.stall_strikes >= STALL_STRIKES
+    }
+
+    /// Per-output supervision: restart a dead — or frozen-but-alive — renderer with
+    /// an anti-flap cap; after `max` consecutive failures fall back to a paused
+    /// static frame (so the output never goes black) and surface it in `Status`.
     fn supervise(&mut self, paused: bool, max: u32) {
         let alive = self.player.as_ref().map(|p| p.is_alive()).unwrap_or(false);
         if alive {
-            if !self.static_fallback {
-                self.restarts = 0;
+            // A paused or static-fallback frame is not expected to advance — don't
+            // sample. Otherwise check for a frozen-but-alive (wedged) renderer.
+            let frozen = if self.static_fallback || self.applied_paused.get() {
+                self.stall_strikes = 0;
+                self.last_pos = None;
+                false
+            } else {
+                self.check_stall()
+            };
+            if !frozen {
+                if !self.static_fallback {
+                    self.restarts = 0;
+                }
+                return;
             }
-            return;
+            log::warn!(
+                "[{}] playback frozen (mpvpaper wedged); respawning",
+                self.connector
+            );
+            // fall through to the restart path below
         }
-        // Renderer is dead or never started.
+        // Renderer is dead, never started, or frozen.
         if self.restarts < max {
             self.restarts += 1;
             log::warn!(

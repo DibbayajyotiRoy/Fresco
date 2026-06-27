@@ -1,0 +1,59 @@
+name: _ci
+
+# Reusable strict build/lint/test lane. Called by ci.yml (pull requests) and
+# publish.yml (push to main, gates the release). Not triggered on its own.
+on:
+  workflow_call:
+
+jobs:
+  lint-build-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer \
+            libmpv-dev libx11-dev libxrandr-dev \
+            libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy, rustfmt
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-ci-${{ hashFiles('Cargo.lock') }}
+
+      # --locked everywhere: a stale Cargo.lock fails the build instead of being
+      # silently regenerated.
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Lint every feature combination AND the test/bench targets (--all-targets),
+      # all warnings denied. Catches dead code and mistakes that only appear under
+      # a single feature set (gui-only / daemon-only builds users actually ship).
+      - name: Clippy (all features)
+        run: cargo clippy --all-features --all-targets --locked -- -D warnings
+      - name: Clippy (daemon only)
+        run: cargo clippy --no-default-features --features daemon --all-targets --locked -- -D warnings
+      - name: Clippy (gui only)
+        run: cargo clippy --no-default-features --features gui --all-targets --locked -- -D warnings
+
+      # Each shipped binary must build on its own required feature set.
+      - name: Build both binaries (all features)
+        run: cargo build --all-features --locked
+
+      - name: Test (daemon)
+        run: cargo test --no-default-features --features daemon --locked
+
+      # Broken intra-doc links fail the build too.
+      - name: Doc (deny warnings)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features --locked

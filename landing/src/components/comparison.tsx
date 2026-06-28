@@ -1,5 +1,7 @@
-import { Check, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, Check, X } from "lucide-react";
 import { COMPARISON, type CompareCell } from "@/lib/content";
+import { ALTERNATIVES } from "@/lib/alternatives";
 
 function Cell({ value, highlight }: { value: CompareCell; highlight: boolean }) {
   const base = highlight ? "bg-lavender/[0.06]" : "";
@@ -88,6 +90,20 @@ export function Comparison() {
         </div>
 
         <p className="mt-4 text-xs text-ink-tertiary">{COMPARISON.note}</p>
+
+        <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-3 text-sm">
+          <span className="text-ink-subtle">Compare in detail:</span>
+          {ALTERNATIVES.map((alt) => (
+            <Link
+              key={alt.slug}
+              href={`/alternatives/${alt.slug}`}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-1 px-3 py-1 font-medium text-ink-muted transition-colors hover:border-hairline-strong hover:text-ink"
+            >
+              Fresco vs {alt.tool}
+              <ArrowUpRight className="size-3.5" aria-hidden />
+            </Link>
+          ))}
+        </div>
       </div>
     </section>
   );

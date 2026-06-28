@@ -20,12 +20,17 @@
     <ul>
       <li>Looping video, animated GIF, static image, image slideshow, and video playlist wallpapers</li>
       <li>Hardware-accelerated playback (VA-API / NVDEC) for low CPU usage without quality loss</li>
-      <li>A drag-to-crop editor to frame exactly the region you want</li>
+      <li>A drag-to-crop and 90-degree rotate editor to frame exactly the region you want</li>
+      <li>Per-wallpaper sound and volume, plus slideshow transitions (crossfade, fade, slide, Ken Burns)</li>
       <li>A wallpaper library with thumbnails, a recently-used row, and search</li>
-      <li>Pause / resume and pause-on-battery</li>
+      <li>Pause / resume, pause-on-battery, and auto-pause when a window goes fullscreen</li>
       <li>Multi-monitor support with per-display wallpapers</li>
     </ul>
-    <p>Fresco currently targets X11 sessions.</p>
+    <p>
+      Fresco runs on X11 and on Wayland layer-shell compositors (COSMIC,
+      Hyprland, Sway, KDE Plasma 6); GNOME on Wayland uses a static-frame
+      fallback.
+    </p>
   </description>
 
   <launchable type="desktop-id">io.github.dibbayajyotiroy.Fresco.desktop</launchable>

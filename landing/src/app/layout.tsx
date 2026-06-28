@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     template: "%s | Fresco",
   },
   description:
-    "Fresco is a free, open-source live wallpaper app for Linux. Set videos, GIFs, images, slideshows, and playlists as your desktop background. GUI-first, hardware-accelerated, near-zero CPU. Works on X11 and Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6).",
+    "Free, open-source live wallpaper app for Linux. Set videos, GIFs, and images as your desktop on X11 and Wayland. Hardware-accelerated, near-zero CPU.",
   keywords: [
     "live wallpaper linux",
     "video wallpaper linux",

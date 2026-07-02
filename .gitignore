@@ -5,3 +5,4 @@
 node_modules/
 .gstack/
 engine-notes/
+tests/assets/generated/

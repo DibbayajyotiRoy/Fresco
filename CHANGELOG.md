@@ -4,6 +4,36 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.91] — 2026-07-02
+
+### Added
+- **Update from inside the app.** Fresco now checks GitHub for new releases on
+  its own (at most once a day) and shows an "Update available" banner — click
+  **Update now**, authenticate once, and the new version installs with live
+  progress and a one-click restart. No more trips to the releases page. A
+  manual **Check for updates** lives in the menu, and Flatpak or non-apt
+  installs get a copyable install command instead.
+- **Live status in the header.** A status pill shows what's playing, whether
+  hardware decoding is active, and current CPU use — with a pause/resume
+  button right next to it.
+- **Relink broken wallpapers.** If a wallpaper's source file was moved or
+  deleted, the card menu now offers "Relink…" to point it at the file's new
+  home instead of removing and re-adding it.
+- **About dialog and keyboard shortcuts.** Ctrl+F focuses search, Ctrl+comma
+  opens the menu, Ctrl+Q quits.
+
+### Changed
+- **The window now adapts to any size.** Wallpaper cards scale fluidly with
+  the window, the grid reflows from a single narrow column up to wide layouts,
+  and content stays centered and readable on ultrawide and 4K displays.
+- **One-step install from the website.** The landing page now leads with the
+  one-line installer instead of sending visitors to browse GitHub releases.
+
+### Fixed
+- Setting a wallpaper now confirms with a toast, and launching Fresco while
+  it's already open brings the existing window forward instead of opening a
+  duplicate.
+
 ## [0.0.9] — 2026-06-27
 
 ### Added

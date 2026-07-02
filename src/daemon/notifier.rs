@@ -252,14 +252,7 @@ fn handle(n: &Notification) {
 
 /// True if `candidate` is a strictly newer semver than the running version.
 fn is_newer(candidate: &str) -> bool {
-    let strip = |v: &str| v.trim().trim_start_matches('v').to_string();
-    match (
-        semver::Version::parse(&strip(candidate)),
-        semver::Version::parse(&strip(CURRENT_VERSION)),
-    ) {
-        (Ok(c), Ok(cur)) => c > cur,
-        _ => false,
-    }
+    crate::update::is_newer(candidate, CURRENT_VERSION)
 }
 
 /// Raise a native desktop notification, optionally with one action button. The
@@ -307,7 +300,7 @@ fn open_url(url: &str) {
 /// root via pkexec (the desktop's polkit agent prompts once). On success, prompt
 /// the user to restart so the new binary takes over.
 fn run_updater() {
-    let Some(script) = updater_script() else {
+    let Some(script) = crate::update::updater_script() else {
         log::warn!("notifier: updater script not found; opening releases page");
         open_url(RELEASES_URL);
         return;
@@ -316,31 +309,31 @@ fn run_updater() {
         "notifier: launching updater via pkexec: {}",
         script.display()
     );
-    match std::process::Command::new("pkexec").arg(&script).status() {
-        Ok(status) if status.success() => {
+    match crate::update::run_updater_blocking() {
+        crate::update::UpdateOutcome::Success => {
             notify(
                 "Fresco updated",
                 "The latest version was installed. Restart Fresco to apply it.",
                 None,
             );
         }
-        Ok(status) => log::warn!("notifier: updater exited with {status}"),
-        Err(e) => log::warn!("notifier: failed to launch pkexec: {e}"),
+        crate::update::UpdateOutcome::AlreadyUpToDate => {
+            log::info!("notifier: already on the latest version; nothing to install");
+        }
+        crate::update::UpdateOutcome::Unsupported => {
+            log::warn!("notifier: unsupported install for auto-update; opening releases page");
+            open_url(RELEASES_URL);
+        }
+        crate::update::UpdateOutcome::Failed(e) => log::warn!("notifier: {e}"),
     }
 }
 
-/// Locate the bundled updater script: beside our binary (dev tree), then the
-/// prefix-relative libexec dir, then the absolute .deb install path.
-fn updater_script() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("fresco-update.sh"));
-            candidates.push(dir.join("../lib/fresco/fresco-update.sh"));
-        }
-    }
-    candidates.push(PathBuf::from("/usr/lib/fresco/fresco-update.sh"));
-    candidates.into_iter().find(|p| p.is_file())
+/// Fire-and-forget entry point for `Request::Update`: runs the updater on a
+/// background thread and reports success/failure via the same desktop
+/// notification path as the Supabase-pushed "Update now" action, without
+/// blocking the daemon's main loop.
+pub(crate) fn run_updater_async() {
+    std::thread::spawn(run_updater);
 }
 
 /// Persistent set of notification ids already shown. Lives in the daemon's state

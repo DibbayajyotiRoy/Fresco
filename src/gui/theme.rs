@@ -197,6 +197,10 @@ window.glass .background {{ background: transparent; }}
 .wp-edit {{ background-color: alpha(black,0.55); color: #FFFFFF; border-radius: 999px; min-height: 26px; min-width: 26px; padding: 3px; margin: 8px; }}
 .wp-edit:hover {{ background-color: alpha(black,0.78); }}
 
+/* ===== Compact layout (narrow window; see LayoutBucket in window.rs) ===== */
+.compact-layout .wp-scrim {{ padding: 16px 8px 6px 8px; }}
+.compact-layout .wp-badge, .compact-layout .wp-active-pill {{ margin: 6px; }}
+
 /* ===== Mini card ===== */
 .wp-mini {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 10px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 160ms ease, border-color 160ms ease; }}
 .wp-mini:hover {{ border-color: alpha(@accent_bg_color,0.45); box-shadow: 0 5px 14px {shadow_md}; }}

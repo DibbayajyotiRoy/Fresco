@@ -9,6 +9,8 @@ pub mod gui;
 pub mod ipc;
 #[cfg(feature = "gui")]
 pub mod supabase;
+#[cfg(any(feature = "gui", feature = "daemon"))]
+pub mod update;
 
 /// Application ID used for the desktop file, autostart entry, and GTK app.
 pub const APP_ID: &str = "io.github.dibbayajyotiroy.Fresco";

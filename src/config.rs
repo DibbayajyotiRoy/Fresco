@@ -219,6 +219,14 @@ pub struct Config {
     /// Per-monitor overrides keyed by RandR connector name (e.g. "HDMI-1").
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub monitors: BTreeMap<String, Wallpaper>,
+    /// Unix epoch (seconds) of the last GitHub Releases check, so the client
+    /// self-throttles to roughly once every 24h.
+    #[serde(default)]
+    pub last_update_check: u64,
+    /// The latest version the user chose "Later" for, so the banner doesn't
+    /// re-appear for that same version on the next check.
+    #[serde(default)]
+    pub update_skipped_version: String,
 }
 
 fn default_version() -> u32 {
@@ -241,6 +249,8 @@ impl Default for Config {
             feedback_prompted: false,
             seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
+            last_update_check: 0,
+            update_skipped_version: String::new(),
         }
     }
 }

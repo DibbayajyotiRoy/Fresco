@@ -1,4 +1,4 @@
-import { Download as DownloadIcon, Package, Terminal } from "lucide-react";
+import { Package, Terminal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -41,37 +41,36 @@ export function Download() {
               </div>
               <div>
                 <h3 className="font-semibold tracking-tight text-ink">
-                  Download the .deb
+                  One-line install
                 </h3>
                 <p className="text-xs text-ink-subtle">
-                  From GitHub releases
+                  Always fetches the latest release
                 </p>
               </div>
             </div>
             <p className="mt-4 text-sm text-ink-subtle">
-              Grab the latest <code className="font-mono text-xs">.deb</code>{" "}
-              and double-click it, or install from the terminal:
+              Run this in a terminal — it downloads and installs the latest{" "}
+              <code className="font-mono text-xs">.deb</code> for you:
             </p>
-            <div className="mt-4 space-y-2">
-              <CodeSnippet code={APT_INSTALL} />
-            </div>
-            <p className="mt-4 text-xs text-muted-foreground">
-              Prefer one command? Run the installer:
-            </p>
-            <div className="mt-2">
+            <div className="mt-4">
               <CodeSnippet code={INSTALL_ONELINER} />
             </div>
+            <p className="mt-4 text-xs text-muted-foreground">
+              Already have the <code className="font-mono text-xs">.deb</code>{" "}
+              downloaded?
+            </p>
+            <div className="mt-2 space-y-2">
+              <CodeSnippet code={APT_INSTALL} />
+            </div>
             <div className="mt-6">
-              <Button asChild className="w-full font-medium sm:w-auto">
-                <a
-                  href={RELEASES_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <DownloadIcon />
-                  Latest release
-                </a>
-              </Button>
+              <a
+                href={RELEASES_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-ink-subtle underline decoration-border underline-offset-4 hover:text-ink"
+              >
+                Browse all releases
+              </a>
             </div>
           </Card>
 

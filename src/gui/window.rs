@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -43,8 +43,8 @@ impl Default for FrescoApplication {
 
 // ─── App state ────────────────────────────────────────────────────────────────
 
-struct AppState {
-    config: Config,
+pub(crate) struct AppState {
+    pub(crate) config: Config,
     entries: Vec<LibraryEntry>,
     editing_idx: Option<usize>,
     /// Keeps the native file/folder chooser alive until it responds. Without
@@ -56,16 +56,37 @@ struct AppState {
     /// Rebuilds the library grid in place; installed by build_library_view so
     /// the active-wallpaper highlight can update without a view switch.
     refresh: Option<Rc<dyn Fn()>>,
+    /// Empty slot the async "Update available" check populates in place;
+    /// installed by build_library_view (mirrors `refresh`).
+    pub(crate) update_banner_slot: Option<gtk4::Box>,
 }
 
 // ─── Main window ─────────────────────────────────────────────────────────────
 
 fn build_ui(app: &adw::Application) {
+    // The app id makes us D-Bus-unique: launching fresco again re-activates
+    // this process. Present the existing window instead of building a
+    // duplicate (with its own status-poll timer and startup checks).
+    if let Some(existing) = app.active_window() {
+        existing.present();
+        return;
+    }
+
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some("Fresco"));
     window.set_default_size(880, 660);
     window.set_size_request(420, 480);
     window.set_icon_name(Some(APP_ID));
+
+    // Ctrl+Q quits. `GApplication` has no built-in "quit" action, so register
+    // one explicitly rather than relying on it existing for free.
+    let quit_action = gio::SimpleAction::new("quit", None);
+    {
+        let app = app.clone();
+        quit_action.connect_activate(move |_, _| app.quit());
+    }
+    app.add_action(&quit_action);
+    app.set_accels_for_action("app.quit", &["<primary>q"]);
 
     let config = Config::load().unwrap_or_default();
 
@@ -93,6 +114,7 @@ fn build_ui(app: &adw::Application) {
         current_picker: None,
         toast: toast.clone(),
         refresh: None,
+        update_banner_slot: None,
     }));
 
     // Re-apply the palette when the system light/dark resolution flips.
@@ -157,6 +179,45 @@ fn capability_banner_text(cap: crate::capability::Capability) -> Option<&'static
 
 // ─── Library view ─────────────────────────────────────────────────────────────
 
+/// Width-threshold layout bucket, resolved from the window's `default-width`
+/// (no `AdwBreakpoint` here: this build targets libadwaita 1.1, which predates
+/// it). Drives FlowBox column caps and footer button density.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LayoutBucket {
+    Compact,
+    Regular,
+    Wide,
+}
+
+impl LayoutBucket {
+    fn from_width(width: i32) -> Self {
+        if width < 600 {
+            LayoutBucket::Compact
+        } else if width < 1200 {
+            LayoutBucket::Regular
+        } else {
+            LayoutBucket::Wide
+        }
+    }
+
+    /// (min, max) children per FlowBox line for this bucket.
+    fn flow_caps(self) -> (u32, u32) {
+        match self {
+            LayoutBucket::Compact => (1, 2),
+            LayoutBucket::Regular => (2, 6),
+            LayoutBucket::Wide => (2, 10),
+        }
+    }
+
+    fn css_class(self) -> Option<&'static str> {
+        match self {
+            LayoutBucket::Compact => Some("compact-layout"),
+            LayoutBucket::Regular => None,
+            LayoutBucket::Wide => Some("wide-layout"),
+        }
+    }
+}
+
 fn build_library_view(
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
@@ -164,43 +225,74 @@ fn build_library_view(
 ) -> gtk4::Box {
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
+    // Width-threshold layout bucket (see LayoutBucket); re-resolved on every
+    // `default-width` change but only acted on when it actually changes.
+    let bucket: Rc<Cell<LayoutBucket>> =
+        Rc::new(Cell::new(LayoutBucket::from_width(window.default_width())));
+
     // ── Header bar ──
     // Deliberately no pause/stop buttons: setting a wallpaper just runs it, and
     // picking another switches it. A stray "Stop" only created a confusing
     // dead/stopped state, so the model is kept dead-simple.
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new("Fresco", "Live wallpapers")));
+    header.pack_start(&super::status::build_status_pill());
 
     let menu_btn = gtk4::MenuButton::new();
     menu_btn.set_icon_name("open-menu-symbolic");
     menu_btn.add_css_class("flat");
+    menu_btn.set_tooltip_text(Some("Menu"));
     menu_btn.set_popover(Some(&build_menu_popover(window, state.clone())));
     header.pack_end(&menu_btn);
     root.append(&header);
 
     // ── "What's new" banner (shown once per version after an update) ──
-    if let Some(banner) = build_update_banner(window, state.clone()) {
+    if let Some(banner) = super::updates::build_update_banner(window, state.clone()) {
         root.append(&banner);
     }
 
+    // ── "Update available" banner slot (populated asynchronously once the
+    // GitHub Releases check resolves; see run_startup_checks) ──
+    let update_banner_slot = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    root.append(&update_banner_slot);
+    state.borrow_mut().update_banner_slot = Some(update_banner_slot);
+
     // ── Search ──
+    // Side margins are set by apply_layout_bucket (tighter in compact mode).
     let search = gtk4::SearchEntry::new();
     search.add_css_class("wp-search");
     search.set_placeholder_text(Some("Search wallpapers…"));
-    search.set_margin_start(16);
-    search.set_margin_end(16);
     search.set_margin_top(12);
     search.set_margin_bottom(4);
     root.append(&search);
+
+    // Ctrl+F focuses search, Ctrl+, opens the header menu.
+    {
+        let focus_search = gio::SimpleAction::new("focus-search", None);
+        let search_a = search.clone();
+        focus_search.connect_activate(move |_, _| {
+            search_a.grab_focus();
+        });
+        window.add_action(&focus_search);
+
+        let open_menu = gio::SimpleAction::new("open-menu", None);
+        let menu_btn_a = menu_btn.clone();
+        open_menu.connect_activate(move |_, _| menu_btn_a.popup());
+        window.add_action(&open_menu);
+
+        if let Some(app) = window.application() {
+            app.set_accels_for_action("win.focus-search", &["<primary>f"]);
+            app.set_accels_for_action("win.open-menu", &["<primary>comma"]);
+        }
+    }
 
     // ── Scrollable content ──
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
 
+    // Side margins are set by apply_layout_bucket (tighter in compact mode).
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
     content.set_margin_bottom(8);
 
     // Recent row.
@@ -210,8 +302,13 @@ fn build_library_view(
     content.append(&recent_label);
 
     let recent_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    recent_box.set_margin_bottom(10);
-    content.append(&recent_box);
+    // Own horizontal scroller: at narrow widths the row can outgrow the
+    // window, and the page-level ScrolledWindow above is vertical-only.
+    let recent_scroll = gtk4::ScrolledWindow::new();
+    recent_scroll.set_policy(PolicyType::Automatic, PolicyType::Never);
+    recent_scroll.set_child(Some(&recent_box));
+    recent_scroll.set_margin_bottom(10);
+    content.append(&recent_scroll);
 
     // Per-type sections (Images / Videos / GIFs); rebuilt by populate_library.
     let sections_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -242,13 +339,20 @@ fn build_library_view(
     welcome.set_child(Some(&welcome_btn));
     content.append(&welcome);
 
-    scroll.set_child(Some(&content));
+    // Bound the grid width with a Clamp: it grows with the window but never
+    // past `maximum_size`, so ultrawide/4K keeps a centered, readable column
+    // instead of stretching edge-to-edge (mirrors the editor's preview_clamp).
+    let content_clamp = adw::Clamp::new();
+    content_clamp.set_maximum_size(1360);
+    content_clamp.set_tightening_threshold(900);
+    content_clamp.set_child(Some(&content));
+
+    scroll.set_child(Some(&content_clamp));
     root.append(&scroll);
 
     // ── Footer: add actions (right-aligned) ──
+    // Side margins are set by apply_layout_bucket (tighter in compact mode).
     let footer = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    footer.set_margin_start(16);
-    footer.set_margin_end(16);
     footer.set_margin_top(8);
     footer.set_margin_bottom(14);
 
@@ -283,6 +387,25 @@ fn build_library_view(
     footer.append(&add_btn);
     root.append(&footer);
 
+    // In compact mode, condense the footer buttons to icon-only (tooltips
+    // already carry the label) so they don't crowd out the search/grid at the
+    // 420px minimum width.
+    let condense_footer_buttons = {
+        let add_folder_btn = add_folder_btn.clone();
+        let add_btn = add_btn.clone();
+        move |compact: bool| {
+            if compact {
+                add_folder_btn.set_icon_name("folder-new-symbolic");
+                add_btn.set_icon_name("list-add-symbolic");
+            } else {
+                add_folder_btn
+                    .set_child(Some(&button_content("folder-new-symbolic", "Add folder")));
+                add_btn.set_child(Some(&button_content("list-add-symbolic", "Add")));
+            }
+        }
+    };
+    add_btn.set_tooltip_text(Some("Add a wallpaper"));
+
     // ── Live-updating sectioned library ──
     let home_query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let refresh: Rc<dyn Fn()> = {
@@ -294,6 +417,7 @@ fn build_library_view(
         let stack = stack.clone();
         let home_query = home_query.clone();
         let search = search.clone();
+        let bucket = bucket.clone();
         Rc::new(move || {
             // Searching an empty library is pointless: hide the field until
             // there's something to search.
@@ -307,6 +431,7 @@ fn build_library_view(
                 &welcome,
                 &stack,
                 q.as_str(),
+                bucket.get(),
             );
         })
     };
@@ -333,7 +458,70 @@ fn build_library_view(
         });
     }
 
+    // Apply the bucket resolved at construction time (handles launching
+    // straight into a narrow tiling-WM tile), then keep it in sync with
+    // interactive resizes. `AdwBreakpoint` needs libadwaita >= 1.4; this build
+    // is on 1.1, so `default-width` is the portable fallback.
+    let margin_widgets = LayoutMarginWidgets {
+        root: root.clone(),
+        search: search.clone(),
+        content: content.clone(),
+        footer: footer.clone(),
+    };
+    apply_layout_bucket(&margin_widgets, &condense_footer_buttons, bucket.get());
+    {
+        let bucket = bucket.clone();
+        let refresh = refresh.clone();
+        window.connect_notify_local(Some("default-width"), move |win, _| {
+            let resolved = LayoutBucket::from_width(win.default_width());
+            if resolved == bucket.get() {
+                return;
+            }
+            bucket.set(resolved);
+            apply_layout_bucket(&margin_widgets, &condense_footer_buttons, resolved);
+            refresh();
+        });
+    }
+
     root
+}
+
+/// Widgets whose margins tighten in compact mode.
+struct LayoutMarginWidgets {
+    root: gtk4::Box,
+    search: gtk4::SearchEntry,
+    content: gtk4::Box,
+    footer: gtk4::Box,
+}
+
+/// Toggle the compact/wide CSS class, footer button density, and outer
+/// margins for `bucket`. Column caps are applied separately, inside
+/// `populate_library`, since they only take effect the next time a FlowBox
+/// section is (re)built.
+fn apply_layout_bucket(
+    widgets: &LayoutMarginWidgets,
+    condense_footer_buttons: &impl Fn(bool),
+    bucket: LayoutBucket,
+) {
+    for cls in ["compact-layout", "wide-layout"] {
+        widgets.root.remove_css_class(cls);
+    }
+    if let Some(cls) = bucket.css_class() {
+        widgets.root.add_css_class(cls);
+    }
+    condense_footer_buttons(bucket == LayoutBucket::Compact);
+
+    let side_margin = if bucket == LayoutBucket::Compact {
+        8
+    } else {
+        16
+    };
+    widgets.search.set_margin_start(side_margin);
+    widgets.search.set_margin_end(side_margin);
+    widgets.content.set_margin_start(side_margin);
+    widgets.content.set_margin_end(side_margin);
+    widgets.footer.set_margin_start(side_margin);
+    widgets.footer.set_margin_end(side_margin);
 }
 
 /// Header menu: appearance (theme mode + accent) and behavior switches.
@@ -493,6 +681,18 @@ fn build_menu_popover(
     }
     popover_box.append(&advanced_btn);
 
+    let update_btn = gtk4::Button::with_label("Check for updates");
+    update_btn.add_css_class("flat");
+    update_btn.set_halign(gtk4::Align::Start);
+    {
+        let state_upd = state.clone();
+        let win_upd = window.clone();
+        update_btn.connect_clicked(move |_| {
+            super::updates::check_for_updates(&win_upd, state_upd.clone(), true);
+        });
+    }
+    popover_box.append(&update_btn);
+
     // ── Help & feedback ──
     // A user-initiated path: the feedback dialog otherwise auto-prompts only once
     // (after a week), so without this a user can neither send feedback nor reach
@@ -527,6 +727,17 @@ fn build_menu_popover(
     });
     popover_box.append(&help_btn);
 
+    let about_btn = gtk4::Button::with_label("About");
+    about_btn.add_css_class("flat");
+    about_btn.set_halign(gtk4::Align::Start);
+    {
+        let win_about = window.clone();
+        about_btn.connect_clicked(move |_| {
+            show_about_dialog(&win_about);
+        });
+    }
+    popover_box.append(&about_btn);
+
     let popover = gtk4::Popover::new();
     popover.set_child(Some(&popover_box));
     popover
@@ -543,6 +754,7 @@ fn populate_library(
     welcome: &adw::StatusPage,
     stack: &gtk4::Stack,
     query: &str,
+    bucket: LayoutBucket,
 ) {
     // Clear.
     while let Some(c) = sections_box.first_child() {
@@ -612,10 +824,11 @@ fn populate_library(
         first_section = false;
         section.append(&header);
 
+        let (min_children, max_children) = bucket.flow_caps();
         let flow = gtk4::FlowBox::new();
         flow.set_homogeneous(true);
-        flow.set_max_children_per_line(6);
-        flow.set_min_children_per_line(2);
+        flow.set_max_children_per_line(max_children);
+        flow.set_min_children_per_line(min_children);
         flow.set_selection_mode(gtk4::SelectionMode::None);
         flow.set_valign(gtk4::Align::Start);
         flow.set_row_spacing(14);
@@ -638,18 +851,16 @@ fn build_mini_card(
     state: Rc<RefCell<AppState>>,
     stack: gtk4::Stack,
     active: bool,
-) -> gtk4::Overlay {
+) -> gtk4::AspectFrame {
     let overlay = gtk4::Overlay::new();
     overlay.add_css_class("wp-mini");
     if active {
         overlay.add_css_class("active");
     }
     overlay.set_overflow(gtk4::Overflow::Hidden);
-    overlay.set_size_request(150, 84);
 
     let pic = gtk4::Picture::new();
     pic.add_css_class("wp-thumb");
-    pic.set_size_request(150, 84);
     pic.set_can_shrink(true);
     pic.set_keep_aspect_ratio(true);
     if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
@@ -683,7 +894,12 @@ fn build_mini_card(
     }
     overlay.add_controller(click);
 
-    overlay
+    // Minimum 16:9 footprint that grows with its natural width instead of a
+    // fixed pixel pair; the row never distorts the thumbnail.
+    let frame = gtk4::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
+    frame.set_size_request(150, -1);
+    frame.set_child(Some(&overlay));
+    frame
 }
 
 /// Cinematic 16:9 library card: poster thumbnail, gradient title scrim, kind
@@ -694,21 +910,17 @@ fn build_library_card(
     state: Rc<RefCell<AppState>>,
     stack: gtk4::Stack,
     active: bool,
-) -> gtk4::Overlay {
+) -> gtk4::AspectFrame {
     let overlay = gtk4::Overlay::new();
     overlay.add_css_class("wp-card");
     if active {
         overlay.add_css_class("active");
     }
     overlay.set_overflow(gtk4::Overflow::Hidden);
-    // Fixed 16:9 poster footprint, top-aligned so the FlowBox never stretches
-    // cards to fill the viewport (vexpand on the child would propagate upward).
-    overlay.set_size_request(230, 130);
     overlay.set_valign(gtk4::Align::Start);
 
     let pic = gtk4::Picture::new();
     pic.add_css_class("wp-thumb");
-    pic.set_size_request(230, 130);
     pic.set_can_shrink(true);
     pic.set_keep_aspect_ratio(true);
     if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
@@ -823,7 +1035,15 @@ fn build_library_card(
         super::hover_preview::attach(&overlay, &pic, video, entry.thumbnail.clone());
     }
 
-    overlay
+    // Minimum 16:9 poster footprint whose height derives from the FlowBox's
+    // allocated cell width, so cards grow with the window instead of being
+    // pinned to a fixed pixel size; homogeneous(true) on the FlowBox gives
+    // every cell in a row the same width, so they all resolve to the same
+    // aspect height too — never stretched or distorted.
+    let frame = gtk4::AspectFrame::new(0.5, 0.0, 16.0 / 9.0, false);
+    frame.set_size_request(230, -1);
+    frame.set_child(Some(&overlay));
+    frame
 }
 
 /// Home sections, in display order.
@@ -940,6 +1160,31 @@ fn show_card_menu(
         });
     }
     menu.append(&rename);
+
+    if state
+        .borrow()
+        .entries
+        .get(idx)
+        .map(|e| e.broken)
+        .unwrap_or(false)
+    {
+        let relink = item("Relink…");
+        {
+            let s = state.clone();
+            let p = pop.clone();
+            let parent = parent.clone();
+            relink.connect_clicked(move |_| {
+                p.popdown();
+                if let Some(window) = parent
+                    .root()
+                    .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok())
+                {
+                    relink_entry(&window, s.clone(), idx);
+                }
+            });
+        }
+        menu.append(&relink);
+    }
 
     menu.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
@@ -1474,7 +1719,59 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     dialog.present();
 }
 
+// ─── About dialog ─────────────────────────────────────────────────────────────
+
+fn show_about_dialog(window: &adw::ApplicationWindow) {
+    let (dialog, content) = glass_dialog(window, "About Fresco", 360, -1);
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    inner.set_margin_start(24);
+    inner.set_margin_end(24);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(22);
+    inner.set_halign(gtk4::Align::Center);
+
+    let heading = gtk4::Label::new(Some("Fresco"));
+    heading.add_css_class("dialog-heading");
+    inner.append(&heading);
+
+    let version = gtk4::Label::new(Some(&format!(
+        "Version {}",
+        crate::update::current_version()
+    )));
+    version.add_css_class("dim");
+    inner.append(&version);
+
+    let desc = gtk4::Label::new(Some("Live wallpapers for Linux."));
+    desc.add_css_class("dialog-sub");
+    desc.set_wrap(true);
+    desc.set_justify(gtk4::Justification::Center);
+    inner.append(&desc);
+
+    let link = gtk4::LinkButton::with_label(
+        "https://github.com/DibbayajyotiRoy/fresco",
+        "github.com/DibbayajyotiRoy/fresco",
+    );
+    link.set_margin_top(4);
+    inner.append(&link);
+
+    content.append(&inner);
+    dialog.present();
+}
+
 // ─── File picker ──────────────────────────────────────────────────────────────
+
+const VIDEO_PATTERNS: [&str; 6] = ["*.mp4", "*.webm", "*.mkv", "*.avi", "*.mov", "*.gif"];
+const IMAGE_PATTERNS: [&str; 5] = ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"];
+
+fn media_filter(name: &str, patterns: &[&str]) -> gtk4::FileFilter {
+    let f = gtk4::FileFilter::new();
+    f.set_name(Some(name));
+    for p in patterns {
+        f.add_pattern(p);
+    }
+    f
+}
 
 fn open_file_picker(
     window: &adw::ApplicationWindow,
@@ -1491,31 +1788,16 @@ fn open_file_picker(
     );
     chooser.set_select_multiple(true);
 
-    let video_pat = ["*.mp4", "*.webm", "*.mkv", "*.avi", "*.mov", "*.gif"];
-    let image_pat = ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"];
-
     // "All supported" first → it's the default filter, so videos AND images
     // both show without the user switching the dropdown.
-    let allf = gtk4::FileFilter::new();
-    allf.set_name(Some("All supported"));
-    for p in video_pat.iter().chain(image_pat.iter()) {
-        allf.add_pattern(p);
-    }
-    chooser.add_filter(&allf);
-
-    let vf = gtk4::FileFilter::new();
-    vf.set_name(Some("Video files"));
-    for p in &video_pat {
-        vf.add_pattern(p);
-    }
-    chooser.add_filter(&vf);
-
-    let imf = gtk4::FileFilter::new();
-    imf.set_name(Some("Image files"));
-    for p in &image_pat {
-        imf.add_pattern(p);
-    }
-    chooser.add_filter(&imf);
+    let all_pat: Vec<&str> = VIDEO_PATTERNS
+        .iter()
+        .chain(IMAGE_PATTERNS.iter())
+        .copied()
+        .collect();
+    chooser.add_filter(&media_filter("All supported", &all_pat));
+    chooser.add_filter(&media_filter("Video files", &VIDEO_PATTERNS));
+    chooser.add_filter(&media_filter("Image files", &IMAGE_PATTERNS));
 
     let state_cb = state.clone();
     chooser.connect_response(move |ch, resp| {
@@ -1617,7 +1899,137 @@ fn open_folder_picker(
     chooser.show();
 }
 
+/// Re-pick the source for a broken library entry (its file/folder was moved
+/// or deleted). Kind-aware: a single file for Video/Image, multiple files for
+/// Playlist/paths-based Slideshow, a folder for folder-based Slideshow.
+/// Clears `broken` on success via `check_health`.
+fn relink_entry(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, idx: usize) {
+    let (kind, use_folder) = {
+        let s = state.borrow();
+        let Some(e) = s.entries.get(idx) else {
+            return;
+        };
+        (e.kind, e.kind == Kind::Slideshow && e.paths.is_empty())
+    };
+
+    if use_folder {
+        let chooser = gtk4::FileChooserNative::new(
+            Some("Relink Slideshow Folder"),
+            Some(window),
+            FileChooserAction::SelectFolder,
+            Some("Select"),
+            Some("Cancel"),
+        );
+        let state_cb = state.clone();
+        chooser.connect_response(move |ch, resp| {
+            state_cb.borrow_mut().current_picker = None;
+            if resp != ResponseType::Accept {
+                return;
+            }
+            let Some(folder) = ch.file().and_then(|f| f.path()) else {
+                return;
+            };
+            finish_relink(&state_cb, idx, |e| e.folder = Some(folder));
+        });
+        state.borrow_mut().current_picker = Some(chooser.clone());
+        chooser.show();
+        return;
+    }
+
+    let chooser = gtk4::FileChooserNative::new(
+        Some("Relink Source"),
+        Some(window),
+        FileChooserAction::Open,
+        Some("Open"),
+        Some("Cancel"),
+    );
+    chooser.set_select_multiple(matches!(kind, Kind::Playlist | Kind::Slideshow));
+    // Same kind-appropriate restriction as the Add flow, so a broken Video
+    // entry can't be "fixed" by pointing it at a non-media file.
+    match kind {
+        Kind::Video | Kind::Playlist => {
+            chooser.add_filter(&media_filter("Video files", &VIDEO_PATTERNS));
+        }
+        Kind::Image | Kind::Slideshow => {
+            chooser.add_filter(&media_filter("Image files", &IMAGE_PATTERNS));
+        }
+    }
+    let state_cb = state.clone();
+    chooser.connect_response(move |ch, resp| {
+        state_cb.borrow_mut().current_picker = None;
+        if resp != ResponseType::Accept {
+            return;
+        }
+        let model = ch.files();
+        let n = model.n_items();
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        for i in 0..n {
+            if let Some(obj) = model.item(i) {
+                if let Ok(file) = obj.downcast::<gio::File>() {
+                    if let Some(p) = file.path() {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+        if paths.is_empty() {
+            return;
+        }
+        match kind {
+            Kind::Playlist | Kind::Slideshow => {
+                finish_relink(&state_cb, idx, |e| e.paths = paths);
+            }
+            _ => {
+                finish_relink(&state_cb, idx, |e| e.path = Some(paths.remove(0)));
+            }
+        }
+    });
+    state.borrow_mut().current_picker = Some(chooser.clone());
+    chooser.show();
+}
+
+/// Apply a relinked source to entry `idx`, re-check health, persist, toast,
+/// and refresh the grid. Mirrors `commit_rename`'s save→toast→refresh tail.
+fn finish_relink(state: &Rc<RefCell<AppState>>, idx: usize, apply: impl FnOnce(&mut LibraryEntry)) {
+    {
+        let mut s = state.borrow_mut();
+        let Some(e) = s.entries.get_mut(idx) else {
+            return;
+        };
+        apply(e);
+        e.check_health();
+        save_entries(&s.entries).ok();
+    }
+    show_toast(state, "Relinked");
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Shared shell for the glass-styled modals: a transient `adw::Window` whose
+/// content box already holds the header bar. Callers append their body to the
+/// returned box and call `dialog.present()`.
+pub(crate) fn glass_dialog(
+    window: &adw::ApplicationWindow,
+    title: &str,
+    width: i32,
+    height: i32,
+) -> (adw::Window, gtk4::Box) {
+    let dialog = adw::Window::new();
+    dialog.add_css_class("glass");
+    dialog.set_transient_for(Some(window));
+    dialog.set_modal(true);
+    dialog.set_title(Some(title));
+    dialog.set_default_size(width, height);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.append(&adw::HeaderBar::new());
+    dialog.set_content(Some(&content));
+    (dialog, content)
+}
 
 /// Uppercase section label styled as an overline (see theme.rs `.overline`).
 fn overline(text: &str) -> gtk4::Label {
@@ -1653,7 +2065,7 @@ fn switch_row<F: Fn(bool) + 'static>(label: &str, active: bool, on_toggle: F) ->
     hbox
 }
 
-fn show_toast(state: &Rc<RefCell<AppState>>, msg: &str) {
+pub(crate) fn show_toast(state: &Rc<RefCell<AppState>>, msg: &str) {
     let toast = adw::Toast::new(msg);
     toast.set_timeout(4);
     state.borrow().toast.add_toast(toast);
@@ -1733,249 +2145,6 @@ fn transition_index(t: Transition) -> u32 {
     }
 }
 
-// ─── "What's new" on-update notice ────────────────────────────────────────────
-
-/// The CHANGELOG, embedded at build time so the notes ship inside the binary.
-const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
-
-/// Extract the changelog section for `version` (Keep a Changelog format:
-/// `## [x.y.z] …` up to the next `## [`).
-fn changelog_for(version: &str) -> Option<String> {
-    let header = format!("## [{version}]");
-    let start = CHANGELOG.find(&header)?;
-    let rest = &CHANGELOG[start..];
-    let body = &rest[header.len()..];
-    let end = body
-        .find("\n## [")
-        .map(|i| header.len() + i)
-        .unwrap_or(rest.len());
-    let section = rest[..end].trim();
-    if section.is_empty() {
-        None
-    } else {
-        Some(section.to_string())
-    }
-}
-
-/// A dismissible banner shown once per version after the app updates. Returns
-/// None if the current version's notes have already been seen (or are absent).
-fn build_update_banner(
-    window: &adw::ApplicationWindow,
-    state: Rc<RefCell<AppState>>,
-) -> Option<gtk4::Widget> {
-    let current = env!("CARGO_PKG_VERSION").to_string();
-    if state.borrow().config.last_seen_version == current {
-        return None;
-    }
-    let notes = changelog_for(&current)?;
-
-    let bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
-    bar.add_css_class("banner");
-    bar.set_margin_start(16);
-    bar.set_margin_end(16);
-    bar.set_margin_top(8);
-
-    let icon = gtk4::Image::from_icon_name("software-update-available-symbolic");
-    bar.append(&icon);
-
-    let label = gtk4::Label::new(Some(&format!("Fresco updated to {current}")));
-    label.set_hexpand(true);
-    label.set_xalign(0.0);
-
-    let details = gtk4::Button::with_label("See what's new");
-    details.add_css_class("suggested-action");
-
-    let close = gtk4::Button::from_icon_name("window-close-symbolic");
-    close.add_css_class("flat");
-    close.set_tooltip_text(Some("Dismiss"));
-
-    bar.append(&label);
-    bar.append(&details);
-    bar.append(&close);
-
-    // Mark the current version seen and persist it.
-    let mark_seen = {
-        let state = state.clone();
-        let current = current.clone();
-        move || {
-            let mut s = state.borrow_mut();
-            if s.config.last_seen_version != current {
-                s.config.last_seen_version = current.clone();
-                s.config.save().ok();
-            }
-        }
-    };
-
-    {
-        let bar = bar.clone();
-        let win = window.clone();
-        let mark = mark_seen.clone();
-        let version = current.clone();
-        details.connect_clicked(move |_| {
-            show_changelog_modal(&win, &version, &notes);
-            mark();
-            bar.set_visible(false);
-        });
-    }
-    {
-        let bar = bar.clone();
-        close.connect_clicked(move |_| {
-            mark_seen();
-            bar.set_visible(false);
-        });
-    }
-
-    Some(bar.upcast())
-}
-
-/// Modal showing the changelog notes for `version`.
-/// One parsed changelog block.
-enum Note {
-    /// A `### Section` heading.
-    Section(String),
-    /// A `- ` bullet (may have spanned several wrapped source lines).
-    Bullet(String),
-    /// A plain paragraph.
-    Para(String),
-}
-
-/// Parse a Keep-a-Changelog section into blocks, coalescing soft-wrapped
-/// source lines back into single bullets/paragraphs and dropping the redundant
-/// `## [version]` header (the modal title already shows it).
-fn parse_notes(notes: &str) -> Vec<Note> {
-    let mut blocks: Vec<Note> = Vec::new();
-    let mut cur: Option<Note> = None;
-    let flush = |cur: &mut Option<Note>, blocks: &mut Vec<Note>| {
-        if let Some(b) = cur.take() {
-            blocks.push(b);
-        }
-    };
-    for raw in notes.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
-            flush(&mut cur, &mut blocks);
-        } else if let Some(rest) = line.strip_prefix("### ") {
-            flush(&mut cur, &mut blocks);
-            blocks.push(Note::Section(rest.to_string()));
-        } else if line.starts_with("## ") {
-            flush(&mut cur, &mut blocks); // version header — title already shows it
-        } else if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
-            flush(&mut cur, &mut blocks);
-            cur = Some(Note::Bullet(rest.to_string()));
-        } else {
-            match &mut cur {
-                Some(Note::Bullet(s)) | Some(Note::Para(s)) => {
-                    s.push(' ');
-                    s.push_str(line);
-                }
-                _ => cur = Some(Note::Para(line.to_string())),
-            }
-        }
-    }
-    flush(&mut cur, &mut blocks);
-    blocks
-}
-
-/// Wrap each `delim`-delimited span in `open`/`close` tags, toggling on/off.
-fn wrap_pairs(s: &str, delim: &str, open: &str, close: &str) -> String {
-    let mut out = String::new();
-    let mut on = false;
-    for (i, seg) in s.split(delim).enumerate() {
-        if i > 0 {
-            out.push_str(if on { close } else { open });
-            on = !on;
-        }
-        out.push_str(seg);
-    }
-    if on {
-        out.push_str(close);
-    }
-    out
-}
-
-/// Render inline markdown (`**bold**`, `*italic*`) as Pango markup, escaping
-/// the rest and normalising em/en dashes to plain hyphens.
-fn pango_inline(raw: &str) -> String {
-    let normalised = raw.replace(['—', '–'], "-");
-    let escaped = glib::markup_escape_text(&normalised).to_string();
-    let bolded = wrap_pairs(&escaped, "**", "<b>", "</b>");
-    wrap_pairs(&bolded, "*", "<i>", "</i>")
-}
-
-/// Modal showing the changelog notes for `version`, rendered as styled widgets
-/// rather than raw markdown text.
-fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &str) {
-    let dialog = adw::Window::new();
-    dialog.add_css_class("glass");
-    dialog.set_transient_for(Some(window));
-    dialog.set_modal(true);
-    dialog.set_title(Some(&format!("What's new in {version}")));
-    dialog.set_default_size(660, 680);
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content.append(&adw::HeaderBar::new());
-
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_vexpand(true);
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-
-    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
-    list.set_margin_start(28);
-    list.set_margin_end(28);
-    list.set_margin_top(14);
-    list.set_margin_bottom(28);
-
-    // Prominent version title at the top of the notes.
-    let title = gtk4::Label::new(Some(&format!("Version {version}")));
-    title.add_css_class("changelog-title");
-    title.set_xalign(0.0);
-    title.set_margin_bottom(2);
-    list.append(&title);
-
-    for note in parse_notes(notes) {
-        match note {
-            Note::Section(text) => {
-                let h = gtk4::Label::new(Some(&text.to_uppercase()));
-                h.add_css_class("changelog-section");
-                h.set_xalign(0.0);
-                h.set_halign(gtk4::Align::Start);
-                h.set_margin_top(16);
-                list.append(&h);
-            }
-            Note::Bullet(text) => {
-                let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
-                let bullet = gtk4::Label::new(Some("•"));
-                bullet.add_css_class("dim");
-                bullet.add_css_class("changelog-body");
-                bullet.set_valign(gtk4::Align::Start);
-                let body = gtk4::Label::new(None);
-                body.add_css_class("changelog-body");
-                body.set_markup(&pango_inline(&text));
-                body.set_wrap(true);
-                body.set_xalign(0.0);
-                body.set_hexpand(true);
-                row.append(&bullet);
-                row.append(&body);
-                list.append(&row);
-            }
-            Note::Para(text) => {
-                let p = gtk4::Label::new(None);
-                p.add_css_class("changelog-body");
-                p.set_markup(&pango_inline(&text));
-                p.set_wrap(true);
-                p.set_xalign(0.0);
-                list.append(&p);
-            }
-        }
-    }
-
-    scroll.set_child(Some(&list));
-    content.append(&scroll);
-
-    dialog.set_content(Some(&content));
-    dialog.present();
-}
-
 // ─── Feedback prompt + admin notifications (Supabase) ──────────────────────────
 
 fn unix_now() -> u64 {
@@ -2008,7 +2177,8 @@ fn run_startup_checks(window: &adw::ApplicationWindow, state: Rc<RefCell<AppStat
     if !prompted && enabled && now.saturating_sub(first_run) >= WEEK {
         show_feedback_dialog(window, state.clone());
     }
-    poll_notifications(window, state);
+    poll_notifications(window, state.clone());
+    super::updates::check_for_updates(window, state, false);
 }
 
 fn submit_feedback_async(rating: i8, comment: &gtk4::Entry, state: &Rc<RefCell<AppState>>) {
@@ -2034,15 +2204,7 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
         s.config.save().ok();
     }
 
-    let dialog = adw::Window::new();
-    dialog.add_css_class("glass");
-    dialog.set_transient_for(Some(window));
-    dialog.set_modal(true);
-    dialog.set_title(Some("Feedback"));
-    dialog.set_default_size(420, -1);
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content.append(&adw::HeaderBar::new());
+    let (dialog, content) = glass_dialog(window, "Feedback", 420, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
     inner.set_margin_start(24);
@@ -2088,7 +2250,6 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     inner.append(&buttons);
 
     content.append(&inner);
-    dialog.set_content(Some(&content));
 
     {
         let comment = comment.clone();
@@ -2166,15 +2327,7 @@ fn show_notification(
 }
 
 fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supabase::Notification) {
-    let dialog = adw::Window::new();
-    dialog.add_css_class("glass");
-    dialog.set_transient_for(Some(window));
-    dialog.set_modal(true);
-    dialog.set_title(Some(&notif.title));
-    dialog.set_default_size(440, -1);
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content.append(&adw::HeaderBar::new());
+    let (dialog, content) = glass_dialog(window, &notif.title, 440, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     inner.set_margin_start(20);
@@ -2201,6 +2354,5 @@ fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supab
     }
 
     content.append(&inner);
-    dialog.set_content(Some(&content));
     dialog.present();
 }

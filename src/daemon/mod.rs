@@ -329,6 +329,10 @@ impl Daemon {
                 Response::Ok
             }
             Request::Status => Response::Status(self.status()),
+            Request::Update => {
+                notifier::run_updater_async();
+                Response::Ok
+            }
         }
     }
 
@@ -828,6 +832,10 @@ fn run_gnome_static() -> Result<()> {
             // A static frame has nothing to pause.
             Request::Pause | Request::Resume => Response::Ok,
             Request::Status => Response::Status(static_status(&config)),
+            Request::Update => {
+                notifier::run_updater_async();
+                Response::Ok
+            }
             Request::Stop => Response::Ok,
         };
         let _ = reply.send(resp);
@@ -1005,6 +1013,10 @@ fn run_wayland_layershell() -> Result<()> {
                     }
                     Request::Status => {
                         Response::Status(wayland_status(&outputs, user_paused || battery_paused))
+                    }
+                    Request::Update => {
+                        notifier::run_updater_async();
+                        Response::Ok
                     }
                     Request::Stop => Response::Ok,
                 };

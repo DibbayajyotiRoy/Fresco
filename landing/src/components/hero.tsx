@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { Download, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
+import { GITHUB_URL } from "@/lib/site";
 
 export function Hero() {
   return (
@@ -24,9 +24,9 @@ export function Hero() {
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <Button asChild size="lg" className="font-medium">
-            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+            <a href="#download">
               <Download />
-              Download .deb
+              Install Fresco
             </a>
           </Button>
           <Button asChild size="lg" variant="secondary" className="font-medium">

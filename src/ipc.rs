@@ -17,6 +17,8 @@ pub enum Request {
     Pause,
     Resume,
     Status,
+    /// Download and install the latest release in the background (fire-and-forget).
+    Update,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -102,6 +104,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Request::Status).unwrap(),
             r#"{"cmd":"status"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request::Update).unwrap(),
+            r#"{"cmd":"update"}"#
         );
     }
 

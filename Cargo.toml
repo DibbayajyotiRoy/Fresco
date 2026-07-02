@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "0.0.9"
+version = "0.0.91"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -9,7 +9,7 @@ authors = ["Dibbayajyoti Roy"]
 
 [features]
 default = ["gui", "daemon"]
-gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel"]
+gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel", "dep:semver"]
 daemon = [
     "dep:x11rb", "dep:libloading", "dep:nix", "dep:wayland-client",
     "dep:wayland-protocols-wlr",

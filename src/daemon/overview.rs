@@ -95,7 +95,14 @@ fn render_still(w: &Wallpaper) -> Option<PathBuf> {
             _ => "null",
         };
         let ok = Command::new("ffmpeg")
+            // -nostdin + null stdio: ffmpeg reads the terminal by default, and
+            // from a shell-launched daemon that SIGTTIN-stops the WHOLE
+            // process group — daemon suspended, wallpaper frozen.
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .args([
+                "-nostdin",
                 "-y",
                 "-loglevel",
                 "error",

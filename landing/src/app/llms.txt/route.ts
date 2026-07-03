@@ -7,7 +7,7 @@ export const { GET } = createLlmsTxtRoute(
   () => ({
     title: "Fresco - Live wallpapers for Linux",
     description:
-      "Fresco is a free, open-source live-wallpaper app for Linux. Set video, GIF, image, slideshow, or playlist wallpapers as your animated desktop background. GUI-first, hardware-accelerated, X11. A free Wallpaper Engine alternative.",
+      "Fresco is a free, open-source live-wallpaper app for Linux. Browse a built-in wallpaper catalog, set video, GIF, image, slideshow, or playlist wallpapers, put a different wallpaper on each monitor, and schedule day and night pairs. GUI-first, hardware-accelerated, on X11 and Wayland. A free Wallpaper Engine alternative.",
     sections: [
       {
         name: "Get Fresco",

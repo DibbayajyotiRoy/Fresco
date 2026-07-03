@@ -291,7 +291,12 @@ fn build_mpv_opts(w: &Wallpaper, scaling: Scaling, sock: &Path) -> String {
     // truncated and mpv rejects it. mpv's default letterbox background is black.
     let mut o: Vec<String> = vec![
         format!("input-ipc-server={}", sock.display()),
-        "hwdec=auto-safe".into(),
+        // Copy-back decode for rotated video — see the note in mpv/player.rs.
+        if w.rotation.is_multiple_of(360) {
+            "hwdec=auto-safe".into()
+        } else {
+            "hwdec=auto-copy".into()
+        },
         "image-display-duration=inf".into(),
     ];
     if w.kind == Kind::Playlist && w.paths.len() > 1 {

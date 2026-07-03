@@ -247,7 +247,13 @@ impl LibraryEntry {
                 _ => "null",
             };
             let ok = std::process::Command::new("ffmpeg")
+                // -nostdin + null stdio: see overview.rs — a terminal-launched
+                // app must never let ffmpeg read the TTY (SIGTTIN stops us).
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .args([
+                    "-nostdin",
                     "-y",
                     "-loglevel",
                     "error",

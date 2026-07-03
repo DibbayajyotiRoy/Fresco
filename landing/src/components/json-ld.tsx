@@ -1,4 +1,4 @@
-import { FAQ, INSTALL_STEPS, FEATURE_LIST, AUTHOR } from "@/lib/content";
+import { FAQ, FEATURE_LIST, AUTHOR } from "@/lib/content";
 import { GITHUB_URL, RELEASES_URL, LICENSE_URL } from "@/lib/site";
 
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
@@ -73,16 +73,6 @@ export function JsonLd({
           "@type": "Question",
           name: q,
           acceptedAnswer: { "@type": "Answer", text: a },
-        })),
-      },
-      {
-        "@type": "HowTo",
-        name: "How to set a video as your wallpaper on Linux",
-        step: INSTALL_STEPS.map((s, i) => ({
-          "@type": "HowToStep",
-          position: i + 1,
-          name: s.name,
-          text: s.text,
         })),
       },
     ],

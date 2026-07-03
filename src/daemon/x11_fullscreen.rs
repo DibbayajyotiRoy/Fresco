@@ -11,7 +11,7 @@
 //! this returns an empty set — the feature degrades to "never pauses", which
 //! is exactly the pre-existing behavior.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, MapState, Window};
@@ -19,14 +19,16 @@ use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, MapState, Window};
 use super::monitors::Monitor;
 use super::x11win::Atoms;
 
-/// Connectors whose monitor is ≥50% covered by a viewable fullscreen window.
+/// Connectors whose monitor is ≥50% covered by a viewable fullscreen window,
+/// mapped to a short description of that window (title, for the pause log —
+/// so a misfiring compositor surface is identifiable from the log alone).
 pub fn covered_connectors<C: Connection>(
     conn: &C,
     root: Window,
     atoms: &Atoms,
     monitors: &[Monitor],
-) -> HashSet<String> {
-    let mut covered = HashSet::new();
+) -> HashMap<String, String> {
+    let mut covered = HashMap::new();
     let Ok(list) = conn
         .get_property(
             false,
@@ -70,11 +72,23 @@ pub fn covered_connectors<C: Connection>(
         };
         for m in monitors {
             if overlap_at_least_half(x, y, w, h, m) {
-                covered.insert(m.connector.clone());
+                covered
+                    .entry(m.connector.clone())
+                    .or_insert_with(|| window_title(conn, win, atoms));
             }
         }
     }
     covered
+}
+
+/// Best-effort window title (`_NET_WM_NAME`), for the pause log.
+fn window_title<C: Connection>(conn: &C, win: Window, atoms: &Atoms) -> String {
+    conn.get_property(false, win, atoms._NET_WM_NAME, atoms.UTF8_STRING, 0, 64)
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .map(|r| String::from_utf8_lossy(&r.value).into_owned())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| format!("window 0x{win:x}"))
 }
 
 fn window_states<C: Connection>(conn: &C, win: Window, atoms: &Atoms) -> Option<Vec<u32>> {
@@ -223,7 +237,7 @@ mod tests {
 
         let covered = covered_connectors(&conn, screen.root, &atoms, &monitors);
         assert!(
-            covered.contains("TEST-1"),
+            covered.contains_key("TEST-1"),
             "fullscreen window not detected: {covered:?}"
         );
 

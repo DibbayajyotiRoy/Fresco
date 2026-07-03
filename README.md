@@ -4,7 +4,7 @@
 
 # Fresco — Live Wallpapers for Linux, Made Easy
 
-**Set any video, GIF, or image as your desktop wallpaper on Debian, Ubuntu, Pop!_OS & Mint** — a simple, GUI alternative to **Wallpaper Engine** and **Lively** for Linux, with hardware-accelerated playback.
+**The most complete free live-wallpaper engine on Linux.** Set any video, GIF, or image as your desktop wallpaper — browse a built-in catalog, put a different wallpaper on every display, schedule day/night pairs, and let hardware decoding keep your CPU near zero. A real GUI alternative to **Wallpaper Engine** and **Lively**, free forever.
 
 ![Downloads](https://img.shields.io/github/downloads/DibbayajyotiRoy/fresco/total?style=flat-square&color=brightgreen&label=downloads)
 ![License](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)
@@ -16,25 +16,42 @@
 > Windows has Wallpaper Engine and Lively. **Linux had nothing simple — until Fresco.**
 > Pick a video, click *Set*, close the app. Your wallpaper keeps playing and comes back on login.
 
-![Fresco — wallpaper library](data/screenshots/library.png)
+![Fresco — wallpaper library](data/screenshots/gallery.png)
 
 ---
 
 ## Why Fresco?
 
-Every other Linux live-wallpaper option is terminal-only, abandoned, locked to one GNOME version, or breaks under the compositor. Fresco is a **proper desktop app**: install a `.deb`, open it from your app menu, pick media, done.
+Every other Linux live-wallpaper option is terminal-only, abandoned, locked to one GNOME version, or breaks under the compositor. Fresco is a **proper desktop app**: install a `.deb`, open it from your app menu, pick media, done. And unlike everything else on this list, it doesn't just claim quality — **it ships the test harnesses that prove it** (see the numbers below).
 
-- 🎬 **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image **slideshow**, or a multi-video **playlist**
+- 🎬 **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image **slideshow**, a multi-video **playlist**, or a direct **URL**
+- 🗂 **Built-in wallpaper catalog** — browse curated, properly-licensed wallpapers in-app and set one in two clicks (menu → *Browse wallpapers…*)
 - ⚡ **Hardware-accelerated** — GPU video decode (VA-API / NVDEC) keeps CPU near zero without degrading quality
 - 🐧 **X11 _and_ Wayland** — desktop-window backend on X11, plus a bundled `mpvpaper` layer-shell backend for Sway (verified) and COSMIC, Hyprland & KDE Plasma 6 (experimental — verification in progress)
 - ✂️ **Crop & rotate editor** — drag a frame to pick the exact region, and rotate 90° to fix sideways phone clips (no other Linux tool has this)
-- 🔊 **Per-wallpaper sound** — unmute a video and set its volume; the choice is remembered for that wallpaper
+- 🔊 **Per-wallpaper sound that just works** — per-wallpaper mute/volume, and if your login raced the audio server, Fresco restores the track automatically
 - 🎞 **Slideshow transitions** — crossfade, fade, slide, or a slow Ken Burns pan between images
 - 🖼 **Wallpaper library** — saved thumbnails, recently-used, and search
 - 🔁 **Set & forget** — close the app, the wallpaper keeps playing; restored automatically on login
 - ⏸ **Power-aware** — pause on battery, and auto-pause per monitor when a window there goes fullscreen (X11 and Wayland)
-- 🖥 **Multi-monitor** — a different wallpaper per display; live hotplug on X11, and on Wayland newly plugged displays pick up on the next apply (automatic hotplug lands with the v1.0 engine)
+- 🖥 **Multi-monitor from the GUI** — right-click any wallpaper → *Set on \<display\>*; live hotplug on X11, and on Wayland newly plugged displays pick up on the next apply
+- 🌗 **Day & night schedules** — switch between two wallpapers on a timer (or arbitrary time slots / sunrise-sunset via config)
+- 🩺 **Self-healing engine** — cold-boot stall recovery, crashed-renderer respawn with anti-flap, automatic audio recovery when the sound server starts late, and honest diagnostics (`fresco status` shows real CPU, memory, source resolution, and dropped frames)
+- 🧩 **Scriptable** — a documented JSON control socket for waybar toggles and workspace hooks ([docs/SCRIPTING.md](docs/SCRIPTING.md))
 - 🎨 **Themes & accents** — light / dark / system with six accent palettes
+
+## Measured, not promised
+
+Fresco ships its proof harnesses in-tree (`tests/fidelity`, `tests/audio`) — every number below is reproducible on a headless compositor with one command, and CI gates releases on them.
+
+| What we measure | Result |
+|---|---|
+| 8K→4K downscale quality (SSIM vs a Lanczos reference, zone-plate torture test) | **0.74** with Fresco's scaler stack vs **0.54** with the defaults most players use |
+| Gradient banding (distinct luma levels reaching your screen, 256 = perfect) | **256** — dithering on every profile (was 220 before v1.0) |
+| Pixel-fidelity at HiDPI scale 1× and 2× (1-pixel checkerboard crispness) | **100 / 100** — pixel-exact, verified by screenshot on X11 *and* Wayland |
+| Audio recovery when the daemon starts before PipeWire (the classic silent-wallpaper bug) | **automatic**, within seconds — proven by a cold-boot repro harness |
+| Decoder honesty | playing media your GPU can't hardware-decode warns you instead of silently stuttering |
+| Automated tests | **73** across engine, schedule (NOAA solar ±2 min), downloads, catalog, and EWMH detection |
 
 ## Fresco vs other Linux options
 
@@ -48,6 +65,11 @@ Every other Linux live-wallpaper option is terminal-only, abandoned, locked to o
 | Per-wallpaper audio | ✅ | ✅ | ❌ | ⚠️ manual | ✅ |
 | Playlists | ✅ | ❌ | ❌ | manual | ✅ |
 | Wallpaper library | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Built-in wallpaper catalog | ✅ | ❌ | ❌ | ❌ | ✅ Workshop |
+| Per-display wallpapers (GUI) | ✅ | ❌ | ❌ | ⚠️ manual | ✅ |
+| Day/night schedules | ✅ | ❌ | ❌ | ❌ | ⚠️ |
+| Scriptable control socket | ✅ | ❌ | ❌ | ⚠️ | ❌ |
+| Self-healing + published benchmarks | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Actively maintained | ✅ | ✅ | ❌ | ✅ | ✅ |
 | Free & open source | ✅ | ✅ | ✅ | ✅ | ❌ (paid, Windows) |
 
@@ -98,7 +120,16 @@ It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). 
 Fresco uses GPU hardware decoding so CPU stays near zero. It can **automatically pause on battery**, and it **auto-pauses per monitor** when a window there goes fullscreen.
 
 **Can a video wallpaper play sound?**
-Yes. Each wallpaper remembers its own mute state and volume, so you can unmute one specific video and the choice sticks. Wallpapers start muted by default.
+Yes. Each wallpaper remembers its own mute state and volume, so you can unmute one specific video and the choice sticks. Wallpapers start muted by default. If your session's audio server starts after Fresco on login, the daemon detects the dropped track and restores it automatically.
+
+**Where do I find wallpapers?**
+Right in the app: menu → **Browse wallpapers…** opens a curated catalog (every item shows its license and author), or paste a direct video/image URL via **Add from URL…**.
+
+**Can I put different wallpapers on each monitor?**
+Yes — right-click any wallpaper in the library and choose **Set on \<display\>**. "Show default on all displays" clears the overrides.
+
+**Can wallpapers change with the time of day?**
+Yes — **Advanced → Day & night wallpaper** switches between two wallpapers on a schedule; arbitrary time slots and sunrise/sunset (manual coordinates) are available via `config.toml`.
 
 **Can I crop or rotate a wallpaper?**
 Yes. The editor has a **drag-to-crop** frame and a **90° rotate** (great for sideways phone videos). Both run on the GPU and are remembered per wallpaper.

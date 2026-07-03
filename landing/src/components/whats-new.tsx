@@ -1,12 +1,12 @@
-import { Layers, Volume2, RotateCw, PauseCircle, ArrowUpRight, Sparkles } from "lucide-react";
+import { LayoutGrid, MonitorSmartphone, SunMoon, Gauge, ArrowUpRight, Sparkles } from "lucide-react";
 import { WHATS_NEW } from "@/lib/content";
 import { GITHUB_URL } from "@/lib/site";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  wayland: Layers,
-  audio: Volume2,
-  rotate: RotateCw,
-  pause: PauseCircle,
+  catalog: LayoutGrid,
+  displays: MonitorSmartphone,
+  schedule: SunMoon,
+  quality: Gauge,
 };
 
 export function WhatsNew({ version }: { version: string }) {
@@ -21,7 +21,7 @@ export function WhatsNew({ version }: { version: string }) {
                 New in v{version}
               </span>
               <h2 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-                Wayland, sound, and rotation just landed.
+                The catalog, per-display wallpapers, and schedules just landed.
               </h2>
             </div>
             <a

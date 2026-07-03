@@ -18,8 +18,8 @@ export function Hero() {
         </h1>
 
         <p className="mt-6 max-w-xl text-pretty text-base text-ink-subtle sm:text-lg">
-          Set any video, GIF, or image as your desktop. Hardware-accelerated
-          playback keeps CPU near zero, on X11 and Wayland.
+          Set any video as your desktop, or browse the built-in catalog.
+          Near-zero CPU, on X11 and Wayland. Free forever.
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -37,10 +37,8 @@ export function Hero() {
           </Button>
         </div>
 
-        {/* Product panel: Linear frames the app screenshot as the protagonist.
-            surface-1 lift, hairline border, 16px corners, top white-edge
-            highlight. TODO: swap the placeholder for a real Fresco capture
-            (the library window, or a desktop running a live wallpaper). */}
+        {/* Product panel: the real app capture is the protagonist, framed
+            Linear-style (surface-1 lift, hairline border, top white edge). */}
         <div className="relative mt-16 w-full max-w-4xl">
           <div className="rounded-2xl border border-border bg-surface-1 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
             <div className="flex items-center gap-1.5 px-3 py-2">
@@ -50,8 +48,8 @@ export function Hero() {
             </div>
             <div className="overflow-hidden rounded-xl border border-border">
               <Image
-                src="/screenshots/library.png"
-                alt="The Fresco app running a live video wallpaper on the Linux desktop"
+                src="/screenshots/gallery.png"
+                alt="Fresco wallpaper library on Linux showing video wallpapers with an active live wallpaper and hardware decode status"
                 width={1280}
                 height={720}
                 priority

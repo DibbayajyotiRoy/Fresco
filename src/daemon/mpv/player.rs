@@ -29,7 +29,17 @@ impl Player {
             ("vo", "gpu"),
             // Clockwise rotation in degrees; applied before crop (zoom/pan).
             ("video-rotate", &(wallpaper.rotation % 360).to_string()),
-            ("hwdec", "auto-safe"),
+            // Rotated video + NATIVE hw surfaces (vaapi/nvdec) hits driver
+            // bugs that corrupt chroma on some stacks; copy-back keeps decode
+            // on the GPU but rotates ordinary uploaded textures instead.
+            (
+                "hwdec",
+                if wallpaper.rotation.is_multiple_of(360) {
+                    "auto-safe"
+                } else {
+                    "auto-copy"
+                },
+            ),
             ("profile", "low-latency"), // small demuxer queues; we override caches below
             ("image-display-duration", "inf"),
             ("osc", "no"),

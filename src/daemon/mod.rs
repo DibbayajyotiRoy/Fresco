@@ -256,8 +256,9 @@ pub struct Daemon {
     last_monitor_check: Instant,
     last_battery_check: Instant,
     last_cache_check: Instant,
-    /// Connectors currently covered by a viewable fullscreen window (EWMH).
-    fullscreen_covered: std::collections::HashSet<String>,
+    /// Connectors currently covered by a viewable fullscreen window (EWMH),
+    /// with the covering window's title for the log.
+    fullscreen_covered: std::collections::HashMap<String, String>,
     last_fullscreen_check: Instant,
     sched: SchedState,
     monitors: Vec<Monitor>,
@@ -283,7 +284,7 @@ impl Daemon {
             last_monitor_check: Instant::now(),
             last_battery_check: Instant::now() - BATTERY_INTERVAL,
             last_cache_check: Instant::now(),
-            fullscreen_covered: std::collections::HashSet::new(),
+            fullscreen_covered: std::collections::HashMap::new(),
             last_fullscreen_check: Instant::now(),
             sched: SchedState::default(),
             monitors: Vec::new(),
@@ -494,7 +495,7 @@ impl Daemon {
         for r in &self.renderers {
             let desired = self.user_paused
                 || self.battery_paused
-                || self.fullscreen_covered.contains(&r.window.connector);
+                || self.fullscreen_covered.contains_key(&r.window.connector);
             if r.applied_paused.get() != desired {
                 r.player.set_paused(desired);
                 r.applied_paused.set(desired);
@@ -511,11 +512,15 @@ impl Daemon {
             &self.monitors,
         );
         if covered != self.fullscreen_covered {
-            for c in covered.difference(&self.fullscreen_covered) {
-                log::info!("[{c}] fullscreen window detected; pausing wallpaper");
+            for (c, title) in &covered {
+                if !self.fullscreen_covered.contains_key(c) {
+                    log::info!("[{c}] fullscreen window ({title:?}) detected; pausing wallpaper");
+                }
             }
-            for c in self.fullscreen_covered.difference(&covered) {
-                log::info!("[{c}] fullscreen cleared; resuming wallpaper");
+            for c in self.fullscreen_covered.keys() {
+                if !covered.contains_key(c) {
+                    log::info!("[{c}] fullscreen cleared; resuming wallpaper");
+                }
             }
             self.fullscreen_covered = covered;
             self.reconcile_pause();

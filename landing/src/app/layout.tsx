@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     template: "%s | Fresco",
   },
   description:
-    "Free, open-source live wallpaper app for Linux. Set videos, GIFs, and images as your desktop on X11 and Wayland. Hardware-accelerated, near-zero CPU.",
+    "Free, open-source live wallpaper app for Linux. Browse a built-in wallpaper catalog, set videos or GIFs as your desktop, per-monitor wallpapers, day and night schedules. Hardware-accelerated on X11 and Wayland.",
   keywords: [
     "live wallpaper linux",
     "video wallpaper linux",
@@ -44,6 +44,10 @@ export const metadata: Metadata = {
     "hyprland live wallpaper",
     "kde plasma live wallpaper",
     "sway wallpaper video",
+    "linux wallpaper app",
+    "wallpaper catalog linux",
+    "day night wallpaper linux",
+    "dual monitor wallpaper linux",
     "GTK4",
     "Rust",
     "mpv",
@@ -78,7 +82,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Fresco - Live Wallpapers for Linux",
     description:
-      "Video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated, near-zero-CPU playback, on X11 and Wayland. A free Wallpaper Engine alternative.",
+      "Built-in wallpaper catalog, per-monitor wallpapers, day and night schedules, and hardware-accelerated near-zero-CPU playback on X11 and Wayland. A free Wallpaper Engine alternative.",
     url: SITE_URL,
     siteName: "Fresco",
     locale: "en_US",

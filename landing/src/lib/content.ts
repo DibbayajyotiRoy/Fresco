@@ -22,7 +22,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Does it work on Wayland or GNOME?",
-    a: "Both, with one caveat. Fresco runs on any X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS) and on Wayland layer-shell compositors through a bundled mpvpaper backend — verified on Sway; COSMIC, Hyprland, and KDE Plasma 6 are experimental while real-session verification lands. GNOME on Wayland shows a static frame instead, because Mutter does not expose a live wallpaper surface.",
+    a: "Both, with one caveat. Fresco runs on any X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS) and on Wayland layer-shell compositors through a bundled mpvpaper backend, verified on Sway. COSMIC, Hyprland, and KDE Plasma 6 are experimental while real-session verification lands. GNOME on Wayland shows a static frame instead, because Mutter does not expose a live wallpaper surface.",
   },
   {
     q: "Can a video wallpaper play sound?",
@@ -49,12 +49,24 @@ export const FAQ: { q: string; a: string }[] = [
     a: "Fresco is GUI-first, hardware-accelerated, and handles video, GIF, image, slideshow, and playlist wallpapers in one app, on both X11 and Wayland. It is actively maintained, unlike Komorebi, and needs no command line, unlike mpvpaper.",
   },
   {
+    q: "Where do I find live wallpapers for Linux?",
+    a: "Inside Fresco itself. The built-in catalog (menu, then Browse wallpapers) offers curated, properly licensed video wallpapers you can set in two clicks, with the license and author shown on every item. You can also paste a direct video or image URL, or add your own files.",
+  },
+  {
+    q: "Can my wallpaper change automatically between day and night?",
+    a: "Yes. Fresco has a day and night schedule: pick two wallpapers and switch times, and the daemon swaps them automatically with no restart. Arbitrary time slots and sunrise or sunset switching (with manual coordinates) are available through config.toml.",
+  },
+  {
+    q: "How do I set a different wallpaper on each monitor?",
+    a: "Right-click any wallpaper in the library and choose Set on a specific display. Each connected monitor is listed with its resolution. Choosing Show default on all displays clears the per-monitor overrides.",
+  },
+  {
     q: "Is Fresco free?",
     a: "Yes. Fresco is completely free and open source under the GPL-3.0 license. There is no paid tier.",
   },
 ];
 
-/** Install steps, reused by the HowTo JSON-LD. */
+/** Install steps, shown in the How-it-works section. */
 export const INSTALL_STEPS: { name: string; text: string }[] = [
   {
     name: "Download Fresco",
@@ -70,33 +82,39 @@ export const INSTALL_STEPS: { name: string; text: string }[] = [
   },
 ];
 
-/** Highlights from the latest releases (0.0.7 to 0.0.9), for the What's New section. */
+/** Highlights from the 1.0 release, for the What's New section. */
 export const WHATS_NEW: { icon: string; title: string; body: string }[] = [
   {
-    icon: "wayland",
-    title: "Wayland live wallpapers",
-    body: "Live video via a bundled mpvpaper backend — verified on Sway; COSMIC, Hyprland, and KDE Plasma 6 are experimental.",
+    icon: "catalog",
+    title: "Built-in wallpaper catalog",
+    body: "Browse curated, licensed wallpapers in-app and set one in two clicks. License and author on every card.",
   },
   {
-    icon: "audio",
-    title: "Per-wallpaper sound",
-    body: "Unmute a video and set its volume. Fresco remembers the choice for that wallpaper.",
+    icon: "displays",
+    title: "Per-display wallpapers",
+    body: "Right-click a wallpaper and set it on one specific monitor. Each display can run its own.",
   },
   {
-    icon: "rotate",
-    title: "Rotate 90 degrees",
-    body: "Turn a sideways phone video or photo upright, with hardware decoding intact.",
+    icon: "schedule",
+    title: "Day and night schedules",
+    body: "Two wallpapers, two switch times. The daemon swaps them automatically, no restart needed.",
   },
   {
-    icon: "pause",
-    title: "Fullscreen auto-pause",
-    body: "The wallpaper pauses on any monitor with a fullscreen window and resumes when it leaves.",
+    icon: "quality",
+    title: "Measured picture quality",
+    body: "Sharper 8K to 4K downscaling, zero banding, pixel-exact HiDPI. Verified by an in-tree fidelity harness.",
   },
 ];
 
 /** Feature names, used for the SoftwareApplication featureList in JSON-LD. */
 export const FEATURE_LIST = [
+  "Built-in catalog of curated, licensed wallpapers",
   "Video, GIF, image, slideshow, and playlist wallpapers",
+  "Add wallpapers from a direct URL",
+  "Day and night wallpaper schedules (plus time slots and solar via config)",
+  "Per-display wallpapers from the GUI",
+  "Automatic audio recovery when the sound server starts late",
+  "Scriptable JSON control socket",
   "Hardware-accelerated playback (VA-API, NVDEC)",
   "Works on X11 and Wayland layer-shell compositors",
   "Drag-to-crop and 90-degree rotate editor",
@@ -153,6 +171,9 @@ export const COMPARISON: {
     { label: "Playlists", values: [true, false, false, "Manual", true] },
     { label: "Image slideshow", values: [true, false, false, false, true] },
     { label: "Wallpaper library", values: [true, false, false, false, true] },
+    { label: "Built-in wallpaper catalog", values: [true, false, false, false, "Workshop"] },
+    { label: "Per-display wallpapers (GUI)", values: [true, false, false, "Manual", true] },
+    { label: "Day and night schedules", values: [true, false, false, false, "Partial"] },
     { label: "Actively maintained", values: [true, true, false, true, true] },
     { label: "Free and open source", values: [true, true, true, true, false] },
   ],

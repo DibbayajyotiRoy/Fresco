@@ -49,7 +49,7 @@ export function Download() {
               </div>
             </div>
             <p className="mt-4 text-sm text-ink-subtle">
-              Run this in a terminal — it downloads and installs the latest{" "}
+              Run this in a terminal. It downloads and installs the latest{" "}
               <code className="font-mono text-xs">.deb</code> for you:
             </p>
             <div className="mt-4">

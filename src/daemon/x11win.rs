@@ -23,6 +23,8 @@ x11rb::atom_manager! {
         _NET_WM_STATE_FULLSCREEN,
         _NET_WM_STATE_HIDDEN,
         _NET_CLIENT_LIST_STACKING,
+        _NET_WM_NAME,
+        UTF8_STRING,
         _MOTIF_WM_HINTS,
         WM_HINTS,
     }

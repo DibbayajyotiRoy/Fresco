@@ -45,7 +45,7 @@ impl Default for FrescoApplication {
 
 pub(crate) struct AppState {
     pub(crate) config: Config,
-    entries: Vec<LibraryEntry>,
+    pub(crate) entries: Vec<LibraryEntry>,
     editing_idx: Option<usize>,
     /// Keeps the native file/folder chooser alive until it responds. Without
     /// this, the local `FileChooserNative` is dropped when the open function
@@ -160,6 +160,11 @@ fn build_ui(app: &adw::Application) {
         None => window.set_content(Some(&toast)),
     }
     window.present();
+
+    // Headless UI-smoke hook: open the gallery immediately (tests/ci only).
+    if std::env::var("FRESCO_OPEN_GALLERY").ok().as_deref() == Some("1") {
+        super::gallery::show_gallery_window(&window, state.clone());
+    }
 
     // Anonymous opt-in feedback + admin-pushed notifications (Supabase).
     run_startup_checks(&window, state);
@@ -681,6 +686,30 @@ fn build_menu_popover(
     }
     popover_box.append(&advanced_btn);
 
+    let browse_btn = gtk4::Button::with_label("Browse wallpapers…");
+    browse_btn.add_css_class("flat");
+    browse_btn.set_halign(gtk4::Align::Start);
+    {
+        let state_b = state.clone();
+        let win_b = window.clone();
+        browse_btn.connect_clicked(move |_| {
+            super::gallery::show_gallery_window(&win_b, state_b.clone());
+        });
+    }
+    popover_box.append(&browse_btn);
+
+    let url_btn = gtk4::Button::with_label("Add from URL…");
+    url_btn.add_css_class("flat");
+    url_btn.set_halign(gtk4::Align::Start);
+    {
+        let state_url = state.clone();
+        let win_url = window.clone();
+        url_btn.connect_clicked(move |_| {
+            show_add_from_url_dialog(&win_url, state_url.clone());
+        });
+    }
+    popover_box.append(&url_btn);
+
     let update_btn = gtk4::Button::with_label("Check for updates");
     update_btn.add_css_class("flat");
     update_btn.set_halign(gtk4::Align::Start);
@@ -1136,6 +1165,34 @@ fn show_card_menu(
     }
     menu.append(&set);
 
+    // Per-monitor assignment (ROADMAP 2.2): only offered with 2+ displays —
+    // single-monitor users never see extra chrome.
+    let displays = connected_monitors();
+    if displays.len() >= 2 {
+        for m in &displays {
+            let label = format!("Set on {} ({}×{})", m.connector, m.width, m.height);
+            let btn = item(&label);
+            let s = state.clone();
+            let p = pop.clone();
+            let connector = m.connector.clone();
+            btn.connect_clicked(move |_| {
+                apply_entry_on_monitor(s.clone(), idx, &connector);
+                p.popdown();
+            });
+            menu.append(&btn);
+        }
+    }
+    if !state.borrow().config.monitors.is_empty() {
+        let clear = item("Show default on all displays");
+        let s = state.clone();
+        let p = pop.clone();
+        clear.connect_clicked(move |_| {
+            clear_overrides_and_apply(s.clone());
+            p.popdown();
+        });
+        menu.append(&clear);
+    }
+
     let edit = item("Edit / Crop…");
     {
         let s = state.clone();
@@ -1293,7 +1350,62 @@ fn commit_rename(state: &Rc<RefCell<AppState>>, idx: usize, name: &str) {
     }
 }
 
-fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
+/// Set an entry as the wallpaper of ONE display (a `config.monitors` override).
+fn apply_entry_on_monitor(state: Rc<RefCell<AppState>>, idx: usize, connector: &str) {
+    let name = {
+        let mut s = state.borrow_mut();
+        let Some(entry) = s.entries.get_mut(idx) else {
+            return;
+        };
+        if entry.broken {
+            return;
+        }
+        entry.touch();
+        let wallpaper = entry.to_wallpaper();
+        let name = entry.name.clone();
+        assign_entry_to_monitor(&mut s.config, wallpaper, connector);
+        name
+    };
+    let ok = {
+        let s = state.borrow();
+        let r = daemon_ctl::ensure_daemon_and_apply(&s.config);
+        save_entries(&s.entries).ok();
+        if let Err(e) = &r {
+            log::error!("failed to apply per-monitor wallpaper: {e}");
+        }
+        r.is_ok()
+    };
+    if ok {
+        show_toast(&state, &format!("“{name}” set on {connector}"));
+    } else {
+        show_toast(&state, "Couldn’t start the wallpaper. Run frescod --check");
+    }
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Clear all per-monitor overrides: the default wallpaper shows everywhere.
+fn clear_overrides_and_apply(state: Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        clear_monitor_overrides(&mut s.config);
+    }
+    let ok = {
+        let s = state.borrow();
+        daemon_ctl::ensure_daemon_and_apply(&s.config).is_ok()
+    };
+    if ok {
+        show_toast(&state, "Default wallpaper on all displays");
+    }
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+pub(crate) fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     let name = {
         let mut s = state.borrow_mut();
         let Some(entry) = s.entries.get_mut(idx) else {
@@ -1703,19 +1815,317 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     scale_row.set_model(Some(&gtk4::StringList::new(&["Balanced", "High"])));
     let current = u32::from(matches!(state.borrow().config.scaling, Scaling::High));
     scale_row.set_selected(current);
-    scale_row.connect_selected_notify(move |row| {
-        let mut s = state.borrow_mut();
-        s.config.scaling = if row.selected() == 1 {
-            Scaling::High
-        } else {
-            Scaling::Balanced
-        };
-        s.config.save().ok();
-    });
+    {
+        let state = state.clone();
+        scale_row.connect_selected_notify(move |row| {
+            let mut s = state.borrow_mut();
+            s.config.scaling = if row.selected() == 1 {
+                Scaling::High
+            } else {
+                Scaling::Balanced
+            };
+            s.config.save().ok();
+        });
+    }
 
     group.add(&scale_row);
     page.add(&group);
+    add_schedule_group(&page, state);
     dialog.add(&page);
+    dialog.present();
+}
+
+/// "Day & night wallpaper" preferences group (ROADMAP 3.3 GUI). v1 exposes
+/// the daynight mode; times/solar stay config-file features (docs/SCRIPTING.md).
+fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Day &amp; night wallpaper");
+    group.set_description(Some(
+        "Automatically switch between two wallpapers on a schedule.",
+    ));
+
+    // Candidate entries: playable single-media items from the library.
+    let candidates: Vec<(usize, String)> = state
+        .borrow()
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| !e.broken && matches!(e.kind, Kind::Video | Kind::Image))
+        .map(|(i, e)| (i, e.name.clone()))
+        .collect();
+    let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
+
+    let enable = adw::ComboRow::new();
+    enable.set_title("Schedule");
+    enable.set_model(Some(&gtk4::StringList::new(&["Off", "Day / night"])));
+
+    let day_row = adw::ComboRow::new();
+    day_row.set_title("Day wallpaper");
+    day_row.set_model(Some(&gtk4::StringList::new(&names)));
+    let night_row = adw::ComboRow::new();
+    night_row.set_title("Night wallpaper");
+    night_row.set_model(Some(&gtk4::StringList::new(&names)));
+
+    let time_entry = |placeholder: &str| {
+        let e = gtk4::Entry::new();
+        e.set_placeholder_text(Some(placeholder));
+        e.set_max_width_chars(6);
+        e.set_valign(gtk4::Align::Center);
+        e
+    };
+    let day_time = time_entry("07:00");
+    let night_time = time_entry("19:00");
+    let day_time_row = adw::ActionRow::new();
+    day_time_row.set_title("Day starts");
+    day_time_row.add_suffix(&day_time);
+    let night_time_row = adw::ActionRow::new();
+    night_time_row.set_title("Night starts");
+    night_time_row.add_suffix(&night_time);
+
+    // Populate from the current config.
+    {
+        let st = state.borrow();
+        if let Some(sch) = st.config.schedule.as_ref() {
+            enable.set_selected(1);
+            day_time.set_text(&sch.day_start);
+            night_time.set_text(&sch.night_start);
+            let find = |w: Option<&crate::config::Wallpaper>| -> u32 {
+                w.and_then(|w| w.path.as_ref())
+                    .and_then(|p| {
+                        candidates
+                            .iter()
+                            .position(|(i, _)| st.entries[*i].path.as_deref() == Some(p.as_path()))
+                    })
+                    .map(|i| i as u32)
+                    .unwrap_or(0)
+            };
+            day_row.set_selected(find(sch.day.as_ref()));
+            night_row.set_selected(find(sch.night.as_ref()));
+        } else {
+            day_time.set_text("07:00");
+            night_time.set_text("19:00");
+        }
+    }
+
+    let write = {
+        let state = state.clone();
+        let enable = enable.clone();
+        let day_row = day_row.clone();
+        let night_row = night_row.clone();
+        let day_time = day_time.clone();
+        let night_time = night_time.clone();
+        let candidates = candidates.clone();
+        move || {
+            let on = enable.selected() == 1;
+            let mut s = state.borrow_mut();
+            if !on {
+                if s.config.schedule.take().is_some() {
+                    s.config.save().ok();
+                    let _ = daemon_ctl::ensure_daemon_and_apply(&s.config);
+                }
+                return;
+            }
+            let (dt, nt) = (day_time.text().to_string(), night_time.text().to_string());
+            if crate::schedule::parse_hhmm(&dt).is_none()
+                || crate::schedule::parse_hhmm(&nt).is_none()
+            {
+                return; // incomplete/invalid times — wait for a valid edit
+            }
+            let pick = |row: &adw::ComboRow| -> Option<crate::config::Wallpaper> {
+                candidates
+                    .get(row.selected() as usize)
+                    .and_then(|(i, _)| s.entries.get(*i))
+                    .map(|e| e.to_wallpaper())
+            };
+            let (Some(day), Some(night)) = (pick(&day_row), pick(&night_row)) else {
+                return;
+            };
+            s.config.schedule = Some(crate::config::Schedule {
+                mode: crate::config::ScheduleMode::Daynight,
+                day: Some(day),
+                night: Some(night),
+                day_start: dt,
+                night_start: nt,
+                lat: None,
+                lon: None,
+                at: vec![],
+            });
+            sync_wallpaper_to_schedule(&mut s.config);
+            s.config.save().ok();
+            let _ = daemon_ctl::ensure_daemon_and_apply(&s.config);
+        }
+    };
+
+    let w = write.clone();
+    enable.connect_selected_notify(move |_| w());
+    let w = write.clone();
+    day_row.connect_selected_notify(move |_| w());
+    let w = write.clone();
+    night_row.connect_selected_notify(move |_| w());
+    let w = write.clone();
+    day_time.connect_changed(move |_| w());
+    let w = write;
+    night_time.connect_changed(move |_| w());
+
+    group.add(&enable);
+    group.add(&day_row);
+    group.add(&night_row);
+    group.add(&day_time_row);
+    group.add(&night_time_row);
+    page.add(&group);
+}
+
+/// Point `config.wallpaper` at whatever the schedule wants RIGHT NOW, so
+/// enabling/changing a schedule takes effect immediately (the daemon's
+/// manual-Apply hold only protects wallpapers that differ from the schedule).
+fn sync_wallpaper_to_schedule(cfg: &mut Config) {
+    use chrono::Offset as _;
+    let Some(sch) = cfg.schedule.as_ref() else {
+        return;
+    };
+    let now = chrono::Local::now();
+    let off = now.offset().fix().local_minus_utc() / 60;
+    if let Some(w) = crate::schedule::desired(sch, now.naive_local(), off) {
+        cfg.wallpaper = w.clone();
+    }
+}
+
+// ─── Add from URL ─────────────────────────────────────────────────────────────
+
+/// Paste a direct media URL (…/clip.mp4) → download into the library
+/// (ROADMAP 3.2). Deliberately NOT yt-dlp/YouTube: direct files only.
+fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    const MAX_BYTES: u64 = 1_000_000_000; // refuse >1 GB outright
+
+    let (dialog, content) = glass_dialog(window, "Add from URL", 420, -1);
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    inner.set_margin_start(20);
+    inner.set_margin_end(20);
+    inner.set_margin_bottom(18);
+
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some("https://example.com/wallpaper.mp4"));
+    inner.append(&entry);
+
+    let hint = gtk4::Label::new(Some(
+        "Direct video or image links only (.mp4, .webm, .gif, .png, …).",
+    ));
+    hint.add_css_class("dim");
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    inner.append(&hint);
+
+    let progress = gtk4::ProgressBar::new();
+    progress.set_visible(false);
+    inner.append(&progress);
+
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    row.set_halign(gtk4::Align::End);
+    let cancel_btn = gtk4::Button::with_label("Cancel");
+    let add_btn = gtk4::Button::with_label("Download");
+    add_btn.add_css_class("suggested-action");
+    row.append(&cancel_btn);
+    row.append(&add_btn);
+    inner.append(&row);
+    content.append(&inner);
+
+    let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let d = dialog.clone();
+        let flag = cancel_flag.clone();
+        cancel_btn.connect_clicked(move |_| {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            d.close();
+        });
+    }
+
+    {
+        let state = state.clone();
+        let dialog = dialog.clone();
+        let entry_w = entry.clone();
+        let progress = progress.clone();
+        let hint = hint.clone();
+        let flag = cancel_flag;
+        add_btn.connect_clicked(move |btn| {
+            let url = entry_w.text().trim().to_string();
+            if crate::download::media_filename(&url).is_none() {
+                hint.set_text("That doesn\u{2019}t look like a direct media link.");
+                return;
+            }
+            btn.set_sensitive(false);
+            entry_w.set_sensitive(false);
+            progress.set_visible(true);
+
+            enum Msg {
+                Progress(f64),
+                Done(Result<std::path::PathBuf, String>),
+            }
+            let (tx, rx) = async_channel::bounded::<Msg>(16);
+            let flag_worker = flag.clone();
+            let dest = library::library_dir().join("downloads");
+            std::thread::spawn(move || {
+                let tx_p = tx.clone();
+                let result = crate::download::download(
+                    &url,
+                    &dest,
+                    MAX_BYTES,
+                    &flag_worker,
+                    move |got, total| {
+                        if let Some(t) = total {
+                            let _ = tx_p.try_send(Msg::Progress(got as f64 / t as f64));
+                        }
+                    },
+                );
+                let _ = tx.send_blocking(Msg::Done(result.map_err(|e| e.to_string())));
+            });
+
+            let state = state.clone();
+            let dialog = dialog.clone();
+            let progress = progress.clone();
+            let hint = hint.clone();
+            let btn = btn.clone();
+            let entry_w = entry_w.clone();
+            glib::spawn_future_local(async move {
+                while let Ok(msg) = rx.recv().await {
+                    match msg {
+                        Msg::Progress(f) => progress.set_fraction(f.clamp(0.0, 1.0)),
+                        Msg::Done(Ok(path)) => {
+                            let mut e = if library::is_video(&path) {
+                                library::LibraryEntry::new_video(path)
+                            } else {
+                                library::LibraryEntry::new_image(path)
+                            };
+                            e.generate_thumbnail();
+                            let name = e.name.clone();
+                            {
+                                let mut s = state.borrow_mut();
+                                s.entries.push(e);
+                                save_entries(&s.entries).ok();
+                            }
+                            show_toast(
+                                &state,
+                                &format!("\u{201c}{name}\u{201d} added to the library"),
+                            );
+                            let refresh = state.borrow().refresh.clone();
+                            if let Some(r) = refresh {
+                                r();
+                            }
+                            dialog.close();
+                            break;
+                        }
+                        Msg::Done(Err(msg)) => {
+                            hint.set_text(&msg);
+                            progress.set_visible(false);
+                            btn.set_sensitive(true);
+                            entry_w.set_sensitive(true);
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+    }
+
     dialog.present();
 }
 
@@ -2075,7 +2485,15 @@ fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
     if !cfg.enabled {
         return false;
     }
-    let w = &cfg.wallpaper;
+    // Active = the default wallpaper OR any per-monitor override.
+    entry_matches_wallpaper(entry, &cfg.wallpaper)
+        || cfg
+            .monitors
+            .values()
+            .any(|w| entry_matches_wallpaper(entry, w))
+}
+
+fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
     if entry.kind != w.kind {
         return false;
     }
@@ -2087,6 +2505,26 @@ fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
             Some(s) => entry.folder.is_some() && s.folder == entry.folder,
             None => false,
         },
+    }
+}
+
+/// Write a per-monitor assignment: only `[monitors."<connector>"]` changes;
+/// the default wallpaper is untouched. (ROADMAP 2.2)
+fn assign_entry_to_monitor(cfg: &mut Config, wallpaper: crate::config::Wallpaper, connector: &str) {
+    cfg.monitors.insert(connector.to_string(), wallpaper);
+    cfg.enabled = true;
+}
+
+/// Remove every per-monitor override so the default wallpaper shows everywhere.
+fn clear_monitor_overrides(cfg: &mut Config) {
+    cfg.monitors.clear();
+}
+
+/// Connected displays as the daemon reports them (empty when it isn't running).
+fn connected_monitors() -> Vec<crate::ipc::MonitorInfo> {
+    match crate::ipc::request(&crate::ipc::Request::Status) {
+        Ok(crate::ipc::Response::Status(s)) => s.monitors_info,
+        _ => Vec::new(),
     }
 }
 
@@ -2355,4 +2793,84 @@ fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supab
 
     content.append(&inner);
     dialog.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn entry(path: &str) -> LibraryEntry {
+        LibraryEntry {
+            path: Some(PathBuf::from(path)),
+            ..LibraryEntry::new_video(PathBuf::from(path))
+        }
+    }
+
+    #[test]
+    fn per_monitor_assign_touches_only_the_override() {
+        let mut cfg = Config::default();
+        cfg.wallpaper.path = Some(PathBuf::from("/default.mp4"));
+        let before_default = cfg.wallpaper.clone();
+
+        let e = entry("/side.mp4");
+        assign_entry_to_monitor(&mut cfg, e.to_wallpaper(), "HDMI-1");
+
+        assert_eq!(cfg.wallpaper, before_default, "default wallpaper untouched");
+        assert_eq!(cfg.monitors.len(), 1);
+        assert_eq!(
+            cfg.monitors["HDMI-1"].path,
+            Some(PathBuf::from("/side.mp4"))
+        );
+        assert!(cfg.enabled);
+
+        clear_monitor_overrides(&mut cfg);
+        assert!(cfg.monitors.is_empty());
+        assert_eq!(cfg.wallpaper, before_default);
+    }
+
+    #[test]
+    fn sync_wallpaper_follows_the_schedule() {
+        use crate::config::{Schedule, ScheduleMode};
+        let mk = |p: &str| entry(p).to_wallpaper();
+        let mut cfg = Config {
+            schedule: Some(Schedule {
+                mode: ScheduleMode::Daynight,
+                day: Some(mk("/day.mp4")),
+                night: Some(mk("/night.mp4")),
+                day_start: "07:00".into(),
+                night_start: "19:00".into(),
+                lat: None,
+                lon: None,
+                at: vec![],
+            }),
+            ..Default::default()
+        };
+        sync_wallpaper_to_schedule(&mut cfg);
+        let got = cfg.wallpaper.path.clone().unwrap();
+        assert!(got.as_os_str() == "/day.mp4" || got.as_os_str() == "/night.mp4");
+        // Self-consistency with the engine for the same instant.
+        use chrono::Offset as _;
+        let now = chrono::Local::now();
+        let off = now.offset().fix().local_minus_utc() / 60;
+        let want = crate::schedule::desired(cfg.schedule.as_ref().unwrap(), now.naive_local(), off)
+            .unwrap()
+            .path
+            .clone()
+            .unwrap();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn active_marker_covers_monitor_overrides() {
+        let mut cfg = Config {
+            enabled: true,
+            ..Default::default()
+        };
+        cfg.wallpaper.path = Some(PathBuf::from("/default.mp4"));
+        let side = entry("/side.mp4");
+        assert!(!entry_is_active(&side, &cfg));
+        assign_entry_to_monitor(&mut cfg, side.to_wallpaper(), "DP-2");
+        assert!(entry_is_active(&side, &cfg), "override counts as active");
+    }
 }

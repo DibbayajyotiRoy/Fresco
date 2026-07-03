@@ -22,7 +22,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Does it work on Wayland or GNOME?",
-    a: "Both, with one caveat. Fresco runs on any X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS) and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6) through a bundled mpvpaper backend. GNOME on Wayland shows a static frame instead, because Mutter does not expose a live wallpaper surface.",
+    a: "Both, with one caveat. Fresco runs on any X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS) and on Wayland layer-shell compositors through a bundled mpvpaper backend — verified on Sway; COSMIC, Hyprland, and KDE Plasma 6 are experimental while real-session verification lands. GNOME on Wayland shows a static frame instead, because Mutter does not expose a live wallpaper surface.",
   },
   {
     q: "Can a video wallpaper play sound?",
@@ -42,7 +42,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Does it support multiple monitors?",
-    a: "Yes. You can set a different wallpaper on each display, Fresco handles monitor hotplug live, and it pauses the wallpaper per output when a window there goes fullscreen.",
+    a: "Yes. You can set a different wallpaper on each display, and Fresco pauses the wallpaper per output when a window there goes fullscreen. Monitor hotplug is live on X11; on Wayland a newly plugged display picks up on the next apply (automatic hotplug lands with the v1.0 engine).",
   },
   {
     q: "How is Fresco different from Hidamari, Komorebi, and mpvpaper?",
@@ -75,7 +75,7 @@ export const WHATS_NEW: { icon: string; title: string; body: string }[] = [
   {
     icon: "wayland",
     title: "Wayland live wallpapers",
-    body: "Live video on COSMIC, Hyprland, Sway, and KDE Plasma 6 via a bundled mpvpaper backend.",
+    body: "Live video via a bundled mpvpaper backend — verified on Sway; COSMIC, Hyprland, and KDE Plasma 6 are experimental.",
   },
   {
     icon: "audio",

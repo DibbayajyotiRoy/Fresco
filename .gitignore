@@ -6,3 +6,4 @@ node_modules/
 .gstack/
 engine-notes/
 tests/assets/generated/
+verification-artifacts/**/*.png

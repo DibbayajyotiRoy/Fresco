@@ -145,8 +145,30 @@ fn status() -> i32 {
                 println!("  Outputs     {}", s.monitors.len());
             }
             println!("  Decode      {}", decode_label(s.hwdec.as_deref()));
+            if let (Some(w), Some(h)) = (s.source_w, s.source_h) {
+                let depth = s
+                    .bit_depth
+                    .map(|d| format!(" · {d}-bit"))
+                    .unwrap_or_default();
+                println!("  Source      {w}x{h}{depth}");
+            }
+            if let Some(n) = s.dropped_frames {
+                if n > 0 {
+                    println!("  Dropped     {n} frames");
+                }
+            }
             println!("  Memory      {} MB", s.rss_mb);
             println!("  Paused      {}", if s.paused { "yes" } else { "no" });
+            // Decode honesty: software-decoding ≥4K is the classic silent cause
+            // of stutter/artifacts — name it instead of leaving it a mystery.
+            let software = matches!(s.hwdec.as_deref(), None | Some("no") | Some(""));
+            if software && s.source_h.unwrap_or(0) >= 2160 {
+                println!(
+                    "  {YELLOW}Note        this source is ≥4K and your GPU is not \
+                     hardware-decoding it (codec/size unsupported) — expect high CPU \
+                     and possible dropped frames{RESET}"
+                );
+            }
             if let Some(e) = s.error {
                 println!("  {YELLOW}Note        {e}{RESET}");
             }

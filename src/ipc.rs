@@ -21,6 +21,18 @@ pub enum Request {
     Update,
 }
 
+/// One connected display, as the daemon sees it (RandR on X11, `wl_output`
+/// on Wayland). Connector names match the keys `Config.monitors` accepts, so
+/// the GUI can offer per-monitor assignment without guessing names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorInfo {
+    pub connector: String,
+    pub width: u16,
+    pub height: u16,
+    pub x: i16,
+    pub y: i16,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StatusReply {
     pub running: bool,
@@ -29,11 +41,40 @@ pub struct StatusReply {
     pub hwdec: Option<String>,
     /// Human-readable description of what's playing.
     pub wallpaper: Option<String>,
+    /// CPU of the daemon + renderer children since the previous status poll,
+    /// as a percentage of ONE core (`top` semantics — may exceed 100 on
+    /// multicore). 0.0 on the first poll (no baseline yet).
     pub cpu_percent: f32,
+    /// Resident memory of the daemon + renderer children (mpvpaper), MB.
     pub rss_mb: u64,
     pub monitors: Vec<String>,
     /// Last media load failure, if any (file path + reason).
     pub error: Option<String>,
+    /// True when the primary renderer has an audio track selected (mpv `aid`
+    /// != no). False means mpv dropped/skipped audio — e.g. muted entries load
+    /// with `aid=no`, and mpv deselects the track permanently when no audio
+    /// server was reachable at load time. None = unknown / not applicable.
+    #[serde(default)]
+    pub audio_track: Option<bool>,
+    #[serde(default)]
+    pub mute: Option<bool>,
+    #[serde(default)]
+    pub volume: Option<u8>,
+    /// Decode honesty (primary renderer): source dimensions, bit depth, and
+    /// decoder frame drops — so "quality looks off" is diagnosable instead of
+    /// silent (e.g. 8K on a GPU without 8K decode support).
+    #[serde(default)]
+    pub source_w: Option<u32>,
+    #[serde(default)]
+    pub source_h: Option<u32>,
+    #[serde(default)]
+    pub bit_depth: Option<u8>,
+    #[serde(default)]
+    pub dropped_frames: Option<u64>,
+    /// ALL connected displays with geometry — unlike `monitors`, which only
+    /// lists outputs that currently have a wallpaper.
+    #[serde(default)]
+    pub monitors_info: Vec<MonitorInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,6 +165,27 @@ mod tests {
         let s = serde_json::to_string(&r).unwrap();
         let back: Response = serde_json::from_str(&s).unwrap();
         assert_eq!(r, back);
+    }
+
+    /// Replies from an older daemon (without the audio fields) must still parse.
+    #[test]
+    fn status_reply_backcompat_without_audio_fields() {
+        let old = r#"{"result":"status","running":true,"paused":false,"hwdec":null,
+                      "wallpaper":null,"cpu_percent":0.0,"rss_mb":10,"monitors":[],"error":null}"#;
+        let r: Response = serde_json::from_str(old).unwrap();
+        match r {
+            Response::Status(s) => {
+                assert_eq!(s.audio_track, None);
+                assert_eq!(s.mute, None);
+                assert_eq!(s.volume, None);
+                assert_eq!(s.source_w, None);
+                assert_eq!(s.source_h, None);
+                assert_eq!(s.bit_depth, None);
+                assert_eq!(s.dropped_frames, None);
+                assert!(s.monitors_info.is_empty());
+            }
+            other => panic!("expected Status, got {other:?}"),
+        }
     }
 
     #[test]

@@ -16,8 +16,7 @@
 > Windows has Wallpaper Engine and Lively. **Linux had nothing simple — until Fresco.**
 > Pick a video, click *Set*, close the app. Your wallpaper keeps playing and comes back on login.
 
-<!-- Add a hero GIF/screenshot here for instant comprehension:
-     ![Fresco screenshot](data/screenshots/library.png) -->
+![Fresco — wallpaper library](data/screenshots/library.png)
 
 ---
 
@@ -27,14 +26,14 @@ Every other Linux live-wallpaper option is terminal-only, abandoned, locked to o
 
 - 🎬 **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image **slideshow**, or a multi-video **playlist**
 - ⚡ **Hardware-accelerated** — GPU video decode (VA-API / NVDEC) keeps CPU near zero without degrading quality
-- 🐧 **X11 _and_ Wayland** — desktop-window backend on X11, plus a bundled `mpvpaper` layer-shell backend for COSMIC, Hyprland, Sway & KDE Plasma 6
+- 🐧 **X11 _and_ Wayland** — desktop-window backend on X11, plus a bundled `mpvpaper` layer-shell backend for Sway (verified) and COSMIC, Hyprland & KDE Plasma 6 (experimental — verification in progress)
 - ✂️ **Crop & rotate editor** — drag a frame to pick the exact region, and rotate 90° to fix sideways phone clips (no other Linux tool has this)
 - 🔊 **Per-wallpaper sound** — unmute a video and set its volume; the choice is remembered for that wallpaper
 - 🎞 **Slideshow transitions** — crossfade, fade, slide, or a slow Ken Burns pan between images
 - 🖼 **Wallpaper library** — saved thumbnails, recently-used, and search
 - 🔁 **Set & forget** — close the app, the wallpaper keeps playing; restored automatically on login
-- ⏸ **Power-aware** — pause on battery, and auto-pause per monitor when a window there goes fullscreen
-- 🖥 **Multi-monitor** — a different wallpaper per display, with live hotplug handling
+- ⏸ **Power-aware** — pause on battery, and auto-pause per monitor when a window there goes fullscreen (X11 and Wayland)
+- 🖥 **Multi-monitor** — a different wallpaper per display; live hotplug on X11, and on Wayland newly plugged displays pick up on the next apply (automatic hotplug lands with the v1.0 engine)
 - 🎨 **Themes & accents** — light / dark / system with six accent palettes
 
 ## Fresco vs other Linux options
@@ -62,7 +61,7 @@ Every other Linux live-wallpaper option is terminal-only, abandoned, locked to o
 | Debian | 12 (Bookworm) | ✅ |
 | elementary OS | 7 | ✅ |
 
-> **Wayland support:** live wallpapers on layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6) via bundled `mpvpaper`. GNOME Wayland shows a static frame fallback.
+> **Wayland support:** live wallpapers on layer-shell compositors via bundled `mpvpaper` — verified on Sway; COSMIC, Hyprland and KDE Plasma 6 are experimental while real-session verification lands (docs/WAYLAND_VERIFICATION.md). GNOME Wayland shows a static frame fallback.
 
 ## Install
 
@@ -93,7 +92,7 @@ Yes — Fresco is a free, open-source live-wallpaper app for Linux that works li
 Install the Fresco `.deb`, open it, click **+ Add**, choose your video, and click **Set as Wallpaper**.
 
 **Does it work on Wayland or GNOME?**
-It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). On **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6) live wallpapers work via the bundled `mpvpaper` backend. **GNOME Wayland** shows a static-frame fallback because Mutter does not expose a live wallpaper surface.
+It runs on **GNOME and any X11 session** today (Pop!_OS, Ubuntu, Mint, Debian). On **Wayland layer-shell compositors** live wallpapers work via the bundled `mpvpaper` backend — verified on Sway; COSMIC, Hyprland and KDE Plasma 6 are experimental while real-session verification lands. **GNOME Wayland** shows a static-frame fallback because Mutter does not expose a live wallpaper surface.
 
 **Will a video wallpaper drain my battery or CPU?**
 Fresco uses GPU hardware decoding so CPU stays near zero. It can **automatically pause on battery**, and it **auto-pauses per monitor** when a window there goes fullscreen.

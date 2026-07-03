@@ -74,3 +74,58 @@ grant usage on schema public to anon;
 do $$ begin
     alter publication supabase_realtime add table public.notifications;
 exception when duplicate_object then null; end $$;
+
+-- ── Wallpaper catalog (curated — ROADMAP 3.1) ────────────────────────────────
+-- Metadata only: media files live on a zero-egress host (GitHub Releases of a
+-- dedicated wallpapers repo, or Cloudflare R2) — NEVER Supabase storage (the
+-- free-tier egress cap dies at ~100 installs of one 20 MB video).
+-- `content_type` is reserved for shaders from day 1 (ROADMAP 6.1) so they slot
+-- in with zero migration. `license` is NOT NULL: every item legally attributable.
+create table if not exists public.catalog_items (
+    id            uuid primary key default gen_random_uuid(),
+    created_at    timestamptz not null default now(),
+    content_type  text not null default 'video'
+                  check (content_type in ('video', 'image', 'shader')),
+    title         text not null,
+    category      text not null default 'other',
+    tags          text[] not null default '{}',
+    media_url     text not null,
+    thumb_url     text,
+    size_bytes    bigint not null default 0,
+    width         integer,
+    height        integer,
+    duration_s    real,
+    checksum      text,
+    license       text not null,
+    author        text not null default '',
+    source_url    text,
+    published     boolean not null default false,
+    install_count bigint not null default 0
+);
+
+alter table public.catalog_items enable row level security;
+
+-- The app may read only published items.
+drop policy if exists "anon can read published catalog items" on public.catalog_items;
+create policy "anon can read published catalog items"
+    on public.catalog_items for select
+    to anon
+    using (published);
+
+grant select on public.catalog_items to anon;
+
+-- Engagement measurement with ZERO client telemetry: the app calls this RPC
+-- once per completed download. SECURITY DEFINER so anon can bump the counter
+-- without update rights on the table.
+create or replace function public.catalog_count_install(item uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+    update public.catalog_items
+       set install_count = install_count + 1
+     where id = item and published;
+$$;
+
+grant execute on function public.catalog_count_install(uuid) to anon;

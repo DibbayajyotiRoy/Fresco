@@ -1,0 +1,42 @@
+# Maintainer: Dibbayajyoti Roy <maromaromuje28@gmail.com>
+# Fresco — live wallpapers for Linux (binary repackage of the release .deb).
+#
+# The .deb bundles mpvpaper under /usr/lib/fresco (Debian doesn't package it);
+# on Arch we keep that bundled copy so the binary package works stand-alone.
+
+pkgname=fresco-bin
+_pkgname=fresco
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Live wallpapers for Linux — video, GIF, image, slideshow and playlist wallpapers (binary release)"
+arch=('x86_64')
+url="https://github.com/DibbayajyotiRoy/fresco"
+license=('GPL-3.0-or-later')
+provides=('fresco')
+conflicts=('fresco')
+depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer')
+optdepends=(
+  'libva-intel-driver: VA-API hardware decode on Intel GPUs'
+  'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
+  'gst-plugins-good: hover-to-play previews in the library'
+  'gst-libav: hover-to-play previews in the library'
+)
+source=("$url/releases/download/v$pkgver/fresco_${pkgver}-1_amd64.deb")
+sha256sums=('SKIP')  # pin per release: curl -L <asset-url> | sha256sum
+noextract=("fresco_${pkgver}-1_amd64.deb")
+
+package() {
+  # A .deb is an ar archive: control.tar.* + data.tar.*; we only need data.
+  cd "$srcdir"
+  ar x "fresco_${pkgver}-1_amd64.deb" data.tar.xz 2>/dev/null \
+    || ar x "fresco_${pkgver}-1_amd64.deb" data.tar.zst
+  if [ -f data.tar.xz ]; then
+    tar -xJf data.tar.xz -C "$pkgdir"
+  else
+    tar --zstd -xf data.tar.zst -C "$pkgdir"
+  fi
+  # Debian's libmpv soname differs from Arch's; the app dlopens libmpv.so.2
+  # then .so.1 then .so, and Arch's mpv package provides libmpv.so.2 — fine.
+  install -Dm644 "$pkgdir/usr/share/doc/fresco/copyright" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+}

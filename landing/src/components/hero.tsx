@@ -50,7 +50,7 @@ export function Hero() {
             </div>
             <div className="overflow-hidden rounded-xl border border-border">
               <Image
-                src="https://picsum.photos/seed/fresco-live-desktop/1280/720"
+                src="/screenshots/library.png"
                 alt="The Fresco app running a live video wallpaper on the Linux desktop"
                 width={1280}
                 height={720}

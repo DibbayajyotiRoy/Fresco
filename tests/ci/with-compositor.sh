@@ -105,7 +105,8 @@ case "$ENV_ID" in
     export DISPLAY=:99
     export XDG_SESSION_TYPE=x11
     unset WAYLAND_DISPLAY
-    Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+    # WITH_COMPOSITOR_X11_GEOM lets pixel tests pick e.g. 3840x2160x24.
+    Xvfb :99 -screen 0 "${WITH_COMPOSITOR_X11_GEOM:-1920x1080x24}" -nolisten tcp >/dev/null 2>&1 &
     XVFB_PID=$!
     wait_for "Xvfb on :99" bash -c 'xdpyinfo -display :99 >/dev/null 2>&1 || xset -display :99 q >/dev/null 2>&1' \
       || { log "Xvfb never came up"; exit 70; }
@@ -113,7 +114,14 @@ case "$ENV_ID" in
 
   sway)
     start_wayland_common
-    cfg="$(mktemp)"; printf 'output * bg #1a1a2e solid_color\ndefault_border none\n' > "$cfg"
+    cfg="$(mktemp)"
+    # WITH_COMPOSITOR_NO_BG=1 skips the solid background: swaybg sits ON TOP of
+    # mpvpaper's background layer, so pixel tests (fidelity) must not start it.
+    if [ "${WITH_COMPOSITOR_NO_BG:-0}" = 1 ]; then
+      printf 'default_border none\n' > "$cfg"
+    else
+      printf 'output * bg #1a1a2e solid_color\ndefault_border none\n' > "$cfg"
+    fi
     adopt_new_wayland_socket sway --unsupported-gpu -c "$cfg" || { log "sway never came up"; exit 70; }
     ;;
 

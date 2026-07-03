@@ -126,6 +126,12 @@ impl WaylandPlayer {
         matches!(self.inner.borrow_mut().child.try_wait(), Ok(None))
     }
 
+    /// The mpvpaper process id (it renders and decodes in-process), so status
+    /// can account its CPU/RSS alongside the daemon's own.
+    pub fn pid(&self) -> u32 {
+        self.inner.borrow().child.id()
+    }
+
     // ── control surface (mirrors the X11 Player; all &self) ──────────────────
 
     pub fn load_path(&self, path: &Path) {
@@ -172,6 +178,22 @@ impl WaylandPlayer {
         self.hwdec.clone()
     }
 
+    /// Live audio state: (audio track selected, muted, volume), read over the
+    /// IPC socket. Mirrors the X11 `Player::audio_status` contract. The track
+    /// flag is the ground truth for "will this ever make sound" — mpv reports
+    /// `aid=no`/`false` both for our muted-entry optimization and after it
+    /// dropped the track because no audio server was reachable at load time.
+    pub fn audio_status(&self) -> Option<(bool, bool, u8)> {
+        let mut inner = self.inner.borrow_mut();
+        let aid = inner.ipc.get("aid")?;
+        let mute = inner.ipc.get("mute")?;
+        let volume = inner.ipc.get("volume")?;
+        let track = aid != "no" && aid != "false";
+        let muted = mute == "yes" || mute == "true";
+        let vol = volume.trim().parse::<f64>().ok()?.round().clamp(0.0, 100.0) as u8;
+        Some((track, muted, vol))
+    }
+
     /// The supervisor tracks real renderer failures via the process exit, so the
     /// per-frame "load failed" notion the X11 path uses is always false here.
     pub fn load_failed(&self) -> bool {
@@ -189,6 +211,43 @@ impl WaylandPlayer {
             .trim()
             .parse()
             .ok()
+    }
+
+    /// Re-select the file's audio track and unmute — recovery for a track mpv
+    /// dropped because no audio server was reachable at load time. Mirrors
+    /// `Player::try_restore_audio`: returns false when the file has no audio
+    /// track at all (nothing to restore; stop retrying).
+    pub fn try_restore_audio(&self, volume: u8) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        let Some(tracks) = inner.ipc.get("track-list") else {
+            return true; // transient read failure — worth another attempt
+        };
+        let Some(id) = crate::daemon::mpv::player::first_audio_track_id(&tracks) else {
+            return false;
+        };
+        inner.ipc.set("aid", json!(id));
+        inner.ipc.set("mute", json!(false));
+        inner.ipc.set("volume", json!(volume));
+        true
+    }
+
+    /// Decode-honesty snapshot: (source width, height, bit depth, dropped
+    /// frames). Mirrors `Player::video_status`.
+    pub fn video_status(&self) -> Option<(u32, u32, u8, u64)> {
+        let mut inner = self.inner.borrow_mut();
+        let w = inner.ipc.get("video-params/w")?;
+        let h = inner.ipc.get("video-params/h")?;
+        let pf = inner
+            .ipc
+            .get("video-params/pixelformat")
+            .unwrap_or_default();
+        let drops = inner.ipc.get("frame-drop-count").unwrap_or_default();
+        Some((
+            w.trim().parse().ok()?,
+            h.trim().parse().ok()?,
+            crate::daemon::mpv::player::pixelformat_bit_depth(&pf),
+            drops.trim().parse().unwrap_or(0),
+        ))
     }
 
     fn command(&self, args: &[Value]) {
@@ -258,9 +317,30 @@ fn build_mpv_opts(w: &Wallpaper, scaling: Scaling, sock: &Path) -> String {
         }
         Fit::Stretch => o.push("keepaspect=no".into()),
     }
+    // Visually-correct scaling on every profile (ROADMAP 1.8.2): mpv's default
+    // bilinear + no dithering visibly softens 8K→4K downscales and bands
+    // gradients — the "quality drops on big screens" complaint. Sigmoidized
+    // spline36/mitchell with correct/linear downscaling matches gpu-hq's
+    // downscale quality at a fraction of its cost; dither-depth=auto kills
+    // banding on 8-bit outputs.
+    // A custom CHROMA scaler + `video-rotate` corrupts chroma into a green
+    // cast (see the matching note in mpv/player.rs); skip cscale when rotated.
+    let rotated = !w.rotation.is_multiple_of(360);
+    o.push("correct-downscaling=yes".into());
+    o.push("linear-downscaling=yes".into());
+    o.push("dither-depth=auto".into());
     if matches!(scaling, Scaling::High) {
         o.push("scale=lanczos".into());
-        o.push("cscale=lanczos".into());
+        if !rotated {
+            o.push("cscale=lanczos".into());
+        }
+        o.push("dscale=lanczos".into());
+    } else {
+        o.push("scale=spline36".into());
+        if !rotated {
+            o.push("cscale=spline36".into());
+        }
+        o.push("dscale=mitchell".into());
     }
     // Clockwise rotation in degrees; applied before crop (zoom/pan).
     o.push(format!("video-rotate={}", w.rotation % 360));

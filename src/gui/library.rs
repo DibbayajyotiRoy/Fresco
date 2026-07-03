@@ -47,6 +47,9 @@ pub struct LibraryEntry {
     pub volume: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<u16>,
+    /// Catalog item this entry was installed from (ROADMAP 3.1), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
 }
 
 impl LibraryEntry {
@@ -71,6 +74,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            catalog_id: None,
         }
     }
 
@@ -95,6 +99,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            catalog_id: None,
         }
     }
 
@@ -126,6 +131,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            catalog_id: None,
         }
     }
 
@@ -150,6 +156,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            catalog_id: None,
         }
     }
 
@@ -172,6 +179,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            catalog_id: None,
         }
     }
 

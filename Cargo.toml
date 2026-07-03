@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "0.0.91"
+version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -32,6 +32,9 @@ required-features = ["daemon"]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 serde_json = "1"
+# Local wall-clock handling for scheduled wallpapers (std has no local tz).
+# Non-optional: the schedule engine is shared core (daemon evaluates, GUI edits).
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 dirs = "6"
 anyhow = "1"
 log = "0.4"
@@ -68,7 +71,7 @@ priority = "optional"
 # in the repos, so we BUNDLE its binary (see assets → usr/lib/fresco/mpvpaper)
 # and only depend on the shared libraries it links at runtime.
 depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer"
-recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav"
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg"
 extended-description = """\
 Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
 desktop wallpaper. Pick media in a simple app, click Set, close the app — \

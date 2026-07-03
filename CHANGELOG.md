@@ -4,6 +4,51 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-07-03
+
+The biggest Fresco release yet — sound that always works, pixel-true quality
+on big screens, per-display control, schedules, and an in-app wallpaper catalog.
+
+### Fixed
+- **Per-wallpaper sound is reliable now.** If Fresco started before your audio
+  system on login, mpv silently dropped the audio track forever; the daemon now
+  detects it and restores audio automatically (both X11 and Wayland).
+- **4K/8K quality on large displays.** Correct downscaling + dithering are on
+  for every quality profile: sharper 8K→4K downscales (SSIM 0.54 → 0.74 on our
+  fidelity harness), no gradient banding, pixel-exact rendering verified at
+  HiDPI scale 1 and 2.
+- Update failures now show the actual error output, not just an exit code.
+- **Rotated wallpapers no longer distort colors.** A custom chroma scaler
+  combined with rotation corrupted chroma into a green cast (affected the High
+  quality profile before this release too); rotated video now keeps the
+  default chroma path.
+- **Workspace switcher / overview now shows the ROTATED wallpaper.** The still
+  frame GNOME surfaces use is generated with your rotation applied (ffmpeg).
+- **Hovering a video card no longer blanks it.** The live preview swaps in
+  only once the first frame is decoded; with missing codecs the thumbnail
+  simply stays.
+
+### Added
+- **Wallpaper catalog**: browse curated wallpapers in-app (menu → "Browse
+  wallpapers…") and set one in two clicks; license + author shown on every card.
+- **Per-display wallpapers from the GUI**: right-click a wallpaper → "Set on
+  <display>"; "Show default on all displays" clears overrides.
+- **Day & night schedules** (Advanced): switch between two wallpapers on a
+  timer; times/solar modes available via config.toml (docs/SCRIPTING.md).
+- **Add from URL**: paste a direct .mp4/.webm/image link to import it.
+- **X11 fullscreen auto-pause** (parity with Wayland): per-monitor pause while
+  a window is fullscreen.
+- Wayland: newly plugged displays are picked up on the next apply — no daemon
+  restart.
+- Honest status: real CPU%, renderer memory included in RSS, source
+  resolution/bit-depth/dropped frames, and a warning when a ≥4K file can't be
+  hardware-decoded.
+- Scripting docs (docs/SCRIPTING.md) with verified copy-paste recipes.
+
+### Verification
+- New machine-proof harnesses in-tree: audio (tests/audio), visual fidelity
+  (tests/fidelity), plus schedule/download/catalog unit suites — 73 tests total.
+
 ## [0.0.91] — 2026-07-02
 
 ### Added

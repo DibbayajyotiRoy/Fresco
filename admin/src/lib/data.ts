@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import type { Feedback, Issue, Notification, Release, Repo } from "@/lib/types";
+import type { CatalogItem, Feedback, Issue, Notification, Release, Repo } from "@/lib/types";
 
 const GITHUB_REPO = process.env.GITHUB_REPO || "DibbayajyotiRoy/fresco";
 
@@ -230,4 +230,25 @@ export async function getIssues(): Promise<DataResult<Issue[]>> {
     const message = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, error: `Failed to reach GitHub: ${message}` };
   }
+}
+
+/** Fetch all catalog items, newest first. */
+export async function getCatalogItems(): Promise<DataResult<CatalogItem[]>> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const { data, error } = await supabase
+    .from("catalog_items")
+    .select(
+      "id, created_at, content_type, title, category, tags, media_url, thumb_url, size_bytes, license, author, source_url, published, install_count"
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: (data ?? []) as CatalogItem[] };
 }

@@ -1,0 +1,52 @@
+# Maintainer: Dibbayajyoti Roy <maromaromuje28@gmail.com>
+# Fresco — live wallpapers for Linux (source build).
+#
+# Mirrors the CI release build (.github/workflows/_release.yml):
+# cargo build --release --all-features, plus the GUI/daemon runtime deps.
+# On Arch, mpvpaper IS packaged (unlike Debian), so we depend on it instead of
+# bundling — frescod's mpvpaper_command() falls back to PATH.
+
+pkgname=fresco
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Live wallpapers for Linux — video, GIF, image, slideshow and playlist wallpapers with hardware-accelerated playback"
+arch=('x86_64')
+url="https://github.com/DibbayajyotiRoy/fresco"
+license=('GPL-3.0-or-later')
+depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'mpvpaper')
+makedepends=('rust' 'cargo' 'git')
+optdepends=(
+  'libva-intel-driver: VA-API hardware decode on Intel GPUs'
+  'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
+  'gst-plugins-good: hover-to-play previews in the library'
+  'gst-libav: hover-to-play previews in the library'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # pin per release: curl -L <source-url> | sha256sum
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --release --all-features --locked
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  cargo test --release --no-default-features --features daemon --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 "target/release/fresco" "$pkgdir/usr/bin/fresco"
+  install -Dm755 "target/release/frescod" "$pkgdir/usr/bin/frescod"
+  # Auto-updates are apt-based; on Arch the script exits 3 (unsupported) and
+  # the app points at the AUR instead. Ship it so the pkexec path stays intact.
+  install -Dm755 "scripts/fresco-update.sh" "$pkgdir/usr/lib/fresco/fresco-update.sh"
+  install -Dm644 "data/io.github.dibbayajyotiroy.Fresco.desktop" \
+    "$pkgdir/usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop"
+  install -Dm644 "data/icons/io.github.dibbayajyotiroy.Fresco.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.dibbayajyotiroy.Fresco.svg"
+  install -Dm644 "data/io.github.dibbayajyotiroy.Fresco.metainfo.xml" \
+    "$pkgdir/usr/share/metainfo/io.github.dibbayajyotiroy.Fresco.metainfo.xml"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

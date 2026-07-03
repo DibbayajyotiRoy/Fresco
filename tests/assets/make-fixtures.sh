@@ -57,12 +57,14 @@ echo "==> 8K zone plate (aliasing/moire probe)"
   -vf "geq=lum='128+127*sin((pow(X-W/2,2)+pow(Y-H/2,2))/(W/4))':cb=128:cr=128" \
   -c:v libx264 -preset ultrafast -qp 0 -pix_fmt yuv420p "$out/zoneplate-8k.mp4"
 
-echo "==> gradient 8-bit"
-"${FF[@]}" -f lavfi -i "gradients=size=3840x2160:rate=10:duration=5:x0=0:y0=1080:x1=3840:y1=1080:c0=black:c1=white:nb_colors=2" \
+echo "==> gradient 8-bit (static horizontal ramp — banding probe needs a fixed axis)"
+"${FF[@]}" -f lavfi -i "nullsrc=size=3840x2160:rate=10:duration=5" \
+  -vf "geq=lum='255*X/(W-1)':cb=128:cr=128" \
   -c:v libx264 -preset ultrafast -qp 0 -pix_fmt yuv420p "$out/gradient-8bit.mp4"
 
 echo "==> gradient 10-bit"
-"${FF[@]}" -f lavfi -i "gradients=size=3840x2160:rate=10:duration=5:x0=0:y0=1080:x1=3840:y1=1080:c0=black:c1=white:nb_colors=2" \
+"${FF[@]}" -f lavfi -i "nullsrc=size=3840x2160:rate=10:duration=5" \
+  -vf "geq=lum='255*X/(W-1)':cb=128:cr=128" \
   -c:v libx265 -preset ultrafast -x265-params "qp=0:log-level=error" -pix_fmt yuv420p10le \
   "$out/gradient-10bit.mp4"
 

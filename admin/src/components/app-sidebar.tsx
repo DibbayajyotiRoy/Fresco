@@ -9,6 +9,7 @@ import {
   ChatCircle,
   SquaresFour,
   Waves,
+  Images,
 } from "@phosphor-icons/react/dist/ssr";
 
 import {
@@ -27,6 +28,7 @@ import {
 
 const NAV = [
   { title: "Overview", href: "/", icon: SquaresFour },
+  { title: "Catalog", href: "/catalog", icon: Images },
   { title: "Notifications", href: "/notifications", icon: Bell },
   { title: "Feedback", href: "/feedback", icon: ChatCircle },
   { title: "Issues", href: "/issues", icon: Bug },

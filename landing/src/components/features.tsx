@@ -122,7 +122,7 @@ export function Features() {
             </div>
             <div className="relative mt-2 h-44 w-full overflow-hidden border-t border-border sm:h-52">
               <Image
-                src="https://picsum.photos/seed/fresco-4k-decode/1000/420"
+                src="/screenshots/gallery.png"
                 alt="A high-resolution live wallpaper running smoothly on the desktop"
                 fill
                 sizes="(max-width: 1024px) 100vw, 60vw"

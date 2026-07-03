@@ -89,3 +89,16 @@ passes T16, T17 at runtime. Remaining for the gate: the same runs on **Hyprland*
 and **KDE Plasma 6**; plus T2 (click-through), T14 (compositor restart), T15
 (suspend), and T9/T18–T22. T10/T11 remain unimplemented (Phase 3). A real
 `background=#000000` bug was found via this testing and fixed.
+
+## Fidelity + audio rows (added 2026-07-03, tests/fidelity + tests/audio)
+
+| ID | Claim | Status | Evidence |
+|----|-------|--------|----------|
+| F1 | 4K source pixel-exact on 4K output @ scale 1 (sway + x11) | PROVEN | crispness 100.0 both legs; verification-artifacts/fidelity-20260703-135907, -140044 |
+| F2 | Buffer = physical pixels @ integer scale 2 (sway) | PROVEN | capture 3840x2160, crispness 100.0 |
+| F2b | Fractional scale 1.25 crispness | KNOWN-LIMITED (76.5) | compositor resamples mpvpaper buffer; fix = native backend (ROADMAP 5.1) |
+| F3 | No added gradient banding; dithering active | PROVEN | 256 unique levels (source 220), both legs |
+| F4 | 8K→4K downscale quality ≥ 0.70 SSIM vs lanczos ref | PROVEN | 0.737 both legs (pre-fix baseline: 0.54) |
+| A1 | Unmuted apply selects audio track (aid/mute/volume) | PROVEN (headless) | tests/audio L1, sway + x11 |
+| A2 | Live unmute via Apply restores audio | PROVEN (headless) | tests/audio L2, sway + x11 |
+| A3 | Cold-boot: track auto-restored after audio server appears | PROVEN (headless) | tests/audio L3 with FRESCO_EXPECT_LATE_AUDIO=1; real-login listen test pending (Roy) |

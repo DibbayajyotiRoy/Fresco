@@ -81,6 +81,40 @@ fn render_still(w: &Wallpaper) -> Option<PathBuf> {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     let out = dir.join(format!("overview-{stamp}.png"));
+    // The still must match what's on screen — INCLUDING the user's rotation,
+    // or the workspace switcher / overview shows the unrotated frame.
+    // ffmpegthumbnailer can't rotate, so rotated wallpapers go through ffmpeg
+    // when available; without ffmpeg we fall back to the unrotated frame
+    // (better than none) and say so in the log.
+    let rotation = w.rotation % 360;
+    if rotation != 0 {
+        let transpose = match rotation {
+            90 => "transpose=1", // mpv video-rotate is clockwise
+            180 => "transpose=1,transpose=1",
+            270 => "transpose=2",
+            _ => "null",
+        };
+        let ok = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                &src.to_string_lossy(),
+                "-frames:v",
+                "1",
+                "-vf",
+                transpose,
+                &out.to_string_lossy(),
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Some(out);
+        }
+        log::warn!("ffmpeg unavailable/failed; overview frame will not be rotated");
+    }
     // ffmpegthumbnailer handles both video frames and images; -s 0 = full size.
     let ok = Command::new("ffmpegthumbnailer")
         .args([

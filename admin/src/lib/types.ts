@@ -58,3 +58,20 @@ export type Release = {
   /** ISO publish date, or null for drafts. */
   publishedAt: string | null;
 };
+
+export type CatalogItem = {
+  id: string;
+  created_at: string;
+  content_type: string;
+  title: string;
+  category: string;
+  tags: string[];
+  media_url: string;
+  thumb_url: string | null;
+  size_bytes: number;
+  license: string;
+  author: string;
+  source_url: string | null;
+  published: boolean;
+  install_count: number;
+};

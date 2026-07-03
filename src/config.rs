@@ -122,6 +122,59 @@ fn default_interval() -> u64 {
     30
 }
 
+/// Time-of-day wallpaper schedule (ROADMAP 3.3). Evaluated by the daemon (the
+/// always-running process); the engine itself is a pure function in
+/// `crate::schedule` so it stays unit-testable and platform-neutral.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Schedule {
+    #[serde(default)]
+    pub mode: ScheduleMode,
+    /// daynight/solar: what plays during the day / night.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day: Option<Wallpaper>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub night: Option<Wallpaper>,
+    /// daynight: manual switch times, "HH:MM" 24h local.
+    #[serde(default = "default_day_start")]
+    pub day_start: String,
+    #[serde(default = "default_night_start")]
+    pub night_start: String,
+    /// solar: manual coordinates (no geoclue — privacy + dependency weight).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lat: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lon: Option<f64>,
+    /// times: arbitrary slots; the latest slot at or before now wins (wrapping
+    /// past midnight to the previous day's last slot).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub at: Vec<TimeSlot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ScheduleMode {
+    #[default]
+    Daynight,
+    Times,
+    Solar,
+}
+
+/// One "from this local time, show this wallpaper" rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimeSlot {
+    /// "HH:MM", 24h local wall clock.
+    pub time: String,
+    pub wallpaper: Wallpaper,
+}
+
+fn default_day_start() -> String {
+    "07:00".into()
+}
+
+fn default_night_start() -> String {
+    "19:00".into()
+}
+
 fn default_volume() -> u8 {
     50
 }
@@ -227,6 +280,10 @@ pub struct Config {
     /// re-appear for that same version on the next check.
     #[serde(default)]
     pub update_skipped_version: String,
+    /// Optional time-of-day schedule for the default wallpaper (v1: does not
+    /// apply to per-monitor overrides). Absent = no scheduling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<Schedule>,
 }
 
 fn default_version() -> u32 {
@@ -251,6 +308,7 @@ impl Default for Config {
             monitors: BTreeMap::new(),
             last_update_check: 0,
             update_skipped_version: String::new(),
+            schedule: None,
         }
     }
 }

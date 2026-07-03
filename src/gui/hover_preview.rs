@@ -54,23 +54,46 @@ pub fn attach(
     // Whether the pointer is currently over the card. The leave handler defers to
     // this after the grace period, so transient crossings don't restart the swap.
     let hovered = Rc::new(Cell::new(false));
+    // True once the MediaFile has produced its first frame. Swapping the
+    // paintable BEFORE that blanks the card — for however long the decoder
+    // takes, or forever when the codec's GStreamer plugin is missing. The
+    // thumbnail must stay until real frames exist.
+    let ready = Rc::new(Cell::new(false));
 
     let controller = EventControllerMotion::new();
 
-    // Enter: create the media if needed, show it, and start playing.
+    // Enter: create the media if needed, start playing, and show it only once
+    // (and as soon as) it has frames to show.
     let media_enter = media.clone();
     let thumb_enter = thumb.clone();
     let hovered_enter = hovered.clone();
+    let ready_enter = ready.clone();
     controller.connect_enter(move |_controller, _x, _y| {
         hovered_enter.set(true);
         let mut slot = media_enter.borrow_mut();
-        let media = slot.get_or_insert_with(|| {
-            let media = gtk4::MediaFile::for_filename(video.to_string_lossy().as_ref());
-            media.set_muted(true);
-            media.set_loop(true);
-            media
-        });
-        thumb_enter.set_paintable(Some(media));
+        if slot.is_none() {
+            let m = gtk4::MediaFile::for_filename(video.to_string_lossy().as_ref());
+            m.set_muted(true);
+            m.set_loop(true);
+            // First decoded frame → swap in the live preview (if still hovered).
+            let ready = ready_enter.clone();
+            let thumb = thumb_enter.clone();
+            let hovered = hovered_enter.clone();
+            let m_frames = m.clone();
+            m.connect_invalidate_contents(move |_| {
+                if !ready.get() {
+                    ready.set(true);
+                    if hovered.get() {
+                        thumb.set_paintable(Some(&m_frames));
+                    }
+                }
+            });
+            *slot = Some(m);
+        }
+        let media = slot.as_ref().expect("just inserted");
+        if ready_enter.get() {
+            thumb_enter.set_paintable(Some(media));
+        }
         media.play();
     });
 

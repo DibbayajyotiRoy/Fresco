@@ -1,12 +1,17 @@
 pub mod autostart;
 pub mod capability;
+#[cfg(any(feature = "gui", feature = "daemon"))]
+pub mod catalog;
 pub mod cli;
 pub mod config;
 #[cfg(feature = "daemon")]
 pub mod daemon;
+#[cfg(any(feature = "gui", feature = "daemon"))]
+pub mod download;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod ipc;
+pub mod schedule;
 #[cfg(feature = "gui")]
 pub mod supabase;
 #[cfg(any(feature = "gui", feature = "daemon"))]

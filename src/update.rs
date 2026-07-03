@@ -51,6 +51,7 @@ pub fn updater_script() -> Option<PathBuf> {
 }
 
 /// Result of running the bundled updater script.
+#[derive(Debug)]
 pub enum UpdateOutcome {
     Success,
     /// The script found the installed version already current and did nothing
@@ -93,17 +94,37 @@ pub fn run_updater_with_progress(on_stage: impl Fn(String) + Send + 'static) -> 
     let Some(script) = updater_script() else {
         return UpdateOutcome::Failed("updater script not found".into());
     };
-    // stderr is inherited (not piped): nothing reads it here, and a piped-but-
-    // undrained stderr would deadlock apt if its warnings ever fill the pipe.
-    let mut child = match std::process::Command::new("pkexec")
-        .arg(&script)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-    {
+    let mut cmd = std::process::Command::new("pkexec");
+    cmd.arg(&script);
+    run_command_with_progress(cmd, on_stage)
+}
+
+/// Inner runner, split from the pkexec wrapper so tests can exercise the
+/// stage/stderr plumbing with an ordinary command.
+fn run_command_with_progress(
+    mut cmd: std::process::Command,
+    on_stage: impl Fn(String) + Send + 'static,
+) -> UpdateOutcome {
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
-        Err(e) => return UpdateOutcome::Failed(format!("failed to launch pkexec: {e}")),
+        Err(e) => return UpdateOutcome::Failed(format!("failed to launch updater: {e}")),
     };
+
+    // Drain stderr on its own thread — a piped-but-undrained stderr would
+    // deadlock apt if its warnings filled the pipe. Keep the tail so a failure
+    // shows WHAT went wrong instead of only an exit code.
+    let stderr_tail = child.stderr.take().map(|err| {
+        std::thread::spawn(move || {
+            let mut tail = std::collections::VecDeque::with_capacity(12);
+            for line in BufReader::new(err).lines().map_while(Result::ok) {
+                if tail.len() == 12 {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+            tail.into_iter().collect::<Vec<_>>().join("\n")
+        })
+    });
 
     if let Some(stdout) = child.stdout.take() {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -112,9 +133,15 @@ pub fn run_updater_with_progress(on_stage: impl Fn(String) + Send + 'static) -> 
             }
         }
     }
+    let stderr_text = stderr_tail.and_then(|h| h.join().ok()).unwrap_or_default();
 
     match child.wait() {
-        Ok(status) => outcome_from_status(status),
+        Ok(status) => match outcome_from_status(status) {
+            UpdateOutcome::Failed(msg) if !stderr_text.trim().is_empty() => {
+                UpdateOutcome::Failed(format!("{msg}\n{}", stderr_text.trim()))
+            }
+            other => other,
+        },
         Err(e) => UpdateOutcome::Failed(format!("failed to wait on updater: {e}")),
     }
 }
@@ -147,6 +174,25 @@ pub fn fetch_latest() -> anyhow::Result<LatestRelease> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_update_carries_stderr_detail() {
+        let stages = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = stages.clone();
+        let mut cmd = std::process::Command::new("bash");
+        cmd.args([
+            "-c",
+            "echo 'STAGE: downloading'; echo 'E: apt broke badly' >&2; exit 1",
+        ]);
+        let outcome = run_command_with_progress(cmd, move |s| seen.lock().unwrap().push(s));
+        match outcome {
+            UpdateOutcome::Failed(msg) => {
+                assert!(msg.contains("E: apt broke badly"), "msg was: {msg}");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        assert_eq!(stages.lock().unwrap().as_slice(), ["downloading"]);
+    }
 
     #[test]
     fn is_newer_compares_semver() {

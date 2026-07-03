@@ -15,7 +15,7 @@
 
 app-id: io.github.dibbayajyotiroy.Fresco
 runtime: org.gnome.Platform
-runtime-version: "47"
+runtime-version: "48"
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -143,8 +143,9 @@ modules:
       #          path: ..
       - type: git
         url: https://github.com/DibbayajyotiRoy/fresco.git
-        tag: v0.0.2
-        commit: REPLACE_WITH_COMMIT_THAT_v0.0.2_TAG_POINTS_TO
+        tag: v1.0.0
+        # Pin at submission time: git rev-parse v1.0.0^{commit}
+        commit: REPLACE_WITH_COMMIT_THAT_v1.0.0_TAG_POINTS_TO
         x-checker-data:
           type: git
           tag-pattern: "^v([\\d.]+)$"

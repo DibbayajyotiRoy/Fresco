@@ -80,10 +80,33 @@ impl Player {
                 f.set_option(handle, "video-sync", "display-resample");
             }
 
-            // Scaling quality.
+            // Visually-correct scaling on every profile (ROADMAP 1.8.2): mpv's
+            // default bilinear + no dithering visibly softens 8K→4K downscales
+            // and bands gradients — the "quality drops on big screens"
+            // complaint. correct/linear downscaling + dithering fix that;
+            // spline36/mitchell is near gpu-hq quality at a fraction of the cost.
+            //
+            // A custom CHROMA scaler combined with `video-rotate` corrupts the
+            // chroma planes into a green cast (repro: rotated capture means
+            // RGB 90,142,64 vs neutral 126,129,127 without cscale — see
+            // tests/fidelity). Luma scalers are unaffected, so on rotated
+            // video we keep mpv's default chroma path.
+            let rotated = !wallpaper.rotation.is_multiple_of(360);
+            f.set_option(handle, "correct-downscaling", "yes");
+            f.set_option(handle, "linear-downscaling", "yes");
+            f.set_option(handle, "dither-depth", "auto");
             if matches!(scaling, Scaling::High) {
                 f.set_option(handle, "scale", "lanczos");
-                f.set_option(handle, "cscale", "lanczos");
+                if !rotated {
+                    f.set_option(handle, "cscale", "lanczos");
+                }
+                f.set_option(handle, "dscale", "lanczos");
+            } else {
+                f.set_option(handle, "scale", "spline36");
+                if !rotated {
+                    f.set_option(handle, "cscale", "spline36");
+                }
+                f.set_option(handle, "dscale", "mitchell");
             }
 
             // Fit mode.
@@ -206,14 +229,87 @@ impl Player {
         }
     }
 
-    pub fn set_volume(&self, volume: u8, mute: bool) {
+    /// Re-select the file's audio track and unmute. Recovery for the case where
+    /// mpv dropped the track because no audio server was reachable at load time
+    /// (cold boot: we start before PipeWire). Setting `aid=auto` does NOT
+    /// recover a dropped track; an explicit track id does — verified against
+    /// mpv 0.3x. Returns false when the file has no audio track at all (there
+    /// is nothing to restore; callers must stop retrying).
+    pub fn try_restore_audio(&self, volume: u8) -> bool {
+        let Ok(f) = fns() else { return true };
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        let Some(tracks) = (unsafe { f.get_property(self.handle, "track-list") }) else {
+            return true; // transient read failure — worth another attempt
+        };
+        let Some(id) = first_audio_track_id(&tracks) else {
+            return false;
+        };
+        // SAFETY: as above.
+        unsafe {
+            f.set_property(self.handle, "aid", &id.to_string());
+            f.set_property(self.handle, "mute", "no");
+            f.set_property(self.handle, "volume", &volume.to_string());
+        }
+        true
+    }
+
+    /// Live audio state: (audio track selected, muted, volume). The track flag
+    /// is the ground truth for "will this ever make sound" — mpv reports
+    /// `aid=no` both for our muted-entry optimization and after it dropped the
+    /// track because no audio server was reachable at load time.
+    pub fn audio_status(&self) -> Option<(bool, bool, u8)> {
+        let f = fns().ok()?;
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        let (aid, mute, volume) = unsafe {
+            (
+                f.get_property(self.handle, "aid")?,
+                f.get_property(self.handle, "mute")?,
+                f.get_property(self.handle, "volume")?,
+            )
+        };
+        let track = aid != "no" && aid != "false";
+        let muted = mute == "yes" || mute == "true";
+        let vol = volume.trim().parse::<f64>().ok()?.round().clamp(0.0, 100.0) as u8;
+        Some((track, muted, vol))
+    }
+
+    /// Raise demuxer read-ahead for high-resolution sources. The spawn
+    /// defaults (16MiB, tuned for low RSS on 1080p loops) hold ~2s of a
+    /// 50Mbps 4K/8K file and can starve the decoder into stutter — quality
+    /// must never silently degrade to save RAM (ROADMAP 1.8.5).
+    pub fn raise_demuxer_cache(&self) {
         if let Ok(f) = fns() {
             // SAFETY: `self.handle` is valid for the lifetime of this Player.
             unsafe {
-                f.set_property(self.handle, "volume", &volume.to_string());
-                f.set_property(self.handle, "mute", if mute { "yes" } else { "no" });
+                f.set_property(self.handle, "demuxer-max-bytes", "64MiB");
+                f.set_property(self.handle, "demuxer-max-back-bytes", "8MiB");
+                f.set_property(self.handle, "demuxer-readahead-secs", "2");
             }
         }
+    }
+
+    /// Decode-honesty snapshot: (source width, height, bit depth, dropped
+    /// frames). Lets Status/doctor explain quality problems (software decode
+    /// at 4K+, decoder drops) instead of leaving them silent.
+    pub fn video_status(&self) -> Option<(u32, u32, u8, u64)> {
+        let f = fns().ok()?;
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        let (w, h, pf, drops) = unsafe {
+            (
+                f.get_property(self.handle, "video-params/w")?,
+                f.get_property(self.handle, "video-params/h")?,
+                f.get_property(self.handle, "video-params/pixelformat")
+                    .unwrap_or_default(),
+                f.get_property(self.handle, "frame-drop-count")
+                    .unwrap_or_default(),
+            )
+        };
+        Some((
+            w.trim().parse().ok()?,
+            h.trim().parse().ok()?,
+            pixelformat_bit_depth(&pf),
+            drops.trim().parse().unwrap_or(0),
+        ))
     }
 
     /// Active hardware decoder, e.g. "nvdec", "vaapi", or "no" (software).
@@ -284,5 +380,70 @@ fn shuffle_in_place<T>(v: &mut [T]) {
         seed ^= seed << 17;
         let j = (seed % (i as u64 + 1)) as usize;
         v.swap(i, j);
+    }
+}
+
+/// Bit depth implied by an mpv pixelformat name ("yuv420p10le" → 10,
+/// "p010" → 10, "nv12" → 8). Depth always appears as a `p`-prefixed suffix
+/// (planar depth marker or semi-planar pNNN family); bare formats are 8-bit.
+pub(crate) fn pixelformat_bit_depth(pf: &str) -> u8 {
+    for (needle, depth) in [
+        ("p016", 16u8),
+        ("p012", 12),
+        ("p010", 10),
+        ("p16", 16),
+        ("p12", 12),
+        ("p10", 10),
+    ] {
+        if pf.contains(needle) {
+            return depth;
+        }
+    }
+    8
+}
+
+/// First audio track id from an mpv `track-list` JSON dump, or None when the
+/// file has no audio track. Shared by both backends' audio recovery.
+pub(crate) fn first_audio_track_id(track_list_json: &str) -> Option<i64> {
+    let tracks: serde_json::Value = serde_json::from_str(track_list_json).ok()?;
+    tracks.as_array()?.iter().find_map(|t| {
+        (t.get("type")?.as_str()? == "audio")
+            .then(|| t.get("id")?.as_i64())
+            .flatten()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_audio_track_id;
+
+    #[test]
+    fn finds_first_audio_track() {
+        let tl = r#"[
+            {"id":1,"type":"video","selected":true},
+            {"id":1,"type":"audio","codec":"aac"},
+            {"id":2,"type":"audio","codec":"ac3"}
+        ]"#;
+        assert_eq!(first_audio_track_id(tl), Some(1));
+    }
+
+    #[test]
+    fn pixelformat_depths() {
+        use super::pixelformat_bit_depth;
+        assert_eq!(pixelformat_bit_depth("yuv420p"), 8);
+        assert_eq!(pixelformat_bit_depth("nv12"), 8);
+        assert_eq!(pixelformat_bit_depth("yuv420p10le"), 10);
+        assert_eq!(pixelformat_bit_depth("p010"), 10);
+        assert_eq!(pixelformat_bit_depth("yuv422p12be"), 12);
+        assert_eq!(pixelformat_bit_depth("p016"), 16);
+        assert_eq!(pixelformat_bit_depth(""), 8);
+    }
+
+    #[test]
+    fn no_audio_track_means_none() {
+        let tl = r#"[{"id":1,"type":"video","selected":true}]"#;
+        assert_eq!(first_audio_track_id(tl), None);
+        assert_eq!(first_audio_track_id("[]"), None);
+        assert_eq!(first_audio_track_id("not json"), None);
     }
 }

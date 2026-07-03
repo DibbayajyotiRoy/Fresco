@@ -1,0 +1,24 @@
+pkgbase = fresco
+	pkgdesc = Live wallpapers for Linux — video, GIF, image, slideshow and playlist wallpapers with hardware-accelerated playback
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/DibbayajyotiRoy/fresco
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = rust
+	makedepends = cargo
+	makedepends = git
+	depends = gtk4
+	depends = libadwaita
+	depends = mpv
+	depends = wayland
+	depends = ffmpegthumbnailer
+	depends = mpvpaper
+	optdepends = libva-intel-driver: VA-API hardware decode on Intel GPUs
+	optdepends = intel-media-driver: VA-API hardware decode on newer Intel GPUs
+	optdepends = gst-plugins-good: hover-to-play previews in the library
+	optdepends = gst-libav: hover-to-play previews in the library
+	source = fresco-1.0.0.tar.gz::https://github.com/DibbayajyotiRoy/fresco/archive/refs/tags/v1.0.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = fresco

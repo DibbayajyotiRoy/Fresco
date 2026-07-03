@@ -1059,9 +1059,13 @@ fn build_library_card(
     }
     overlay.add_controller(rclick);
 
-    // Video/GIF cards play a muted, looping preview while hovered.
-    if let Some(video) = preview_video_path(entry) {
-        super::hover_preview::attach(&overlay, &pic, video, entry.thumbnail.clone());
+    // Video/GIF cards play a muted, looping preview while hovered. Rotated
+    // entries keep their static (rotated) thumbnail instead: GTK's MediaFile
+    // can't rotate, and motion in the WRONG orientation reads as a bug.
+    if entry.rotation.unwrap_or(0).is_multiple_of(360) {
+        if let Some(video) = preview_video_path(entry) {
+            super::hover_preview::attach(&overlay, &pic, video, entry.thumbnail.clone());
+        }
     }
 
     // Minimum 16:9 poster footprint whose height derives from the FlowBox's
@@ -1636,6 +1640,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                         e.mute = Some(mute_ref.is_active());
                         e.volume = Some(vol_ref.value() as u8);
                         e.rotation = Some(crop_ref.rotation());
+                        // The card must show the new orientation immediately.
+                        e.generate_thumbnail();
                     }
                 }
                 save_entries(&s.entries).ok();

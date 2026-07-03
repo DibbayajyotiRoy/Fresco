@@ -234,6 +234,39 @@ impl LibraryEntry {
         if let Some(dir) = out.parent() {
             fs::create_dir_all(dir).ok();
         }
+        // The thumbnail must show the entry's ROTATION, or the card keeps the
+        // old orientation after an edit. ffmpegthumbnailer can't rotate, so
+        // rotated entries go through ffmpeg (fall through to the unrotated
+        // thumbnailer if that fails).
+        let rotation = self.rotation.unwrap_or(0) % 360;
+        if rotation != 0 {
+            let transpose = match rotation {
+                90 => "transpose=1",
+                180 => "transpose=1,transpose=1",
+                270 => "transpose=2",
+                _ => "null",
+            };
+            let ok = std::process::Command::new("ffmpeg")
+                .args([
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    &src.to_string_lossy(),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    &format!("{transpose},scale=256:-2"),
+                    &out.to_string_lossy(),
+                ])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if ok {
+                self.thumbnail = Some(out);
+                return;
+            }
+        }
         let ok = std::process::Command::new("ffmpegthumbnailer")
             .args([
                 "-i",

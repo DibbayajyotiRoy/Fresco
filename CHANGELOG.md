@@ -4,6 +4,16 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-07-04
+
+### Fixed
+- **Editing a wallpaper's rotation now updates its card thumbnail** — the
+  library card kept the old orientation before (thumbnails were only generated
+  at import).
+- Hover-to-play is skipped on rotated entries: GTK's inline player can't
+  rotate, and motion in the wrong orientation read as a bug. The static
+  (correctly rotated) thumbnail shows instead.
+
 ## [1.0.0] — 2026-07-03
 
 The biggest Fresco release yet — sound that always works, pixel-true quality

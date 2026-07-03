@@ -58,6 +58,11 @@
   </branding>
 
   <releases>
+    <release version="1.0.1" date="2026-07-04">
+      <description>
+        <p>Rotation polish: card thumbnails follow the edited rotation; hover previews no longer play in the wrong orientation.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-07-03">
       <description>
         <p>Reliable per-wallpaper sound, pixel-true 4K/8K quality, an in-app wallpaper catalog, per-display wallpapers, day/night schedules, add-from-URL, and X11 fullscreen auto-pause.</p>

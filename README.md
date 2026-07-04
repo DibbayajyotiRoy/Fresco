@@ -78,6 +78,7 @@ Fresco ships its proof harnesses in-tree (`tests/fidelity`, `tests/audio`) — e
 | Distro | Versions | Status |
 |--------|----------|--------|
 | Pop!_OS | 22.04 | ✅ Primary target |
+| Pop!_OS | 24.04 (COSMIC) | ⚠️ Installs & runs (24.04 base is CI-tested weekly); live wallpapers via layer-shell, on-screen verification pending |
 | Ubuntu | 22.04, 24.04 | ✅ |
 | Linux Mint | 21, 22 | ✅ |
 | Debian | 12 (Bookworm) | ✅ |
@@ -129,7 +130,30 @@ Right in the app: menu → **Browse wallpapers…** opens a curated catalog (eve
 Yes — right-click any wallpaper in the library and choose **Set on \<display\>**. "Show default on all displays" clears the overrides.
 
 **Can wallpapers change with the time of day?**
-Yes — **Advanced → Day & night wallpaper** switches between two wallpapers on a schedule; arbitrary time slots and sunrise/sunset (manual coordinates) are available via `config.toml`.
+Yes. In the app: menu → **Advanced… → Day & night wallpaper** — pick a day wallpaper, a night wallpaper, and the two switch times. The daemon swaps them automatically (no restart, no flash), and a manual wallpaper choice holds until the next boundary. Power users get more modes in `~/.config/fresco/config.toml`:
+
+```toml
+# Arbitrary time slots
+[schedule]
+mode = "times"
+[[schedule.at]]
+time = "06:30"
+[schedule.at.wallpaper]
+kind = "video"
+path = "/home/you/Videos/sunrise.mp4"
+[[schedule.at]]
+time = "22:00"
+[schedule.at.wallpaper]
+kind = "video"
+path = "/home/you/Videos/night.mp4"
+
+# Or sunrise/sunset (manual coordinates, no location services)
+# [schedule]
+# mode = "solar"
+# lat = 26.1
+# lon = 91.7
+# [schedule.day]  / [schedule.night] = wallpaper blocks as above
+```
 
 **Can I crop or rotate a wallpaper?**
 Yes. The editor has a **drag-to-crop** frame and a **90° rotate** (great for sideways phone videos). Both run on the GPU and are remembered per wallpaper.

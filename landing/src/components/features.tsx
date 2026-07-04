@@ -5,10 +5,12 @@ import {
   Film,
   Images,
   Layers,
+  LayoutGrid,
   ListVideo,
   Monitor,
   Palette,
   PauseCircle,
+  SunMoon,
   Volume2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -20,6 +22,12 @@ type Feature = {
 };
 
 const MEDIA_FEATURES: Feature[] = [
+  {
+    icon: LayoutGrid,
+    title: "Built-in wallpaper catalog",
+    description:
+      "Browse curated, licensed wallpapers in-app (menu, then Browse wallpapers) and set one in two clicks.",
+  },
   {
     icon: Film,
     title: "Video & GIF wallpapers",
@@ -58,9 +66,15 @@ const SECONDARY_FEATURES: Feature[] = [
   },
   {
     icon: Monitor,
-    title: "Multi-monitor",
+    title: "Per-display wallpapers",
     description:
-      "A different wallpaper on every display, with live handling when you plug or unplug one.",
+      "Right-click any wallpaper and Set on a specific display. Each monitor can run its own.",
+  },
+  {
+    icon: SunMoon,
+    title: "Day and night schedules",
+    description:
+      "Advanced, then Day & night wallpaper: two wallpapers, two switch times, swapped automatically.",
   },
   {
     icon: PauseCircle,

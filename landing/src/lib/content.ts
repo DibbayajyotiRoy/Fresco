@@ -54,7 +54,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Can my wallpaper change automatically between day and night?",
-    a: "Yes. Fresco has a day and night schedule: pick two wallpapers and switch times, and the daemon swaps them automatically with no restart. Arbitrary time slots and sunrise or sunset switching (with manual coordinates) are available through config.toml.",
+    a: "Yes. Open the menu, choose Advanced, then Day & night wallpaper: pick two wallpapers and switch times, and the daemon swaps them automatically with no restart. Arbitrary time slots and sunrise or sunset switching (with manual coordinates) are available through config.toml.",
   },
   {
     q: "How do I set a different wallpaper on each monitor?",
@@ -143,6 +143,7 @@ export const FORMATS = [
 
 export const DISTROS = [
   "Pop!_OS 22.04",
+  "Pop!_OS 24.04 (COSMIC, experimental)",
   "Ubuntu 22.04 / 24.04",
   "Linux Mint 21 / 22",
   "Debian 12",

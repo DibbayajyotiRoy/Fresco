@@ -643,7 +643,10 @@ impl Daemon {
         let Some(path) = want.effective_path().map(|p| p.to_path_buf()) else {
             return;
         };
-        log::info!("schedule: switching default wallpaper to {}", path.display());
+        log::info!(
+            "schedule: switching default wallpaper to {}",
+            path.display()
+        );
         for r in &self.renderers {
             if !self.config.monitors.contains_key(&r.window.connector) {
                 // Rotation and crop are per-wallpaper state on the mpv instance;
@@ -1505,7 +1508,10 @@ fn run_wayland_layershell() -> Result<()> {
             // outputs showing the DEFAULT wallpaper — never a respawn.
             if let Some(want) = sched.due(&config) {
                 if let Some(path) = want.effective_path().map(|p| p.to_path_buf()) {
-                    log::info!("schedule: switching default wallpaper to {}", path.display());
+                    log::info!(
+                        "schedule: switching default wallpaper to {}",
+                        path.display()
+                    );
                     for (connector, o) in outputs.iter_mut() {
                         if !config.monitors.contains_key(connector) {
                             if let Some(pl) = o.player.as_ref() {
@@ -1594,7 +1600,9 @@ fn sync_wayland_outputs(outputs: &std::collections::BTreeMap<String, WlOutput>) 
             continue;
         };
         for o in &group[1..] {
-            let Some(pl) = o.player.as_ref() else { continue };
+            let Some(pl) = o.player.as_ref() else {
+                continue;
+            };
             if let Some(pos) = pl.time_pos() {
                 if (pos - lead).abs() > SYNC_TOLERANCE {
                     log::debug!(

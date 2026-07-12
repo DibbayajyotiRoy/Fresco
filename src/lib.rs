@@ -12,7 +12,7 @@ pub mod download;
 pub mod gui;
 pub mod ipc;
 pub mod schedule;
-#[cfg(feature = "gui")]
+#[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod supabase;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod update;

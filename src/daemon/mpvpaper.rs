@@ -173,6 +173,31 @@ impl WaylandPlayer {
         self.set("pause", json!(paused));
     }
 
+    /// Change rotation at runtime — the scheduled swap replaces media in place
+    /// (no respawn), so the previous wallpaper's rotation must not leak onto
+    /// the next one. Mirrors `Player::set_rotation`: copy-back hwdec and mpv's
+    /// default chroma scaler for rotated video (green-cast bug).
+    pub fn set_rotation(&self, rotation: u16, scaling: Scaling) {
+        let rotated = !rotation.is_multiple_of(360);
+        self.set("video-rotate", json!(rotation % 360));
+        self.set(
+            "hwdec",
+            json!(if rotated { "auto-copy" } else { "auto-safe" }),
+        );
+        let cscale = match (rotated, scaling) {
+            (true, _) => "bilinear", // mpv's default chroma path
+            (false, Scaling::High) => "lanczos",
+            (false, _) => "spline36",
+        };
+        self.set("cscale", json!(cscale));
+    }
+
+    /// Seek to an absolute position (seconds). Used to keep clones of the same
+    /// video in lockstep across monitors.
+    pub fn set_time_pos(&self, secs: f64) {
+        self.set("playback-time", json!(secs));
+    }
+
     /// Active hardware decoder, e.g. "vaapi" / "nvdec" / "no" — cached at spawn.
     pub fn hwdec_current(&self) -> Option<String> {
         self.hwdec.clone()
@@ -307,6 +332,8 @@ fn build_mpv_opts(w: &Wallpaper, scaling: Scaling, sock: &Path) -> String {
     if w.mute {
         o.push("mute=yes".into());
         o.push("aid=no".into());
+        // No audio clock → smoother looping (matches the X11 Player).
+        o.push("video-sync=display-resample".into());
     } else {
         o.push("mute=no".into());
         o.push(format!("volume={}", w.volume));
@@ -454,6 +481,25 @@ impl MpvIpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn muted_wallpaper_drops_audio_clock() {
+        let w = Wallpaper {
+            kind: Kind::Video,
+            mute: true,
+            ..Default::default()
+        };
+        let opts = build_mpv_opts(&w, Scaling::Balanced, Path::new("/tmp/s.sock"));
+        assert!(opts.contains("aid=no"));
+        assert!(opts.contains("video-sync=display-resample"));
+        let unmuted = Wallpaper {
+            kind: Kind::Video,
+            mute: false,
+            ..Default::default()
+        };
+        let opts = build_mpv_opts(&unmuted, Scaling::Balanced, Path::new("/tmp/s.sock"));
+        assert!(!opts.contains("video-sync=display-resample"));
+    }
 
     fn have(bin: &str) -> bool {
         std::env::var("PATH")

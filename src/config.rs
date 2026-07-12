@@ -266,6 +266,10 @@ pub struct Config {
     /// True once the (one-time, opt-in) feedback prompt has been shown.
     #[serde(default)]
     pub feedback_prompted: bool,
+    /// Periodic desktop reminder to send feedback (every 5 hours until the
+    /// user submits once). Set false in config.toml to silence it.
+    #[serde(default = "default_true")]
+    pub feedback_reminders: bool,
     /// IDs of admin notifications already shown, so each appears only once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub seen_notifications: Vec<String>,
@@ -304,6 +308,7 @@ impl Default for Config {
             last_seen_version: String::new(),
             first_run_epoch: 0,
             feedback_prompted: false,
+            feedback_reminders: true,
             seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
             last_update_check: 0,

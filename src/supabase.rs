@@ -32,6 +32,10 @@ pub fn submit_feedback(rating: i8, comment: Option<String>) -> Result<()> {
         "comment": comment,
         "app_version": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
+        // Coarse "where are our users" signal — region-level only, still no
+        // identifiers. Timezone gives geography; locale gives language+country.
+        "timezone": system_timezone(),
+        "locale": system_locale(),
     });
     ureq::post(&format!("{URL}/rest/v1/feedback"))
         .set("apikey", ANON_KEY)
@@ -39,7 +43,45 @@ pub fn submit_feedback(rating: i8, comment: Option<String>) -> Result<()> {
         .set("Content-Type", "application/json")
         .set("Prefer", "return=minimal")
         .send_json(payload)?;
+    // One successful submission permanently silences the daemon's periodic
+    // feedback reminder (see daemon/notifier.rs).
+    let marker = feedback_sent_marker();
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(&marker, b"").ok();
     Ok(())
+}
+
+/// Marker file written after one successful submission; the daemon's feedback
+/// reminder stops for good once it exists.
+pub fn feedback_sent_marker() -> std::path::PathBuf {
+    dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("fresco")
+        .join("feedback-sent")
+}
+
+/// IANA timezone name ("Asia/Kolkata"), from /etc/timezone or the
+/// /etc/localtime symlink. None when neither is readable.
+fn system_timezone() -> Option<String> {
+    if let Ok(tz) = std::fs::read_to_string("/etc/timezone") {
+        let tz = tz.trim();
+        if !tz.is_empty() {
+            return Some(tz.to_string());
+        }
+    }
+    let link = std::fs::read_link("/etc/localtime").ok()?;
+    let s = link.to_string_lossy();
+    s.split("zoneinfo/").nth(1).map(|z| z.to_string())
+}
+
+/// The user's locale ("en_IN.UTF-8") — language plus country code.
+fn system_locale() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
 }
 
 /// Fetch published notifications, newest first.

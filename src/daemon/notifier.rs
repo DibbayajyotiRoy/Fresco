@@ -222,6 +222,97 @@ enum Click {
     OpenUrl(String),
     /// Run the bundled updater script (download + install the latest .deb) via pkexec.
     Update,
+    /// Launch the Fresco GUI (the feedback dialog lives in its menu).
+    OpenApp,
+}
+
+/// How often to nudge for feedback, and how often the loop wakes to check.
+const FEEDBACK_REMINDER_INTERVAL: u64 = 5 * 60 * 60; // seconds
+const FEEDBACK_REMINDER_POLL: Duration = Duration::from_secs(10 * 60);
+
+/// Spawn the periodic feedback reminder: a desktop notification every 5 hours
+/// until the user submits feedback once (then it stops for good), or disables
+/// `feedback_reminders` in config.toml.
+pub fn spawn_feedback_reminder() {
+    std::thread::Builder::new()
+        .name("fresco-feedback-nudge".into())
+        .spawn(feedback_reminder_loop)
+        .ok();
+}
+
+fn feedback_reminder_loop() {
+    let path = reminder_state_path();
+    // First run: start the clock now so the first nudge lands 5h from install,
+    // not at first launch.
+    if read_epoch(&path).is_none() {
+        write_epoch(&path, epoch_now());
+    }
+    loop {
+        std::thread::sleep(FEEDBACK_REMINDER_POLL);
+        if crate::supabase::feedback_sent_marker().exists() {
+            log::info!("feedback reminder: feedback already sent; stopping");
+            return;
+        }
+        // Re-read config each cycle so a toggle takes effect without a restart.
+        let enabled = crate::config::Config::load()
+            .map(|c| c.feedback_reminders)
+            .unwrap_or(true);
+        if !enabled {
+            continue;
+        }
+        let due = read_epoch(&path)
+            .map(|t| epoch_now().saturating_sub(t) >= FEEDBACK_REMINDER_INTERVAL)
+            .unwrap_or(true);
+        if due {
+            write_epoch(&path, epoch_now());
+            notify(
+                "Enjoying Fresco?",
+                "Tell us what's working and what isn't — it takes ten seconds \
+                 and shapes the next release.",
+                Some(("Send feedback", Click::OpenApp)),
+            );
+        }
+    }
+}
+
+fn epoch_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn read_epoch(path: &PathBuf) -> Option<u64> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+fn write_epoch(path: &PathBuf, epoch: u64) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(path, epoch.to_string()).ok();
+}
+
+fn reminder_state_path() -> PathBuf {
+    dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("fresco")
+        .join("feedback-reminder-epoch")
+}
+
+/// Launch the Fresco GUI so the user lands one click from the feedback dialog.
+fn open_app() {
+    let result = if crate::is_flatpak() {
+        std::process::Command::new("flatpak")
+            .args(["run", "io.github.dibbayajyotiroy.Fresco"])
+            .spawn()
+    } else {
+        std::process::Command::new("fresco").spawn()
+    };
+    if let Err(e) = result {
+        log::warn!("feedback reminder: launching the GUI failed: {e}");
+    }
 }
 
 /// Decide what to do with one notification. An `update` row is semver-gated; on a
@@ -279,6 +370,7 @@ fn notify(title: &str, body: &str, action: Option<(&str, Click)>) {
                             match click {
                                 Click::OpenUrl(url) => open_url(&url),
                                 Click::Update => run_updater(),
+                                Click::OpenApp => open_app(),
                             }
                         }
                     });

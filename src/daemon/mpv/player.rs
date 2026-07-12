@@ -232,6 +232,39 @@ impl Player {
         }
     }
 
+    /// Change rotation at runtime — the scheduled swap replaces media in place
+    /// (no respawn), so the previous wallpaper's rotation must not leak onto
+    /// the next one. Re-applies the rotated-video constraints from `new`:
+    /// copy-back hwdec and mpv's default chroma scaler (green-cast bug above).
+    pub fn set_rotation(&self, rotation: u16, scaling: Scaling) {
+        let Ok(f) = fns() else { return };
+        let rotated = !rotation.is_multiple_of(360);
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        unsafe {
+            f.set_property(self.handle, "video-rotate", &(rotation % 360).to_string());
+            f.set_property(
+                self.handle,
+                "hwdec",
+                if rotated { "auto-copy" } else { "auto-safe" },
+            );
+            let cscale = match (rotated, scaling) {
+                (true, _) => "bilinear", // mpv's default chroma path
+                (false, Scaling::High) => "lanczos",
+                (false, _) => "spline36",
+            };
+            f.set_property(self.handle, "cscale", cscale);
+        }
+    }
+
+    /// Seek to an absolute position (seconds). Used to keep clones of the same
+    /// video in lockstep across monitors.
+    pub fn set_time_pos(&self, secs: f64) {
+        if let Ok(f) = fns() {
+            // SAFETY: `self.handle` is valid for the lifetime of this Player.
+            unsafe { f.set_property(self.handle, "time-pos", &format!("{secs:.3}")) };
+        }
+    }
+
     pub fn set_paused(&self, paused: bool) {
         if let Ok(f) = fns() {
             // SAFETY: `self.handle` is valid for the lifetime of this Player.

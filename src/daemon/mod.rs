@@ -44,6 +44,12 @@ const MAX_HEALS: u32 = 5;
 // playback progress before treating a still-running mpvpaper as wedged. 3 ≈ 6s,
 // high enough that a normally looping clip never trips it.
 const STALL_STRIKES: u32 = 3;
+// Cross-monitor lockstep: the same video on two outputs plays on independent
+// mpv clocks, and per-output pauses (fullscreen on one monitor, workspace
+// switches) make them drift further apart forever. Periodically re-seat every
+// follower on the leader's clock once the drift exceeds the tolerance.
+const SYNC_INTERVAL: Duration = Duration::from_secs(5);
+const SYNC_TOLERANCE: f64 = 0.2;
 
 /// During a transition the loop ticks at ~60fps for buttery, eased motion.
 const ANIM_TICK: Duration = Duration::from_millis(16);
@@ -160,6 +166,26 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.load_path(path),
         }
     }
+    /// Runtime rotation change (scheduled swaps are media-only, no respawn).
+    fn set_rotation(&self, rotation: u16, scaling: Scaling) {
+        match self {
+            PlayerHandle::X11(p) => p.set_rotation(rotation, scaling),
+            PlayerHandle::Wayland(p) => p.set_rotation(rotation, scaling),
+        }
+    }
+    fn apply_crop(&self, wallpaper: &Wallpaper) {
+        match self {
+            PlayerHandle::X11(p) => p.apply_crop(wallpaper),
+            PlayerHandle::Wayland(p) => p.apply_crop(wallpaper),
+        }
+    }
+    /// Absolute seek (seconds) — cross-monitor lockstep for cloned videos.
+    fn set_time_pos(&self, secs: f64) {
+        match self {
+            PlayerHandle::X11(p) => p.set_time_pos(secs),
+            PlayerHandle::Wayland(p) => p.set_time_pos(secs),
+        }
+    }
     fn set_zoom_pan(&self, zoom: f64, pan_x: f64, pan_y: f64) {
         match self {
             PlayerHandle::X11(p) => p.set_zoom_pan(zoom, pan_x, pan_y),
@@ -256,6 +282,7 @@ pub struct Daemon {
     last_monitor_check: Instant,
     last_battery_check: Instant,
     last_cache_check: Instant,
+    last_sync_check: Instant,
     /// Connectors currently covered by a viewable fullscreen window (EWMH),
     /// with the covering window's title for the log.
     fullscreen_covered: std::collections::HashMap<String, String>,
@@ -284,6 +311,7 @@ impl Daemon {
             last_monitor_check: Instant::now(),
             last_battery_check: Instant::now() - BATTERY_INTERVAL,
             last_cache_check: Instant::now(),
+            last_sync_check: Instant::now(),
             fullscreen_covered: std::collections::HashMap::new(),
             last_fullscreen_check: Instant::now(),
             sched: SchedState::default(),
@@ -398,6 +426,10 @@ impl Daemon {
                 self.check_cache();
                 self.check_schedule();
                 self.last_cache_check = now;
+            }
+            if now.duration_since(self.last_sync_check) >= SYNC_INTERVAL {
+                self.check_sync();
+                self.last_sync_check = now;
             }
             self.check_cold_boot_stall(now);
             let animating = self.advance_slideshows(now);
@@ -608,21 +640,68 @@ impl Daemon {
         let Some(want) = self.sched.due(&self.config) else {
             return;
         };
-        log::info!(
-            "schedule: switching default wallpaper to {}",
-            want.display()
-        );
+        let Some(path) = want.effective_path().map(|p| p.to_path_buf()) else {
+            return;
+        };
+        log::info!("schedule: switching default wallpaper to {}", path.display());
         for r in &self.renderers {
             if !self.config.monitors.contains_key(&r.window.connector) {
-                r.player.load_path(&want);
+                // Rotation and crop are per-wallpaper state on the mpv instance;
+                // without resetting them here the previous wallpaper's rotation
+                // leaks onto the scheduled one (wrong dimensions on screen).
+                r.player.set_rotation(want.rotation, self.config.scaling);
+                r.player.apply_crop(&want);
+                r.player.load_path(&path);
                 r.cache_raised.set(false); // re-check resolution for the new media
             }
         }
         // Keep the in-memory config coherent for status/describe. NEVER saved:
         // the on-disk config remains the user's own intent.
-        self.config.wallpaper.path = Some(want.clone());
-        self.sched.applied = Some(want);
+        self.config.wallpaper.path = Some(path.clone());
+        self.config.wallpaper.rotation = want.rotation;
+        self.config.wallpaper.crop = want.crop;
+        self.sched.applied = Some(path);
         overview::apply(&self.config.wallpaper);
+    }
+
+    /// Re-seat clones of the same video on one clock (see SYNC_INTERVAL): the
+    /// first unpaused renderer in each same-file group is the leader; any other
+    /// drifted beyond SYNC_TOLERANCE seeks to the leader's position.
+    fn check_sync(&self) {
+        let mut groups: std::collections::HashMap<&std::path::Path, Vec<&Renderer>> =
+            std::collections::HashMap::new();
+        for r in &self.renderers {
+            if r.applied_paused.get() || r.slideshow.is_some() {
+                continue;
+            }
+            let w = self.config.wallpaper_for(&r.window.connector);
+            if w.kind != Kind::Video {
+                continue;
+            }
+            if let Some(p) = w.effective_path() {
+                groups.entry(p).or_default().push(r);
+            }
+        }
+        for group in groups.values() {
+            if group.len() < 2 {
+                continue;
+            }
+            let Some(lead) = group[0].player.time_pos() else {
+                continue;
+            };
+            for r in &group[1..] {
+                if let Some(pos) = r.player.time_pos() {
+                    if (pos - lead).abs() > SYNC_TOLERANCE {
+                        log::debug!(
+                            "[{}] video {:.2}s out of sync with leader; re-seating",
+                            r.window.connector,
+                            pos - lead
+                        );
+                        r.player.set_time_pos(lead);
+                    }
+                }
+            }
+        }
     }
 
     /// One-shot demuxer-cache raise once a ≥4K source is known (its resolution
@@ -974,14 +1053,20 @@ fn proc_stats(child_pids: &[u32]) -> (f32, u64) {
     (cpu, rss_pages * 4096 / 1_048_576)
 }
 
-/// What the configured schedule wants on screen right now (path only, v1).
-fn schedule_desired_path(config: &Config) -> Option<PathBuf> {
+/// The full wallpaper the configured schedule wants on screen right now —
+/// rotation/crop included, so a scheduled swap can reset per-wallpaper player
+/// state instead of leaking the previous wallpaper's rotation.
+fn schedule_desired_wallpaper(config: &Config) -> Option<Wallpaper> {
     use chrono::Offset as _;
     let sched = config.schedule.as_ref()?;
     let now = chrono::Local::now();
     let off = now.offset().fix().local_minus_utc() / 60;
-    crate::schedule::desired(sched, now.naive_local(), off)
-        .and_then(|w| w.effective_path().map(|p| p.to_path_buf()))
+    crate::schedule::desired(sched, now.naive_local(), off).cloned()
+}
+
+/// What the configured schedule wants on screen right now (path only).
+fn schedule_desired_path(config: &Config) -> Option<PathBuf> {
+    schedule_desired_wallpaper(config).and_then(|w| w.effective_path().map(|p| p.to_path_buf()))
 }
 
 /// Scheduler bookkeeping shared by both backends' loops.
@@ -1009,17 +1094,18 @@ impl SchedState {
         self.applied = None;
     }
 
-    /// The path to switch to now, if any (None = nothing to do this tick).
-    fn due(&mut self, config: &Config) -> Option<PathBuf> {
-        let want = schedule_desired_path(config)?;
-        if self.hold.as_deref() == Some(want.as_path()) {
+    /// The wallpaper to switch to now, if any (None = nothing to do this tick).
+    fn due(&mut self, config: &Config) -> Option<Wallpaper> {
+        let want = schedule_desired_wallpaper(config)?;
+        let path = want.effective_path()?.to_path_buf();
+        if self.hold.as_deref() == Some(path.as_path()) {
             return None; // user's manual choice holds this slot
         }
         self.hold = None; // boundary passed — hold expires
-        if self.applied.as_deref() == Some(want.as_path())
-            || config.wallpaper.effective_path() == Some(want.as_path())
+        if self.applied.as_deref() == Some(path.as_path())
+            || config.wallpaper.effective_path() == Some(path.as_path())
         {
-            self.applied = Some(want);
+            self.applied = Some(path);
             return None;
         }
         Some(want)
@@ -1098,6 +1184,8 @@ pub fn run() -> Result<()> {
     // Event-driven admin notifications + update prompts over Supabase Realtime.
     // Background thread; never blocks the wallpaper loop.
     notifier::spawn();
+    // Periodic "send feedback" nudge (config-gated; stops after one submission).
+    notifier::spawn_feedback_reminder();
 
     // Self-heal the login-restore entry: if the user wants the wallpaper restored
     // on login (and hasn't stopped it), make sure the autostart entry actually
@@ -1416,20 +1504,27 @@ fn run_wayland_layershell() -> Result<()> {
             // Scheduled wallpaper swap (ROADMAP 3.3): media-only loadfile on
             // outputs showing the DEFAULT wallpaper — never a respawn.
             if let Some(want) = sched.due(&config) {
-                log::info!(
-                    "schedule: switching default wallpaper to {}",
-                    want.display()
-                );
-                for (connector, o) in outputs.iter_mut() {
-                    if !config.monitors.contains_key(connector) {
-                        if let Some(pl) = o.player.as_ref() {
-                            pl.load_path(&want);
+                if let Some(path) = want.effective_path().map(|p| p.to_path_buf()) {
+                    log::info!("schedule: switching default wallpaper to {}", path.display());
+                    for (connector, o) in outputs.iter_mut() {
+                        if !config.monitors.contains_key(connector) {
+                            if let Some(pl) = o.player.as_ref() {
+                                // Reset per-wallpaper player state, or the previous
+                                // wallpaper's rotation/crop leak onto this one.
+                                pl.set_rotation(want.rotation, o.scaling);
+                                pl.apply_crop(&want);
+                                pl.load_path(&path);
+                            }
+                            o.wallpaper.path = Some(path.clone());
+                            o.wallpaper.rotation = want.rotation;
+                            o.wallpaper.crop = want.crop;
                         }
-                        o.wallpaper.path = Some(want.clone());
                     }
+                    config.wallpaper.path = Some(path.clone());
+                    config.wallpaper.rotation = want.rotation;
+                    config.wallpaper.crop = want.crop;
+                    sched.applied = Some(path);
                 }
-                config.wallpaper.path = Some(want.clone());
-                sched.applied = Some(want);
             }
 
             if config.pause_on_battery {
@@ -1446,6 +1541,8 @@ fn run_wayland_layershell() -> Result<()> {
             for o in outputs.values_mut() {
                 o.supervise(paused, MAX_RESTARTS);
             }
+
+            sync_wayland_outputs(&outputs);
         }
 
         // Refresh fullscreen state on a coarse cadence, then reconcile every
@@ -1468,6 +1565,48 @@ fn run_wayland_layershell() -> Result<()> {
     std::fs::remove_file(crate::ipc::socket_path()).ok();
     log::info!("frescod stopped");
     Ok(())
+}
+
+/// Re-seat clones of the same video on one clock (see SYNC_INTERVAL/X11
+/// `check_sync`): per-output pauses leave each mpvpaper's clock wherever it
+/// stopped, so the same file on two outputs drifts further apart forever.
+fn sync_wayland_outputs(outputs: &std::collections::BTreeMap<String, WlOutput>) {
+    let mut groups: std::collections::HashMap<&std::path::Path, Vec<&WlOutput>> =
+        std::collections::HashMap::new();
+    for o in outputs.values() {
+        if o.player.is_none()
+            || o.applied_paused.get()
+            || o.static_fallback
+            || o.slideshow.is_some()
+            || o.wallpaper.kind != Kind::Video
+        {
+            continue;
+        }
+        if let Some(p) = o.wallpaper.effective_path() {
+            groups.entry(p).or_default().push(o);
+        }
+    }
+    for group in groups.values() {
+        if group.len() < 2 {
+            continue;
+        }
+        let Some(lead) = group[0].player.as_ref().and_then(|p| p.time_pos()) else {
+            continue;
+        };
+        for o in &group[1..] {
+            let Some(pl) = o.player.as_ref() else { continue };
+            if let Some(pos) = pl.time_pos() {
+                if (pos - lead).abs() > SYNC_TOLERANCE {
+                    log::debug!(
+                        "[{}] video {:.2}s out of sync with leader; re-seating",
+                        o.connector,
+                        pos - lead
+                    );
+                    pl.set_time_pos(lead);
+                }
+            }
+        }
+    }
 }
 
 /// One supervised output: its mpvpaper renderer (or none, in static fallback),

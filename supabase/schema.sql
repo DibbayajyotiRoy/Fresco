@@ -15,8 +15,18 @@ create table if not exists public.feedback (
     rating      smallint    not null check (rating in (-1, 1)),  -- 👎 / 👍
     comment     text,
     app_version text,
-    os          text
+    os          text,
+    -- Coarse "where are our users" columns (no identifiers): IANA timezone
+    -- ("Asia/Kolkata") and locale ("en_IN.UTF-8"), sent by the client.
+    timezone    text,
+    locale      text
 );
+
+-- Additive columns for projects created before `timezone`/`locale` existed.
+-- Run this BEFORE shipping a client that sends them: PostgREST rejects inserts
+-- with unknown columns, which would break feedback submission entirely.
+alter table public.feedback add column if not exists timezone text;
+alter table public.feedback add column if not exists locale   text;
 
 alter table public.feedback enable row level security;
 

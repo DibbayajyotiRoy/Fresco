@@ -1,7 +1,0 @@
-{"case":"C1","metric":"capture dims (expect 3840x2160)","value":"1","pass":1}
-{"case":"C1","metric":"1px alternation crispness %","value":"100.0","pass":1}
-{"case":"C2","metric":"physical capture dims (expect 3840x2160)","value":"1","pass":1}
-{"case":"C2","metric":"1px alternation at scale 2 %","value":"100.0","pass":1}
-{"case":"C2b","metric":"alternation at scale 1.25 (informational)","value":"76.5","pass":null}
-{"case":"C3","metric":"unique gradient luma levels","value":"256","pass":1}
-{"case":"C4","metric":"downscale SSIM vs lanczos reference","value":"0.737067","pass":0}

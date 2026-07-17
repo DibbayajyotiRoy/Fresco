@@ -1,3 +1,0 @@
-{"case":"C1","metric":"renderer produced non-black frames","value":"0","pass":0}
-{"case":"C3","metric":"unique gradient luma levels","value":"256","pass":1}
-{"case":"C4","metric":"downscale SSIM vs lanczos reference","value":"0.552933","pass":0}

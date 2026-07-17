@@ -1,3 +1,0 @@
-############ PHASE 2 — Source (expected behavior only) ############
-grep pub mod cli:
-src/lib.rs:3:pub mod cli;

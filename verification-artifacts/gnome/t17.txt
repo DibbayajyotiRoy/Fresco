@@ -1,6 +1,0 @@
-BEFORE (modified bg) : 'file:///home/roy/.cache/fresco/overview-1781640314426.png'
-saved original       : 'file:///home/roy/Pictures/Wallpapers/wallpaper2.jpeg'
-DURING (fresco frame): 'file:///home/roy/.cache/fresco/overview-1781640314426.png'
-AFTER  (restored)    : 'file:///home/roy/Pictures/Wallpapers/wallpaper2.jpeg'
-state file exists?   : no - deleted
-T17 RESULT: FAIL (after='file:///home/roy/Pictures/Wallpapers/wallpaper2.jpeg' expected='file:///home/roy/Pictures/Wallpapers/wallpaper2.jpeg')

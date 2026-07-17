@@ -1,7 +1,0 @@
-next version will be 0.0.2 and so on i will decide when it will be 0.1.0
-
-not now.
-
-and fix the bugs i said, u will ship in next version what you planned, also there should be an automatic update app type button should be there , whenever new version is there, so clicking that button it would redirect to the landing page(which we will make soon) or github repo url depending on what is set to download new version, or if it is possible that the app can update itself after clicking the button without much hassle for users, jsut like it works for windows and mac apps, then research for it as well.
-
-I also want a feedback feature such that if a user is satisfied with using the product or not after a certain period of time of usage as an app notification so that i can make the product better i want to monitor these feedbacks from a dashboard of mine, a api will be there in the app for this feedback, and I will also be able to send notifications from my admin dashboard that new version is here or any updates if i want, otherwiose when user installs the new version in their laptop then automated notification will trigger with changes content, like what was changed and newly added , the notification will be small but there will be button to see details, then clicking that hyperlink a modal will appear to see latest changes, which once seen then it will not show for the current version

@@ -62,7 +62,46 @@ sudo apt-get install -y "$TMP_DEB" 2>&1 | grep -v '^Reading\|^Building\|^Selecti
 rm -f "$TMP_DEB"
 ok "Installed"
 
-# 6. VA-API hint
+# 6. Verify the bundled Wayland renderer actually loads on this OS.
+# The package ships one mpvpaper build per libmpv soname generation
+# (mpvpaper-libmpv2 / mpvpaper-libmpv1; older packages shipped a single
+# "mpvpaper"). A build linked against a libmpv this distro doesn't ship execs
+# but dies in the dynamic linker with exit 127 — apt can't catch that, so we
+# probe here and, if every bundled copy is unloadable, build one locally
+# against the system libmpv.
+probe() { "$1" --help >/dev/null 2>&1; [[ $? -ne 127 ]]; }
+
+renderer_ok() {
+  local bin
+  for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
+    [[ -x "$bin" ]] || continue
+    if probe "$bin"; then return 0; fi
+  done
+  return 1
+}
+
+if [[ "$SESSION" == "wayland" ]] && ! renderer_ok; then
+  warn "The bundled wallpaper renderer can't load this system's libmpv — building a local copy (one-time)"
+  info "Installing build tools (may ask for your password)…"
+  sudo apt-get install -y git gcc meson ninja-build pkg-config libmpv-dev \
+    libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev >/dev/null
+  BUILD_DIR=$(mktemp -d)
+  git clone -q --depth 1 --branch 1.4 https://github.com/GhostNaN/mpvpaper.git "$BUILD_DIR/mpvpaper"
+  (cd "$BUILD_DIR/mpvpaper" && meson setup build >/dev/null && meson compile -C build >/dev/null)
+  sudo install -m 755 "$BUILD_DIR/mpvpaper/build/mpvpaper" /usr/lib/fresco/mpvpaper
+  rm -rf "$BUILD_DIR"
+  if renderer_ok; then
+    ok "Renderer rebuilt against this system's libmpv"
+    # Restart the daemon so it picks up the fixed renderer right away.
+    if pkill -x frescod 2>/dev/null; then
+      (setsid frescod >/dev/null 2>&1 &) || true
+    fi
+  else
+    warn "Renderer still can't load — run 'fresco doctor' and report the output at https://github.com/${REPO}/issues"
+  fi
+fi
+
+# 7. VA-API hint
 if ! command -v vainfo >/dev/null 2>&1; then
   echo
   warn "Hardware decode drivers not found — playback still works, but CPU usage will be higher"

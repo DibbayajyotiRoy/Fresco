@@ -106,9 +106,15 @@ fn doctor() -> i32 {
             ),
             None => {
                 problems += 1;
-                println!(
-                    "  {RED}✗{RESET} mpvpaper available {DIM}install or build mpvpaper, or use the .deb/Flatpak release which bundles it{RESET}"
-                );
+                match crate::mpvpaper_broken() {
+                    Some(p) => println!(
+                        "  {RED}✗{RESET} mpvpaper available {DIM}({} exists but fails to load — likely a libmpv version mismatch; update Fresco or install the matching libmpv){RESET}",
+                        p.display()
+                    ),
+                    None => println!(
+                        "  {RED}✗{RESET} mpvpaper available {DIM}install or build mpvpaper, or use the .deb/Flatpak release which bundles it{RESET}"
+                    ),
+                }
             }
         }
     }

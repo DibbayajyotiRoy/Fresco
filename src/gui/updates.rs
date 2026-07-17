@@ -40,7 +40,17 @@ pub(crate) fn build_update_banner(
     if state.borrow().config.last_seen_version == current {
         return None;
     }
-    let notes = changelog_for(&current)?;
+    // First-ever launch isn't an update — don't greet new users with a
+    // "Fresco updated" banner.
+    if state.borrow().config.last_seen_version.is_empty() {
+        let mut s = state.borrow_mut();
+        s.config.last_seen_version = current;
+        s.config.save().ok();
+        return None;
+    }
+    // Missing notes for this version fall back to the releases page rather
+    // than silently dropping the banner (users should always learn what changed).
+    let notes = changelog_for(&current);
 
     let bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
     bar.add_css_class("banner");
@@ -85,7 +95,15 @@ pub(crate) fn build_update_banner(
         let mark = mark_seen.clone();
         let version = current.clone();
         details.connect_clicked(move |_| {
-            show_changelog_modal(&win, &version, &notes);
+            match &notes {
+                Some(notes) => show_changelog_modal(&win, &version, notes),
+                None => {
+                    let _ = gio::AppInfo::launch_default_for_uri(
+                        RELEASES_URL,
+                        None::<&gio::AppLaunchContext>,
+                    );
+                }
+            }
             mark();
             bar.set_visible(false);
         });
@@ -420,27 +438,34 @@ fn show_update_banner(
 
 // ─── Install dialog ────────────────────────────────────────────────────────────
 
-/// Modal driving the actual update: a spinner + staged status label while the
-/// updater script runs, then a final Success/Failed/Unsupported state.
+/// Modal driving the actual update: a real progress bar (determinate while the
+/// .deb downloads, activity-pulse while apt installs) with a shimmering stage
+/// label, then a final Success/Failed/Unsupported state. On success the app
+/// restarts itself after a short countdown so the new version applies without
+/// the user having to quit manually.
 fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
-    let (dialog, content) = glass_dialog(window, &format!("Updating to {version}"), 420, -1);
+    let (dialog, content) = glass_dialog(window, &format!("Updating to {version}"), 440, -1);
 
-    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
-    inner.set_margin_start(24);
-    inner.set_margin_end(24);
-    inner.set_margin_top(8);
-    inner.set_margin_bottom(22);
-    inner.set_halign(gtk4::Align::Center);
-
-    let spinner = gtk4::Spinner::new();
-    spinner.set_spinning(true);
-    spinner.set_size_request(32, 32);
-    inner.append(&spinner);
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    inner.set_margin_start(28);
+    inner.set_margin_end(28);
+    inner.set_margin_top(10);
+    inner.set_margin_bottom(24);
 
     let status = gtk4::Label::new(Some("Preparing…"));
-    status.set_wrap(true);
-    status.set_xalign(0.5);
+    status.add_css_class("shimmer");
+    status.set_xalign(0.0);
     inner.append(&status);
+
+    let bar = gtk4::ProgressBar::new();
+    bar.add_css_class("update-progress");
+    bar.set_hexpand(true);
+    inner.append(&bar);
+
+    let detail = gtk4::Label::new(Some("Contacting the release server"));
+    detail.add_css_class("dialog-sub");
+    detail.set_xalign(0.0);
+    inner.append(&detail);
 
     content.append(&inner);
     dialog.present();
@@ -453,24 +478,70 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
         return;
     }
 
-    let (tx, rx) = async_channel::bounded::<UpdateProgress>(8);
+    let (tx, rx) = async_channel::bounded::<UpdateProgress>(32);
     std::thread::spawn(move || {
         let tx_stage = tx.clone();
-        let outcome = crate::update::run_updater_with_progress(move |stage| {
-            let _ = tx_stage.send_blocking(UpdateProgress::Stage(stage));
+        let outcome = crate::update::run_updater_with_progress(move |p| {
+            let _ = tx_stage.send_blocking(UpdateProgress::Live(p));
         });
         let _ = tx.send_blocking(UpdateProgress::Done(outcome));
     });
 
+    // Pulse the bar whenever we have no determinate percentage (preparing /
+    // installing). The Done handler flips `pulsing` off, which ends the tick.
+    let pulsing = Rc::new(std::cell::Cell::new(true));
+    {
+        let bar = bar.clone();
+        let pulsing = pulsing.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(110), move || {
+            if pulsing.get() {
+                bar.pulse();
+                glib::ControlFlow::Continue
+            } else {
+                glib::ControlFlow::Break
+            }
+        });
+    }
+
     let window = window.clone();
     glib::spawn_future_local(async move {
+        use crate::update::Progress;
         while let Ok(progress) = rx.recv().await {
             match progress {
-                UpdateProgress::Stage(stage) => {
-                    status.set_label(friendly_stage(&stage));
+                UpdateProgress::Live(Progress::Stage(stage)) => match stage.as_str() {
+                    "downloading" => {
+                        status.set_label("Downloading update…");
+                        detail.set_label("Fetching the new version");
+                    }
+                    "installing" => {
+                        status.set_label("Installing…");
+                        detail.set_label("Applying the update — almost there");
+                        pulsing.set(true);
+                        let bar = bar.clone();
+                        let pulsing = pulsing.clone();
+                        glib::timeout_add_local(std::time::Duration::from_millis(110), move || {
+                            if pulsing.get() {
+                                bar.pulse();
+                                glib::ControlFlow::Continue
+                            } else {
+                                glib::ControlFlow::Break
+                            }
+                        });
+                    }
+                    "done" => {
+                        status.set_label("Finishing…");
+                    }
+                    _ => {}
+                },
+                UpdateProgress::Live(Progress::Percent(pct)) => {
+                    // A real percentage arrived: switch from pulse to determinate.
+                    pulsing.set(false);
+                    bar.set_fraction(f64::from(pct) / 100.0);
+                    detail.set_label(&format!("{pct}%"));
                 }
                 UpdateProgress::Done(outcome) => {
-                    finish_install_dialog(&window, &dialog, &content, outcome);
+                    pulsing.set(false);
+                    finish_install_dialog(&window, &dialog, &content, &version, outcome);
                     break;
                 }
             }
@@ -480,18 +551,8 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
 
 /// One message crossing the background→main-thread channel while the updater runs.
 enum UpdateProgress {
-    Stage(String),
+    Live(crate::update::Progress),
     Done(crate::update::UpdateOutcome),
-}
-
-/// Map a raw `STAGE: x` payload to user-facing text.
-fn friendly_stage(stage: &str) -> &'static str {
-    match stage {
-        "downloading" => "Downloading…",
-        "installing" => "Installing…",
-        "done" => "Done",
-        _ => "Working…",
-    }
 }
 
 /// Replace the install dialog's content with its final state once the updater
@@ -500,19 +561,33 @@ fn finish_install_dialog(
     window: &adw::ApplicationWindow,
     dialog: &adw::Window,
     content: &gtk4::Box,
+    version: &str,
     outcome: crate::update::UpdateOutcome,
 ) {
     match outcome {
         crate::update::UpdateOutcome::Success => {
-            replace_dialog_body(content, |inner| {
-                let heading = gtk4::Label::new(Some("Updated — restart to apply"));
+            let window = window.clone();
+            let dialog = dialog.clone();
+            let version = version.to_string();
+            replace_dialog_body(content, move |inner| {
+                let heading = gtk4::Label::new(Some(&format!("Updated to {version}")));
                 heading.add_css_class("dialog-heading");
                 heading.set_wrap(true);
+                heading.set_xalign(0.0);
                 inner.append(&heading);
+
+                // Auto-restart with a visible, cancellable countdown: users
+                // shouldn't have to know a restart is needed — we do it for
+                // them, but leave a moment to opt out.
+                let sub = gtk4::Label::new(Some("Restarting in 3 s to finish the update…"));
+                sub.add_css_class("dialog-sub");
+                sub.set_xalign(0.0);
+                inner.append(&sub);
 
                 let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                 buttons.set_margin_top(6);
-                let later = gtk4::Button::with_label("Later");
+                buttons.set_halign(gtk4::Align::End);
+                let later = gtk4::Button::with_label("Not now");
                 later.add_css_class("flat");
                 let restart = gtk4::Button::with_label("Restart now");
                 restart.add_css_class("suggested-action");
@@ -520,16 +595,47 @@ fn finish_install_dialog(
                 buttons.append(&restart);
                 inner.append(&buttons);
 
+                let cancelled = Rc::new(std::cell::Cell::new(false));
+                let remaining = Rc::new(std::cell::Cell::new(3u8));
+                {
+                    let win = window.clone();
+                    let d = dialog.clone();
+                    let cancelled = cancelled.clone();
+                    let remaining = remaining.clone();
+                    let sub = sub.clone();
+                    glib::timeout_add_seconds_local(1, move || {
+                        if cancelled.get() {
+                            return glib::ControlFlow::Break;
+                        }
+                        let left = remaining.get().saturating_sub(1);
+                        remaining.set(left);
+                        if left == 0 {
+                            d.close();
+                            relaunch_app(&win);
+                            glib::ControlFlow::Break
+                        } else {
+                            sub.set_label(&format!("Restarting in {left} s to finish the update…"));
+                            glib::ControlFlow::Continue
+                        }
+                    });
+                }
                 {
                     let d = dialog.clone();
-                    later.connect_clicked(move |_| d.close());
+                    let cancelled = cancelled.clone();
+                    let sub = sub.clone();
+                    later.connect_clicked(move |_| {
+                        cancelled.set(true);
+                        sub.set_label("The new version applies the next time you open Fresco.");
+                        d.close();
+                    });
                 }
                 {
                     let win = window.clone();
                     let d = dialog.clone();
                     restart.connect_clicked(move |_| {
-                        relaunch_app(&win);
+                        cancelled.set(true);
                         d.close();
+                        relaunch_app(&win);
                     });
                 }
             });
@@ -610,8 +716,14 @@ fn replace_dialog_body(content: &gtk4::Box, build: impl FnOnce(&gtk4::Box)) {
 }
 
 /// Relaunch the app as a new detached process, then quit this one so the
-/// freshly-installed binary takes over.
+/// freshly-installed binary takes over. Also restarts the wallpaper daemon —
+/// its binary was replaced by the update too, and the new one restores the
+/// current wallpaper on startup.
 fn relaunch_app(window: &adw::ApplicationWindow) {
+    if crate::ipc::daemon_alive() {
+        let _ = crate::ipc::request(&crate::ipc::Request::Stop);
+        let _ = super::daemon_ctl::spawn_daemon();
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Err(e) = std::process::Command::new(exe).spawn() {
             log::warn!("failed to relaunch fresco: {e}");

@@ -1064,7 +1064,7 @@ fn build_library_card(
     // can't rotate, and motion in the WRONG orientation reads as a bug.
     if entry.rotation.unwrap_or(0).is_multiple_of(360) {
         if let Some(video) = preview_video_path(entry) {
-            super::hover_preview::attach(&overlay, &pic, video, entry.thumbnail.clone());
+            super::hover_preview::attach(&overlay, &pic, video);
         }
     }
 

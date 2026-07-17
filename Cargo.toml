@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -80,10 +80,14 @@ decoding keeps CPU usage near zero without degrading quality."""
 assets = [
     ["target/release/fresco", "usr/bin/", "755"],
     ["target/release/frescod", "usr/bin/", "755"],
-    # Bundled Wayland renderer. NOT in /usr/bin (so it can't collide with a
-    # user-installed mpvpaper); frescod finds it via mpvpaper_command().
-    # Built by scripts/build-mpvpaper.sh → target/release/mpvpaper before `cargo deb`.
-    ["target/release/mpvpaper", "usr/lib/fresco/mpvpaper", "755"],
+    # Bundled Wayland renderer, one build per libmpv soname generation: the
+    # "libmpv1" build (ubuntu-22.04 CI) for older LTS bases and the "libmpv2"
+    # build (ubuntu-24.04 CI) for current distros. NOT in /usr/bin (so they
+    # can't collide with a user-installed mpvpaper); frescod probes which one
+    # actually loads via mpvpaper_command(). Built by scripts/build-mpvpaper.sh
+    # in _release.yml before `cargo deb`.
+    ["target/release/mpvpaper-libmpv1", "usr/lib/fresco/mpvpaper-libmpv1", "755"],
+    ["target/release/mpvpaper-libmpv2", "usr/lib/fresco/mpvpaper-libmpv2", "755"],
     # Auto-updater run by frescod via pkexec when a newer release is published.
     ["scripts/fresco-update.sh", "usr/lib/fresco/fresco-update.sh", "755"],
     ["data/io.github.dibbayajyotiroy.Fresco.desktop", "usr/share/applications/", "644"],

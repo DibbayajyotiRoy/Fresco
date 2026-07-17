@@ -62,7 +62,22 @@ trap 'rm -f "${TMP_DEB}"' EXIT
 
 echo "STAGE: downloading"
 echo "fresco-update: downloading $(basename "${DEB_URL}")…"
-curl -fsSL -o "${TMP_DEB}" "${DEB_URL}"
+# Emit "PROGRESS: <0-100>" lines so the GUI can draw a real progress bar:
+# resolve the payload size, download in the background, and poll the growing
+# file. Best-effort — if the size can't be determined the GUI just shows an
+# indeterminate bar.
+TOTAL=$(curl -fsSLI "${DEB_URL}" | tr -d '\r' | awk 'tolower($1)=="content-length:" {n=$2} END {print n+0}')
+curl -fsSL -o "${TMP_DEB}" "${DEB_URL}" &
+CURL_PID=$!
+if [ "${TOTAL:-0}" -gt 0 ]; then
+  while kill -0 "${CURL_PID}" 2>/dev/null; do
+    SIZE=$(stat -c%s "${TMP_DEB}" 2>/dev/null || echo 0)
+    echo "PROGRESS: $((SIZE * 100 / TOTAL))"
+    sleep 0.25
+  done
+fi
+wait "${CURL_PID}"
+echo "PROGRESS: 100"
 
 if [ ! -s "${TMP_DEB}" ] || ! dpkg-deb -I "${TMP_DEB}" >/dev/null 2>&1; then
   echo "fresco-update: downloaded file is empty or not a valid .deb" >&2

@@ -232,6 +232,20 @@ button.suggested-action {{ font-weight: 600; }}
 .accent-coral {{ background-image: none; background-color: #E85C7A; }}
 .accent-graphite {{ background-image: none; background-color: #7A8392; }}
 
+/* ===== Update progress ===== shimmering status text (GTK CSS can't clip a
+   gradient to text, so the wave is a smooth animated color cycle through the
+   accent) over a slim rounded bar. */
+@keyframes fresco-shimmer {{
+  0%   {{ color: @dim_fg; }}
+  35%  {{ color: @accent_bg_color; }}
+  65%  {{ color: shade(@accent_bg_color, 1.35); }}
+  100% {{ color: @dim_fg; }}
+}}
+.shimmer {{ font-size: 15px; font-weight: 600; letter-spacing: -0.01em; animation: fresco-shimmer 2.2s ease-in-out infinite; }}
+.update-progress {{ min-height: 8px; }}
+.update-progress trough {{ min-height: 8px; border-radius: 999px; background-color: alpha(@window_fg_color, 0.08); }}
+.update-progress progress {{ min-height: 8px; border-radius: 999px; background-image: linear-gradient(to right, @accent_bg_color, shade(@accent_bg_color, 1.25)); }}
+
 /* ===== Misc ===== */
 entry.wp-search {{ border-radius: 10px; }}
 .welcome-cta {{ min-height: 40px; border-radius: 11px; font-weight: 600; }}

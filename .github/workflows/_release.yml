@@ -23,8 +23,34 @@ permissions:
   contents: write
 
 jobs:
+  # The bundled mpvpaper hard-links against whichever libmpv soname the build
+  # host ships, so one build per generation: this job produces the libmpv.so.2
+  # build (mpv >= 0.35: Ubuntu 24.04+, Fedora 38+, ...); build-deb's own
+  # ubuntu-22.04 build produces the libmpv.so.1 one. frescod probes at runtime
+  # which of the two loads on the user's OS.
+  build-mpvpaper-libmpv2:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libmpv-dev meson ninja-build pkg-config \
+            libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Build mpvpaper (libmpv2)
+        run: scripts/build-mpvpaper.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpvpaper-libmpv2
+          path: target/release/mpvpaper
+          if-no-files-found: error
+
   build-deb:
     runs-on: ubuntu-22.04
+    needs: build-mpvpaper-libmpv2
     steps:
       - uses: actions/checkout@v4
 
@@ -49,10 +75,23 @@ jobs:
       - name: Build release
         run: cargo build --release --all-features --locked
 
-      # Build mpvpaper into target/release/mpvpaper so `cargo deb` bundles it
-      # under /usr/lib/fresco/mpvpaper (it is not in the apt repos).
-      - name: Build bundled mpvpaper (Wayland backend)
-        run: scripts/build-mpvpaper.sh
+      # Build the libmpv1 variant here (ubuntu-22.04 links libmpv.so.1) and pull
+      # the libmpv2 variant from the ubuntu-24.04 job, so `cargo deb` bundles
+      # both under /usr/lib/fresco/ (mpvpaper is not in the apt repos).
+      - name: Build bundled mpvpaper (libmpv1)
+        run: |
+          scripts/build-mpvpaper.sh
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv1
+
+      - name: Fetch bundled mpvpaper (libmpv2)
+        uses: actions/download-artifact@v4
+        with:
+          name: mpvpaper-libmpv2
+          path: mpvpaper-libmpv2-artifact
+
+      - name: Stage mpvpaper (libmpv2)
+        run: |
+          install -m 755 mpvpaper-libmpv2-artifact/mpvpaper target/release/mpvpaper-libmpv2
 
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked

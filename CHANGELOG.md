@@ -4,6 +4,46 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-07-17
+
+### Fixed
+- **Live wallpapers work on Ubuntu 24.04-based systems (COSMIC, Pop!_OS 24.04,
+  Mint 22…).** The bundled renderer was built against an older libmpv and
+  silently failed to start on newer distros, leaving the desktop's default
+  wallpaper. Fresco now ships one renderer build per libmpv generation and
+  picks the one that works on your system automatically.
+- The install command detects a renderer that can't load and rebuilds it
+  against your system's libmpv on the spot, so a fresh install always ends
+  with a working live wallpaper.
+- **Library cards no longer resize or jump around while hovering** — the
+  hover-to-play preview could push the whole grid into a glitchy reflow loop
+  on high-resolution videos.
+- `fresco doctor` now catches a renderer that exists but can't load, instead
+  of reporting a healthy system while nothing renders.
+
+### Changed
+- **In-app updates finish themselves.** Updating now shows a real progress
+  bar with live download percentage, and the app restarts automatically a few
+  seconds after the update completes (cancellable) — no more wondering whether
+  a restart is needed. The wallpaper daemon restarts too, so fixes apply
+  immediately.
+- The "what's new" notes now always appear after an update.
+
+## [1.1.0] — 2026-07-12
+
+### Fixed
+- **Multi-monitor video sync** — the same video on several displays now stays
+  in step instead of slowly drifting apart.
+- Scheduled wallpaper swaps no longer leak the previous entry's rotation and
+  crop onto the next wallpaper.
+- Smoother playback on Wayland: display-matched frame timing now applies there
+  just like on X11.
+
+### Added
+- Occasional feedback reminders (can be turned off in Settings) so it's easy
+  to tell us what to improve; reports now carry your timezone and locale for
+  region-aware fixes.
+
 ## [1.0.1] — 2026-07-04
 
 ### Fixed

@@ -85,25 +85,34 @@ pub fn run_updater_blocking() -> UpdateOutcome {
     }
 }
 
-/// Same as [`run_updater_blocking`], but streams the script's `STAGE: <name>`
-/// stdout lines to `on_stage` as they arrive, so a caller (e.g. the GUI, on a
-/// background thread) can show live progress instead of a silent blocking call.
-/// Runs entirely with std/anyhow so this stays usable from either the `gui` or
-/// `daemon` feature.
-pub fn run_updater_with_progress(on_stage: impl Fn(String) + Send + 'static) -> UpdateOutcome {
+/// One live progress event from the updater script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Progress {
+    /// A `STAGE: <name>` line — a new phase started (downloading / installing / done).
+    Stage(String),
+    /// A `PROGRESS: <0-100>` line — download completion percentage.
+    Percent(u8),
+}
+
+/// Same as [`run_updater_blocking`], but streams the script's `STAGE:` and
+/// `PROGRESS:` stdout lines to `on_progress` as they arrive, so a caller (e.g.
+/// the GUI, on a background thread) can show live progress instead of a silent
+/// blocking call. Runs entirely with std/anyhow so this stays usable from
+/// either the `gui` or `daemon` feature.
+pub fn run_updater_with_progress(on_progress: impl Fn(Progress) + Send + 'static) -> UpdateOutcome {
     let Some(script) = updater_script() else {
         return UpdateOutcome::Failed("updater script not found".into());
     };
     let mut cmd = std::process::Command::new("pkexec");
     cmd.arg(&script);
-    run_command_with_progress(cmd, on_stage)
+    run_command_with_progress(cmd, on_progress)
 }
 
 /// Inner runner, split from the pkexec wrapper so tests can exercise the
 /// stage/stderr plumbing with an ordinary command.
 fn run_command_with_progress(
     mut cmd: std::process::Command,
-    on_stage: impl Fn(String) + Send + 'static,
+    on_progress: impl Fn(Progress) + Send + 'static,
 ) -> UpdateOutcome {
     let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
@@ -129,7 +138,11 @@ fn run_command_with_progress(
     if let Some(stdout) = child.stdout.take() {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Some(stage) = line.strip_prefix("STAGE: ") {
-                on_stage(stage.to_string());
+                on_progress(Progress::Stage(stage.to_string()));
+            } else if let Some(pct) = line.strip_prefix("PROGRESS: ") {
+                if let Ok(pct) = pct.trim().parse::<u8>() {
+                    on_progress(Progress::Percent(pct.min(100)));
+                }
             }
         }
     }
@@ -177,21 +190,24 @@ mod tests {
 
     #[test]
     fn failed_update_carries_stderr_detail() {
-        let stages = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let stages = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Progress>::new()));
         let seen = stages.clone();
         let mut cmd = std::process::Command::new("bash");
         cmd.args([
             "-c",
-            "echo 'STAGE: downloading'; echo 'E: apt broke badly' >&2; exit 1",
+            "echo 'STAGE: downloading'; echo 'PROGRESS: 40'; echo 'E: apt broke badly' >&2; exit 1",
         ]);
-        let outcome = run_command_with_progress(cmd, move |s| seen.lock().unwrap().push(s));
+        let outcome = run_command_with_progress(cmd, move |p| seen.lock().unwrap().push(p));
         match outcome {
             UpdateOutcome::Failed(msg) => {
                 assert!(msg.contains("E: apt broke badly"), "msg was: {msg}");
             }
             other => panic!("expected Failed, got {other:?}"),
         }
-        assert_eq!(stages.lock().unwrap().as_slice(), ["downloading"]);
+        assert_eq!(
+            stages.lock().unwrap().as_slice(),
+            [Progress::Stage("downloading".into()), Progress::Percent(40)]
+        );
     }
 
     #[test]

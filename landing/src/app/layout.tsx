@@ -28,7 +28,7 @@ const jetbrainsMono = JetBrains_Mono({
 /* Applied before CSS paints: html.dark + colorScheme, no flash. */
 const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("fresco.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
 
-const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
+const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -107,12 +107,21 @@ export const metadata: Metadata = {
     siteName: "Fresco",
     locale: "en_US",
     type: "website",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Fresco - Live wallpapers for Linux",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Fresco - Live Wallpapers for Linux",
     description:
       "Hardware-accelerated live wallpapers for Linux, on X11 and Wayland. A free, open-source Wallpaper Engine alternative.",
+    images: ["/opengraph-image"],
   },
 };
 

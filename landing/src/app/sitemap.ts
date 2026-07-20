@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { ALTERNATIVES } from "@/lib/alternatives";
 
-const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
+const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();

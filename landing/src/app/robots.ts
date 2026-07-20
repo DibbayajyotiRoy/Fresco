@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
+const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 /**
  * Fresco is open source and WANTS to be cited by AI answer engines, so every

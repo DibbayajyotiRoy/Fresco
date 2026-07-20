@@ -9,7 +9,7 @@ import { ALTERNATIVES, getAlternative } from "@/lib/alternatives";
 import { COMPARISON, type CompareCell } from "@/lib/content";
 import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
 
-const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
+const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 export function generateStaticParams() {
   return ALTERNATIVES.map((a) => ({ slug: a.slug }));

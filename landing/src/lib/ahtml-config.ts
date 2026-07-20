@@ -5,7 +5,7 @@ import {
 } from "@/lib/site";
 
 // Canonical site URL. SITE_URL env wins so previews/prod can override.
-export const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
+export const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 // Bug tracker, used as the policy contact and llms.txt issue links.
 export const ISSUES_URL = `${GITHUB_URL}/issues`;

@@ -2,7 +2,7 @@ import { FAQ, FEATURE_LIST, AUTHOR } from "@/lib/content";
 import { ALTERNATIVES } from "@/lib/alternatives";
 import { GITHUB_URL, RELEASES_URL, LICENSE_URL } from "@/lib/site";
 
-const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
+const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 /**
  * Structured data for SEO and GEO. A single @graph carries the

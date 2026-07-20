@@ -31,8 +31,8 @@ export function JsonLd({
     softwareRequirements:
       "Linux on X11, or a Wayland layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma 6)",
     featureList: FEATURE_LIST,
-    screenshot: `${SITE_URL}/opengraph-image`,
-    image: `${SITE_URL}/opengraph-image`,
+    screenshot: `${SITE_URL}/og.png`,
+    image: `${SITE_URL}/og.png`,
     license: LICENSE_URL,
     isAccessibleForFree: true,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },

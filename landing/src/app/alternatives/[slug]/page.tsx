@@ -36,13 +36,13 @@ export async function generateMetadata({
       url,
       siteName: "Fresco",
       type: "article",
-      images: [{ url: "/opengraph-image", width: 1200, height: 630 }],
+      images: [{ url: "/og.png", width: 1200, height: 630, alt: "Fresco — Finally, a Linux wallpaper that just works." }],
     },
     twitter: {
       card: "summary_large_image",
       title: alt.metaTitle,
       description: alt.metaDescription,
-      images: ["/opengraph-image"],
+      images: ["/og.png"],
     },
   };
 }

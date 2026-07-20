@@ -109,10 +109,10 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/opengraph-image",
+        url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "Fresco - Live wallpapers for Linux",
+        alt: "Fresco — Finally, a Linux wallpaper that just works.",
       },
     ],
   },
@@ -121,7 +121,7 @@ export const metadata: Metadata = {
     title: "Fresco - Live Wallpapers for Linux",
     description:
       "Hardware-accelerated live wallpapers for Linux, on X11 and Wayland. A free, open-source Wallpaper Engine alternative.",
-    images: ["/opengraph-image"],
+    images: ["/og.png"],
   },
 };
 

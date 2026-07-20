@@ -1,17 +1,17 @@
+import Image from "next/image";
 import Link from "next/link";
 import { Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getGitHubStats } from "@/lib/github";
 import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
-import { Wordmark } from "@/components/wordmark";
 
 const NAV_LINKS = [
-  { href: "#features", label: "Specs" },
-  { href: "#compare", label: "Brief" },
-  { href: "#whats-new", label: "Patch notes" },
-  { href: "#download", label: "Deploy" },
-  { href: "#quests", label: "Quests" },
+  { href: "/#features", label: "Specs" },
+  { href: "/#compare", label: "Brief" },
+  { href: "/#whats-new", label: "Patch notes" },
+  { href: "/#download", label: "Deploy" },
+  { href: "/#quests", label: "Quests" },
 ];
 
 export async function SiteNav() {
@@ -21,15 +21,18 @@ export async function SiteNav() {
     <header className="sticky top-0 z-50 w-full border-b border-hairline bg-paper/95 backdrop-blur">
       <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-6 px-5">
         <Link
-          href="#top"
+          href="/"
           className="flex items-center gap-2.5 rounded-sm"
           aria-label="Fresco home"
         >
-          <span
-            aria-hidden
-            className="inline-block size-2.5 rounded-[3px] bg-accent"
+          <Image
+            src="/logo.png"
+            width={26}
+            height={26}
+            alt=""
+            priority
+            className="rounded-[6px]"
           />
-          <Wordmark className="h-6 w-6" />
           <span className="font-serif text-xl text-ink">Fresco</span>
         </Link>
 

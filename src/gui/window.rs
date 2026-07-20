@@ -3435,7 +3435,8 @@ fn show_command_palette(
     let cmds = Rc::new(cmds);
 
     // Actions of the currently listed rows, parallel to the ListBox rows.
-    let visible: Rc<RefCell<Vec<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
+    type RowActions = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+    let visible: RowActions = Rc::new(RefCell::new(Vec::new()));
 
     let rebuild = {
         let list = list.clone();

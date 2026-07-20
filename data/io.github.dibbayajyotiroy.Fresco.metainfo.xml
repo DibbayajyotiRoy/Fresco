@@ -62,9 +62,14 @@
   </branding>
 
   <releases>
-    <release version="1.1.1" date="2026-07-19">
+    <release version="1.1.2" date="2026-07-20">
       <description>
-        <p>Live wallpapers now work on Ubuntu 24.04-based systems (COSMIC, Pop!_OS 24.04, Mint 22): Fresco ships one renderer per libmpv generation and picks the right one automatically. Also: paste a Pinterest or direct media link to add a wallpaper, a media-first redesign with rich metadata cards and favorites, a Ctrl+K command palette, an optional browser new-tab wallpaper bridge with a companion extension, self-finishing in-app updates, and anonymous opt-out usage statistics (disclosed in-app).</p>
+        <p>Paste a Pinterest or direct media link to add a wallpaper, an optional browser new-tab wallpaper bridge with a companion extension, a Ctrl+K command palette, favorites, a media-first redesign with rich metadata cards, fullscreen auto-pause on COSMIC, and anonymous usage statistics behind a one-time consent dialog (nothing is sent unless you agree).</p>
+      </description>
+    </release>
+    <release version="1.1.1" date="2026-07-17">
+      <description>
+        <p>Live wallpapers now work on Ubuntu 24.04-based systems (COSMIC, Pop!_OS 24.04, Mint 22): Fresco ships one renderer per libmpv generation and picks the right one automatically. Self-finishing in-app updates with real download progress.</p>
       </description>
     </release>
     <release version="1.1.0" date="2026-07-12">

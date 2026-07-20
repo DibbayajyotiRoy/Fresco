@@ -1,5 +1,5 @@
+import Image from "next/image";
 import Link from "next/link";
-import { Wordmark } from "@/components/wordmark";
 import { SoundToggle } from "@/components/sound-toggle";
 import { GITHUB_URL, LICENSE_URL } from "@/lib/site";
 
@@ -13,7 +13,13 @@ export function SiteFooter() {
     <footer id="site-footer" className="border-t border-hairline py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 px-5 sm:flex-row">
         <div className="flex items-center gap-2">
-          <Wordmark className="h-6 w-6" />
+          <Image
+            src="/logo.png"
+            width={24}
+            height={24}
+            alt=""
+            className="rounded-[5px]"
+          />
           <span className="font-serif text-lg text-ink">Fresco</span>
           <span className="instrument-label ml-2">rust + gtk4 + mpv</span>
         </div>

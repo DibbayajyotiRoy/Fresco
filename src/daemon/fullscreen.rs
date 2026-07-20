@@ -282,15 +282,13 @@ impl Dispatch<cosmic_info::ZcosmicToplevelInfoV1, ()> for State {
         _: &Connection,
         _: &QueueHandle<State>,
     ) {
-        match event {
-            cosmic_info::Event::Toplevel { toplevel } => {
-                state
-                    .toplevels
-                    .insert(toplevel.id().protocol_id(), Toplevel::default());
-            }
-            // `finished`: the compositor will send no further toplevel events.
-            // Existing state stays valid; nothing to tear down eagerly.
-            _ => {}
+        // `finished` (the only other event): the compositor will send no
+        // further toplevel events. Existing state stays valid; nothing to
+        // tear down eagerly.
+        if let cosmic_info::Event::Toplevel { toplevel } = event {
+            state
+                .toplevels
+                .insert(toplevel.id().protocol_id(), Toplevel::default());
         }
     }
 

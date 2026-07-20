@@ -80,7 +80,7 @@ fn random_uuid_v4() -> String {
         for (i, chunk) in b.chunks_mut(8).enumerate() {
             chunk.copy_from_slice(
                 &std::collections::hash_map::RandomState::new()
-                    .hash_one(&(std::time::SystemTime::now(), std::process::id(), i))
+                    .hash_one((std::time::SystemTime::now(), std::process::id(), i))
                     .to_le_bytes()[..chunk.len()],
             );
         }

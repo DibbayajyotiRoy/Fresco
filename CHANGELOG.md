@@ -4,13 +4,20 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] — 2026-07-17
+## [1.1.2] — 2026-07-20
 
 ### Added
-- **Browser new-tab wallpaper bridge** (off by default, local-only,
-  127.0.0.1): the companion extension in `extension/` mirrors your current
-  wallpaper on new tabs — or a browser-specific wallpaper you pick via
-  right-click → "Set as browser wallpaper".
+- **Add from a link.** Paste a Pinterest pin (pin.it short links and story
+  pins included) or any direct video/image URL — Fresco resolves it, downloads
+  it, and opens the crop/rotate editor so you can frame it before setting.
+- **Your wallpaper on every new tab.** An optional local-only browser bridge
+  (127.0.0.1, off by default) plus a companion extension in `extension/`
+  (Chrome, Brave, Edge, Firefox) mirrors your wallpaper — or a
+  browser-specific pick via right-click → "Set as browser wallpaper".
+- **Command palette** (Ctrl+K): set any wallpaper by name, random wallpaper,
+  and jump to any feature from the keyboard.
+- Favorites with hover actions, drag-and-drop import, a first-run feature
+  tour, and a quick day/night schedule pause switch in Settings.
 
 ### Privacy
 - Fresco can send anonymous usage statistics — a daily ping (random install
@@ -20,6 +27,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   first launch, and the answer can be changed anytime in Settings →
   "Share anonymous usage statistics".
 - No personal data, no file names, no wallpaper content is ever sent.
+
+### Fixed
+- **Fullscreen auto-pause now works on COSMIC.** The wallpaper pauses while a
+  window is fullscreen (no more decoding a hidden wallpaper under your video),
+  via COSMIC's native toplevel-info protocol — previously this protection was
+  silently unavailable there.
+- Clicking the feedback reminder notification now opens the feedback dialog
+  directly instead of just launching the app.
+
+### Changed
+- **Media-first redesign**: larger wallpaper grid, resolution/fps/size on
+  every card with 4K badges, a cleaner now-playing pill, and a real
+  drop-files-here empty state.
+
+## [1.1.1] — 2026-07-17
 
 ### Fixed
 - **Live wallpapers work on Ubuntu 24.04-based systems (COSMIC, Pop!_OS 24.04,
@@ -35,10 +57,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on high-resolution videos.
 - `fresco doctor` now catches a renderer that exists but can't load, instead
   of reporting a healthy system while nothing renders.
-- **Fullscreen auto-pause now works on COSMIC.** The wallpaper pauses while a
-  window is fullscreen (no more decoding a hidden wallpaper under your video),
-  via COSMIC's native toplevel-info protocol — previously this protection was
-  silently unavailable there.
 
 ### Changed
 - **In-app updates finish themselves.** Updating now shows a real progress

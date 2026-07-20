@@ -4,7 +4,6 @@ import * as React from "react";
 import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlaySound } from "@/hooks/use-play-sound";
-import { dispatchQuest } from "@/lib/game";
 
 export function CopyButton({
   value,
@@ -20,7 +19,6 @@ export function CopyButton({
     navigator.clipboard.writeText(value).then(() => {
       setCopied(true);
       play();
-      dispatchQuest("cast");
       setTimeout(() => setCopied(false), 1600);
     });
   }

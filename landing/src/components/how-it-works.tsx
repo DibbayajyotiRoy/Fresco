@@ -1,5 +1,4 @@
 import { FolderOpen, MousePointerClick, X } from "lucide-react";
-import { ACHIEVEMENTS } from "@/lib/game";
 
 const STEPS = [
   {
@@ -28,8 +27,6 @@ const STEPS = [
   },
 ] as const;
 
-const RITUAL = ACHIEVEMENTS.find((a) => a.id === "ritual")!;
-
 export function HowItWorks() {
   return (
     <section
@@ -38,14 +35,7 @@ export function HowItWorks() {
     >
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <p className="instrument-label !text-ink-faint">
-              {RITUAL.code} <span className="text-accent/70">·</span> +{RITUAL.xp} xp
-            </p>
-            <p className="instrument-label !text-ink-faint">
-              {RITUAL.code} · ritual
-            </p>
-          </div>
+          <p className="instrument-label !text-ink-faint">how it works</p>
           <h2 className="mt-3 font-serif text-display-sm text-ink">
             Three clicks, then forget about it.
           </h2>

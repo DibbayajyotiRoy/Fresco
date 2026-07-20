@@ -4,16 +4,10 @@
   "description": "Free, open-source live wallpaper app for Linux. Set videos, GIFs, or images as your desktop on X11 and Wayland.",
   "icons": [
     {
-      "src": "/favicon/web-app-manifest-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/favicon/web-app-manifest-512x512.png",
+      "src": "/logo.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     }
   ],
   "theme_color": "#0c0a09",

@@ -1,9 +1,14 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "Fresco - Live wallpaper, decoded.";
+export const alt = "Fresco - Finally, a Linux wallpaper that just works.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
+/**
+ * OpenGraph card in the Warm Terminal system: stone-950 paper, single sky
+ * accent, serif display headline (italic sky clause matching the live hero),
+ * Inter subhead, mono eyebrow. System fonts only; no external fetches.
+ */
 export default function Image() {
   return new ImageResponse(
     (
@@ -32,37 +37,46 @@ export default function Image() {
               "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
           }}
         >
-          fresco operator console · gpl-3.0 · linux
+          fresco · gpl-3.0 · linux
         </div>
 
         <div
           style={{
             display: "flex",
-            fontSize: 88,
-            fontStyle: "italic",
-            color: "#38bdf8",
+            fontSize: 80,
+            color: "#e5e5e5",
             fontFamily: "ui-serif, Georgia, serif",
-            lineHeight: 1.04,
+            lineHeight: 1.06,
             letterSpacing: "-0.02em",
             marginTop: 28,
             maxWidth: 1000,
           }}
         >
-          Live wallpaper, decoded.
+          Finally, a Linux wallpaper{" "}
+          <span
+            style={{
+              fontStyle: "italic",
+              color: "#38bdf8",
+              marginLeft: 14,
+            }}
+          >
+            that just works.
+          </span>
         </div>
 
         <div
           style={{
             display: "flex",
-            fontSize: 32,
+            fontSize: 30,
             color: "#a1a1a1",
-            marginTop: 26,
+            marginTop: 28,
             maxWidth: 980,
             lineHeight: 1.3,
           }}
         >
-          Nine missions talk directly to the page itself. Scroll, cast the
-          install, flip the theme, decoder any question.
+          Set any video, GIF, or image as your desktop. Hardware-accelerated,
+          near zero CPU, on X11 and Wayland. Close the app; the daemon keeps
+          it playing.
         </div>
 
         <div
@@ -70,7 +84,7 @@ export default function Image() {
             display: "flex",
             alignItems: "center",
             gap: 16,
-            marginTop: 56,
+            marginTop: 48,
           }}
         >
           <div
@@ -84,7 +98,7 @@ export default function Image() {
                 "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
             }}
           >
-            boot / specs / brief / ritual / init / cast / lore / night / send
+            x11 / wayland / multi-monitor / day + night / gpl-3.0
           </div>
         </div>
       </div>

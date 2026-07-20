@@ -7,11 +7,10 @@ import { getGitHubStats } from "@/lib/github";
 import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
 
 const NAV_LINKS = [
-  { href: "/#features", label: "Specs" },
-  { href: "/#compare", label: "Brief" },
-  { href: "/#whats-new", label: "Patch notes" },
-  { href: "/#download", label: "Deploy" },
-  { href: "/#quests", label: "Quests" },
+  { href: "/#features", label: "Features" },
+  { href: "/#compare", label: "Compare" },
+  { href: "/#whats-new", label: "What's new" },
+  { href: "/#download", label: "Download" },
 ];
 
 export async function SiteNav() {

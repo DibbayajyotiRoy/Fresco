@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Check, Download, Github, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { ALTERNATIVES, getAlternative } from "@/lib/alternatives";
 import { COMPARISON, type CompareCell } from "@/lib/content";
@@ -107,7 +106,6 @@ export default async function AlternativePage({
 
   return (
     <>
-      <SiteNav />
       <main>
         <article className="mx-auto max-w-3xl px-5 pb-20 pt-14 sm:pt-20">
           {/* Visible breadcrumb, mirroring the BreadcrumbList JSON-LD. */}

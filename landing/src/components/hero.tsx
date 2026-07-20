@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { Download, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AnimatedGlyph } from "@/components/animated-glyph";
@@ -39,30 +38,6 @@ export function Hero() {
           </Button>
         </div>
 
-        {/* Product frame: the real capture, framed by 1px hairlines with a
-            mono window-chrome strip — no glow, no gradients. */}
-        <div className="relative mt-16 w-full max-w-4xl">
-          <div className="rounded-lg border border-hairline bg-surface p-2">
-            <div className="flex items-center justify-between px-2 py-1.5">
-              <span className="instrument-label">fresco — library</span>
-              <span className="flex items-center gap-1.5" aria-hidden>
-                <span className="size-2 rounded-full border border-hairline-strong" />
-                <span className="size-2 rounded-full border border-hairline-strong" />
-                <span className="size-2 rounded-full border border-hairline-strong" />
-              </span>
-            </div>
-            <div className="overflow-hidden rounded-md border border-hairline">
-              <Image
-                src="/screenshots/gallery.png"
-                alt="Fresco wallpaper library on Linux showing video wallpapers with an active live wallpaper and hardware decode status"
-                width={1280}
-                height={720}
-                priority
-                className="h-auto w-full"
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </section>
   );

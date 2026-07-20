@@ -40,10 +40,10 @@ export function Comparison() {
   const leader = scores.indexOf(Math.max(...scores));
 
   return (
-    <section id="compare" className="border-b border-hairline py-20 sm:py-28">
+    <section id="compare" className="hidden border-b border-hairline py-20 sm:block sm:py-28">
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <p className="instrument-label">briefing · +15 xp</p>
+          <p className="instrument-label">compare</p>
           <h2 className="mt-3 font-serif text-display-sm text-ink">
             Fresco vs the Linux wallpaper field.
           </h2>
@@ -54,7 +54,7 @@ export function Comparison() {
             with Hidamari, Komorebi, mpvpaper, and Wallpaper Engine.
           </p>
           <p className="mt-2 font-mono text-meta uppercase tracking-widest text-ink-faint">
-            brief · {COMPARISON.tools.length} tools · {COMPARISON.rows.length}{" "}
+            compare · {COMPARISON.tools.length} tools · {COMPARISON.rows.length}{" "}
             capabilities
           </p>
         </div>

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { usePlaySound } from "@/hooks/use-play-sound";
-import { dispatchQuest } from "@/lib/game";
 
 export function ThemeToggle() {
   const [dark, setDark] = useState<boolean | null>(null);
@@ -25,7 +24,6 @@ export function ThemeToggle() {
     }
     setDark(next);
     play();
-    dispatchQuest("night");
   }
 
   return (

@@ -204,10 +204,9 @@ modules:
       # with:  - type: dir
       #          path: ..
       - type: git
-        url: https://github.com/DibbayajyotiRoy/fresco.git
-        tag: v1.0.0
-        # Pin at submission time: git rev-parse v1.0.0^{commit}
-        commit: REPLACE_WITH_COMMIT_THAT_v1.0.0_TAG_POINTS_TO
+        url: https://github.com/DibbayajyotiRoy/Fresco.git
+        tag: v1.1.2
+        commit: 83468c155a78f4bb2e934e340c0f1ef01186d3d5
         x-checker-data:
           type: git
           tag-pattern: "^v([\\d.]+)$"

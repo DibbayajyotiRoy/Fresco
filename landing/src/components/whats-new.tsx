@@ -24,7 +24,7 @@ export function WhatsNew({ version }: { version: string }) {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="max-w-2xl">
               <p className="instrument-label !text-ink-faint">
-                PATCH NOTES · v{version}
+                what&apos;s new · v{version}
               </p>
               <h2 className="mt-4 font-serif text-display-sm text-ink">
                 The catalog, per-display wallpapers, and schedules just landed.

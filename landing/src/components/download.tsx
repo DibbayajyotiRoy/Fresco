@@ -4,13 +4,10 @@ import { CopyButton } from "@/components/copy-button";
 import { AnimatedGlyph } from "@/components/animated-glyph";
 import {
   APT_INSTALL,
-  FLATPAK_INSTALL,
-  FLATHUB_URL,
   INSTALL_ONELINER,
   INSTALL_ONELINER_COPY,
   RELEASES_URL,
 } from "@/lib/site";
-import Link from "next/link";
 
 function TerminalBlock({
   title,
@@ -62,7 +59,7 @@ export function Download() {
       <div className="mx-auto max-w-6xl px-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="max-w-2xl">
-            <p className="instrument-label">INIT · +15 xp on cast</p>
+            <p className="instrument-label">download</p>
             <h2 className="mt-3 font-serif text-display-sm text-ink">
               Deploy on Debian, Ubuntu, Pop!_OS, and Mint.
             </h2>
@@ -71,12 +68,12 @@ export function Download() {
         </div>
 
         <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
-          Two install paths — the official one-line installer or the .deb
-          release. The cast command copies to clipboard; whichever you fire,
-          Fresco keeps running after you close the window.
+          The official one-line installer or the .deb release. Either path
+          copies to your clipboard and runs instantly. Fresco keeps playing
+          after you close the window.
         </p>
 
-        <div className="mt-12 grid gap-4 lg:grid-cols-2">
+        <div className="mt-12">
           <Card className="flex flex-col p-7">
             <p className="instrument-label">one-line install</p>
             <p className="mt-3 text-sm text-ink-subtle">
@@ -106,63 +103,15 @@ export function Download() {
                 Browse all releases
               </a>
             </div>
-          </Card>
-
-          <Card className="flex flex-col p-7">
-            <p className="instrument-label">flatpak install</p>
-            <p className="mt-3 text-sm text-ink-subtle">
-              A sandboxed Flatpak build with automatic updates is in the works.
-              For now, grab the{" "}
-              <code className="font-mono text-sm">.deb</code> from GitHub
-              releases.
-            </p>
-            {/* Flathub listing is not published yet — a copyable command that
-                fails (and a link that 404s) would break the site's honesty
-                rule. Uncomment this block the day the listing goes live.
-            <div className="mt-4">
-              <TerminalBlock
-                title="flatpak install"
-                lines={[
-                  {
-                    code: FLATPAK_INSTALL,
-                    comment: "via flathub (pending publication)",
-                  },
-                ]}
-              />
-            </div>
-            */}
-            <div className="mt-4">
-              <span className="inline-block rounded-sm border border-hairline bg-raised px-2 py-0.5 font-mono text-meta uppercase tracking-widest text-ink-faint">
-                Coming soon
-              </span>
-            </div>
             <p className="mt-4 text-sm text-ink-subtle">
               For the lowest CPU usage, install your GPU&apos;s hardware-decode
               driver (Intel media VA driver, Mesa VA drivers, or the NVIDIA
               proprietary driver for NVDEC).
             </p>
-            {/* Restore alongside the install command above when live:
-            <div className="mt-auto pt-6">
-              <Link
-                href={FLATHUB_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono text-meta uppercase tracking-widest text-ink-subtle underline decoration-hairline-strong underline-offset-4 transition-colors hover:text-ink"
-              >
-                Flathub page
-              </Link>
-            </div>
-            */}
           </Card>
         </div>
 
-        <div className="mt-6 flex items-center gap-2 rounded-sm border border-accent/40 bg-accent/10 px-4 py-2.5">
-          <AnimatedGlyph name="scan" className="text-accent" staticChar="▸" />
-          <p className="font-mono text-meta uppercase tracking-widest text-accent">
-            cast either install command above to unlock the CAST quest · +15 xp
-          </p>
         </div>
-      </div>
     </section>
   );
 }

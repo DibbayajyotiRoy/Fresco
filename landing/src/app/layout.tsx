@@ -3,7 +3,7 @@ import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SmoothScroll } from "@/components/smooth-scroll";
 import { SoundProvider } from "@/components/sound-provider";
-import { QuestEngine } from "@/components/game/quest-engine";
+import { SiteNav } from "@/components/site-nav";
 import { MadeBy } from "@roy-ui/ui/made-by";
 import "./globals.css";
 
@@ -73,11 +73,9 @@ export const metadata: Metadata = {
   manifest: "/favicon/site.webmanifest",
   icons: {
     icon: [
-      { url: "/favicon/favicon.ico", sizes: "48x48" },
-      { url: "/favicon/favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon/favicon-96x96.png", type: "image/png", sizes: "96x96" },
+      { url: "/logo.png", type: "image/png", sizes: "1024x1024" },
     ],
-    apple: [{ url: "/favicon/apple-touch-icon.png", sizes: "180x180" }],
+    apple: [{ url: "/logo.png", sizes: "1024x1024" }],
   },
   robots: {
     index: true,
@@ -139,8 +137,8 @@ export default function RootLayout({
         className={`${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <SoundProvider>
+          <SiteNav />
           <SmoothScroll>{children}</SmoothScroll>
-          <QuestEngine />
         </SoundProvider>
         <MadeBy
           name="Dibbayajyoti Roy"

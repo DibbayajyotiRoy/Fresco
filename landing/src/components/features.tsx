@@ -1,5 +1,3 @@
-import { ACHIEVEMENTS } from "@/lib/game";
-
 type FeatureRow = {
   tag: string;
   title: string;
@@ -101,24 +99,16 @@ const FEATURE_ROWS: FeatureRow[] = [
   },
 ];
 
-const SPECS = ACHIEVEMENTS.find((a) => a.id === "specs")!;
 const TOTAL = FEATURE_ROWS.length;
 const SOON = FEATURE_ROWS.filter((r) => r.soon).length;
 const SHIPPING = TOTAL - SOON;
 
 export function Features() {
   return (
-    <section id="features" className="border-b border-hairline py-20 sm:py-28">
+    <section id="features" className="hidden border-b border-hairline py-20 sm:block sm:py-28">
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <p className="instrument-label !text-ink-faint">
-              {SPECS.code} <span className="text-accent/70">·</span> +{SPECS.xp} xp
-            </p>
-            <p className="instrument-label !text-ink-faint">
-              {SPECS.code} · inventory
-            </p>
-          </div>
+          <p className="instrument-label !text-ink-faint">features</p>
           <h2 className="mt-3 font-serif text-display-sm text-ink">
             Any media. Any monitor. No CPU drama.
           </h2>

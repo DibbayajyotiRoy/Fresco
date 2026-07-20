@@ -4,62 +4,108 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Linear-style dark product surface. One locked theme (Linear ships no light
- * mode): deepest near-black canvas, a four-step surface ladder for lift,
- * hairline borders for separation, and a single lavender-blue accent reserved
- * for the brand mark, primary CTA, focus rings, and link emphasis.
- * :root and .dark hold the same values so the page renders dark regardless.
+ * WARM TERMINAL — marketing translation.
+ * Warm stone paper, exactly one sky accent, three type families in three
+ * lanes (Instrument Serif display / Inter body / JetBrains Mono instrument),
+ * 1px stone hairlines, 6/8/12 radii. Light is authored; dark is a wholesale
+ * remap of the same semantic variables under html.dark (applied by an inline
+ * head script before CSS paints).
  */
-:root,
-.dark {
-  --radius: 0.75rem;
-
-  /* Surface ladder (canvas -> surface-4) */
-  --canvas: #010102;
-  --surface-1: #0c0d11;
-  --surface-2: #131419;
-  --surface-3: #1b1c22;
-  --surface-4: #23242b;
-  --hairline: #23252a;
-  --hairline-strong: #2c2f37;
+:root {
+  /* Surfaces */
+  --paper: #fafaf9; /* stone-50 */
+  --surface: #ffffff;
+  --raised: #f5f5f4; /* stone-100 */
+  --terminal: #0c0a09; /* stone-950 — the house terminal card, both themes */
 
   /* Ink ramp */
-  --ink: #f7f8f8;
-  --ink-muted: #d0d6e0;
-  --ink-subtle: #8a8f98;
-  --ink-tertiary: #62666d;
+  --ink: #1c1917; /* stone-900 */
+  --ink-muted: #44403c; /* stone-700 */
+  --ink-subtle: #78716c; /* stone-500 */
+  --ink-faint: #a8a29e; /* stone-400 */
 
-  /* Lavender-blue accent (scarce: brand, primary CTA, focus, link) */
-  --accent-lavender: #5e6ad2;
-  --accent-lavender-hover: #828fff;
-  --accent-lavender-focus: #5e69d1;
-  --success: #27a644;
+  /* Hairlines */
+  --hairline: #e7e5e4; /* stone-200 */
+  --hairline-strong: #d6d3d1; /* stone-300 */
 
-  /* shadcn semantic tokens mapped onto the Linear ladder */
-  --background: var(--canvas);
+  /* The one accent: sky. Interactivity only. */
+  --accent: #0284c7; /* sky-600 */
+  --accent-strong: #0369a1; /* sky-700 */
+  --link: #0369a1;
+
+  /* Status (status atoms only — never chrome) */
+  --ok: #059669; /* emerald-600 */
+  --warn: #d97706; /* amber-600 */
+  --danger: #dc2626;
+
+  /* shadcn semantic aliases used by ui primitives */
+  --background: var(--paper);
   --foreground: var(--ink);
-  --card: var(--surface-1);
+  --card: var(--surface);
   --card-foreground: var(--ink);
-  --popover: var(--surface-2);
+  --popover: var(--surface);
   --popover-foreground: var(--ink);
-
-  --primary: var(--accent-lavender);
+  --primary: var(--accent);
   --primary-foreground: #ffffff;
-
-  --secondary: var(--surface-2);
+  --secondary: var(--raised);
   --secondary-foreground: var(--ink);
-  --muted: var(--surface-2);
+  --muted: var(--raised);
   --muted-foreground: var(--ink-subtle);
-  --accent: var(--surface-3);
-  --accent-foreground: var(--ink);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
   --border: var(--hairline);
   --input: var(--hairline-strong);
-  --ring: var(--accent-lavender-focus);
+  --ring: var(--accent);
+}
+
+/* Dark remap: same variables, warm stone dark values. Accent lifts to sky-400. */
+.dark {
+  --paper: #0c0a09; /* stone-950 */
+  --surface: #1c1917; /* stone-900 */
+  --raised: #292524; /* stone-800 */
+  --terminal: #0c0a09;
+
+  --ink: #e5e5e5;
+  --ink-muted: #d4d4d4;
+  --ink-subtle: #a1a1a1;
+  --ink-faint: #8a8a8a;
+
+  --hairline: #292524; /* stone-800 */
+  --hairline-strong: #44403c; /* stone-700 */
+
+  --accent: #38bdf8; /* sky-400 */
+  --accent-strong: #7dd3fc; /* sky-300 */
+  --link: #7dd3fc;
+
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+
+  --primary: #0284c7; /* bg-accent stays sky-600 in dark (readable white ink) */
+  --primary-foreground: #ffffff;
+  --input: var(--hairline-strong);
 }
 
 @theme inline {
+  /* Semantic palette */
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-terminal: var(--terminal);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-faint: var(--ink-faint);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-link: var(--link);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  /* shadcn aliases */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -72,45 +118,69 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Linear surface ladder + ink ramp + accent, exposed as Tailwind colors
-     (e.g. bg-surface-2, text-ink-subtle, border-hairline, text-lavender). */
-  --color-canvas: var(--canvas);
-  --color-surface-1: var(--surface-1);
-  --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
-  --color-surface-4: var(--surface-4);
-  --color-hairline: var(--hairline);
-  --color-hairline-strong: var(--hairline-strong);
-  --color-ink: var(--ink);
-  --color-ink-muted: var(--ink-muted);
-  --color-ink-subtle: var(--ink-subtle);
-  --color-ink-tertiary: var(--ink-tertiary);
-  --color-lavender: var(--accent-lavender);
-  --color-lavender-hover: var(--accent-lavender-hover);
-  --color-success: var(--success);
+  /* Type scale — tokenized. meta/sm/base/lg/xl/2xl per spec, plus two
+     marketing display tokens (still tokens, never arbitrary sizes). */
+  --text-meta: 0.6875rem; /* 11px */
+  --text-meta--line-height: 1rem;
+  --text-sm: 0.8125rem; /* 13px */
+  --text-sm--line-height: 1.125rem;
+  --text-base: 0.875rem; /* 14px */
+  --text-base--line-height: 1.25rem;
+  --text-lg: 1rem; /* 16px */
+  --text-lg--line-height: 1.375rem;
+  --text-xl: 1.25rem; /* 20px */
+  --text-xl--line-height: 1.625rem;
+  --text-2xl: 1.75rem; /* 28px */
+  --text-2xl--line-height: 2rem;
+  --text-display-sm: clamp(1.75rem, 4vw, 2.25rem);
+  --text-display-sm--line-height: 1.12;
+  --text-display: clamp(2.25rem, 5.5vw, 3.375rem);
+  --text-display--line-height: 1.06;
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Radius scale: 6 / 8 / 12 + full. Nothing else. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
+  --radius-2xl: 12px;
 
-  /* Linear runs one continuous sans voice from display to body (Geist as the
-     open substitute for Linear's custom cut). No separate display family. */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-  --font-display: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Three families, three lanes */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "JetBrains Mono",
+    monospace;
 
-  --animate-accordion-down: accordion-down 0.2s ease-out;
-  --animate-accordion-up: accordion-up 0.2s ease-out;
+  /* Motion — house curve, entrances ≤180ms */
+  --ease-house: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 120ms ease-out both;
+  --animate-rise-in: rise-in 160ms var(--ease-house) both;
+  --animate-accordion-down: accordion-down 160ms var(--ease-house);
+  --animate-accordion-up: accordion-up 160ms var(--ease-house);
 
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
   @keyframes accordion-down {
     from {
       height: 0;
@@ -137,35 +207,84 @@
     scroll-behavior: smooth;
     scroll-padding-top: 5rem;
   }
+  html,
   body {
-    background-color: var(--background);
-    color: var(--foreground);
+    overflow-x: hidden;
+  }
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    letter-spacing: -0.15px;
+    font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  /* One sans voice (Geist), Linear-style: aggressive negative tracking that
-     scales with size. Headings hold the same family as body. */
+  /* Serif is display-only and resets the Inter tracking. */
+  .font-serif {
+    letter-spacing: normal;
+    font-feature-settings: normal;
+    font-weight: 400;
+  }
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: normal;
+  }
   h1,
   h2,
   h3,
   h4 {
-    font-family: var(--font-display);
-    letter-spacing: -0.03em;
     text-wrap: balance;
   }
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
   ::selection {
-    background-color: color-mix(in oklch, var(--primary) 35%, transparent);
-    color: var(--ink);
+    background-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  /* 6px stone pill scrollbars, transparent track */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--hairline-strong);
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-faint);
   }
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;
     }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-/* Lavender accent for a single emphasized phrase in display headlines.
-   Linear emphasizes with color in the same family, not a gradient. */
-.text-lavender-accent {
-  color: var(--accent-lavender-hover);
+/* Instrument label — the signature texture: 10–11px mono uppercase. */
+.instrument-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
 }

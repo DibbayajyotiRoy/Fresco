@@ -270,6 +270,37 @@ pub struct Config {
     /// user submits once). Set false in config.toml to silence it.
     #[serde(default = "default_true")]
     pub feedback_reminders: bool,
+    /// Anonymous usage telemetry (daily ping, feature counts, error kinds).
+    /// Opt-out via the Settings switch or config.toml.
+    #[serde(default = "default_true")]
+    pub telemetry: bool,
+    /// Whether the one-time telemetry consent dialog was answered. Nothing is
+    /// ever sent before this is true — consent-first, like a cookie banner
+    /// but honest (no dark patterns, both buttons equal weight).
+    #[serde(default)]
+    pub telemetry_prompted: bool,
+    /// Local browser bridge (127.0.0.1 only): lets the Fresco browser
+    /// extension mirror the wallpaper on new tabs. Off by default — nothing
+    /// listens on any port unless the user opts in.
+    #[serde(default)]
+    pub browser_bridge: bool,
+    /// Optional wallpaper shown ONLY in the browser (new-tab extension),
+    /// independent of the desktop. None = mirror the desktop wallpaper.
+    /// Follows the per-monitor override pattern: absent from config.toml
+    /// unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_wallpaper: Option<Wallpaper>,
+    /// Successful wallpaper applies so far — the star nudge stays silent until
+    /// the user has visibly gotten value (3+ applies).
+    #[serde(default)]
+    pub apply_count: u32,
+    /// Unix epoch (seconds) of the last "star Fresco on GitHub" nudge, so it
+    /// repeats at most once every 2 days.
+    #[serde(default)]
+    pub last_star_nudge: u64,
+    /// Whether the one-time "What can Fresco do?" feature tour was shown.
+    #[serde(default)]
+    pub tour_shown: bool,
     /// IDs of admin notifications already shown, so each appears only once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub seen_notifications: Vec<String>,
@@ -288,6 +319,11 @@ pub struct Config {
     /// apply to per-monitor overrides). Absent = no scheduling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<Schedule>,
+    /// Temporarily suspend the schedule WITHOUT deleting it — the quick
+    /// on/off switch in the menu flips this, so users don't lose their
+    /// configured day/night setup just to pause it.
+    #[serde(default)]
+    pub schedule_paused: bool,
 }
 
 fn default_version() -> u32 {
@@ -309,11 +345,19 @@ impl Default for Config {
             first_run_epoch: 0,
             feedback_prompted: false,
             feedback_reminders: true,
+            telemetry: true,
+            telemetry_prompted: false,
+            browser_bridge: false,
+            browser_wallpaper: None,
+            apply_count: 0,
+            last_star_nudge: 0,
+            tour_shown: false,
             seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
             last_update_check: 0,
             update_skipped_version: String::new(),
             schedule: None,
+            schedule_paused: false,
         }
     }
 }

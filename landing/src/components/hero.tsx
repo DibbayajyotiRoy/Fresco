@@ -1,23 +1,25 @@
 import Image from "next/image";
 import { Download, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AnimatedGlyph } from "@/components/animated-glyph";
 import { GITHUB_URL } from "@/lib/site";
 
 export function Hero() {
   return (
-    <section id="top" className="relative overflow-hidden border-b border-border">
+    <section id="top" className="relative border-b border-hairline">
       <div className="mx-auto flex max-w-6xl flex-col items-center px-5 pb-16 pt-16 text-center sm:pt-24">
-        <p className="mb-6 inline-flex items-center rounded-full border border-border bg-surface-1 px-3 py-1 text-xs font-medium text-ink-subtle">
-          Free and open source · GPL-3.0
+        <p className="instrument-label mb-6 inline-flex items-center gap-2 rounded-full border border-hairline bg-surface px-3 py-1">
+          <AnimatedGlyph name="scanline" className="text-accent" />
+          live wallpaper · free · gpl-3.0
         </p>
 
-        <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-5xl md:text-6xl">
+        <h1 className="max-w-3xl text-balance font-serif text-display text-ink">
           Finally, live wallpapers
-          <br className="hidden sm:block" />{" "}
-          that <span className="text-lavender-accent">just work</span> on Linux.
+          <br className="hidden sm:block" /> that{" "}
+          <em className="text-accent">just work</em> on Linux.
         </h1>
 
-        <p className="mt-6 max-w-xl text-pretty text-base text-ink-subtle sm:text-lg">
+        <p className="mt-6 max-w-xl text-pretty text-lg text-ink-subtle">
           Set any video as your desktop, or browse the built-in catalog.
           Near-zero CPU, on X11 and Wayland. Free forever.
         </p>
@@ -37,16 +39,19 @@ export function Hero() {
           </Button>
         </div>
 
-        {/* Product panel: the real app capture is the protagonist, framed
-            Linear-style (surface-1 lift, hairline border, top white edge). */}
+        {/* Product frame: the real capture, framed by 1px hairlines with a
+            mono window-chrome strip — no glow, no gradients. */}
         <div className="relative mt-16 w-full max-w-4xl">
-          <div className="rounded-2xl border border-border bg-surface-1 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-            <div className="flex items-center gap-1.5 px-3 py-2">
-              <span className="size-2.5 rounded-full bg-hairline-strong" />
-              <span className="size-2.5 rounded-full bg-hairline-strong" />
-              <span className="size-2.5 rounded-full bg-hairline-strong" />
+          <div className="rounded-lg border border-hairline bg-surface p-2">
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <span className="instrument-label">fresco — library</span>
+              <span className="flex items-center gap-1.5" aria-hidden>
+                <span className="size-2 rounded-full border border-hairline-strong" />
+                <span className="size-2 rounded-full border border-hairline-strong" />
+                <span className="size-2 rounded-full border border-hairline-strong" />
+              </span>
             </div>
-            <div className="overflow-hidden rounded-xl border border-border">
+            <div className="overflow-hidden rounded-md border border-hairline">
               <Image
                 src="/screenshots/gallery.png"
                 alt="Fresco wallpaper library on Linux showing video wallpapers with an active live wallpaper and hardware decode status"

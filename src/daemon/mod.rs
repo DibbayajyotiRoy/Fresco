@@ -9,6 +9,7 @@ mod mpvpaper;
 mod notifier;
 mod overview;
 mod wayland_outputs;
+mod webbridge;
 mod x11_fullscreen;
 mod x11win;
 
@@ -386,6 +387,14 @@ impl Daemon {
         self.rebuild()?;
         overview::apply(&self.config.wallpaper);
         log::info!("frescod started with {} renderer(s)", self.renderers.len());
+        crate::telemetry::heartbeat(
+            Some("x11"),
+            self.renderers
+                .first()
+                .and_then(|r| r.player.hwdec_current())
+                .as_deref(),
+            Some(self.renderers.len() as u32),
+        );
 
         loop {
             while let Ok((req, reply)) = commands.try_recv() {
@@ -1059,8 +1068,11 @@ fn proc_stats(child_pids: &[u32]) -> (f32, u64) {
 /// The full wallpaper the configured schedule wants on screen right now —
 /// rotation/crop included, so a scheduled swap can reset per-wallpaper player
 /// state instead of leaking the previous wallpaper's rotation.
-fn schedule_desired_wallpaper(config: &Config) -> Option<Wallpaper> {
+pub(crate) fn schedule_desired_wallpaper(config: &Config) -> Option<Wallpaper> {
     use chrono::Offset as _;
+    if config.schedule_paused {
+        return None; // paused: keep the schedule config, ignore it entirely
+    }
     let sched = config.schedule.as_ref()?;
     let now = chrono::Local::now();
     let off = now.offset().fix().local_minus_utc() / 60;
@@ -1198,6 +1210,14 @@ pub fn run() -> Result<()> {
         if cfg.autostart && cfg.enabled {
             crate::autostart::enable().ok();
         }
+        // Browser bridge: bound at startup only (std TcpListener has no clean
+        // async shutdown and this stays dependency-free). Turning the switch
+        // OFF takes effect immediately anyway — every request re-reads the
+        // config and refuses while disabled; turning it ON needs a daemon
+        // restart.
+        if cfg.browser_bridge {
+            webbridge::spawn(webbridge::PORT);
+        }
     }
     let capability = detect();
     log::info!("session capability: {}", capability.id());
@@ -1247,6 +1267,7 @@ fn run_gnome_static() -> Result<()> {
     let commands = control::start_server()?;
     overview::apply(&config.wallpaper);
     log::info!("frescod started (GNOME Wayland static-frame mode)");
+    crate::telemetry::heartbeat(Some("gnome-static"), None, None);
 
     while let Ok((req, reply)) = commands.recv() {
         let is_stop = matches!(req, Request::Stop);
@@ -1372,14 +1393,16 @@ fn run_wayland_layershell() -> Result<()> {
     let mut sched = SchedState::default();
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
-    // wlroots/KWin; absent on GNOME (which uses the static path, not this one).
+    // wlroots/KWin (wlr protocol) and COSMIC (zcosmic-toplevel-info); absent on
+    // GNOME (which uses the static path, not this one).
     let mut fs_watch = fullscreen::FullscreenWatch::new();
     log::info!(
         "fullscreen auto-pause: {}",
-        if fs_watch.is_some() {
-            "enabled (wlr-foreign-toplevel)"
-        } else {
-            "unavailable (compositor lacks wlr-foreign-toplevel-management)"
+        match fs_watch.as_ref().map(|w| w.backend()) {
+            Some(fullscreen::Backend::Wlr) => "enabled (wlr-foreign-toplevel)",
+            Some(fullscreen::Backend::Cosmic) => "using cosmic-toplevel-info",
+            None =>
+                "unavailable (compositor lacks wlr-foreign-toplevel-management and cosmic-toplevel-info)",
         }
     );
     let mut hidden: HashSet<String> = HashSet::new();
@@ -1403,6 +1426,7 @@ fn run_wayland_layershell() -> Result<()> {
         "frescod started (Wayland layer-shell / mpvpaper, {} output(s))",
         outputs.len()
     );
+    crate::telemetry::heartbeat(Some("wayland"), None, Some(outputs.len() as u32));
 
     loop {
         let tick = if outputs.values().any(|o| o.animating) {
@@ -1857,6 +1881,10 @@ impl WlOutput {
                 "[{}] giving up live playback; attempting a static frame",
                 self.connector
             );
+            crate::telemetry::error(
+                "renderer_giveup",
+                &format!("{}: renderer failed {max}x", self.connector),
+            );
             self.respawn(true, true);
         }
         // restarts > max → given up; do nothing (anti-flap). Error stays in Status.
@@ -1978,6 +2006,17 @@ pub fn check() {
             Some(p) => println!("mpvpaper        : {G}{}{X}", p.display()),
             None => println!(
                 "mpvpaper        : {R}not found{X} (live wallpapers need mpvpaper installed or bundled)"
+            ),
+        }
+        match fullscreen::FullscreenWatch::new().map(|w| w.backend()) {
+            Some(fullscreen::Backend::Wlr) => {
+                println!("Fullscreen pause: {G}enabled{X} (wlr-foreign-toplevel)")
+            }
+            Some(fullscreen::Backend::Cosmic) => {
+                println!("Fullscreen pause: {G}enabled{X} (cosmic-toplevel-info)")
+            }
+            None => println!(
+                "Fullscreen pause: {Y}unavailable{X} (compositor lacks wlr-foreign-toplevel-management and cosmic-toplevel-info)"
             ),
         }
     }

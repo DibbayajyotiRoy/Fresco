@@ -1,7 +1,8 @@
 import { getGitHubStats } from "@/lib/github";
 import { SiteNav } from "@/components/site-nav";
-import { Hero } from "@/components/hero";
+import { BootConsole } from "@/components/game/boot-console";
 import { StatsStrip } from "@/components/stats-strip";
+import { AtAGlance } from "@/components/at-a-glance";
 import { Features } from "@/components/features";
 import { Comparison } from "@/components/comparison";
 import { WhatsNew } from "@/components/whats-new";
@@ -9,6 +10,7 @@ import { HowItWorks } from "@/components/how-it-works";
 import { Supported } from "@/components/supported";
 import { Download } from "@/components/download";
 import { Faq } from "@/components/faq";
+import { AchievementGallery } from "@/components/game/achievement-gallery";
 import { SiteFooter } from "@/components/site-footer";
 import { JsonLd } from "@/components/json-ld";
 
@@ -19,8 +21,9 @@ export default async function Home() {
     <>
       <SiteNav />
       <main>
-        <Hero />
+        <BootConsole />
         <StatsStrip stats={stats} />
+        <AtAGlance />
         <Features />
         <Comparison />
         <WhatsNew version={stats.version} />
@@ -28,6 +31,7 @@ export default async function Home() {
         <Supported />
         <Download />
         <Faq />
+        <AchievementGallery />
       </main>
       <SiteFooter />
       <JsonLd version={stats.version} downloads={stats.downloads} />

@@ -185,17 +185,30 @@ window.glass .background {{ background: transparent; }}
 .changelog-body {{ font-size: 15px; }}
 
 /* ===== Wallpaper card ===== */
-.wp-card {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 14px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease; }}
-.wp-card:hover {{ background-color: @card_hover; border-color: alpha(@accent_bg_color,0.45); box-shadow: 0 6px 18px {shadow_md}; }}
+.wp-card {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 12px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease; }}
+.wp-card:hover {{ background-color: @card_hover; border-color: alpha(@accent_bg_color,0.55); box-shadow: 0 8px 24px {shadow_md}, 0 2px 6px {shadow_sm}; }}
 .wp-card.active {{ border: 2px solid @accent_bg_color; box-shadow: 0 1px 3px {shadow_sm}; }}
 
-.wp-thumb {{ background-color: @thumb_mat; }}
-.wp-scrim {{ background: linear-gradient(to top, alpha(black,0.82) 0%, alpha(black,0.38) 52%, alpha(black,0) 100%); padding: 22px 12px 9px 12px; }}
+.wp-thumb {{ background-color: @thumb_mat; transition: opacity 220ms ease; }}
+/* Thumbnail fade-in: cards start with .thumb-loading (opacity 0); an idle
+   callback removes it right after map, so the opacity transition plays. */
+.wp-thumb.thumb-loading {{ opacity: 0; }}
+.wp-scrim {{ background: linear-gradient(to top, alpha(black,0.84) 0%, alpha(black,0.40) 52%, alpha(black,0) 100%); padding: 24px 12px 9px 12px; }}
 .wp-title {{ color: #FFFFFF; font-weight: 600; font-size: 13px; letter-spacing: -0.01em; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }}
+.wp-meta {{ color: rgba(255,255,255,0.72); font-size: 11px; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }}
+.wp-fav-glyph {{ color: @accent_bg_color; font-size: 11px; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }}
 .wp-badge {{ background-color: alpha(black,0.55); color: #FFFFFF; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 7px; margin: 8px; }}
+/* 4K quality badge sits in the same top-left row as the kind badge; the row
+   carries the outer margin, so badges inside it only keep a small gap. */
+.wp-badge-row {{ margin: 8px; }}
+.wp-badge-row .wp-badge {{ margin: 0 6px 0 0; }}
+.wp-badge.quality {{ background-color: alpha(@accent_bg_color,0.85); color: @accent_fg_color; }}
 .wp-active-pill {{ background-color: @accent_bg_color; color: @accent_fg_color; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 7px; margin: 8px; }}
-.wp-edit {{ background-color: alpha(black,0.55); color: #FFFFFF; border-radius: 999px; min-height: 26px; min-width: 26px; padding: 3px; margin: 8px; }}
+.wp-edit {{ background-color: alpha(black,0.55); color: #FFFFFF; border-radius: 999px; min-height: 26px; min-width: 26px; padding: 3px; transition: background-color 160ms ease, color 160ms ease; }}
 .wp-edit:hover {{ background-color: alpha(black,0.78); }}
+.wp-edit.fav-on {{ color: @accent_bg_color; }}
+/* Hover action cluster (heart / edit / menu), bottom-right. */
+.wp-actions {{ margin: 8px; }}
 
 /* ===== Compact layout (narrow window; see LayoutBucket in window.rs) ===== */
 .compact-layout .wp-scrim {{ padding: 16px 8px 6px 8px; }}
@@ -206,8 +219,14 @@ window.glass .background {{ background: transparent; }}
 .wp-mini:hover {{ border-color: alpha(@accent_bg_color,0.45); box-shadow: 0 5px 14px {shadow_md}; }}
 .wp-mini.active {{ border: 2px solid @accent_bg_color; }}
 
+/* Placeholder shown inside a card while (or if) no thumbnail exists. */
+.wp-placeholder {{ background-color: @thumb_mat; }}
+.wp-placeholder image {{ color: @dim_fg; }}
+
 /* ===== Status ===== */
-.status-pill {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 999px; padding: 3px 12px; color: @dim_fg; font-size: 12px; }}
+.status-pill {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 999px; padding: 2px 12px; color: @dim_fg; font-size: 12px; }}
+.pill-overline {{ font-size: 9px; font-weight: 700; letter-spacing: 0.09em; color: @dim_fg; }}
+.pill-name {{ font-size: 12px; font-weight: 600; color: @window_fg_color; }}
 .dot-ok {{ color: #3FB950; }}
 .dot-warn {{ color: #D29922; }}
 .dot-off {{ color: @dim_fg; }}
@@ -246,8 +265,39 @@ button.suggested-action {{ font-weight: 600; }}
 .update-progress trough {{ min-height: 8px; border-radius: 999px; background-color: alpha(@window_fg_color, 0.08); }}
 .update-progress progress {{ min-height: 8px; border-radius: 999px; background-image: linear-gradient(to right, @accent_bg_color, shade(@accent_bg_color, 1.25)); }}
 
+/* ===== Search ===== */
+entry.wp-search {{ min-height: 36px; border-radius: 10px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 8px; padding-right: 8px; }}
+entry.wp-search image {{ color: @dim_fg; margin-right: 4px; }}
+entry.wp-search:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.22); }}
+
+/* ===== Header menu popover ===== compact grouped menu, GTK-menu-like rows. */
+.fresco-menu .overline {{ margin-top: 8px; margin-bottom: 2px; }}
+.fresco-menu separator {{ min-height: 1px; background-color: @card_border; margin-top: 4px; margin-bottom: 4px; }}
+.menu-row {{ min-height: 30px; }}
+.menu-item {{ min-height: 22px; padding: 3px 8px; border-radius: 7px; background-image: none; background-color: transparent; border: none; box-shadow: none; font-weight: 400; }}
+.menu-item:hover {{ background-color: alpha(@window_fg_color, 0.07); }}
+.menu-item:active {{ background-color: alpha(@window_fg_color, 0.11); }}
+.fresco-menu .seg button {{ min-height: 24px; font-size: 13px; }}
+
+/* ===== Footer action bar ===== */
+.footer-bar {{ border-top: 1px solid @card_border; background-color: @headerbar_bg_color; padding: 8px 16px; }}
+.compact-layout .footer-bar {{ padding: 8px 8px; }}
+.footer-bar button {{ min-height: 26px; }}
+.footer-count {{ color: @dim_fg; font-size: 12px; }}
+
+/* ===== Command palette (Ctrl+K) ===== */
+.palette-entry {{ min-height: 44px; font-size: 16px; border-radius: 12px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 12px; padding-right: 12px; }}
+.palette-entry:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.22); }}
+.palette-list {{ background: transparent; }}
+.palette-list row {{ border-radius: 10px; padding: 8px 12px; transition: background-color 140ms ease; }}
+.palette-list row:hover {{ background-color: alpha(@window_fg_color, 0.06); }}
+.palette-list row:selected {{ background-color: alpha(@accent_bg_color, 0.18); color: @window_fg_color; }}
+.palette-hint {{ color: @dim_fg; font-size: 11px; }}
+
+/* ===== Accent audit: switches follow the accent (Adwaita default is blue) ===== */
+switch:checked {{ background-color: @accent_bg_color; }}
+
 /* ===== Misc ===== */
-entry.wp-search {{ border-radius: 10px; }}
 .welcome-cta {{ min-height: 40px; border-radius: 11px; font-weight: 600; }}
 ",
         window_bg = p.window_bg,

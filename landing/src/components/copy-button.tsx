@@ -1,15 +1,26 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy } from "lucide-react";
+import { Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePlaySound } from "@/hooks/use-play-sound";
+import { dispatchQuest } from "@/lib/game";
 
-export function CopyButton({ value }: { value: string }) {
+export function CopyButton({
+  value,
+  className,
+}: {
+  value: string;
+  className?: string;
+}) {
   const [copied, setCopied] = React.useState(false);
+  const { play } = usePlaySound({ sound: "hero.complete" });
 
   function onCopy() {
     navigator.clipboard.writeText(value).then(() => {
       setCopied(true);
+      play();
+      dispatchQuest("cast");
       setTimeout(() => setCopied(false), 1600);
     });
   }
@@ -20,13 +31,19 @@ export function CopyButton({ value }: { value: string }) {
       onClick={onCopy}
       aria-label={copied ? "Copied" : "Copy to clipboard"}
       className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        "flex size-7 shrink-0 items-center justify-center rounded-sm border transition-colors",
+        copied
+          ? "border-ok/40 text-ok"
+          : "border-stone-700 text-stone-400 hover:bg-stone-800 hover:text-stone-200",
+        className
       )}
     >
       {copied ? (
-        <Check className="size-3.5 text-primary" />
+        <span className="font-mono text-sm leading-none" aria-hidden>
+          ✓
+        </span>
       ) : (
-        <Copy className="size-3.5" />
+        <Copy className="size-3.5" aria-hidden />
       )}
     </button>
   );

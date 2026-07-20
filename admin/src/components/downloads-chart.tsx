@@ -1,22 +1,16 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
+import { Bar } from "@/components/dither-kit/bar";
+import { BarChart } from "@/components/dither-kit/bar-chart";
+import { Grid } from "@/components/dither-kit/grid";
+import { Tooltip } from "@/components/dither-kit/tooltip";
+import { XAxis } from "@/components/dither-kit/x-axis";
+import { YAxis } from "@/components/dither-kit/y-axis";
+import { formatNumber } from "@/lib/format";
 import type { Release } from "@/lib/types";
 
-const chartConfig = {
-  downloads: {
-    label: "Downloads",
-    color: "var(--brand)",
-  },
-} satisfies ChartConfig;
-
+/** Downloads per release as a dither-kit dot-matrix bar chart: stone
+ *  gridlines, 9-10px mono axis labels, blue (accent-family) bars. */
 export function DownloadsChart({ releases }: { releases: Release[] }) {
   const data = releases.map((r) => ({
     tag: r.tag,
@@ -24,40 +18,21 @@ export function DownloadsChart({ releases }: { releases: Release[] }) {
   }));
 
   return (
-    <ChartContainer config={chartConfig} className="aspect-auto h-[200px] w-full">
+    <div className="h-[200px] w-full">
       <BarChart
-        accessibilityLayer
         data={data}
-        margin={{ left: 4, right: 8, top: 4, bottom: 0 }}
+        config={{ downloads: { label: "Downloads", color: "blue" } }}
+        animate={false}
       >
-        <CartesianGrid vertical={false} strokeDasharray="3 3" strokeOpacity={0.12} />
-        <XAxis
-          dataKey="tag"
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={4}
-          className="text-xs"
-        />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          width={36}
-          allowDecimals={false}
-          className="text-xs"
-        />
-        <ChartTooltip
-          cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-          content={<ChartTooltipContent indicator="dot" />}
-        />
-        <Bar
-          dataKey="downloads"
-          fill="var(--color-downloads)"
-          radius={[4, 4, 0, 0]}
-          maxBarSize={56}
-          isAnimationActive={false}
+        <Grid strokeDasharray="3 3" />
+        <XAxis dataKey="tag" />
+        <YAxis tickFormatter={(v) => formatNumber(v)} />
+        <Bar dataKey="downloads" variant="solid" />
+        <Tooltip
+          labelKey="tag"
+          valueFormatter={(v) => formatNumber(v)}
         />
       </BarChart>
-    </ChartContainer>
+    </div>
   );
 }

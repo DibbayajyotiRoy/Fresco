@@ -87,10 +87,15 @@ jobs:
       - name: Test (daemon)
         run: cargo test --no-default-features --features daemon
 
-      # Build mpvpaper → target/release/mpvpaper so `cargo deb` bundles it under
-      # /usr/lib/fresco/mpvpaper (not in the apt repos, so we ship it ourselves).
+      # The release ships one mpvpaper per libmpv generation (see _release.yml).
+      # A per-distro test deb builds once against THIS distro's libmpv and fills
+      # both asset slots with that build, keeping cargo-deb's asset list
+      # identical to the release layout; the runtime probe picks whichever loads.
       - name: Build bundled mpvpaper (Wayland backend)
-        run: scripts/build-mpvpaper.sh
+        run: |
+          scripts/build-mpvpaper.sh
+          cp target/release/mpvpaper target/release/mpvpaper-libmpv1
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv2
 
       - name: Package .deb
         run: |
@@ -175,3 +180,136 @@ jobs:
         # Headless: no X11, no GPU. --check dlopens libmpv and prints
         # diagnostics, exiting 0 regardless — proves libmpv resolves at runtime.
         run: frescod --check
+
+      - name: Smoke test — a bundled renderer loads this distro's libmpv
+        # Exit 127 = the dynamic linker couldn't find the libmpv soname the
+        # renderer was linked against — the failure that shipped invisible
+        # wallpapers to Ubuntu 24.04/COSMIC users in 1.1.0. A file-exists check
+        # can't catch it; actually executing the binary can.
+        run: |
+          ok=0
+          for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
+            [ -x "$bin" ] || continue
+            rc=0; "$bin" --help >/dev/null 2>&1 || rc=$?
+            echo "$bin --help → exit $rc"
+            [ "$rc" -ne 127 ] && ok=1
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::no bundled mpvpaper can load this distro's libmpv"
+            exit 1
+          fi
+
+  # ── Release parity: the EXACT artifact users download ───────────────────────
+  # The published .deb is built ONCE on ubuntu-22.04 with one mpvpaper per
+  # libmpv generation, then installed by users on every distro generation.
+  # These jobs replicate that artifact and cross-install it — the 1.1.0
+  # regression (renderer hard-linked to libmpv.so.1 dying with exit 127 on
+  # Ubuntu 24.04 / COSMIC while every same-distro test passed) is exactly the
+  # class of failure only this cross-generation path can catch.
+  release-parity-mpvpaper-libmpv2:
+    name: parity · mpvpaper (libmpv2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libmpv-dev meson ninja-build pkg-config git ca-certificates \
+            libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev
+      - name: Build mpvpaper (libmpv2)
+        run: scripts/build-mpvpaper.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parity-mpvpaper-libmpv2
+          path: target/release/mpvpaper
+          if-no-files-found: error
+
+  release-parity-deb:
+    name: parity · build release-style .deb
+    needs: release-parity-mpvpaper-libmpv2
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build deps
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends $BUILD_DEPS
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-parity-${{ hashFiles('Cargo.lock') }}
+      - name: Build release
+        run: cargo build --release --all-features --locked
+      - name: Build mpvpaper (libmpv1)
+        run: |
+          scripts/build-mpvpaper.sh
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv1
+      - uses: actions/download-artifact@v4
+        with:
+          name: parity-mpvpaper-libmpv2
+          path: parity-mpvpaper
+      - name: Stage mpvpaper (libmpv2)
+        run: install -m 755 parity-mpvpaper/mpvpaper target/release/mpvpaper-libmpv2
+      - name: Package .deb
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build --no-strip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parity-deb
+          path: target/debian/fresco_*.deb
+          if-no-files-found: error
+
+  release-parity-install:
+    name: parity · install on ${{ matrix.name }}
+    needs: release-parity-deb
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: 'Ubuntu 22.04 (libmpv1)', image: 'ubuntu:22.04' }
+          - { name: 'Ubuntu 24.04 (libmpv2)', image: 'ubuntu:24.04' }
+          - { name: 'Debian 12 (libmpv2)',    image: 'debian:12' }
+    steps:
+      - name: Bootstrap container
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends ca-certificates binutils
+      - uses: actions/download-artifact@v4
+        with:
+          name: parity-deb
+          path: deb
+      - name: Install the release-style .deb
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          DEB="./$(ls deb/fresco_*.deb | head -1)"
+          echo "Installing $DEB"
+          apt-get install -y "$DEB"
+      - name: frescod --check
+        run: frescod --check
+      - name: A bundled renderer must load THIS distro's libmpv
+        run: |
+          ok=0
+          for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
+            [ -x "$bin" ] || continue
+            rc=0; "$bin" --help >/dev/null 2>&1 || rc=$?
+            echo "$bin --help → exit $rc"
+            [ "$rc" -ne 127 ] && ok=1
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::release .deb has no renderer that loads on this distro — 1.1.0 regression"
+            exit 1
+          fi

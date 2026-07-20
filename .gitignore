@@ -7,3 +7,15 @@ node_modules/
 engine-notes/
 tests/assets/generated/
 verification-artifacts/**/*.png
+
+# Internal working files — never part of the public repo
+prompt.md
+verification-artifacts/
+docs/TASKS*.md
+docs/AUDIT.md
+docs/plan-*.md
+docs/GNOME_LIVE_WALLPAPER_PLAN.md
+docs/ARCHITECTURE_BRIEF.md
+.claude/*.tmp.*
+.claude/settings.local.json.tmp*
+flatpak/local-test.yaml

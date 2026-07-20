@@ -1,70 +1,81 @@
 import { ArrowSquareOut } from "@phosphor-icons/react/dist/ssr";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/badges";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatRelative } from "@/lib/format";
+  DataTable,
+  NullCell,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "@/components/data-table";
+import { formatNumber, formatRelative } from "@/lib/format";
 import type { Issue } from "@/lib/types";
 
 export function IssuesTable({ issues }: { issues: Issue[] }) {
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[64px]">#</TableHead>
-          <TableHead>Title</TableHead>
-          <TableHead className="w-[180px]">Labels</TableHead>
-          <TableHead className="w-[120px]">Author</TableHead>
-          <TableHead className="w-[90px] text-right">Comments</TableHead>
-          <TableHead className="w-[140px] text-right">Opened</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <DataTable>
+      <THead>
+        <TR>
+          <TH className="w-[60px]">#</TH>
+          <TH>Title</TH>
+          <TH className="hidden w-[190px] lg:table-cell">Labels</TH>
+          <TH className="hidden w-[120px] md:table-cell">Author</TH>
+          <TH className="w-[70px] text-right">Cmts</TH>
+          <TH className="w-[100px] text-right">Opened</TH>
+        </TR>
+      </THead>
+      <TBody>
         {issues.map((i) => (
-          <TableRow key={i.number}>
-            <TableCell className="text-muted-foreground font-mono text-xs">
-              #{i.number}
-            </TableCell>
-            <TableCell className="max-w-[420px]">
+          <TR key={i.number}>
+            <TD>
+              <span className="font-mono text-meta text-stone-500">
+                #{i.number}
+              </span>
+            </TD>
+            <TD>
               <a
                 href={i.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-sm font-medium hover:underline"
+                className="inline-flex max-w-full items-center gap-1 text-sm font-medium text-sky-700 hover:underline"
               >
-                {i.title}
-                <ArrowSquareOut className="size-3 opacity-60" />
+                <span className="truncate">{i.title}</span>
+                <ArrowSquareOut className="size-3 shrink-0 opacity-60" />
               </a>
-            </TableCell>
-            <TableCell>
+            </TD>
+            <TD className="hidden lg:table-cell">
               {i.labels.length ? (
-                i.labels.slice(0, 3).map((l) => (
-                  <Badge key={l} variant="outline" className="mr-1 text-xs">
-                    {l}
-                  </Badge>
-                ))
+                <span className="flex flex-wrap gap-1">
+                  {i.labels.slice(0, 3).map((l) => (
+                    <Badge key={l} label={l} />
+                  ))}
+                </span>
               ) : (
-                <span className="text-muted-foreground text-xs">—</span>
+                <NullCell />
               )}
-            </TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {i.author ?? "—"}
-            </TableCell>
-            <TableCell className="text-muted-foreground text-right text-sm">
-              {i.comments}
-            </TableCell>
-            <TableCell className="text-muted-foreground text-right font-mono text-xs">
-              {formatRelative(i.createdAt)}
-            </TableCell>
-          </TableRow>
+            </TD>
+            <TD className="hidden md:table-cell">
+              {i.author ? (
+                <span className="block truncate font-mono text-sm text-stone-500">
+                  {i.author}
+                </span>
+              ) : (
+                <NullCell />
+              )}
+            </TD>
+            <TD className="text-right text-sm text-stone-500 tabular-nums">
+              {formatNumber(i.comments)}
+            </TD>
+            <TD className="text-right">
+              <span className="font-mono text-meta text-stone-500">
+                {formatRelative(i.createdAt)}
+              </span>
+            </TD>
+          </TR>
         ))}
-      </TableBody>
-    </Table>
+      </TBody>
+    </DataTable>
   );
 }

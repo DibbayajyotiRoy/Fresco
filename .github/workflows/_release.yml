@@ -121,6 +121,25 @@ jobs:
           sudo apt-get install -y "$DEB"
           frescod --check || true   # non-zero on headless CI is expected
 
+      - name: Smoke test — a bundled renderer loads (this host is libmpv1)
+        # Deliberately NOT continue-on-error: publishing a .deb whose renderers
+        # all die in the dynamic linker (exit 127) means invisible wallpapers
+        # for users — the 1.1.0 regression. Cross-generation coverage lives in
+        # distros.yml release-parity; this catches a broken artifact at the
+        # moment of release.
+        run: |
+          ok=0
+          for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
+            [ -x "$bin" ] || continue
+            rc=0; "$bin" --help >/dev/null 2>&1 || rc=$?
+            echo "$bin --help → exit $rc"
+            [ "$rc" -ne 127 ] && ok=1
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::released .deb has no loadable renderer on this host"
+            exit 1
+          fi
+
       # Fire the "update available" event so running clients self-update.
       # Best-effort and gated on the secret, so a missing key or a Supabase hiccup
       # never blocks a release.

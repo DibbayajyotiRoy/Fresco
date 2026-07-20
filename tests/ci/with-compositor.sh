@@ -14,6 +14,7 @@
 #   sway      Sway, headless wlroots        → WAYLAND_DISPLAY (layer-shell)
 #   hyprland  Hyprland, headless wlroots    → WAYLAND_DISPLAY (layer-shell)
 #   kde       KWin, virtual backend         → WAYLAND_DISPLAY (layer-shell)
+#   cosmic    cosmic-comp, nested in Xvfb   → WAYLAND_DISPLAY (layer-shell)
 #   weston    Weston, headless backend      → WAYLAND_DISPLAY (NO layer-shell)
 #
 # Exit codes: the command's own exit code, or 70 if the compositor never came up.
@@ -146,6 +147,24 @@ case "$ENV_ID" in
       adopt_new_wayland_socket kwin_wayland --virtual --width 1920 --height 1080 \
         || { log "kwin_wayland never came up"; exit 70; }
     fi
+    ;;
+
+  cosmic)
+    # COSMIC's real compositor (smithay-based). It has no headless backend, so
+    # we nest it inside Xvfb via its X11 backend — the same compositor code
+    # path COSMIC users run, exercising cosmic-comp's actual layer-shell
+    # implementation (which differs from wlroots': this is the environment
+    # where mpvpaper/libmpv bugs bit real users).
+    export DISPLAY=:98
+    Xvfb :98 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+    XVFB_PID=$!
+    wait_for "Xvfb on :98" bash -c 'xset -display :98 q >/dev/null 2>&1' \
+      || { log "Xvfb (for cosmic-comp) never came up"; exit 70; }
+    export XDG_SESSION_TYPE=wayland
+    export XDG_CURRENT_DESKTOP=COSMIC
+    export LIBGL_ALWAYS_SOFTWARE=1
+    adopt_new_wayland_socket cosmic-comp || { log "cosmic-comp never came up"; exit 70; }
+    unset DISPLAY # clients must pick the Wayland path, not the outer Xvfb
     ;;
 
   weston)

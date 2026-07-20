@@ -59,6 +59,47 @@ export type Release = {
   publishedAt: string | null;
 };
 
+export type Install = {
+  install_id: string;
+  version: string | null;
+  distro: string | null;
+  compositor: string | null;
+  session: string | null;
+  backend: string | null;
+  decode: string | null;
+  /** UTM-style download attribution (website/github/reddit/…), null for older installs. */
+  source: string | null;
+  /** Packaging channel (deb/flatpak/other). */
+  channel: string | null;
+  monitor_count: number | null;
+  /** ISO timestamps. */
+  first_seen: string;
+  last_seen: string;
+};
+
+export type TelemetryEvent = {
+  install_id: string | null;
+  name: string;
+  created_at: string;
+};
+
+export type FeatureEvent = {
+  install_id: string | null;
+  name: string;
+  /** Raw props jsonb — e.g. { ok, source, kind } for add_from_link. */
+  props: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type TelemetryError = {
+  id: number;
+  install_id: string | null;
+  kind: string;
+  detail: string | null;
+  version: string | null;
+  created_at: string;
+};
+
 export type CatalogItem = {
   id: string;
   created_at: string;

@@ -1,3 +1,4 @@
+pub mod add_link;
 mod daemon_ctl;
 mod gallery;
 mod hover_preview;

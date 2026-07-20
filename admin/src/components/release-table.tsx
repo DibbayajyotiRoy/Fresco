@@ -1,61 +1,53 @@
+import { DataTable, TBody, TD, TH, THead, TR } from "@/components/data-table";
 import type { Release } from "@/lib/types";
 import { formatDate, formatNumber } from "@/lib/format";
 
 /**
- * Compact per-release table: version, publish date, download count, and a thin
- * share-of-total bar. Newest first. Pairs with the downloads chart to give the
- * exact numbers behind the trend in the same vertical space.
+ * Per-release table in the Excel grammar: mono version/date, right-aligned
+ * tabular counts, share-of-total. Newest first — the exact numbers behind
+ * the downloads chart.
  */
 export function ReleaseTable({ releases }: { releases: Release[] }) {
   const total = releases.reduce((s, r) => s + r.downloads, 0) || 1;
-  // Newest first for the table (the chart already reads oldest -> newest).
   const rows = [...releases].reverse();
 
   return (
-    <div className="overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted-foreground border-border border-b text-[11px] tracking-wide uppercase">
-            <th className="py-2 pr-3 text-left font-medium">Version</th>
-            <th className="hidden py-2 pr-3 text-left font-medium sm:table-cell">
-              Published
-            </th>
-            <th className="py-2 pr-3 text-right font-medium">Downloads</th>
-            <th className="w-24 py-2 text-right font-medium">Share</th>
-          </tr>
-        </thead>
-        <tbody className="divide-border divide-y">
-          {rows.map((r) => {
-            const share = Math.round((r.downloads / total) * 100);
-            return (
-              <tr key={r.tag} className="text-foreground">
-                <td className="py-2.5 pr-3 font-medium">
-                  <span className="font-mono text-xs">{r.tag}</span>
-                </td>
-                <td className="text-muted-foreground hidden py-2.5 pr-3 text-xs sm:table-cell">
+    <DataTable>
+      <THead>
+        <TR>
+          <TH className="w-[110px]">Version</TH>
+          <TH className="hidden sm:table-cell">Published</TH>
+          <TH className="w-[110px] text-right">Downloads</TH>
+          <TH className="w-[80px] text-right">Share</TH>
+        </TR>
+      </THead>
+      <TBody>
+        {rows.map((r) => {
+          const share = Math.round((r.downloads / total) * 100);
+          return (
+            <TR key={r.tag}>
+              <TD>
+                <span className="truncate font-mono text-sm text-stone-900">
+                  {r.tag}
+                </span>
+              </TD>
+              <TD className="hidden sm:table-cell">
+                <span className="font-mono text-sm text-stone-500">
                   {formatDate(r.publishedAt)}
-                </td>
-                <td className="py-2.5 pr-3 text-right tabular-nums">
-                  {formatNumber(r.downloads)}
-                </td>
-                <td className="py-2.5">
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="bg-muted hidden h-1.5 w-12 overflow-hidden rounded-full sm:block">
-                      <div
-                        className="bg-brand h-full rounded-full"
-                        style={{ width: `${share}%` }}
-                      />
-                    </div>
-                    <span className="text-muted-foreground w-8 text-right text-xs tabular-nums">
-                      {share}%
-                    </span>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                </span>
+              </TD>
+              <TD className="text-right text-sm text-stone-900 tabular-nums">
+                {formatNumber(r.downloads)}
+              </TD>
+              <TD className="text-right">
+                <span className="font-mono text-meta text-stone-500 tabular-nums">
+                  {share}%
+                </span>
+              </TD>
+            </TR>
+          );
+        })}
+      </TBody>
+    </DataTable>
   );
 }

@@ -21,8 +21,12 @@ export const FAQ: { q: string; a: string }[] = [
     a: "No. Fresco decodes video on the GPU through mpv (VA-API and NVDEC), so CPU usage stays near zero and memory sits around 120 to 150 MB. It can pause automatically while you are on battery, and it auto-pauses on any monitor that has a fullscreen window.",
   },
   {
-    q: "Does it work on Wayland or GNOME?",
-    a: "Both, with one caveat. Fresco runs on any X11 session (Pop!_OS, Ubuntu, Linux Mint, Debian, elementary OS) and on Wayland layer-shell compositors through a bundled mpvpaper backend, verified on Sway. COSMIC, Hyprland, and KDE Plasma 6 are experimental while real-session verification lands. GNOME on Wayland shows a static frame instead, because Mutter does not expose a live wallpaper surface.",
+    q: "Does Fresco work on Wayland and the COSMIC desktop?",
+    a: "Yes. Fresco runs animated wallpapers on Wayland layer-shell compositors through a bundled, supervised mpvpaper backend: COSMIC (Pop!_OS 24.04), Hyprland, Sway, KDE Plasma 6, and other wlroots compositors. Since v1.1.1 it ships two mpvpaper builds and probes at runtime, so it works on both libmpv1 and libmpv2 distributions. On X11 it works on any desktop.",
+  },
+  {
+    q: "Does Fresco work on GNOME?",
+    a: "On GNOME with an X11 session, yes, full live wallpapers. On GNOME with Wayland, Mutter does not expose a live wallpaper surface, so Fresco falls back to showing a static frame of your chosen wallpaper instead of pretending to animate.",
   },
   {
     q: "Can a video wallpaper play sound?",
@@ -43,6 +47,10 @@ export const FAQ: { q: string; a: string }[] = [
   {
     q: "Does it support multiple monitors?",
     a: "Yes. You can set a different wallpaper on each display, and Fresco pauses the wallpaper per output when a window there goes fullscreen. Monitor hotplug is live on X11; on Wayland a newly plugged display picks up on the next apply (automatic hotplug lands with the v1.0 engine).",
+  },
+  {
+    q: "How is Fresco different from Wallpaper Engine?",
+    a: "Wallpaper Engine is a paid, Windows-first product that only runs on Linux through Steam Play and Proton. Fresco is free, open source (GPL-3.0), and native to Linux: no Steam, no Proton, no compatibility layer. Instead of the Steam Workshop it has a built-in catalog of curated, licensed wallpapers, and it supports X11 and Wayland layer-shell compositors directly.",
   },
   {
     q: "How is Fresco different from Hidamari, Komorebi, and mpvpaper?",
@@ -143,7 +151,7 @@ export const FORMATS = [
 
 export const DISTROS = [
   "Pop!_OS 22.04",
-  "Pop!_OS 24.04 (COSMIC, experimental)",
+  "Pop!_OS 24.04 (COSMIC)",
   "Ubuntu 22.04 / 24.04",
   "Linux Mint 21 / 22",
   "Debian 12",

@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.1.1] — 2026-07-17
 
+### Added
+- **Browser new-tab wallpaper bridge** (off by default, local-only,
+  127.0.0.1): the companion extension in `extension/` mirrors your current
+  wallpaper on new tabs — or a browser-specific wallpaper you pick via
+  right-click → "Set as browser wallpaper".
+
+### Privacy
+- Fresco can send anonymous usage statistics — a daily ping (random install
+  id, app version, distro name, desktop/compositor, session type, renderer
+  backend, decode mode, monitor count), feature-usage counts, and error kinds.
+- **Nothing is sent until you say yes**: a one-time consent dialog asks on
+  first launch, and the answer can be changed anytime in Settings →
+  "Share anonymous usage statistics".
+- No personal data, no file names, no wallpaper content is ever sent.
+
 ### Fixed
 - **Live wallpapers work on Ubuntu 24.04-based systems (COSMIC, Pop!_OS 24.04,
   Mint 22…).** The bundled renderer was built against an older libmpv and
@@ -20,6 +35,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on high-resolution videos.
 - `fresco doctor` now catches a renderer that exists but can't load, instead
   of reporting a healthy system while nothing renders.
+- **Fullscreen auto-pause now works on COSMIC.** The wallpaper pauses while a
+  window is fullscreen (no more decoding a hidden wallpaper under your video),
+  via COSMIC's native toplevel-info protocol — previously this protection was
+  silently unavailable there.
 
 ### Changed
 - **In-app updates finish themselves.** Updating now shows a real progress

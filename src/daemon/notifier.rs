@@ -301,14 +301,18 @@ fn reminder_state_path() -> PathBuf {
         .join("feedback-reminder-epoch")
 }
 
-/// Launch the Fresco GUI so the user lands one click from the feedback dialog.
+/// Launch the Fresco GUI straight into the feedback dialog. `--feedback` is
+/// forwarded to a running instance over D-Bus, so this works whether the app
+/// is open or not.
 fn open_app() {
     let result = if crate::is_flatpak() {
         std::process::Command::new("flatpak")
-            .args(["run", "io.github.dibbayajyotiroy.Fresco"])
+            .args(["run", "io.github.dibbayajyotiroy.Fresco", "--feedback"])
             .spawn()
     } else {
-        std::process::Command::new("fresco").spawn()
+        std::process::Command::new("fresco")
+            .arg("--feedback")
+            .spawn()
     };
     if let Err(e) = result {
         log::warn!("feedback reminder: launching the GUI failed: {e}");

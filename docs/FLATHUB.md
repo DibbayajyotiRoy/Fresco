@@ -28,6 +28,7 @@ Fresco is not a single-process GUI; the manifest's `finish-args` exist for these
 | Behaviour | Sandbox handling |
 |---|---|
 | Creates a desktop-level **X11** window and restacks it | `--socket=x11 --share=ipc` (X11-only app) |
+| Renders the wallpaper via **wlr-layer-shell** on Wayland (bundled mpvpaper) | **No** `--socket=wayland`; instead `--filesystem=xdg-run/wayland-0` + `wayland-1` and a `WAYLAND_DISPLAY`-restoring wrapper — see "Wayland security context & layer-shell" below |
 | GPU decode/render via libmpv (`vo=gpu`) | `--device=dri` + bundled libmpv (built in the manifest) |
 | Daemon opens the user's media files long after the picker closes | `--filesystem=host:ro` (document portal is per-file/per-process, insufficient) |
 | Writes the login **autostart** entry | `--filesystem=xdg-config/autostart:create`; the app writes `Exec=flatpak run --command=frescod …` (handled in `src/autostart.rs`) |
@@ -37,6 +38,81 @@ Fresco is not a single-process GUI; the manifest's `finish-args` exist for these
 The `--filesystem=host:ro` permission will likely draw a reviewer question —
 be ready to explain that a wallpaper daemon must re-open arbitrary local media
 paths on every login, which the document portal cannot provide.
+
+---
+
+## Wayland security context & layer-shell (reviewer note)
+
+**Problem.** Flatpak ≥ 1.16 no longer hands the app the host's Wayland socket.
+With `--socket=wayland` it creates a per-app proxy socket via the
+`wp_security_context_manager_v1` protocol, so the compositor knows the client
+is sandboxed. Compositors that implement security-context filtering then hide
+*privileged* globals from such clients — and `zwlr_layer_shell_v1` (the only
+way to render a wallpaper on wlroots-style compositors) is privileged.
+cosmic-comp is explicit about this: only clients **without** a security
+context (or with the internal `com.system76.CosmicPanel` context) receive
+privileged globals. The mechanism is not COSMIC-specific — wlroots ships
+`security-context-v1` since 0.17 and sway uses it to withhold privileged
+protocols from sandboxed clients — so this will spread, not shrink.
+
+**Observed on COSMIC (flatpak 1.16.6, verified 2026-07):**
+
+- Sandboxed registry probe sees no `zwlr_layer_shell_v1`; `frescod --check`
+  falls back to `wayland-gnome-static` (static frames only).
+- Sandboxed `mpvpaper` dies with SIGSEGV (exit 139) right after opening the
+  video; the identical host binary works perfectly on the same session.
+- `--filesystem=xdg-run/wayland-1` *alone* does **not** help: flatpak mounts
+  its security-context proxy socket over the same path (different inode).
+- Flatpak source has **no opt-out** (no env var, no permission check): the
+  proxy is skipped only when the compositor lacks the protocol.
+
+**Workaround (what the manifest does).** Drop `--socket=wayland` entirely —
+then flatpak creates no proxy — and expose the real host socket with
+`--filesystem=xdg-run/wayland-0` + `--filesystem=xdg-run/wayland-1` (the name
+is machine-dependent; 0 and 1 cover practically all sessions, and missing
+paths are silently skipped). One wrinkle: flatpak scrubs `WAYLAND_DISPLAY`
+whenever the wayland socket permission is absent, so
+`flatpak/fresco-wrapper.sh` (installed as both `/app/bin/fresco` and
+`/app/bin/frescod`, real binaries renamed `*-real`) re-derives it by globbing
+`$XDG_RUNTIME_DIR/wayland-*` before exec. Verified end-to-end on COSMIC with
+run-time flags equivalent to these finish-args:
+
+```bash
+# capability flips to layer-shell:
+flatpak run --nosocket=wayland --filesystem=xdg-run/wayland-1 \
+    --command=sh io.github.dibbayajyotiroy.Fresco \
+    -c 'export WAYLAND_DISPLAY=wayland-1; exec frescod --check'
+#   → Session: wayland (wayland-layer-shell)
+
+# mpvpaper renders instead of segfaulting (124 = killed by timeout, i.e. ran fine):
+timeout 8 flatpak run --nosocket=wayland --filesystem=xdg-run/wayland-1 \
+    --command=sh io.github.dibbayajyotiroy.Fresco \
+    -c 'export WAYLAND_DISPLAY=wayland-1; exec mpvpaper eDP-1 video.mp4'; echo $?
+#   → 124 (previously 139/SIGSEGV via the security-context proxy)
+```
+
+**What to tell reviewers.** There is no wallpaper or layer-shell portal, so a
+sandboxed wallpaper app fundamentally cannot do its job through the
+security-context socket on filtering compositors. The `--filesystem` grant is
+the minimal escape hatch: it only re-establishes what every Flatpak had
+before 1.16 (a direct compositor connection), and the app already carries
+`--filesystem=host:ro` + `--talk-name=org.freedesktop.Flatpak`, so this adds
+no meaningful sandbox weakening beyond the existing permission set. Prior
+art: Flathub's only comparable video-wallpaper app (Hidamari) avoids the
+problem by being X11-only and talking to `org.freedesktop.Flatpak` to run
+things on the host — strictly broader access than this socket grant.
+
+**Fallback if reviewers reject it.** Revert to plain `--socket=wayland` and
+document that on security-context-filtering compositors (COSMIC today) the
+Flatpak degrades to static frames — `frescod --check` handles this sanely
+(reports `wayland-gnome-static`, exit 0, no crash loop) — and recommend the
+.deb for COSMIC users. That is shippable but quietly loses the app's
+headline feature on exactly the sessions mpvpaper targets, which is why the
+workaround is the preferred submission.
+
+Side effects to keep in mind: without a security context the compositor can
+no longer associate the connection with the app ID (minor: window↔app
+matching cosmetics), and portals are unaffected.
 
 ---
 
@@ -166,3 +242,7 @@ once published: log in to [flathub.org](https://flathub.org) with the
    host's `org.gnome.desktop.background` through the granted dconf access.
 5. **`--filesystem=host:ro`** — be ready to justify it to reviewers, or switch to
    a narrower set (`home:ro` + removable media) if they prefer.
+6. **Wayland socket workaround** — after any rebuild, re-verify on a
+   security-context compositor (COSMIC): `frescod --check` must report
+   `wayland-layer-shell`, and confirm hosts whose socket is neither
+   `wayland-0` nor `wayland-1` (rare) gracefully fall back to X11/static.

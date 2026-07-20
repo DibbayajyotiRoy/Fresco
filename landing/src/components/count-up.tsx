@@ -57,7 +57,9 @@ export function CountUp({
     return () => io.disconnect();
   }, [value]);
 
-  if (value === null) return <span className={className}>{"-"}</span>;
+  // Data honesty (§7): missing value renders as a greyed em-dash, never blank.
+  if (value === null)
+    return <span className={`text-ink-faint ${className}`}>{"—"}</span>;
 
   return (
     <span ref={ref} className={className}>

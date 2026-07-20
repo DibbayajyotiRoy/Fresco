@@ -1,24 +1,11 @@
-import { ThumbsDown, ThumbsUp } from "@phosphor-icons/react/dist/ssr";
+import { SeverityBadge } from "@/components/badges";
 
-import { cn } from "@/lib/utils";
-
+/** Sentiment as a status atom: color says the answer, mono label carries the
+ *  word. Severity lane only — never chrome. */
 export function SentimentBadge({ rating }: { rating: number }) {
-  const up = rating > 0;
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium",
-        up
-          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
-          : "border-rose-500/30 bg-rose-500/10 text-rose-500"
-      )}
-    >
-      {up ? (
-        <ThumbsUp className="size-3" weight="bold" />
-      ) : (
-        <ThumbsDown className="size-3" weight="bold" />
-      )}
-      {up ? "Up" : "Down"}
-    </span>
+  return rating > 0 ? (
+    <SeverityBadge severity="ok" label="up" />
+  ) : (
+    <SeverityBadge severity="error" label="down" />
   );
 }

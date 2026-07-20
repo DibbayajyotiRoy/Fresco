@@ -52,7 +52,7 @@ function CompareValue({ value }: { value: CompareCell }) {
   if (value === true)
     return <Check className="size-4 text-ink" aria-label="Yes" />;
   if (value === false)
-    return <X className="size-4 text-ink-tertiary" aria-label="No" />;
+    return <X className="size-4 text-ink-faint" aria-label="No" />;
   return <span className="text-xs text-ink-subtle">{value}</span>;
 }
 
@@ -122,14 +122,14 @@ export default async function AlternativePage({
                   Home
                 </Link>
               </li>
-              <li aria-hidden className="text-ink-tertiary">
+              <li aria-hidden className="text-ink-faint">
                 /
               </li>
               <li className="text-ink-muted">{alt.tool} alternative</li>
             </ol>
           </nav>
 
-          <h1 className="mt-6 text-balance text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-5xl">
+          <h1 className="mt-6 text-balance font-serif text-display text-ink">
             {alt.h1}
           </h1>
           <p className="mt-5 text-pretty text-lg text-ink-subtle">{alt.lead}</p>
@@ -170,20 +170,20 @@ export default async function AlternativePage({
           {/* Focused comparison: Fresco vs this one competitor */}
           {rivalIndex > 0 && (
             <div className="mt-14">
-              <h2 className="text-2xl font-semibold tracking-tight text-ink">
+              <h2 className="font-serif text-2xl text-ink">
                 Fresco vs {alt.tool}
               </h2>
-              <div className="mt-6 overflow-hidden rounded-2xl border border-border">
+              <div className="mt-6 overflow-hidden rounded-md border border-hairline">
                 <table className="w-full border-collapse text-sm">
                   <thead>
-                    <tr className="border-b border-border">
-                      <th className="px-4 py-3 text-left font-medium text-ink-subtle">
+                    <tr className="border-b border-hairline">
+                      <th className="instrument-label px-4 py-3 text-left font-semibold">
                         Feature
                       </th>
-                      <th className="bg-lavender/[0.06] px-4 py-3 text-center font-semibold text-lavender-hover">
+                      <th className="instrument-label border-l border-hairline bg-accent/[0.06] px-4 py-3 text-center font-semibold !text-accent">
                         Fresco
                       </th>
-                      <th className="px-4 py-3 text-center font-semibold text-ink">
+                      <th className="instrument-label border-l border-hairline px-4 py-3 text-center font-semibold">
                         {alt.tool}
                       </th>
                     </tr>
@@ -192,7 +192,7 @@ export default async function AlternativePage({
                     {COMPARISON.rows.map((row) => (
                       <tr
                         key={row.label}
-                        className="border-b border-border last:border-0"
+                        className="border-b border-hairline last:border-0"
                       >
                         <th
                           scope="row"
@@ -200,12 +200,12 @@ export default async function AlternativePage({
                         >
                           {row.label}
                         </th>
-                        <td className="bg-lavender/[0.06] px-4 py-3 text-center">
+                        <td className="border-l border-hairline bg-accent/[0.06] px-4 py-3 text-center">
                           <span className="inline-flex justify-center">
                             <CompareValue value={row.values[0]} />
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="border-l border-hairline px-4 py-3 text-center">
                           <span className="inline-flex justify-center">
                             <CompareValue value={row.values[rivalIndex]} />
                           </span>
@@ -220,10 +220,10 @@ export default async function AlternativePage({
 
           {/* FAQ */}
           <div className="mt-14">
-            <h2 className="text-2xl font-semibold tracking-tight text-ink">
+            <h2 className="font-serif text-2xl text-ink">
               {alt.tool} alternative FAQ
             </h2>
-            <dl className="mt-6 flex flex-col divide-y divide-border border-t border-border">
+            <dl className="mt-6 flex flex-col divide-y divide-hairline border-t border-hairline">
               {alt.faq.map((item) => (
                 <div key={item.q} className="py-5">
                   <dt className="text-base font-medium text-ink">{item.q}</dt>
@@ -234,8 +234,8 @@ export default async function AlternativePage({
           </div>
 
           {/* Closing CTA */}
-          <div className="mt-14 rounded-2xl border border-border bg-surface-1 p-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <h2 className="text-xl font-semibold tracking-tight text-ink">
+          <div className="mt-14 rounded-md border border-hairline bg-surface p-8 text-center">
+            <h2 className="font-serif text-xl text-ink">
               Try Fresco. It is free.
             </h2>
             <p className="mx-auto mt-2 max-w-md text-sm text-ink-subtle">

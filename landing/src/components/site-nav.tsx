@@ -1,47 +1,76 @@
 import Link from "next/link";
+import { Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { RELEASES_URL } from "@/lib/site";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { getGitHubStats } from "@/lib/github";
+import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
 import { Wordmark } from "@/components/wordmark";
 
 const NAV_LINKS = [
-  { href: "#features", label: "Features" },
-  { href: "#compare", label: "Compare" },
-  { href: "#whats-new", label: "What's new" },
-  { href: "#download", label: "Download" },
+  { href: "#features", label: "Specs" },
+  { href: "#compare", label: "Brief" },
+  { href: "#whats-new", label: "Patch notes" },
+  { href: "#download", label: "Deploy" },
+  { href: "#quests", label: "Quests" },
 ];
 
-export function SiteNav() {
+export async function SiteNav() {
+  const stats = await getGitHubStats();
+
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-5">
+    <header className="sticky top-0 z-50 w-full border-b border-hairline bg-paper/95 backdrop-blur">
+      <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-6 px-5">
         <Link
           href="#top"
-          className="flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="flex items-center gap-2.5 rounded-sm"
           aria-label="Fresco home"
         >
-          <Wordmark className="h-7 w-7" />
-          <span className="text-base font-semibold tracking-tight">
-            Fresco
-          </span>
+          <span
+            aria-hidden
+            className="inline-block size-2.5 rounded-[3px] bg-accent"
+          />
+          <Wordmark className="h-6 w-6" />
+          <span className="font-serif text-xl text-ink">Fresco</span>
         </Link>
 
-        <div className="hidden items-center gap-7 md:flex">
+        <div className="hidden items-center gap-6 md:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="text-sm text-ink-subtle transition-colors hover:text-ink"
             >
               {link.label}
             </Link>
           ))}
         </div>
 
-        <Button asChild size="sm" className="font-medium">
-          <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-            Get Fresco
+        <div className="flex items-center gap-2">
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={
+              stats.stars === null
+                ? "Star Fresco on GitHub"
+                : `Star Fresco on GitHub (${stats.stars} stars)`
+            }
+            className="hidden h-8 items-center gap-1.5 rounded-sm border border-hairline px-2.5 font-mono text-meta tabular-nums text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink sm:inline-flex"
+          >
+            <Star className="size-3.5" aria-hidden />
+            {stats.stars === null ? (
+              <span className="text-ink-faint">—</span>
+            ) : (
+              stats.stars.toLocaleString("en-US")
+            )}
           </a>
-        </Button>
+          <ThemeToggle />
+          <Button asChild size="sm" className="font-medium">
+            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+              Get Fresco
+            </a>
+          </Button>
+        </div>
       </nav>
     </header>
   );

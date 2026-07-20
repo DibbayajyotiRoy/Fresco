@@ -3,18 +3,17 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
+/* Badges are instrument chips: mono 11px uppercase, hairline border, never
+   interactive. The accent variant is reserved for the one accent lane. */
 const badgeVariants = cva(
-  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-sm border px-2 py-0.5 font-mono text-meta font-medium uppercase tracking-wide",
   {
     variants: {
       variant: {
-        default:
-          "border-transparent bg-primary text-primary-foreground shadow",
-        secondary:
-          "border-transparent bg-secondary text-secondary-foreground",
-        destructive:
-          "border-transparent bg-destructive text-destructive-foreground shadow",
-        outline: "text-foreground",
+        default: "border-accent/40 bg-accent/10 text-accent",
+        secondary: "border-hairline bg-raised text-ink-subtle",
+        destructive: "border-danger/40 bg-danger/10 text-danger",
+        outline: "border-hairline text-ink-subtle",
       },
     },
     defaultVariants: {

@@ -17,6 +17,9 @@ const POLL_INTERVAL_S: u32 = 4;
 /// Widgets the polling loop updates in place.
 struct PillWidgets {
     dot: gtk4::Label,
+    /// Tiny "PLAYING" / "PAUSED" overline above the name.
+    overline: gtk4::Label,
+    /// Prettified wallpaper name (CPU% lives in the tooltip).
     label: gtk4::Label,
     hwdec: gtk4::Label,
     toggle: gtk4::Button,
@@ -34,10 +37,21 @@ pub fn build_status_pill() -> gtk4::Widget {
     dot.add_css_class("dot-off");
     pill.append(&dot);
 
+    // Two stacked lines: a tiny state overline + the wallpaper name.
+    let text_col = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    text_col.set_valign(gtk4::Align::Center);
+    let overline = gtk4::Label::new(None);
+    overline.add_css_class("pill-overline");
+    overline.set_xalign(0.0);
+    overline.set_visible(false);
+    text_col.append(&overline);
     let label = gtk4::Label::new(Some("Not running"));
+    label.add_css_class("pill-name");
+    label.set_xalign(0.0);
     label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     label.set_max_width_chars(24);
-    pill.append(&label);
+    text_col.append(&label);
+    pill.append(&text_col);
 
     let hwdec = gtk4::Label::new(None);
     hwdec.add_css_class("dim");
@@ -52,6 +66,7 @@ pub fn build_status_pill() -> gtk4::Widget {
 
     let widgets = Rc::new(PillWidgets {
         dot,
+        overline,
         label,
         hwdec,
         toggle: toggle.clone(),
@@ -130,6 +145,7 @@ fn apply_off(w: &PillWidgets) {
     w.dot.remove_css_class("dot-ok");
     w.dot.remove_css_class("dot-warn");
     w.dot.add_css_class("dot-off");
+    w.overline.set_visible(false);
     w.label.set_label("Not running");
     w.hwdec.set_visible(false);
     w.toggle.set_visible(false);
@@ -149,9 +165,13 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
     w.dot
         .add_css_class(if warn { "dot-warn" } else { "dot-ok" });
 
+    // Presentation-only restyle: overline state + prettified name in the pill,
+    // CPU% relegated to the tooltip (with any daemon error).
+    w.overline
+        .set_label(if status.paused { "PAUSED" } else { "PLAYING" });
+    w.overline.set_visible(true);
     let name = status.wallpaper.as_deref().unwrap_or("Wallpaper active");
-    let cpu = format!("{:.0}%", status.cpu_percent);
-    w.label.set_label(&format!("{name} · {cpu}"));
+    w.label.set_label(&pretty_status_name(name));
 
     match status.hwdec.as_deref() {
         Some(raw) if raw != "no" => {
@@ -170,7 +190,47 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
         w.toggle.set_tooltip_text(Some("Pause"));
     }
 
-    w.pill.set_tooltip_text(status.error.as_deref());
+    let mut tip = format!("CPU {:.0}%", status.cpu_percent);
+    if let Some(err) = status.error.as_deref() {
+        tip.push('\n');
+        tip.push_str(err);
+    }
+    w.pill.set_tooltip_text(Some(&tip));
+}
+
+/// Prettify the daemon-reported wallpaper name for the pill: strip a trailing
+/// media extension ("CAR.mp4" → "CAR") and middle-truncate very long names.
+fn pretty_status_name(raw: &str) -> String {
+    let mut n = raw.trim().to_string();
+    if let Some((stem, ext)) = n.rsplit_once('.') {
+        if !stem.is_empty()
+            && matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "mp4"
+                    | "webm"
+                    | "mkv"
+                    | "avi"
+                    | "mov"
+                    | "flv"
+                    | "gif"
+                    | "jpg"
+                    | "jpeg"
+                    | "png"
+                    | "webp"
+                    | "bmp"
+                    | "tiff"
+            )
+        {
+            n = stem.to_string();
+        }
+    }
+    let chars: Vec<char> = n.chars().collect();
+    if chars.len() > 28 {
+        let head: String = chars[..18].iter().collect();
+        let tail: String = chars[chars.len() - 8..].iter().collect();
+        n = format!("{}…{}", head.trim_end(), tail.trim_start());
+    }
+    n
 }
 
 /// Map a raw hwdec value from frescod to a friendly badge label.

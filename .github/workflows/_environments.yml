@@ -45,6 +45,11 @@ jobs:
           - { id: sway,     name: 'Sway (wlroots)',     expect: wayland-layer-shell,  comp: 'sway grim' }
           - { id: hyprland, name: 'Hyprland (wlroots)', expect: wayland-layer-shell,  comp: 'hyprland' }
           - { id: kde,      name: 'KDE Plasma (KWin)',  expect: wayland-layer-shell,  comp: 'kwin-wayland dbus-x11' }
+          # cosmic-comp isn't in the Ubuntu 24.04 archive; the System76 COSMIC
+          # PPA (added below just for this leg) provides it. Nested in Xvfb via
+          # its X11 backend — COSMIC's REAL compositor and layer-shell
+          # implementation, the environment where the 1.1.1 libmpv bug bit.
+          - { id: cosmic,   name: 'COSMIC (cosmic-comp)', expect: wayland-layer-shell, comp: 'xvfb x11-utils cosmic-comp', repo: 'ppa:system76/cosmic' }
           - { id: weston,   name: 'Weston (fallback)',  expect: wayland-gnome-static, comp: 'weston dbus-x11' }
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +64,14 @@ jobs:
 
       # Best-effort: a missing/unavailable compositor package just means this
       # environment reports FAIL — the >=min_pass gate tolerates that.
+      - name: Extra repo — ${{ matrix.id }}
+        if: matrix.repo != ''
+        run: |
+          sudo apt-get install -y --no-install-recommends software-properties-common
+          sudo add-apt-repository -y "${{ matrix.repo }}" \
+            || echo "::warning::could not add '${{ matrix.repo }}' — ${{ matrix.id }} will report FAIL"
+          sudo apt-get update -q
+
       - name: Compositor — ${{ matrix.id }}
         run: |
           sudo apt-get install -y --no-install-recommends ${{ matrix.comp }} \

@@ -12,7 +12,7 @@ default = ["gui", "daemon"]
 gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel", "dep:semver"]
 daemon = [
     "dep:x11rb", "dep:libloading", "dep:nix", "dep:wayland-client",
-    "dep:wayland-protocols-wlr",
+    "dep:wayland-protocols-wlr", "dep:cosmic-protocols",
     # Event-driven push: the daemon subscribes to Supabase Realtime over a
     # blocking websocket and raises native desktop notifications.
     "dep:ureq", "dep:tungstenite", "dep:notify-rust", "dep:semver",
@@ -48,6 +48,9 @@ wayland-client = { version = "0.31", optional = true }
 # wlr-foreign-toplevel-management: lets the daemon see fullscreen state per output
 # so it can pause that output's wallpaper (wlroots/KDE; GNOME doesn't implement it).
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
+# zcosmic-toplevel-info: COSMIC's native equivalent (its compositor lacks the wlr
+# protocol), used as a fallback so fullscreen auto-pause works on COSMIC too.
+cosmic-protocols = { version = "0.2", default-features = false, features = ["client"], optional = true }
 ureq = { version = "2", features = ["json"], optional = true }
 async-channel = { version = "2", optional = true }
 # Daemon-side event-driven notifications (Supabase Realtime + desktop notifs).

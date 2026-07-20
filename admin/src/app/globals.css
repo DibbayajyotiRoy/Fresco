@@ -3,162 +3,335 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Warm Terminal tokens ───────────────────────────────────────────────────
+   Warm-stone paper, exactly one cool accent (sky), Excel-grade density.
+   Accent = Tailwind sky (sky-600 #0284c7 light / sky-400 #38bdf8 dark).
+   Severity ramp = status only: info gray-500, warning amber-600,
+   error orange-600, critical red-600. Chrome is always stone. */
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular",
+    monospace;
+
+  /* Six-token type scale — no arbitrary sizes. */
+  --text-meta: 11px;
+  --text-meta--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-2xl: 28px;
+  --text-2xl--line-height: 32px;
+
+  /* Radius scale 6 / 8 / 12 + full — nothing else. */
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* House keyframes. Signature curve cubic-bezier(0.16, 1, 0.3, 1). */
+  --animate-fade-in: fade-in 120ms ease-out both;
+  --animate-modal-pop: modal-pop 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-drawer-in: drawer-in 180ms ease-out both;
+  --animate-row-flash: row-flash 2.4s ease-out both;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes modal-pop {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes drawer-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes row-flash {
+    0% {
+      background-color: #fef3c7;
+    }
+    40% {
+      background-color: #fef9c3;
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+}
+
+/* shadcn semantic variables, remapped to the warm-stone palette so the
+   surviving shadcn primitives (dialog, input, switch, dropdown) inherit the
+   house chrome. `accent` here is the shadcn HOVER fill (stone), never the
+   interactive sky accent — sky is used via sky-* utilities only. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  /* No display serif in this UI; keep the token pointed at the sans stack so
-     any residual `font-serif` utility degrades gracefully. */
-  --font-serif: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --color-brand: var(--brand);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--card);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar-primary: var(--primary);
+  --color-sidebar-primary-foreground: var(--primary-foreground);
+  --color-sidebar-accent: var(--accent);
+  --color-sidebar-accent-foreground: var(--accent-foreground);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--ring);
+  --color-brand: var(--ring);
 }
 
-/* ── Geist (light) ──────────────────────────────────────────────────────────
-   Vercel's design language: near-neutral surfaces, hairline borders, a single
-   blue accent reserved for links / focus / live state. Hierarchy comes from
-   tonal greys and borders, not shadows. */
 :root {
-  --radius: 0.5rem;
-  /* blue-700 #006bff — the lone accent. Big numbers stay foreground, not blue. */
-  --brand: oklch(0.576 0.214 257);
-  --background: oklch(1 0 0); /* background-100 #ffffff */
-  --foreground: oklch(0.205 0 0); /* gray-1000 #171717 */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.205 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.205 0 0);
-  --primary: oklch(0.205 0 0); /* near-black solid fill */
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0); /* gray-100 #f2f2f2 */
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.522 0 0); /* gray-900 #666 */
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.55 0.225 27); /* red-800 #ea001d */
-  --border: oklch(0.922 0 0); /* gray-300 #e6e6e6 */
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.576 0.214 257);
-  --chart-1: oklch(0.576 0.214 257);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0); /* background-200 #fafafa */
-  --sidebar-foreground: oklch(0.205 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.576 0.214 257);
+  color-scheme: light;
+  --background: #fafaf9; /* stone-50 paper */
+  --foreground: #1c1917; /* stone-900 ink */
+  --card: #ffffff;
+  --card-foreground: #1c1917;
+  --popover: #ffffff;
+  --popover-foreground: #1c1917;
+  --primary: #1c1917;
+  --primary-foreground: #fafaf9;
+  --secondary: #f5f5f4; /* stone-100 */
+  --secondary-foreground: #1c1917;
+  --muted: #f5f5f4;
+  --muted-foreground: #78716c; /* stone-500 */
+  --accent: #f5f5f4; /* shadcn hover fill — stone, NOT sky */
+  --accent-foreground: #1c1917;
+  --destructive: #f43f5e; /* rose-500 */
+  --border: #e7e5e4; /* stone-200 hairline */
+  --input: #e7e5e4;
+  --ring: #0284c7; /* sky-600 — the lone interactive accent */
+  --radius: 8px;
 }
 
-/* ── Geist (dark) ───────────────────────────────────────────────────────────
-   Near-black page, faintly lighter card surface, 10% white hairlines. */
 .dark {
-  --brand: oklch(0.66 0.18 256); /* brighter blue for dark surfaces */
-  --background: oklch(0.145 0 0); /* ~#1c1c1c page */
-  --foreground: oklch(0.97 0 0); /* #ededed */
-  --card: oklch(0.185 0 0); /* surface, a touch above the page */
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.97 0 0); /* white solid fill */
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.24 0 0);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.24 0 0);
-  --muted-foreground: oklch(0.68 0 0); /* #a1a1a1 */
-  --accent: oklch(0.26 0 0);
-  --accent-foreground: oklch(0.97 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.66 0.18 256);
-  --chart-1: oklch(0.66 0.18 256);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.165 0 0); /* slightly off the page background */
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.66 0.18 256);
-  --sidebar-primary-foreground: oklch(0.97 0 0);
-  --sidebar-accent: oklch(0.24 0 0);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.66 0.18 256);
+  color-scheme: dark;
+  --background: #0c0a09; /* stone-950 */
+  --foreground: #e5e5e5;
+  --card: #1c1917; /* stone-900 surface */
+  --card-foreground: #e5e5e5;
+  --popover: #1c1917;
+  --popover-foreground: #e5e5e5;
+  --primary: #e5e5e5;
+  --primary-foreground: #1c1917;
+  --secondary: #292524;
+  --secondary-foreground: #e5e5e5;
+  --muted: #292524;
+  --muted-foreground: #a1a1a1;
+  --accent: #292524;
+  --accent-foreground: #e5e5e5;
+  --destructive: #f43f5e;
+  --border: #292524; /* stone-800 */
+  --input: #292524;
+  --ring: #38bdf8; /* sky-400 */
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    border-color: var(--border);
   }
+
+  html,
   body {
-    @apply bg-background text-foreground;
+    overflow-x: hidden; /* no horizontal page scroll, ever */
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    letter-spacing: -0.15px;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Serif is display-only; reset the Inter tracking there. */
+  .font-serif {
+    letter-spacing: normal;
+    font-feature-settings: normal;
+  }
+
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+  .tabular,
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  *:focus-visible {
+    outline: 2px solid #0284c7;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  .dark *:focus-visible {
+    outline-color: #38bdf8;
+  }
+
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 100;
+    padding: 4px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .skip-link:focus-visible {
+    left: 8px;
+    top: 8px;
   }
 }
 
-/* Slim, neutral scrollbars that read in both light and dark mode. */
+/* ── Dark mode: wholesale remap ─────────────────────────────────────────────
+   Components author light-only in explicit stone-* utilities; dark mode is a
+   global remap. Explicit `dark:` variants still win where declared (they are
+   emitted later and also carry !important-free specificity via html.dark). */
+html.dark .bg-white {
+  background-color: #1c1917 !important;
+}
+html.dark .bg-stone-50 {
+  background-color: #1c1917 !important;
+}
+html.dark .bg-stone-100 {
+  background-color: #292524 !important;
+}
+html.dark .bg-stone-200 {
+  background-color: #44403c !important;
+}
+html.dark .bg-white\/95 {
+  background-color: rgb(28 25 23 / 0.95) !important;
+}
+html.dark .bg-stone-50\/50 {
+  background-color: rgb(41 37 36 / 0.5) !important;
+}
+html.dark .border-stone-100,
+html.dark .border-stone-200 {
+  border-color: #292524 !important;
+}
+html.dark .border-stone-300 {
+  border-color: #44403c !important;
+}
+html.dark .border-stone-400 {
+  border-color: #57534e !important;
+}
+html.dark .divide-stone-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #292524 !important;
+}
+html.dark .text-stone-900,
+html.dark .text-stone-800 {
+  color: #e5e5e5 !important;
+}
+html.dark .text-stone-700 {
+  color: #d4d4d4 !important;
+}
+html.dark .text-stone-600,
+html.dark .text-stone-500 {
+  color: #a1a1a1 !important;
+}
+html.dark .text-stone-400 {
+  color: #8a8a8a !important;
+}
+/* accent lift */
+html.dark .text-sky-600 {
+  color: #38bdf8 !important;
+}
+html.dark .text-sky-700 {
+  color: #7dd3fc !important;
+}
+html.dark .border-sky-600 {
+  border-color: #38bdf8 !important;
+}
+html.dark .border-sky-600\/40 {
+  border-color: rgb(56 189 248 / 0.4) !important;
+}
+html.dark .bg-sky-600\/10 {
+  background-color: rgb(56 189 248 / 0.1) !important;
+}
+/* hovers */
+html.dark .hover\:bg-stone-100:hover,
+html.dark .hover\:bg-stone-50:hover {
+  background-color: #292524 !important;
+}
+/* zebra */
+html.dark .odd\:bg-white:nth-child(odd) {
+  background-color: #1c1917 !important;
+}
+html.dark .even\:bg-stone-50:nth-child(even) {
+  background-color: rgb(41 37 36 / 0.6) !important;
+}
+
+/* ── Scrollbars: 6px stone pill, transparent track ─────────────────────────*/
 * {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent)
-    transparent;
+  scrollbar-color: #d6d3d1 transparent;
+}
+html.dark * {
+  scrollbar-color: #44403c transparent;
 }
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in oklch, var(--foreground) 18%, transparent);
+  background: #d6d3d1; /* stone-300 */
   border-radius: 9999px;
-  border: 3px solid transparent;
-  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--foreground) 32%, transparent);
-  background-clip: content-box;
+  background: #a8a29e; /* stone-400 */
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #44403c; /* stone-700 */
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #78716c; /* stone-500 */
 }
 
-/* Tabular figures everywhere numbers carry meaning — KPIs, tables, charts. */
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

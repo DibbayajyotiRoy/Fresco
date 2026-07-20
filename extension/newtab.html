@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+  <div id="bg-a" class="bg" aria-hidden="true"></div>
+  <div id="bg-b" class="bg" aria-hidden="true"></div>
+
+  <main class="overlay">
+    <div class="center">
+      <div id="clock" class="clock">--:--</div>
+      <div id="date" class="date"></div>
+    </div>
+  </main>
+
+  <div id="credit" class="credit" hidden>
+    <span id="wallpaper-name"></span>
+    <span class="via">via Fresco</span>
+  </div>
+
+  <div id="hint" class="hint" hidden>
+    <span>Open Fresco and enable Browser new-tab in Settings</span>
+    <button id="hint-dismiss" class="hint-dismiss" type="button" aria-label="Dismiss">&times;</button>
+  </div>
+
+  <script src="newtab.js"></script>
+</body>
+</html>

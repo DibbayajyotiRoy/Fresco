@@ -139,3 +139,100 @@ as $$
 $$;
 
 grant execute on function public.catalog_count_install(uuid) to anon;
+
+-- ── Anonymous telemetry (installs / events / errors) ─────────────────────────
+-- The app writes these with the anon key over REST. Write-only for anon: it
+-- may INSERT (and, for installs, UPDATE — required by PostgREST upsert with
+-- merge-duplicates) but never SELECT. The admin dashboard reads them with the
+-- service_role key, which bypasses RLS.
+
+-- One row per install, keyed by a random client-generated id. The app upserts
+-- on launch to refresh `last_seen` and environment columns.
+create table if not exists public.installs (
+    install_id    text primary key,
+    version       text,
+    distro        text,
+    compositor    text,
+    session       text,
+    backend       text,
+    decode        text,
+    monitor_count int,
+    first_seen    timestamptz not null default now(),
+    last_seen     timestamptz not null default now()
+);
+
+alter table public.installs enable row level security;
+
+-- Anyone with the anon key may register or refresh an install (but not read).
+drop policy if exists "anon can insert installs" on public.installs;
+create policy "anon can insert installs"
+    on public.installs for insert
+    to anon
+    with check (true);
+
+drop policy if exists "anon can update installs" on public.installs;
+create policy "anon can update installs"
+    on public.installs for update
+    to anon
+    using (true)
+    with check (true);
+
+grant insert, update on public.installs to anon;
+
+create index if not exists installs_last_seen_idx
+    on public.installs (last_seen);
+
+-- Feature-usage events ("wallpaper_set", "schedule_created", …).
+create table if not exists public.events (
+    id         bigint generated always as identity primary key,
+    install_id text,
+    name       text not null,
+    props      jsonb,
+    version    text,
+    created_at timestamptz not null default now()
+);
+
+alter table public.events enable row level security;
+
+-- Anyone with the anon key may record events (but not read them).
+drop policy if exists "anon can insert events" on public.events;
+create policy "anon can insert events"
+    on public.events for insert
+    to anon
+    with check (true);
+
+grant insert on public.events to anon;
+
+create index if not exists events_name_created_at_idx
+    on public.events (name, created_at);
+
+-- Error reports (crash kinds, backend failures, …).
+create table if not exists public.errors (
+    id         bigint generated always as identity primary key,
+    install_id text,
+    kind       text not null,
+    detail     text,
+    version    text,
+    created_at timestamptz not null default now()
+);
+
+alter table public.errors enable row level security;
+
+-- Anyone with the anon key may report errors (but not read them).
+drop policy if exists "anon can insert errors" on public.errors;
+create policy "anon can insert errors"
+    on public.errors for insert
+    to anon
+    with check (true);
+
+grant insert on public.errors to anon;
+
+create index if not exists errors_kind_created_at_idx
+    on public.errors (kind, created_at);
+
+-- ── Download attribution (added after the initial telemetry tables) ──────────
+-- `source` is the UTM-style tag the install one-liner persisted (website /
+-- github / reddit / …); `channel` is the runtime-detected packaging
+-- (deb / flatpak / other). Idempotent: safe to run on any state.
+alter table public.installs add column if not exists source  text;
+alter table public.installs add column if not exists channel text;

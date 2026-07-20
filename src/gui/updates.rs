@@ -564,6 +564,17 @@ fn finish_install_dialog(
     version: &str,
     outcome: crate::update::UpdateOutcome,
 ) {
+    crate::telemetry::event(
+        "update",
+        serde_json::json!({
+            "outcome": match &outcome {
+                crate::update::UpdateOutcome::Success => "success",
+                crate::update::UpdateOutcome::AlreadyUpToDate => "up_to_date",
+                crate::update::UpdateOutcome::Failed(_) => "failed",
+                crate::update::UpdateOutcome::Unsupported => "unsupported",
+            }
+        }),
+    );
     match outcome {
         crate::update::UpdateOutcome::Success => {
             let window = window.clone();
@@ -724,14 +735,31 @@ fn relaunch_app(window: &adw::ApplicationWindow) {
         let _ = crate::ipc::request(&crate::ipc::Request::Stop);
         let _ = super::daemon_ctl::spawn_daemon();
     }
+    // After apt replaced our binary, /proc/self/exe points at the DELETED old
+    // inode and current_exe() comes back as ".../fresco (deleted)" — spawning
+    // that fails, which is why "Restart now" used to do nothing. Strip the
+    // marker to reach the freshly installed binary at the same path, and fall
+    // back to the packaged path / PATH lookup.
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
-        if let Err(e) = std::process::Command::new(exe).spawn() {
-            log::warn!("failed to relaunch fresco: {e}");
-            return;
-        }
+        let cleaned = exe
+            .to_string_lossy()
+            .trim_end_matches(" (deleted)")
+            .to_string();
+        candidates.push(std::path::PathBuf::from(cleaned));
     }
-    if let Some(app) = window.application() {
-        app.quit();
+    candidates.push(std::path::PathBuf::from("/usr/bin/fresco"));
+    let spawned = candidates
+        .iter()
+        .filter(|c| c.is_file())
+        .any(|c| std::process::Command::new(c).spawn().is_ok())
+        || std::process::Command::new("fresco").spawn().is_ok();
+    if spawned {
+        if let Some(app) = window.application() {
+            app.quit();
+        }
+    } else {
+        log::warn!("failed to relaunch fresco after update");
     }
 }
 

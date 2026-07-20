@@ -1,12 +1,5 @@
-import { Check, Minus } from "lucide-react";
 import { DISTROS, FORMATS } from "@/lib/content";
 
-/**
- * Distro + session/compositor support, as crawlable content. Targets the
- * long-tail queries people actually search (live wallpaper hyprland, kde plasma
- * live wallpaper, sway, cosmic, pop os, mint) that the homepage otherwise only
- * mentions in passing.
- */
 const SESSIONS: { label: string; detail: string; ok: boolean }[] = [
   {
     label: "X11 (any desktop)",
@@ -25,42 +18,73 @@ const SESSIONS: { label: string; detail: string; ok: boolean }[] = [
   },
 ];
 
+const COMPOSITORS: { name: string; live: boolean }[] = [
+  { name: "cosmic", live: true },
+  { name: "hyprland", live: true },
+  { name: "sway", live: true },
+  { name: "kde plasma 6", live: true },
+  { name: "x11", live: true },
+  { name: "gnome wayland", live: false },
+];
+
+function HealthDot({ name, live }: { name: string; live: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 font-mono text-meta uppercase tracking-widest text-ink-subtle">
+      <span
+        aria-hidden
+        className={`size-1.5 rounded-full ${live ? "bg-ok" : "bg-warn"}`}
+      />
+      {name}
+      <span className="sr-only">
+        {live ? ": live wallpaper" : ": static fallback"}
+      </span>
+    </span>
+  );
+}
+
 export function Supported() {
   return (
-    <section id="supported" className="border-b border-border py-20 sm:py-28">
+    <section id="supported" className="border-b border-hairline py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <p className="text-sm font-medium text-ink-subtle">Compatibility</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <p className="instrument-label !text-ink-faint">
+              DEPLOYED ENVIRONMENTS
+            </p>
+          </div>
+          <h2 className="mt-3 font-serif text-display-sm text-ink">
             Where Fresco runs.
           </h2>
-          <p className="mt-4 text-pretty text-ink-subtle">
-            Live wallpapers on X11 and on Wayland layer-shell compositors, across
-            the popular Debian and Ubuntu based distributions.
+          <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
+            On any X11 desktop and on Wayland layer-shell compositors — COSMIC,
+            Hyprland, Sway, and KDE Plasma 6 — across the popular Debian and
+            Ubuntu distributions. GNOME Wayland gets a static-frame fallback.
+          </p>
+          <p className="mt-3 font-mono text-meta uppercase tracking-widest text-ink-faint">
+            deployed: 5 live compositors · 1 static fallback · {DISTROS.length}{" "}
+            distros · {FORMATS.length} formats
           </p>
         </div>
 
-        <div className="mt-10 grid gap-5 lg:grid-cols-2">
-          {/* Sessions / compositors */}
-          <div className="rounded-2xl border border-border bg-surface-1 p-7">
-            <h3 className="text-sm font-medium text-ink-subtle">
-              Sessions and compositors
-            </h3>
+        <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-sm border border-hairline bg-surface px-4 py-3">
+          {COMPOSITORS.map((c) => (
+            <HealthDot key={c.name} {...c} />
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-md border border-hairline bg-surface p-7">
+            <h3 className="instrument-label">sessions and compositors</h3>
             <ul className="mt-5 flex flex-col gap-4">
               {SESSIONS.map((s) => (
                 <li key={s.label} className="flex gap-3">
                   <span
-                    className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border ${
-                      s.ok
-                        ? "border-border bg-surface-2 text-ink"
-                        : "border-border bg-surface-2 text-ink-tertiary"
+                    aria-hidden
+                    className={`mt-1 font-mono text-sm leading-none ${
+                      s.ok ? "text-ok" : "text-ink-faint"
                     }`}
                   >
-                    {s.ok ? (
-                      <Check className="size-3" aria-label="Live wallpaper" />
-                    ) : (
-                      <Minus className="size-3" aria-label="Static fallback" />
-                    )}
+                    {s.ok ? "✓" : "—"}
                   </span>
                   <span>
                     <span className="text-sm font-medium text-ink">
@@ -69,36 +93,38 @@ export function Supported() {
                     <span className="block text-sm text-ink-subtle">
                       {s.detail}
                     </span>
+                    <span className="sr-only">
+                      {s.ok ? "Live wallpaper" : "Static fallback"}
+                    </span>
                   </span>
                 </li>
               ))}
             </ul>
           </div>
 
-          {/* Distros + formats */}
-          <div className="rounded-2xl border border-border bg-surface-1 p-7">
-            <h3 className="text-sm font-medium text-ink-subtle">
-              Tested distributions
-            </h3>
+          <div className="rounded-md border border-hairline bg-surface p-7">
+            <p className="instrument-label mt-0">
+              tested distributions · {DISTROS.length}
+            </p>
             <ul className="mt-5 flex flex-wrap gap-2">
               {DISTROS.map((d) => (
                 <li
                   key={d}
-                  className="rounded-md border border-border bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-muted"
+                  className="rounded-sm border border-hairline bg-raised px-2 py-0.5 font-mono text-meta text-ink-muted"
                 >
                   {d}
                 </li>
               ))}
             </ul>
 
-            <h3 className="mt-7 text-sm font-medium text-ink-subtle">
-              Supported formats
-            </h3>
+            <p className="instrument-label mt-7">
+              supported formats · {FORMATS.length}
+            </p>
             <ul className="mt-5 flex flex-wrap gap-2">
               {FORMATS.map((f) => (
                 <li
                   key={f}
-                  className="rounded-md border border-border bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-muted"
+                  className="rounded-sm border border-hairline bg-raised px-2 py-0.5 font-mono text-meta text-ink-muted"
                 >
                   {f}
                 </li>

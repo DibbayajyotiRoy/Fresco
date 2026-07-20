@@ -35,8 +35,25 @@ finish-args:
   # for the layer-shell backend (bundled mpvpaper). Fresco picks the right one
   # per session at runtime.
   - --socket=x11
-  - --socket=wayland
   - --share=ipc
+  # REVIEWER NOTE — why there is no --socket=wayland and why the wayland
+  # sockets are exposed via --filesystem instead (details: docs/FLATHUB.md,
+  # "Wayland security context & layer-shell"):
+  #   With --socket=wayland, flatpak >= 1.16 routes the app through a
+  #   wp_security_context_manager_v1 proxy socket. Compositors that filter
+  #   privileged globals for security-context clients — COSMIC's cosmic-comp
+  #   confirmed in testing (only trusted clients get privileged globals);
+  #   sway/wlroots ship the same mechanism — then hide zwlr_layer_shell_v1,
+  #   which the wallpaper backend (bundled mpvpaper) requires; without it
+  #   mpvpaper crashes (SIGSEGV) and Fresco can only show static frames.
+  #   There is no wallpaper/layer-shell portal, so the only way for a
+  #   sandboxed wallpaper app to work on these compositors is to connect to
+  #   the host's real socket. The socket name is machine-dependent;
+  #   wayland-0 + wayland-1 cover practically all sessions. flatpak scrubs
+  #   WAYLAND_DISPLAY when the wayland socket permission is absent, so a
+  #   wrapper script (fresco-wrapper.sh) restores it at launch.
+  - --filesystem=xdg-run/wayland-0
+  - --filesystem=xdg-run/wayland-1
   # GPU for mpv vo=gpu + hardware decode.
   - --device=dri
   # Read the user's media files wherever they live (the daemon opens stored
@@ -108,15 +125,52 @@ modules:
         tag: "1.4"
         commit: "8678234c163d0b0b616ec9ff6e5e0e1c87e0e6f4"
 
+  # Fresco shells out to the `ffmpeg` CLI (still frames in the daemon overview,
+  # rotated thumbnails in the library, browser-bridge poster) and to `ffprobe`
+  # (media probing in the library). The org.freedesktop.Platform.ffmpeg-full
+  # extension ships libraries only — no CLI binaries — so inside the sandbox
+  # those features would silently degrade. We build the CLI tools ourselves,
+  # statically against ffmpeg's own internal libs, so they don't conflict with
+  # the runtime/extension shared libav* that libmpv links against.
+  - name: ffmpeg-cli
+    buildsystem: autotools
+    config-opts:
+      - --disable-doc
+      - --disable-ffplay
+      - --disable-debug
+      # ffprobe stays enabled — Fresco's library probe_media uses it.
+      # Default (LGPL) feature set otherwise so common codecs work; the app is
+      # GPL-3.0 so licensing is unproblematic either way.
+    cleanup:
+      # Only the binaries are wanted; drop the static libs/headers the build
+      # installs alongside them (libmpv links the runtime's shared ffmpeg).
+      - /include
+      - /lib/libav*
+      - /lib/libsw*
+      - /lib/pkgconfig
+      - /share/ffmpeg
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+        sha256: 40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6
+
   - name: ffmpegthumbnailer
     buildsystem: cmake-ninja
     config-opts:
       - -DENABLE_GIO=ON
       - -DENABLE_THUMBNAILER=OFF
+      # The bundled unit tests don't compile against the runtime's newer
+      # ffmpeg (deprecated side-data API); we only need the library + CLI.
+      - -DENABLE_TESTS=OFF
     sources:
-      - type: archive
-        url: https://github.com/dirkvdb/ffmpegthumbnailer/archive/refs/tags/2.2.2.tar.gz
-        sha256: 8c4c42ab68144a9e2349710d42c0248407a87e7dc0ba4366891905322b331f92
+      # The 2.2.2 release still calls avcodec_decode_video2(), which was
+      # removed in the ffmpeg 7 shipped by the GNOME 48 runtime, so it no
+      # longer compiles. Upstream master switched to the send/receive decode
+      # API after 2.2.2 — pin to a master commit (post-2.3.0) instead of the
+      # release tarball until a fixed release is tagged.
+      - type: git
+        url: https://github.com/dirkvdb/ffmpegthumbnailer.git
+        commit: 43ca9e37d1ee4f0787ae78a63f49a12c072299d1
 
   - name: fresco
     buildsystem: simple
@@ -124,9 +178,17 @@ modules:
       env:
         CARGO_NET_OFFLINE: "true"
     build-commands:
+      # The ffmpeg-full extension mounts here; the directory must exist in
+      # the app or bwrap fails to set up the sandbox at all.
+      - mkdir -p /app/lib/ffmpeg
       - cargo --offline build --release --all-features
-      - install -Dm755 target/release/fresco /app/bin/fresco
-      - install -Dm755 target/release/frescod /app/bin/frescod
+      # Real binaries get a -real suffix; fresco-wrapper.sh (see its header:
+      # Wayland security-context workaround) is installed under both public
+      # names and restores WAYLAND_DISPLAY before exec'ing them.
+      - install -Dm755 target/release/fresco /app/bin/fresco-real
+      - install -Dm755 target/release/frescod /app/bin/frescod-real
+      - install -Dm755 flatpak/fresco-wrapper.sh /app/bin/fresco
+      - install -Dm755 flatpak/fresco-wrapper.sh /app/bin/frescod
       - install -Dm644 data/io.github.dibbayajyotiroy.Fresco.desktop
           /app/share/applications/io.github.dibbayajyotiroy.Fresco.desktop
       - install -Dm644 data/io.github.dibbayajyotiroy.Fresco.metainfo.xml

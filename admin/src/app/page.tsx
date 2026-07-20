@@ -1,35 +1,18 @@
-import {
-  ArrowSquareOut,
-  Bell,
-  Bug,
-  ChatCircle,
-  DownloadSimple,
-  Gauge,
-  GithubLogo,
-  Star,
-  Tag,
-  ThumbsUp,
-} from "@phosphor-icons/react/dist/ssr";
+import { ArrowSquareOut, GithubLogo } from "@phosphor-icons/react/dist/ssr";
 
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { EmptyState } from "@/components/empty-state";
+import { ErrorPanel } from "@/components/error-panel";
 import { SentimentBadge } from "@/components/sentiment-badge";
 import { DownloadsChart } from "@/components/downloads-chart";
 import { ReleaseTable } from "@/components/release-table";
+import { Panel, PanelHeader } from "@/components/panel";
+import { Badge } from "@/components/badges";
 import {
   DistributionList,
   type DistributionItem,
 } from "@/components/distribution-list";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { getFeedback, getNotifications, getReleases, getRepo } from "@/lib/data";
 import { formatNumber, formatRelative } from "@/lib/format";
 
@@ -38,8 +21,7 @@ export const revalidate = 0;
 
 const REPO_URL = "https://github.com/DibbayajyotiRoy/fresco";
 
-/** Bucket freeform values into a top-N breakdown with an "Other" rollup, so a
- *  long tail of one-off OS strings doesn't drown the common ones. */
+/** Bucket freeform values into a top-N breakdown with an "Other" rollup. */
 function topDistribution(
   values: (string | null)[],
   n = 6
@@ -74,8 +56,6 @@ export default async function OverviewPage() {
   const notifications = notificationsRes.ok ? notificationsRes.data : [];
 
   const totalDownloads = releases.reduce((s, r) => s + r.downloads, 0);
-  // Cumulative downloads (oldest -> newest) — a real growth curve for the KPI
-  // sparkline. Draws only with >= 2 releases.
   let running = 0;
   const downloadsTrend = releases.map((r) => (running += r.downloads));
   const latest = releases.at(-1) ?? null;
@@ -91,248 +71,216 @@ export default async function OverviewPage() {
   const latestNotifications = notifications.slice(0, 5);
 
   return (
-    <>
+    <div className="space-y-3">
       <PageHeader
         title="Overview"
-        description="Stars, downloads, feedback and notifications at a glance"
+        meta={`${formatNumber(totalDownloads)} downloads · ${formatNumber(feedback.length)} feedback`}
         action={
           <a
             href={REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="border-border bg-card text-foreground hover:bg-accent inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-stone-200 bg-white px-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100"
           >
             <GithubLogo className="size-3.5" weight="fill" />
             GitHub
-            <ArrowSquareOut className="text-muted-foreground size-3" />
+            <ArrowSquareOut className="size-3 text-stone-400" />
           </a>
         }
       />
 
-      <div className="flex flex-1 flex-col gap-4 p-4 md:p-5">
-        {/* KPI strip — six figures across one row at xl. */}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard
-            label="Stars"
-            value={repo ? formatNumber(repo.stars) : "—"}
-            hint={
-              repo
-                ? `${formatNumber(repo.forks)} forks · ${formatNumber(repo.watchers)} watching`
-                : (repoRes.ok ? undefined : repoRes.error)
-            }
-            icon={Star}
-          />
-          <StatCard
-            label="Downloads"
-            value={formatNumber(totalDownloads)}
-            hint={
-              releasesRes.ok
-                ? `Across ${releases.length} release${releases.length === 1 ? "" : "s"}`
-                : releasesRes.error
-            }
-            icon={DownloadSimple}
-            data={downloadsTrend}
-          />
-          <StatCard
-            label="Latest version"
-            value={latest ? latest.tag : "—"}
-            hint={
-              latest?.publishedAt
-                ? `Released ${formatRelative(latest.publishedAt)}`
-                : undefined
-            }
-            icon={Tag}
-          />
-          <StatCard
-            label="Feedback"
-            value={formatNumber(feedback.length)}
-            hint={
-              feedbackRes.ok
-                ? `${formatNumber(up)} up · ${formatNumber(down)} down`
-                : feedbackRes.error
-            }
-            icon={ChatCircle}
-          />
-          <StatCard
-            label="Satisfaction"
-            value={up + down > 0 ? `${satisfaction}%` : "—"}
-            hint="up / (up + down)"
-            icon={Gauge}
-          />
-          <StatCard
-            label="Open issues"
-            value={repo ? formatNumber(repo.openIssues) : "—"}
-            hint="issues + PRs on GitHub"
-            icon={Bug}
-          />
-        </div>
+      {/* KPI strip — six figures across one row at xl. */}
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard
+          label="Stars"
+          value={repo ? formatNumber(repo.stars) : "—"}
+          hint={
+            repo
+              ? `${formatNumber(repo.forks)} forks · ${formatNumber(repo.watchers)} watching`
+              : repoRes.ok
+                ? undefined
+                : repoRes.error
+          }
+        />
+        <StatCard
+          label="Downloads"
+          value={releasesRes.ok ? formatNumber(totalDownloads) : "—"}
+          hint={
+            releasesRes.ok
+              ? `across ${releases.length} release${releases.length === 1 ? "" : "s"}`
+              : releasesRes.error
+          }
+          data={downloadsTrend}
+        />
+        <StatCard
+          label="Latest version"
+          value={latest ? latest.tag : "—"}
+          hint={
+            latest?.publishedAt
+              ? `released ${formatRelative(latest.publishedAt)}`
+              : undefined
+          }
+        />
+        <StatCard
+          label="Feedback"
+          value={feedbackRes.ok ? formatNumber(feedback.length) : "—"}
+          hint={
+            feedbackRes.ok
+              ? `${formatNumber(up)} up · ${formatNumber(down)} down`
+              : feedbackRes.error
+          }
+        />
+        <StatCard
+          label="Satisfaction"
+          value={up + down > 0 ? `${satisfaction}%` : "—"}
+          hint="up / (up + down)"
+        />
+        <StatCard
+          label="Open issues"
+          value={repo ? formatNumber(repo.openIssues) : "—"}
+          hint="issues + PRs on GitHub"
+        />
+      </div>
 
-        {/* Main: downloads (chart + table) beside the feedback breakdowns. */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="gap-4 lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Downloads per release</CardTitle>
-              <CardDescription>
-                GitHub release asset downloads ·{" "}
-                {formatNumber(totalDownloads)} total
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {!releasesRes.ok ? (
-                <EmptyState
-                  title="Couldn't load GitHub releases"
-                  description={releasesRes.error}
-                />
-              ) : releases.length === 0 ? (
-                <EmptyState
-                  title="No releases yet"
-                  description="Published GitHub releases with assets will appear here."
-                />
-              ) : (
-                <>
-                  <DownloadsChart releases={releases} />
-                  <Separator />
-                  <ReleaseTable releases={releases} />
-                </>
-              )}
-            </CardContent>
-          </Card>
+      {/* Downloads beside the feedback breakdowns. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <Panel className="lg:col-span-2">
+          <PanelHeader
+            title="Downloads per release"
+            meta={`${formatNumber(totalDownloads)} total`}
+          />
+          {!releasesRes.ok ? (
+            <ErrorPanel
+              title="Couldn't load GitHub releases"
+              message={releasesRes.error}
+            />
+          ) : releases.length === 0 ? (
+            <EmptyState
+              title="No releases yet"
+              description="Published GitHub releases with assets will appear here."
+            />
+          ) : (
+            <div className="space-y-3">
+              <DownloadsChart releases={releases} />
+              <ReleaseTable releases={releases} />
+            </div>
+          )}
+        </Panel>
 
-          <div className="flex flex-col gap-4">
-            <Card className="gap-4">
-              <CardHeader>
-                <CardTitle>Platform</CardTitle>
-                <CardDescription>By feedback reports</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {osDist.length === 0 ? (
-                  <EmptyState
-                    className="py-8"
-                    title="No data yet"
-                    description="The OS field arrives with app feedback."
-                  />
-                ) : (
-                  <DistributionList items={osDist} total={feedback.length} />
-                )}
-              </CardContent>
-            </Card>
+        <div className="flex flex-col gap-3">
+          <Panel>
+            <PanelHeader title="Platform" meta="by feedback" />
+            {osDist.length === 0 ? (
+              <EmptyState
+                className="py-6"
+                title="No data yet"
+                description="The OS field arrives with app feedback."
+              />
+            ) : (
+              <DistributionList items={osDist} total={feedback.length} />
+            )}
+          </Panel>
 
-            <Card className="gap-4">
-              <CardHeader>
-                <CardTitle>App version</CardTitle>
-                <CardDescription>By feedback reports</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {versionDist.length === 0 ? (
-                  <EmptyState
-                    className="py-8"
-                    title="No data yet"
-                    description="The version field arrives with app feedback."
-                  />
-                ) : (
-                  <DistributionList
-                    items={versionDist}
-                    total={feedback.length}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Recent activity. */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card className="flex flex-col gap-4">
-            <CardHeader>
-              <CardTitle>Recent feedback</CardTitle>
-              <CardDescription>Latest ratings from the app</CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1">
-              {!feedbackRes.ok ? (
-                <EmptyState title="No feedback" description={feedbackRes.error} />
-              ) : recentFeedback.length === 0 ? (
-                <EmptyState
-                  title="No feedback yet"
-                  icon={ThumbsUp}
-                  description="Ratings from the app will show up here."
-                />
-              ) : (
-                <ul className="divide-border divide-y">
-                  {recentFeedback.map((f) => (
-                    <li
-                      key={f.id}
-                      className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0"
-                    >
-                      <SentimentBadge rating={f.rating} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm">
-                          {f.comment ? (
-                            f.comment
-                          ) : (
-                            <span className="text-muted-foreground italic">
-                              No comment
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-muted-foreground mt-0.5 text-xs">
-                          {[f.app_version, f.os].filter(Boolean).join(" · ") ||
-                            "unknown"}
-                        </p>
-                      </div>
-                      <span className="text-muted-foreground shrink-0 text-xs">
-                        {formatRelative(f.created_at)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="flex flex-col gap-4">
-            <CardHeader>
-              <CardTitle>Latest notifications</CardTitle>
-              <CardDescription>Most recent announcements</CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1">
-              {!notificationsRes.ok ? (
-                <EmptyState
-                  title="No notifications"
-                  description={notificationsRes.error}
-                />
-              ) : latestNotifications.length === 0 ? (
-                <EmptyState
-                  title="No notifications yet"
-                  icon={Bell}
-                  description="Create one on the Notifications page."
-                />
-              ) : (
-                <ul className="divide-border divide-y">
-                  {latestNotifications.map((n) => (
-                    <li
-                      key={n.id}
-                      className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{n.title}</p>
-                        <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
-                          {n.body}
-                        </p>
-                      </div>
-                      <Badge
-                        variant={n.published ? "default" : "secondary"}
-                        className="shrink-0"
-                      >
-                        {n.published ? "Published" : "Draft"}
-                      </Badge>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+          <Panel>
+            <PanelHeader title="App version" meta="by feedback" />
+            {versionDist.length === 0 ? (
+              <EmptyState
+                className="py-6"
+                title="No data yet"
+                description="The version field arrives with app feedback."
+              />
+            ) : (
+              <DistributionList items={versionDist} total={feedback.length} />
+            )}
+          </Panel>
         </div>
       </div>
-    </>
+
+      {/* Recent activity. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Panel>
+          <PanelHeader
+            title="Recent feedback"
+            meta={`${formatNumber(recentFeedback.length)} shown`}
+          />
+          {!feedbackRes.ok ? (
+            <ErrorPanel
+              title="Couldn't load feedback"
+              message={feedbackRes.error}
+            />
+          ) : recentFeedback.length === 0 ? (
+            <EmptyState
+              title="No feedback yet"
+              description="Ratings from the app will show up here."
+            />
+          ) : (
+            <ul className="divide-y divide-stone-200">
+              {recentFeedback.map((f) => (
+                <li
+                  key={f.id}
+                  className="flex items-start gap-3 py-2 first:pt-0 last:pb-0"
+                >
+                  <SentimentBadge rating={f.rating} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-stone-900">
+                      {f.comment ? (
+                        f.comment
+                      ) : (
+                        <span className="text-stone-400 italic">
+                          No comment
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 truncate font-mono text-meta text-stone-400">
+                      {[f.app_version, f.os].filter(Boolean).join(" · ") || "—"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-mono text-meta text-stone-400">
+                    {formatRelative(f.created_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel>
+          <PanelHeader
+            title="Latest notifications"
+            meta={`${formatNumber(latestNotifications.length)} shown`}
+          />
+          {!notificationsRes.ok ? (
+            <ErrorPanel
+              title="Couldn't load notifications"
+              message={notificationsRes.error}
+            />
+          ) : latestNotifications.length === 0 ? (
+            <EmptyState
+              title="No notifications yet"
+              description="Create one on the Notifications page."
+            />
+          ) : (
+            <ul className="divide-y divide-stone-200">
+              {latestNotifications.map((n) => (
+                <li
+                  key={n.id}
+                  className="flex items-start gap-3 py-2 first:pt-0 last:pb-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-stone-900">
+                      {n.title}
+                    </p>
+                    <p className="mt-0.5 line-clamp-1 text-sm text-stone-500">
+                      {n.body}
+                    </p>
+                  </div>
+                  <Badge label={n.published ? "published" : "draft"} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </div>
+    </div>
   );
 }

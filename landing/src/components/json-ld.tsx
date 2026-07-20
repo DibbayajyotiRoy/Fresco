@@ -1,4 +1,5 @@
 import { FAQ, FEATURE_LIST, AUTHOR } from "@/lib/content";
+import { ALTERNATIVES } from "@/lib/alternatives";
 import { GITHUB_URL, RELEASES_URL, LICENSE_URL } from "@/lib/site";
 
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.app";
@@ -38,6 +39,7 @@ export function JsonLd({
     author: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
     creator: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
     codeRepository: GITHUB_URL,
+    sameAs: [GITHUB_URL],
     programmingLanguage: ["Rust"],
     keywords:
       "live wallpaper linux, video wallpaper linux, animated wallpaper ubuntu, wallpaper engine alternative linux, hidamari alternative, live wallpaper wayland, hyprland live wallpaper, kde plasma live wallpaper",
@@ -66,6 +68,16 @@ export function JsonLd({
         name: AUTHOR.name,
         url: AUTHOR.portfolio,
         sameAs: [AUTHOR.portfolio, AUTHOR.github],
+      },
+      {
+        "@type": "ItemList",
+        name: "Fresco alternative comparisons",
+        itemListElement: ALTERNATIVES.map((alt, i) => ({
+          "@type": "ListItem",
+          position: i + 1,
+          name: `Fresco vs ${alt.tool}`,
+          url: `${SITE_URL}/alternatives/${alt.slug}`,
+        })),
       },
       {
         "@type": "FAQPage",

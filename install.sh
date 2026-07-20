@@ -20,6 +20,14 @@ echo -e "${BOLD}  Fresco — Live Wallpaper for Linux${RESET}"
 echo    "  ───────────────────────────────────"
 echo
 
+# Download-source attribution (UTM-style): the copy buttons on the website /
+# README / posts prefix the one-liner with FRESCO_SOURCE=<tag>. Persisted for
+# the app's anonymous telemetry (reported only if the user opts in). No tag =
+# "installer".
+FRESCO_SOURCE="${FRESCO_SOURCE:-installer}"
+mkdir -p "$HOME/.config/fresco" 2>/dev/null || true
+printf '%s' "$FRESCO_SOURCE" > "$HOME/.config/fresco/install-source" 2>/dev/null || true
+
 # 1. Check OS family
 if ! command -v apt-get >/dev/null 2>&1; then
   fail "Fresco requires a Debian/Ubuntu-based distro (apt-get not found)"

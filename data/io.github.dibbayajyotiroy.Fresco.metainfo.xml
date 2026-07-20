@@ -24,7 +24,11 @@
       <li>Per-wallpaper sound and volume, plus slideshow transitions (crossfade, fade, slide, Ken Burns)</li>
       <li>A wallpaper library with thumbnails, a recently-used row, and search</li>
       <li>Pause / resume, pause-on-battery, and auto-pause when a window goes fullscreen</li>
-      <li>Multi-monitor support with per-display wallpapers</li>
+      <li>Multi-monitor support with per-display wallpapers and synced video playback</li>
+      <li>Add from a link: paste a Pinterest pin or a direct video/image URL</li>
+      <li>Day and night wallpaper schedules</li>
+      <li>A curated in-app wallpaper catalog</li>
+      <li>A command palette (Ctrl+K) for fast keyboard-driven control</li>
     </ul>
     <p>
       Fresco runs on X11 and on Wayland layer-shell compositors (COSMIC,
@@ -58,6 +62,16 @@
   </branding>
 
   <releases>
+    <release version="1.1.1" date="2026-07-19">
+      <description>
+        <p>Live wallpapers now work on Ubuntu 24.04-based systems (COSMIC, Pop!_OS 24.04, Mint 22): Fresco ships one renderer per libmpv generation and picks the right one automatically. Also: paste a Pinterest or direct media link to add a wallpaper, a media-first redesign with rich metadata cards and favorites, a Ctrl+K command palette, an optional browser new-tab wallpaper bridge with a companion extension, self-finishing in-app updates, and anonymous opt-out usage statistics (disclosed in-app).</p>
+      </description>
+    </release>
+    <release version="1.1.0" date="2026-07-12">
+      <description>
+        <p>Multi-monitor video sync, schedule rotation fixes, smoother Wayland frame timing, and optional feedback reminders.</p>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-07-04">
       <description>
         <p>Rotation polish: card thumbnails follow the edited rotation; hover previews no longer play in the wrong orientation.</p>

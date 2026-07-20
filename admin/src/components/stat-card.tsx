@@ -1,53 +1,51 @@
-import type { Icon } from "@phosphor-icons/react";
-
 /**
- * Compact KPI tile in the Geist/Vercel idiom: a small uppercase label, one big
- * tabular figure, and an optional one-line hint. Dense by design so several
- * fit across a single row. An optional real sparkline draws to the right of the
- * value when given >= 2 points.
+ * Dense KPI tile: 11px uppercase mono instrument label, one big tabular
+ * figure, optional one-line hint. Absent metrics render "—" greyed — never
+ * fabricated (§7). Optional real sparkline (>= 2 points) drawn in the accent.
  */
 export function StatCard({
   label,
   value,
   hint,
-  icon: Icon,
   data,
 }: {
   label: string;
   value: string;
   hint?: string;
-  icon: Icon;
   /** Optional real series (>= 2 points). Never fabricated. */
   data?: number[];
 }) {
+  const absent = value === "—";
   return (
-    <div className="bg-card border-border rounded-lg border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground truncate text-[11px] font-medium tracking-wide uppercase">
-          {label}
-        </span>
-        <Icon className="text-muted-foreground size-4 shrink-0" weight="bold" />
-      </div>
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <span className="text-foreground text-2xl leading-none font-semibold tracking-tight tabular-nums">
+    <div className="rounded-lg border border-stone-200 bg-white p-3">
+      <span className="block truncate font-mono text-meta font-medium tracking-widest text-stone-400 uppercase">
+        {label}
+      </span>
+      <div className="mt-2 flex items-end justify-between gap-3">
+        <span
+          className={
+            "text-xl leading-none font-semibold tracking-tight tabular-nums " +
+            (absent ? "text-stone-400" : "text-stone-900")
+          }
+        >
           {value}
         </span>
-        {data && data.length >= 2 ? (
-          <Sparkline data={data} />
-        ) : null}
+        {data && data.length >= 2 ? <Sparkline data={data} /> : null}
       </div>
       {hint ? (
-        <p className="text-muted-foreground mt-2 truncate text-xs">{hint}</p>
+        <p className="mt-1.5 truncate font-mono text-meta text-stone-400">
+          {hint}
+        </p>
       ) : null}
     </div>
   );
 }
 
-/** Minimal dependency-free sparkline. Data viz, not an icon — drawn from real
- *  points only. */
+/** Dependency-free sparkline from real points only. Accent = interactivity
+ *  lane is not borrowed here — this is the data-line color from §4 charts. */
 function Sparkline({ data }: { data: number[] }) {
   const w = 72;
-  const h = 26;
+  const h = 22;
   const max = Math.max(...data);
   const min = Math.min(...data);
   const range = max - min || 1;
@@ -70,8 +68,8 @@ function Sparkline({ data }: { data: number[] }) {
     >
       <polyline
         points={points}
-        stroke="var(--brand)"
-        strokeWidth={1.5}
+        className="stroke-sky-600 dark:stroke-sky-400"
+        strokeWidth={1.25}
         strokeLinecap="round"
         strokeLinejoin="round"
       />

@@ -1,7 +1,18 @@
 import "server-only";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import type { CatalogItem, Feedback, Issue, Notification, Release, Repo } from "@/lib/types";
+import type {
+  CatalogItem,
+  Feedback,
+  Issue,
+  Notification,
+  Release,
+  Repo,
+  FeatureEvent,
+  Install,
+  TelemetryError,
+  TelemetryEvent,
+} from "@/lib/types";
 
 const GITHUB_REPO = process.env.GITHUB_REPO || "DibbayajyotiRoy/fresco";
 
@@ -230,6 +241,103 @@ export async function getIssues(): Promise<DataResult<Issue[]>> {
     const message = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, error: `Failed to reach GitHub: ${message}` };
   }
+}
+
+/** Fetch all install rows, most recently seen first. */
+export async function getInstalls(): Promise<DataResult<Install[]>> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const { data, error } = await supabase
+    .from("installs")
+    .select(
+      "install_id, version, distro, compositor, session, backend, decode, source, channel, monitor_count, first_seen, last_seen"
+    )
+    .order("last_seen", { ascending: false })
+    .limit(10000);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: (data ?? []) as Install[] };
+}
+
+/** Fetch telemetry events created since `sinceIso`, newest first. */
+export async function getEventsSince(
+  sinceIso: string
+): Promise<DataResult<TelemetryEvent[]>> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const { data, error } = await supabase
+    .from("events")
+    .select("install_id, name, created_at")
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .limit(10000);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: (data ?? []) as TelemetryEvent[] };
+}
+
+/**
+ * Fetch events (with props) for a specific set of event names since
+ * `sinceIso`, newest first. Filtered server-side so we never pull the
+ * whole events table just to inspect a couple of features.
+ */
+export async function getFeatureEventsSince(
+  sinceIso: string,
+  names: string[]
+): Promise<DataResult<FeatureEvent[]>> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const { data, error } = await supabase
+    .from("events")
+    .select("install_id, name, props, created_at")
+    .in("name", names)
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .limit(10000);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: (data ?? []) as FeatureEvent[] };
+}
+
+/** Fetch error reports created since `sinceIso`, newest first. */
+export async function getErrorsSince(
+  sinceIso: string
+): Promise<DataResult<TelemetryError[]>> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const { data, error } = await supabase
+    .from("errors")
+    .select("id, install_id, kind, detail, version, created_at")
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .limit(10000);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: (data ?? []) as TelemetryError[] };
 }
 
 /** Fetch all catalog items, newest first. */

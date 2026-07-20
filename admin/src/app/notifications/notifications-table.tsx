@@ -7,18 +7,19 @@ import {
   PencilSimple,
   Trash,
 } from "@phosphor-icons/react/dist/ssr";
-import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { toast } from "@/components/toaster";
+import { confirm } from "@/components/confirm-dialog";
+import { Badge } from "@/components/badges";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DataTable,
+  NullCell,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "@/components/data-table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,24 +28,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { NotificationDialog } from "@/app/notifications/notification-dialog";
 import { deleteNotification, setPublished } from "@/app/notifications/actions";
-import { formatDate } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import type { Notification } from "@/lib/types";
 
 function PublishToggle({ notification }: { notification: Notification }) {
   const [checked, setChecked] = React.useState(notification.published);
   const [pending, startTransition] = React.useTransition();
 
-  // Keep in sync if the server data changes after a revalidate.
   React.useEffect(() => {
     setChecked(notification.published);
   }, [notification.published]);
@@ -74,18 +66,18 @@ function PublishToggle({ notification }: { notification: Notification }) {
 
 function RowActions({ notification }: { notification: Notification }) {
   const [editOpen, setEditOpen] = React.useState(false);
-  const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const [pending, startTransition] = React.useTransition();
+  const [, startTransition] = React.useTransition();
 
-  function onDelete() {
+  async function onDelete() {
+    const ok = await confirm({
+      title: "Delete notification?",
+      description: `This permanently removes "${notification.title}". This action cannot be undone.`,
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await deleteNotification(notification.id);
-      if (result.ok) {
-        toast.success("Notification deleted");
-        setConfirmOpen(false);
-      } else {
-        toast.error(result.error);
-      }
+      if (result.ok) toast.success("Notification deleted");
+      else toast.error(result.error);
     });
   }
 
@@ -93,22 +85,22 @@ function RowActions({ notification }: { notification: Notification }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-8">
+          <button
+            type="button"
+            className="inline-flex size-6 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-900"
+          >
             <DotsThree className="size-4" weight="bold" />
             <span className="sr-only">Open actions</span>
-          </Button>
+          </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="rounded-md border-stone-200">
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>
-            <PencilSimple className="size-4" />
+            <PencilSimple className="size-3.5" />
             Edit
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onSelect={() => setConfirmOpen(true)}
-          >
-            <Trash className="size-4" />
+          <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash className="size-3.5" />
             Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -119,30 +111,6 @@ function RowActions({ notification }: { notification: Notification }) {
         open={editOpen}
         onOpenChange={setEditOpen}
       />
-
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete notification?</DialogTitle>
-            <DialogDescription>
-              This permanently removes &ldquo;{notification.title}&rdquo;. This
-              action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmOpen(false)}
-              disabled={pending}
-            >
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={onDelete} disabled={pending}>
-              {pending ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
@@ -153,60 +121,62 @@ export function NotificationsTable({
   notifications: Notification[];
 }) {
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Title</TableHead>
-          <TableHead className="w-[120px]">Status</TableHead>
-          <TableHead className="w-[90px]">Link</TableHead>
-          <TableHead className="w-[140px]">Created</TableHead>
-          <TableHead className="w-[110px] text-right">Published</TableHead>
-          <TableHead className="w-[48px]" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <DataTable>
+      <THead>
+        <TR>
+          <TH>Title</TH>
+          <TH className="w-[100px]">Status</TH>
+          <TH className="w-[70px]">Link</TH>
+          <TH className="hidden w-[170px] md:table-cell">Created</TH>
+          <TH className="w-[90px] text-right">Published</TH>
+          <TH className="w-[44px]" />
+        </TR>
+      </THead>
+      <TBody>
         {notifications.map((n) => (
-          <TableRow key={n.id}>
-            <TableCell className="max-w-[320px]">
-              <div className="truncate font-medium">{n.title}</div>
-              <div className="text-muted-foreground line-clamp-1 text-xs">
+          <TR key={n.id}>
+            <TD>
+              <span className="block truncate text-sm font-medium text-stone-900">
+                {n.title}
+              </span>
+              <span className="block truncate font-mono text-meta text-stone-400">
                 {n.body}
-              </div>
-            </TableCell>
-            <TableCell>
-              <Badge variant={n.published ? "default" : "secondary"}>
-                {n.published ? "Published" : "Draft"}
-              </Badge>
-            </TableCell>
-            <TableCell>
+              </span>
+            </TD>
+            <TD>
+              <Badge label={n.published ? "published" : "draft"} />
+            </TD>
+            <TD>
               {n.url ? (
                 <a
                   href={n.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-primary inline-flex items-center gap-1 text-xs hover:underline"
+                  className="inline-flex items-center gap-1 text-sm text-sky-700 hover:underline"
                 >
                   <LinkSimple className="size-3" weight="bold" />
                   Link
                 </a>
               ) : (
-                <span className="text-muted-foreground text-xs">—</span>
+                <NullCell />
               )}
-            </TableCell>
-            <TableCell className="text-muted-foreground font-mono text-xs">
-              {formatDate(n.created_at)}
-            </TableCell>
-            <TableCell className="text-right">
-              <div className="flex justify-end">
+            </TD>
+            <TD className="hidden md:table-cell">
+              <span className="font-mono text-meta text-stone-500">
+                {formatDateTime(n.created_at)}
+              </span>
+            </TD>
+            <TD className="text-right">
+              <span className="flex justify-end">
                 <PublishToggle notification={n} />
-              </div>
-            </TableCell>
-            <TableCell>
+              </span>
+            </TD>
+            <TD className="text-right">
               <RowActions notification={n} />
-            </TableCell>
-          </TableRow>
+            </TD>
+          </TR>
         ))}
-      </TableBody>
-    </Table>
+      </TBody>
+    </DataTable>
   );
 }

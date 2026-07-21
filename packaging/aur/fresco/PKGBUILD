@@ -46,6 +46,12 @@ package() {
     "$pkgdir/usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop"
   install -Dm644 "data/icons/io.github.dibbayajyotiroy.Fresco.svg" \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.dibbayajyotiroy.Fresco.svg"
+  # Fixed-size PNGs: some icon themes (e.g. Deepin 25's "bloom") never look in
+  # scalable/, so ship raster fallbacks that hicolor inheritance always finds.
+  for _size in 48 64 128 256 512; do
+    install -Dm644 "data/icons/hicolor/${_size}x${_size}/apps/io.github.dibbayajyotiroy.Fresco.png" \
+      "$pkgdir/usr/share/icons/hicolor/${_size}x${_size}/apps/io.github.dibbayajyotiroy.Fresco.png"
+  done
   install -Dm644 "data/io.github.dibbayajyotiroy.Fresco.metainfo.xml" \
     "$pkgdir/usr/share/metainfo/io.github.dibbayajyotiroy.Fresco.metainfo.xml"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

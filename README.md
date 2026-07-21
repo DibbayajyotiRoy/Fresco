@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="data/icons/io.github.dibbayajyotiroy.Fresco.svg" width="112" alt="Fresco logo" />
+<img src="data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png" width="112" alt="Fresco logo" />
 
 # Fresco
 
-**Live wallpapers for Linux** — set any video, GIF, or image as an animated desktop wallpaper. A free, open-source **Wallpaper Engine alternative** for **X11 and Wayland** (COSMIC, Hyprland, Sway, KDE Plasma 6).
+**Live wallpapers for Linux** — set any video, GIF, or image as an animated desktop wallpaper. A free, open-source **Wallpaper Engine alternative** for **X11 and Wayland** (COSMIC, Hyprland, Sway, KDE Plasma 6, Deepin DDE).
 
 [![Release](https://img.shields.io/github/v/release/DibbayajyotiRoy/fresco?style=flat-square&label=release)](https://github.com/DibbayajyotiRoy/fresco/releases/latest)
 [![License](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
@@ -32,6 +32,7 @@ Fresco is a video wallpaper app for the Linux desktop: pick a video, GIF, image,
 - **Built-in catalog** — browse curated, properly licensed wallpapers in-app
 - **Command palette** — Ctrl+K to set any wallpaper or reach any feature from the keyboard
 - **Fullscreen auto-pause** — per monitor, including on COSMIC; plus pause-on-battery
+- **Deepin DDE support** — on Deepin 25, Fresco adapts the DDE desktop automatically so live wallpapers show through with desktop icons intact
 - **Crop & rotate editor**, per-wallpaper sound/volume, slideshow transitions, and a searchable library
 
 ## Supported environments
@@ -39,6 +40,7 @@ Fresco is a video wallpaper app for the Linux desktop: pick a video, GIF, image,
 | Environment | Live wallpaper |
 |---|---|
 | X11 (GNOME, Cinnamon, XFCE, MATE, …) | ✅ |
+| Deepin 25 (DDE, X11) | ✅ auto DDE adaptation |
 | COSMIC (Wayland) | ✅ layer-shell |
 | Hyprland | ✅ layer-shell |
 | Sway | ✅ layer-shell |

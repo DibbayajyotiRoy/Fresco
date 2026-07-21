@@ -4,6 +4,30 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] — 2026-07-22
+
+### Added
+- **Deepin 25 (DDE) support** ([#2]). On Deepin's DDE desktop, the X11
+  wallpaper window was covered by DDE's own opaque desktop window. Fresco now
+  detects DDE and makes its wallpaper transparent via the DDE Appearance DBus
+  service (saving the original and restoring it on stop, clear, or crash
+  recovery), so live wallpapers show through with desktop icons intact. If
+  DBus is unavailable it falls back to restacking above the DDE desktop
+  window.
+- Deepin 25 (crimson) added to the distro CI matrix (build + clean-install),
+  plus an install-time check that all icon sizes and the `.desktop` entry
+  land correctly on every distro.
+
+### Fixed
+- **App icon missing under Deepin's bloom icon theme** ([#1]). The icon was
+  shipped only as `hicolor/scalable` SVG, which bloom (and other
+  fixed-size-only themes) never look up. The packages now also install
+  48/64/128/256/512 px PNGs into hicolor, and the .deb refreshes the icon
+  cache in postinst/postrm.
+
+[#1]: https://github.com/DibbayajyotiRoy/fresco/issues/1
+[#2]: https://github.com/DibbayajyotiRoy/fresco/issues/2
+
 ## [1.1.2] — 2026-07-20
 
 ### Added

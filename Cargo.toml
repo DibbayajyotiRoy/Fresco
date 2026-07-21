@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.2"
+version = "1.1.3"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -95,4 +95,14 @@ assets = [
     ["scripts/fresco-update.sh", "usr/lib/fresco/fresco-update.sh", "755"],
     ["data/io.github.dibbayajyotiroy.Fresco.desktop", "usr/share/applications/", "644"],
     ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    # Fixed-size PNGs: some icon themes (e.g. Deepin 25's "bloom") never look in
+    # scalable/, so ship raster fallbacks that hicolor inheritance always finds.
+    ["data/icons/hicolor/48x48/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/48x48/apps/", "644"],
+    ["data/icons/hicolor/64x64/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/64x64/apps/", "644"],
+    ["data/icons/hicolor/128x128/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
+    ["data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["data/icons/hicolor/512x512/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
 ]
+# postinst/postrm refresh the icon cache and desktop database so the icon shows
+# up immediately (Deepin's bloom theme relies on a fresh hicolor cache).
+maintainer-scripts = "packaging/debian"

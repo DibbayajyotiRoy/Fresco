@@ -15,6 +15,12 @@ name: Distro matrix
 #
 # Pop!_OS and elementary OS have no official container images; both are Ubuntu
 # 22.04 derivatives, so we run them on ubuntu:22.04 and add their repos.
+#
+# Deepin 25 "crimson" uses the official linuxdeepin/deepin:crimson image
+# (beige = V23). It is apt-based with a Debian 12-generation library set
+# (libmpv2), and its repos carry every build dep, so the standard bootstrap
+# works. Coverage added for the packaging/runtime bugs a Deepin 25 user hit
+# in issues #1 and #2.
 
 on:
   workflow_dispatch:
@@ -48,6 +54,7 @@ jobs:
           - { id: mint-22,       name: 'Linux Mint 22',  image: 'linuxmintd/mint22-amd64' }
           - { id: popos-2204,    name: 'Pop!_OS 22.04',  image: 'ubuntu:22.04', repo: 'ppa:system76/pop' }
           - { id: elementary-7,  name: 'elementary OS 7', image: 'ubuntu:22.04', repo: 'ppa:elementary-os/stable' }
+          - { id: deepin-25,     name: 'Deepin 25',      image: 'linuxdeepin/deepin:crimson' }
     steps:
       - name: Bootstrap container
         env:
@@ -126,6 +133,7 @@ jobs:
           - { id: mint-22,       name: 'Linux Mint 22',  image: 'linuxmintd/mint22-amd64' }
           - { id: popos-2204,    name: 'Pop!_OS 22.04',  image: 'ubuntu:22.04', repo: 'ppa:system76/pop' }
           - { id: elementary-7,  name: 'elementary OS 7', image: 'ubuntu:22.04', repo: 'ppa:elementary-os/stable' }
+          - { id: deepin-25,     name: 'Deepin 25',      image: 'linuxdeepin/deepin:crimson' }
     steps:
       # NOTE: a CLEAN container — no -dev packages. apt must resolve every
       # runtime dependency declared in Cargo.toml [package.metadata.deb] on its
@@ -160,6 +168,44 @@ jobs:
           DEB="./$(ls deb/fresco_*.deb | head -1)"
           echo "Installing $DEB"
           apt-get install -y "$DEB"
+
+      - name: Smoke test — icon + .desktop are installed (issue #1)
+        # Deepin 25's icon theme never fell back to scalable/, so the app icon
+        # was missing until raster hicolor sizes shipped. Assert every icon the
+        # .deb declares actually lands on disk, both via dpkg's file list and
+        # directly, and that the .desktop Icon= name matches the icon basename.
+        run: |
+          set -e
+          APP=io.github.dibbayajyotiroy.Fresco
+          fail=0
+          files="/usr/share/icons/hicolor/scalable/apps/$APP.svg"
+          for size in 48x48 64x64 128x128 256x256 512x512; do
+            files="$files /usr/share/icons/hicolor/$size/apps/$APP.png"
+          done
+          for f in $files; do
+            if ! dpkg -L fresco | grep -qx "$f"; then
+              echo "::error::$f not declared in the fresco package"
+              fail=1
+            fi
+            if [ ! -f "$f" ]; then
+              echo "::error::$f missing on disk after install"
+              fail=1
+            else
+              echo "ok: $f"
+            fi
+          done
+          desktop=/usr/share/applications/$APP.desktop
+          if [ ! -f "$desktop" ]; then
+            echo "::error::$desktop missing on disk after install"
+            fail=1
+          elif ! grep -qx "Icon=$APP" "$desktop"; then
+            echo "::error::$desktop Icon= does not match '$APP'"
+            grep '^Icon=' "$desktop" || echo "(no Icon= line)"
+            fail=1
+          else
+            echo "ok: $desktop Icon=$APP"
+          fi
+          exit $fail
 
       - name: Smoke test — binaries load all shared libraries
         # ldd -r resolves data + function relocations; a missing lib or symbol

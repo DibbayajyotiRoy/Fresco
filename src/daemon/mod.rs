@@ -2,6 +2,7 @@
 //! reconciles them against the config, and serves IPC control commands.
 
 mod control;
+mod dde;
 mod fullscreen;
 pub mod monitors;
 pub mod mpv;
@@ -293,6 +294,9 @@ pub struct Daemon {
     started_at: Instant,
     last_heal_check: Instant,
     heals: u32,
+    /// Deepin DDE quirk (issue #2): whether/how DDE's covering desktop window
+    /// is being handled. `Inactive` on every other desktop.
+    dde_mode: dde::Mode,
 }
 
 impl Daemon {
@@ -320,6 +324,7 @@ impl Daemon {
             started_at: Instant::now(),
             last_heal_check: Instant::now(),
             heals: 0,
+            dde_mode: dde::Mode::Inactive,
         })
     }
 
@@ -356,6 +361,15 @@ impl Daemon {
         // Fresh renderers start unpaused (applied_paused = false); one
         // reconcile applies whatever the folded pause sources currently say.
         self.reconcile_pause();
+
+        // Deepin DDE (issue #2): dde-shell's own opaque desktop window covers
+        // ours. Make DDE's wallpaper transparent (or restack above it).
+        if crate::capability::is_deepin_dde() && !self.renderers.is_empty() {
+            let monitors: Vec<String> = self.monitors.iter().map(|m| m.connector.clone()).collect();
+            let windows: Vec<x11rb::protocol::xproto::Window> =
+                self.renderers.iter().map(|r| r.window.window).collect();
+            self.dde_mode = dde::apply(&self.conn, &self.atoms, screen.root, &monitors, &windows);
+        }
         Ok(())
     }
 
@@ -573,6 +587,13 @@ impl Daemon {
             let _ = x11win::lower(&self.conn, r.window.window);
         }
         let _ = self.conn.flush();
+        // DDE restack fallback: lowering puts us back under dde-shell's
+        // desktop window, so re-assert the ABOVE-sibling stacking each time.
+        if self.dde_mode == dde::Mode::Restack {
+            let windows: Vec<x11rb::protocol::xproto::Window> =
+                self.renderers.iter().map(|r| r.window.window).collect();
+            dde::restack_above_dde_desktop(&self.conn, &self.atoms, self.screen().root, &windows);
+        }
     }
 
     /// Tear down all renderers, terminating each mpv instance BEFORE destroying
@@ -802,6 +823,11 @@ impl Daemon {
 
     fn shutdown(&mut self) {
         overview::restore();
+        // Put the user's original DDE wallpaper back (no-op off DDE / when
+        // nothing was saved).
+        if crate::capability::is_deepin_dde() {
+            dde::restore();
+        }
         self.teardown_renderers();
         std::fs::remove_file(crate::ipc::socket_path()).ok();
         log::info!("frescod stopped");
@@ -1246,6 +1272,12 @@ fn run_x11() -> Result<()> {
         // Safety net: if a prior run was killed (not Stopped) it may have left
         // our static frame as the background — put the user's original back.
         overview::restore();
+        // Same for DDE: a crashed run may have left the transparent wallpaper
+        // applied with the original saved on disk — restore it (no-op
+        // otherwise).
+        if crate::capability::is_deepin_dde() {
+            dde::restore();
+        }
         log::info!("wallpaper disabled (enabled=false) — exiting");
         return Ok(());
     }

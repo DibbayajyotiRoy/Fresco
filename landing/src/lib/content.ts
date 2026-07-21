@@ -156,6 +156,7 @@ export const DISTROS = [
   "Linux Mint 21 / 22",
   "Debian 12",
   "elementary OS 7",
+  "Deepin 25 (DDE)",
 ];
 
 /**

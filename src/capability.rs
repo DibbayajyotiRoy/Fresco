@@ -87,6 +87,31 @@ fn classify(
     }
 }
 
+/// Is this session Deepin's DDE? Its `dde-shell` paints an opaque desktop
+/// window that covers other DESKTOP-type windows, so the X11 backend applies
+/// extra quirks (see `daemon::dde`).
+pub fn is_deepin_dde() -> bool {
+    classify_deepin_dde(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+    )
+}
+
+/// Pure DDE classification, testable without touching the process environment.
+/// Desktop vars are colon-separated lists (e.g. "Deepin:GNOME"); a segment
+/// containing "deepin" or equal to "dde" (case-insensitive) means DDE.
+fn classify_deepin_dde(current_desktop: Option<&str>, session_desktop: Option<&str>) -> bool {
+    [current_desktop, session_desktop]
+        .into_iter()
+        .flatten()
+        .any(|v| {
+            v.split(':').any(|seg| {
+                let s = seg.trim().to_ascii_lowercase();
+                s.contains("deepin") || s == "dde"
+            })
+        })
+}
+
 fn is_gnome(desktop: Option<&str>) -> bool {
     desktop
         .map(|d| d.to_ascii_lowercase().contains("gnome"))
@@ -171,6 +196,20 @@ mod tests {
                 "desktop {d}"
             );
         }
+    }
+
+    #[test]
+    fn deepin_dde_detection() {
+        for d in ["Deepin", "deepin", "DDE", "dde", "X-Deepin", "Deepin:GNOME"] {
+            assert!(classify_deepin_dde(Some(d), None), "current {d}");
+            assert!(classify_deepin_dde(None, Some(d)), "session {d}");
+        }
+        for d in ["GNOME", "KDE", "pop:GNOME", "ubuntu:GNOME", "kddesomething", ""] {
+            assert!(!classify_deepin_dde(Some(d), None), "current {d}");
+        }
+        assert!(!classify_deepin_dde(None, None));
+        // Second var still detected when the first is a non-DDE desktop.
+        assert!(classify_deepin_dde(Some("GNOME"), Some("dde")));
     }
 
     #[test]

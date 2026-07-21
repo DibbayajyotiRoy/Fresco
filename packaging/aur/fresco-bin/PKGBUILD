@@ -35,6 +35,8 @@ package() {
   else
     tar --zstd -xf data.tar.zst -C "$pkgdir"
   fi
+  # The .deb already ships the hicolor fixed-size PNG icons (48–512px) plus the
+  # scalable SVG, so extracting data.tar above installs them — nothing extra.
   # Debian's libmpv soname differs from Arch's; the app dlopens libmpv.so.2
   # then .so.1 then .so, and Arch's mpv package provides libmpv.so.2 — fine.
   install -Dm644 "$pkgdir/usr/share/doc/fresco/copyright" \

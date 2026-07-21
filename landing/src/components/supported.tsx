@@ -7,6 +7,11 @@ const SESSIONS: { label: string; detail: string; ok: boolean }[] = [
     ok: true,
   },
   {
+    label: "Deepin 25 (DDE)",
+    detail: "Auto DDE adaptation — icons stay visible",
+    ok: true,
+  },
+  {
     label: "Wayland layer-shell",
     detail: "COSMIC, Hyprland, Sway, KDE Plasma 6, wlroots",
     ok: true,
@@ -24,6 +29,7 @@ const COMPOSITORS: { name: string; live: boolean }[] = [
   { name: "sway", live: true },
   { name: "kde plasma 6", live: true },
   { name: "x11", live: true },
+  { name: "deepin dde", live: true },
   { name: "gnome wayland", live: false },
 ];
 
@@ -56,12 +62,13 @@ export function Supported() {
             Where Fresco runs.
           </h2>
           <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
-            On any X11 desktop and on Wayland layer-shell compositors — COSMIC,
-            Hyprland, Sway, and KDE Plasma 6 — across the popular Debian and
-            Ubuntu distributions. GNOME Wayland gets a static-frame fallback.
+            On any X11 desktop — including Deepin 25's DDE — and on Wayland
+            layer-shell compositors — COSMIC, Hyprland, Sway, and KDE Plasma 6 —
+            across the popular Debian and Ubuntu distributions. GNOME Wayland
+            gets a static-frame fallback.
           </p>
           <p className="mt-3 font-mono text-meta uppercase tracking-widest text-ink-faint">
-            deployed: 5 live compositors · 1 static fallback · {DISTROS.length}{" "}
+            deployed: 6 live compositors · 1 static fallback · {DISTROS.length}{" "}
             distros · {FORMATS.length} formats
           </p>
         </div>

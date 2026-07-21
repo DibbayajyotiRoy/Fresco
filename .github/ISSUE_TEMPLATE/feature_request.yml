@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an idea or improvement for Fresco
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the problem or use case, not just the solution.
+      placeholder: "I want different wallpapers on weekdays vs weekends, but schedules only support time-of-day."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: "Add a day-of-week condition to schedule slots."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)

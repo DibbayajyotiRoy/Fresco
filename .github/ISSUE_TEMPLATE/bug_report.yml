@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in Fresco isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: One or two sentences — what you did, and what went wrong.
+      placeholder: "Set a .webm as wallpaper on COSMIC; the screen stays black after login."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "The video wallpaper should resume on login."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Fresco
+        2. Add a video and click Set
+        3. Log out and back in
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Fresco version
+      description: "`fresco --version`"
+      placeholder: "1.1.2"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Desktop environment & display server
+      description: "`echo $XDG_CURRENT_DESKTOP $XDG_SESSION_TYPE`"
+      placeholder: "COSMIC wayland"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - .deb / install.sh
+        - Flatpak
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots (optional)
+      description: Terminal output, `journalctl --user -u fresco*`, or a screenshot.
+      render: shell

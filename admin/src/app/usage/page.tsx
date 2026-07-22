@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorPanel } from "@/components/error-panel";
+import { Notice } from "@/components/notice";
 import { Panel, PanelHeader } from "@/components/panel";
 import {
   DataTable,
@@ -22,6 +23,7 @@ import {
   getInstalls,
 } from "@/lib/data";
 import type { FeatureEvent } from "@/lib/types";
+import { BREAKDOWN_HELP, KNOWN_EVENTS, eventMeta } from "@/lib/events";
 import { formatNumber, formatRelative, truncateId } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -179,9 +181,15 @@ export default async function UsagePage() {
     if (Date.parse(e.created_at) >= cutoff7d) entry.c7 += 1;
     featureCounts.set(e.name, entry);
   }
+  // Seed every instrumented event at zero so "never used" is a visible row
+  // rather than a missing one — the difference between "no data" and "nobody
+  // uses this" is the whole point of the panel.
+  for (const name of KNOWN_EVENTS) {
+    if (!featureCounts.has(name)) featureCounts.set(name, { c7: 0, c30: 0 });
+  }
   const features = [...featureCounts.entries()]
     .map(([name, c]) => ({ name, ...c }))
-    .sort((a, b) => b.c30 - a.c30);
+    .sort((a, b) => b.c30 - a.c30 || a.name.localeCompare(b.name));
 
   const depthEvents = depthRes.ok ? depthRes.data : [];
   const linkRows = linkBreakdown(depthEvents, cutoff7d);
@@ -189,12 +197,18 @@ export default async function UsagePage() {
 
   const breakdowns: { title: string; items: DistributionItem[] }[] = [
     { title: "Distro", items: distroDist },
-    { title: "Compositor", items: compositorDist },
-    { title: "Session", items: sessionDist },
-    { title: "Decode", items: decodeDist },
+    { title: "Desktop", items: compositorDist },
+    { title: "Session type", items: sessionDist },
+    { title: "Video decode", items: decodeDist },
     { title: "Download source", items: sourceDist },
-    { title: "Channel", items: channelDist },
+    { title: "Install channel", items: channelDist },
   ];
+
+  // Events can only be sent by an install, so events with zero recorded
+  // installs is not a real zero — it means the heartbeat write is failing
+  // while the event write succeeds. Surfaced rather than left to be misread
+  // as "nobody is using the app".
+  const installsBroken = installsRes.ok && installs.length === 0 && events.length > 0;
 
   return (
     <div className="space-y-3">
@@ -207,26 +221,64 @@ export default async function UsagePage() {
         }
       />
 
+      {installsBroken ? (
+        <Notice
+          label="install telemetry not recording"
+          title={`${formatNumber(events.length)} events arrived from installs that were never registered.`}
+        >
+          <p>
+            Every metric below that counts installs — active today/7d/30d, total
+            installs, and all six environment breakdowns — reads zero for this
+            reason, not because the app is unused. The client posts{" "}
+            <code className="font-mono text-[0.85em]">source</code> and{" "}
+            <code className="font-mono text-[0.85em]">channel</code> columns that
+            the <code className="font-mono text-[0.85em]">installs</code> table
+            does not have, so PostgREST rejects every heartbeat and the app logs
+            it at debug level. Feature usage is unaffected and is real.
+          </p>
+        </Notice>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard
           label="Active today"
-          value={installsRes.ok ? formatNumber(activeToday) : "—"}
-          hint={installsRes.ok ? "seen in the last 24 h" : installsRes.error}
+          value={!installsRes.ok || installsBroken ? "—" : formatNumber(activeToday)}
+          hint={
+            !installsRes.ok
+              ? installsRes.error
+              : installsBroken
+                ? "not recorded — see above"
+                : "installs that checked in today"
+          }
         />
         <StatCard
           label="Active 7d"
-          value={installsRes.ok ? formatNumber(active7d) : "—"}
-          hint="seen in the last 7 days"
+          value={!installsRes.ok || installsBroken ? "—" : formatNumber(active7d)}
+          hint={
+            installsBroken
+              ? "not recorded — see above"
+              : "installs that checked in this week"
+          }
         />
         <StatCard
           label="Active 30d"
-          value={installsRes.ok ? formatNumber(active30d) : "—"}
-          hint="seen in the last 30 days"
+          value={!installsRes.ok || installsBroken ? "—" : formatNumber(active30d)}
+          hint={
+            installsBroken
+              ? "not recorded — see above"
+              : "installs that checked in this month"
+          }
         />
         <StatCard
           label="Total installs"
-          value={installsRes.ok ? formatNumber(installs.length) : "—"}
-          hint="all installs ever seen"
+          value={
+            !installsRes.ok || installsBroken ? "—" : formatNumber(installs.length)
+          }
+          hint={
+            installsBroken
+              ? "not recorded — see above"
+              : "every install ever seen"
+          }
         />
       </div>
 
@@ -251,8 +303,8 @@ export default async function UsagePage() {
 
         <Panel className="lg:col-span-2">
           <PanelHeader
-            title="Feature usage"
-            meta="events by name · last 30 days"
+            title="What people are doing"
+            meta="times used · last 30 days"
           />
           {!eventsRes.ok ? (
             <ErrorPanel title="Couldn't load events" message={eventsRes.error} />
@@ -265,27 +317,46 @@ export default async function UsagePage() {
             <DataTable>
               <THead>
                 <TR>
-                  <TH>Event</TH>
-                  <TH className="w-[100px] text-right">7d</TH>
-                  <TH className="w-[100px] text-right">30d</TH>
+                  <TH>Action</TH>
+                  <TH className="w-[90px] text-right">Last 7d</TH>
+                  <TH className="w-[90px] text-right">Last 30d</TH>
                 </TR>
               </THead>
               <TBody>
-                {features.map((f) => (
-                  <TR key={f.name}>
-                    <TD>
-                      <span className="block truncate font-mono text-sm text-stone-900">
-                        {f.name}
-                      </span>
-                    </TD>
-                    <TD className="text-right text-sm text-stone-900 tabular-nums">
-                      {formatNumber(f.c7)}
-                    </TD>
-                    <TD className="text-right text-sm text-stone-900 tabular-nums">
-                      {formatNumber(f.c30)}
-                    </TD>
-                  </TR>
-                ))}
+                {features.map((f) => {
+                  const meta = eventMeta(f.name);
+                  return (
+                    <TR key={f.name}>
+                      <TD>
+                        <span className="block truncate text-sm font-medium text-stone-900">
+                          {meta.title}
+                        </span>
+                        {meta.meaning ? (
+                          <span className="mt-0.5 block text-sm leading-snug text-stone-500">
+                            {meta.meaning}
+                          </span>
+                        ) : null}
+                        <span className="mt-0.5 block truncate font-mono text-meta text-stone-400">
+                          {f.name}
+                        </span>
+                      </TD>
+                      <TD
+                        className={`align-top text-right text-sm tabular-nums ${
+                          f.c7 === 0 ? "text-stone-400" : "text-stone-900"
+                        }`}
+                      >
+                        {formatNumber(f.c7)}
+                      </TD>
+                      <TD
+                        className={`align-top text-right text-sm tabular-nums ${
+                          f.c30 === 0 ? "text-stone-400" : "text-stone-900"
+                        }`}
+                      >
+                        {f.c30 === 0 ? "never used" : formatNumber(f.c30)}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </DataTable>
           )}
@@ -296,11 +367,18 @@ export default async function UsagePage() {
         {breakdowns.map((b) => (
           <Panel key={b.title}>
             <PanelHeader title={b.title} meta="by install" />
+            <p className="mb-2 text-sm leading-snug text-stone-500">
+              {BREAKDOWN_HELP[b.title]}
+            </p>
             {b.items.length === 0 ? (
               <EmptyState
                 className="py-6"
-                title="No data yet"
-                description="Arrives with install telemetry."
+                title={installsBroken ? "Not being recorded" : "No data yet"}
+                description={
+                  installsBroken
+                    ? "Blocked by the install telemetry failure above."
+                    : "Arrives with install telemetry."
+                }
               />
             ) : (
               <DistributionList items={b.items} total={installs.length} />
@@ -313,8 +391,8 @@ export default async function UsagePage() {
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <Panel>
             <PanelHeader
-              title="Feature depth"
-              meta="add_from_link · source × kind × outcome"
+              title="Link adds, broken down"
+              meta="where from · what · did it work"
             />
             {!depthRes.ok ? (
               <ErrorPanel
@@ -323,8 +401,8 @@ export default async function UsagePage() {
               />
             ) : linkRows.length === 0 ? (
               <EmptyState
-                title="No add_from_link events yet"
-                description="Sent when a wallpaper is added from a pasted link."
+                title="Nobody has pasted a link yet"
+                description="Not a data problem — the paste-a-link feature has had zero uses in the last 30 days."
               />
             ) : (
               <DataTable>
@@ -374,8 +452,8 @@ export default async function UsagePage() {
 
           <Panel>
             <PanelHeader
-              title="Per-install depth"
-              meta="events per using-install · last 30 days"
+              title="How heavily each user uses it"
+              meta="uses per person · last 30 days"
             />
             {!depthRes.ok ? (
               <ErrorPanel
@@ -402,8 +480,8 @@ export default async function UsagePage() {
                     {summaries.map((s) => (
                       <TR key={s.event}>
                         <TD>
-                          <span className="block truncate font-mono text-sm text-stone-900">
-                            {s.event}
+                          <span className="block truncate text-sm text-stone-900">
+                            {eventMeta(s.event).title}
                           </span>
                         </TD>
                         <TD className="text-right text-sm text-stone-900 tabular-nums">
@@ -436,8 +514,8 @@ export default async function UsagePage() {
                           {truncateId(t.installId)}
                         </TD>
                         <TD>
-                          <span className="block truncate font-mono text-sm text-stone-900">
-                            {t.event}
+                          <span className="block truncate text-sm text-stone-900">
+                            {eventMeta(t.event).title}
                           </span>
                         </TD>
                         <TD className="text-right text-sm text-stone-900 tabular-nums">

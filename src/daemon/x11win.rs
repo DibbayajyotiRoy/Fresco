@@ -1,5 +1,8 @@
-//! Desktop-level X11 window: sits below everything (and below the desktop-icon
-//! window), spans one monitor, accepts no input, and hosts an embedded mpv.
+//! Desktop-level X11 window: spans one monitor, accepts no input, and hosts an
+//! embedded mpv.
+//!
+//! Two stacking flavours, picked per session — see [`WindowKind`]. Everything
+//! else (geometry, input shape, hints, mpv embedding) is identical.
 
 use anyhow::{Context, Result};
 use x11rb::connection::Connection;
@@ -15,6 +18,7 @@ x11rb::atom_manager! {
     pub Atoms: AtomsCookie {
         _NET_WM_WINDOW_TYPE,
         _NET_WM_WINDOW_TYPE_DESKTOP,
+        _NET_WM_WINDOW_TYPE_NORMAL,
         _NET_WM_STATE,
         _NET_WM_STATE_BELOW,
         _NET_WM_STATE_STICKY,
@@ -30,18 +34,70 @@ x11rb::atom_manager! {
     }
 }
 
+/// How a wallpaper window declares itself to the window manager.
+///
+/// `Desktop` is what Fresco has always used and stays the default on every
+/// desktop environment. `DdeRaised` exists only for Deepin DDE, so no other WM
+/// ever sees a different set of properties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowKind {
+    /// `_NET_WM_WINDOW_TYPE_DESKTOP` + `_NET_WM_STATE_BELOW`, lowered to the
+    /// bottom of the stack: below the desktop-icon window, below everything.
+    #[default]
+    Desktop,
+    /// Deepin DDE only. Measured on Deepin 25 (dde-shell, X11, KWin): a
+    /// DESKTOP-only window is pinned to KWin's bottom desktop layer,
+    /// permanently under dde-shell's own desktop window, so the video is never
+    /// visible. Declaring `[DESKTOP, NORMAL]` — the exact list dde-shell's
+    /// desktop window itself declares — and raising (no `BELOW`, which would
+    /// fight the raise) puts our window above DDE's desktop while real app
+    /// windows and the dock still stack above us. DDE's desktop icons end up
+    /// hidden; that is the accepted trade-off of this mode.
+    DdeRaised,
+}
+
+/// `_NET_WM_WINDOW_TYPE` value for `kind`. Order is significant: DESKTOP first
+/// (EWMH "most preferable first"), NORMAL second, mirroring dde-shell.
+fn window_type_atoms(kind: WindowKind, atoms: &Atoms) -> Vec<Atom> {
+    match kind {
+        WindowKind::Desktop => vec![atoms._NET_WM_WINDOW_TYPE_DESKTOP],
+        WindowKind::DdeRaised => vec![
+            atoms._NET_WM_WINDOW_TYPE_DESKTOP,
+            atoms._NET_WM_WINDOW_TYPE_NORMAL,
+        ],
+    }
+}
+
+/// `_NET_WM_STATE` value for `kind`. STICKY + SKIP_TASKBAR + SKIP_PAGER always;
+/// BELOW only for `Desktop`, since on the DDE path it would undo the raise.
+fn window_state_atoms(kind: WindowKind, atoms: &Atoms) -> Vec<Atom> {
+    let mut states = Vec::with_capacity(4);
+    if kind == WindowKind::Desktop {
+        states.push(atoms._NET_WM_STATE_BELOW);
+    }
+    states.extend([
+        atoms._NET_WM_STATE_STICKY,
+        atoms._NET_WM_STATE_SKIP_TASKBAR,
+        atoms._NET_WM_STATE_SKIP_PAGER,
+    ]);
+    states
+}
+
 pub struct WallpaperWindow {
     pub window: Window,
     pub connector: String,
 }
 
 impl WallpaperWindow {
-    /// Create, configure, map, and lower a wallpaper window for `monitor`.
+    /// Create, configure, map, and stack a wallpaper window for `monitor`.
+    /// `kind` decides the EWMH declaration and whether the window is lowered
+    /// (everywhere) or raised (Deepin DDE) once mapped.
     pub fn create<C: Connection>(
         conn: &C,
         screen: &Screen,
         atoms: &Atoms,
         monitor: &Monitor,
+        kind: WindowKind,
     ) -> Result<WallpaperWindow> {
         let window = conn.generate_id()?;
         let aux = CreateWindowAux::new()
@@ -65,27 +121,21 @@ impl WallpaperWindow {
         .check()
         .context("create_window")?;
 
-        // _NET_WM_WINDOW_TYPE = DESKTOP
+        // _NET_WM_WINDOW_TYPE / _NET_WM_STATE — the only per-kind difference.
         conn.change_property32(
             PropMode::REPLACE,
             window,
             atoms._NET_WM_WINDOW_TYPE,
             AtomEnum::ATOM,
-            &[atoms._NET_WM_WINDOW_TYPE_DESKTOP],
+            &window_type_atoms(kind, atoms),
         )?;
 
-        // _NET_WM_STATE = BELOW, STICKY, SKIP_TASKBAR, SKIP_PAGER
         conn.change_property32(
             PropMode::REPLACE,
             window,
             atoms._NET_WM_STATE,
             AtomEnum::ATOM,
-            &[
-                atoms._NET_WM_STATE_BELOW,
-                atoms._NET_WM_STATE_STICKY,
-                atoms._NET_WM_STATE_SKIP_TASKBAR,
-                atoms._NET_WM_STATE_SKIP_PAGER,
-            ],
+            &window_state_atoms(kind, atoms),
         )?;
 
         // WM_CLASS = "fresco-wallpaper\0fresco-wallpaper\0"
@@ -146,7 +196,7 @@ impl WallpaperWindow {
         )?;
 
         conn.map_window(window)?;
-        lower(conn, window)?;
+        restack(conn, window, kind)?;
         conn.flush()?;
 
         // Wait until the window is actually viewable before the caller embeds mpv
@@ -193,4 +243,98 @@ pub fn lower<C: Connection>(conn: &C, window: Window) -> Result<()> {
         &ConfigureWindowAux::new().stack_mode(StackMode::BELOW),
     )?;
     Ok(())
+}
+
+/// Raise a window to the top of the stack. Deliberately sibling-less: a
+/// sibling-relative `ConfigureWindow` against dde-shell's desktop window fails
+/// with BadMatch, because KWin reparents both windows into its own frames and
+/// they are no longer siblings.
+pub fn raise<C: Connection>(conn: &C, window: Window) -> Result<()> {
+    conn.configure_window(
+        window,
+        &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
+    )?;
+    Ok(())
+}
+
+/// Put `window` where its `kind` belongs in the stack. Called at creation and
+/// again on the daemon's periodic stacking pass.
+pub fn restack<C: Connection>(conn: &C, window: Window, kind: WindowKind) -> Result<()> {
+    match kind {
+        WindowKind::Desktop => lower(conn, window),
+        WindowKind::DdeRaised => raise(conn, window),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Distinct sentinel atoms, so the assertions below pin down both the
+    /// contents and the ORDER of the property values.
+    fn atoms() -> Atoms {
+        Atoms {
+            _NET_WM_WINDOW_TYPE: 1,
+            _NET_WM_WINDOW_TYPE_DESKTOP: 2,
+            _NET_WM_WINDOW_TYPE_NORMAL: 3,
+            _NET_WM_STATE: 4,
+            _NET_WM_STATE_BELOW: 5,
+            _NET_WM_STATE_STICKY: 6,
+            _NET_WM_STATE_SKIP_TASKBAR: 7,
+            _NET_WM_STATE_SKIP_PAGER: 8,
+            _NET_WM_STATE_FULLSCREEN: 9,
+            _NET_WM_STATE_HIDDEN: 10,
+            _NET_CLIENT_LIST_STACKING: 11,
+            _NET_WM_NAME: 12,
+            UTF8_STRING: 13,
+            _MOTIF_WM_HINTS: 14,
+            WM_HINTS: 15,
+        }
+    }
+
+    #[test]
+    fn default_kind_is_the_historic_desktop_window() {
+        assert_eq!(WindowKind::default(), WindowKind::Desktop);
+    }
+
+    /// Off Deepin nothing changed: type DESKTOP only, state BELOW + STICKY +
+    /// SKIP_TASKBAR + SKIP_PAGER, in that order.
+    #[test]
+    fn desktop_kind_properties_are_unchanged() {
+        let a = atoms();
+        assert_eq!(
+            window_type_atoms(WindowKind::Desktop, &a),
+            vec![a._NET_WM_WINDOW_TYPE_DESKTOP]
+        );
+        assert_eq!(
+            window_state_atoms(WindowKind::Desktop, &a),
+            vec![
+                a._NET_WM_STATE_BELOW,
+                a._NET_WM_STATE_STICKY,
+                a._NET_WM_STATE_SKIP_TASKBAR,
+                a._NET_WM_STATE_SKIP_PAGER,
+            ]
+        );
+    }
+
+    /// DDE: [DESKTOP, NORMAL] in that order, and no BELOW (it would fight the
+    /// raise) while the other three states stay.
+    #[test]
+    fn dde_kind_declares_desktop_then_normal_without_below() {
+        let a = atoms();
+        assert_eq!(
+            window_type_atoms(WindowKind::DdeRaised, &a),
+            vec![a._NET_WM_WINDOW_TYPE_DESKTOP, a._NET_WM_WINDOW_TYPE_NORMAL]
+        );
+        let states = window_state_atoms(WindowKind::DdeRaised, &a);
+        assert!(!states.contains(&a._NET_WM_STATE_BELOW));
+        assert_eq!(
+            states,
+            vec![
+                a._NET_WM_STATE_STICKY,
+                a._NET_WM_STATE_SKIP_TASKBAR,
+                a._NET_WM_STATE_SKIP_PAGER,
+            ]
+        );
+    }
 }

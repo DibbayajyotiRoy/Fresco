@@ -31,6 +31,20 @@ pub enum Scaling {
     High,
 }
 
+/// How Fresco deals with Deepin DDE's covering desktop window (issue #2).
+/// `Auto` probes the desktop window's visual depth and picks for itself;
+/// `Transparent` forces the DBus transparent-wallpaper strategy; `Restack`
+/// forces stacking our windows above DDE's desktop (icons may be hidden).
+/// The `FRESCO_DDE_MODE` env var overrides this key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DdeMode {
+    #[default]
+    Auto,
+    Transparent,
+    Restack,
+}
+
 /// Light/dark preference. `System` follows the desktop's color scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -249,6 +263,9 @@ pub struct Config {
     pub pause_on_battery: bool,
     #[serde(default)]
     pub scaling: Scaling,
+    /// Deepin DDE strategy (auto | transparent | restack); see [`DdeMode`].
+    #[serde(default)]
+    pub dde_mode: DdeMode,
     /// Light/dark preference (System follows the desktop).
     #[serde(default)]
     pub theme_mode: ThemeMode,
@@ -301,6 +318,13 @@ pub struct Config {
     /// Whether the one-time "What can Fresco do?" feature tour was shown.
     #[serde(default)]
     pub tour_shown: bool,
+    /// Highest onboarding revision this install has been walked through.
+    /// Versioned rather than boolean so a release that introduces a flow worth
+    /// teaching can re-show it to *existing* users (who already have
+    /// `tour_shown = true` and would otherwise never see it) by bumping
+    /// `ONBOARDING_VERSION`. 0 means "never shown".
+    #[serde(default)]
+    pub onboarding_version: u32,
     /// IDs of admin notifications already shown, so each appears only once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub seen_notifications: Vec<String>,
@@ -338,6 +362,7 @@ impl Default for Config {
             enabled: true,
             pause_on_battery: false,
             scaling: Scaling::default(),
+            dde_mode: DdeMode::default(),
             theme_mode: ThemeMode::default(),
             accent: Accent::default(),
             wallpaper: Wallpaper::default(),
@@ -352,6 +377,7 @@ impl Default for Config {
             apply_count: 0,
             last_star_nudge: 0,
             tour_shown: false,
+            onboarding_version: 0,
             seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
             last_update_check: 0,

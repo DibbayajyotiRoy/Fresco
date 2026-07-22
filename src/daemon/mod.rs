@@ -28,7 +28,7 @@ use crate::ipc::{MonitorInfo, Request, Response, StatusReply};
 use monitors::Monitor;
 use mpv::Player;
 use mpvpaper::WaylandPlayer;
-use x11win::{Atoms, WallpaperWindow};
+use x11win::{Atoms, WallpaperWindow, WindowKind};
 
 const TICK: Duration = Duration::from_millis(100);
 const LOWER_INTERVAL: Duration = Duration::from_secs(2);
@@ -280,7 +280,7 @@ pub struct Daemon {
     config: Config,
     user_paused: bool,
     battery_paused: bool,
-    last_lower: Instant,
+    last_stacking: Instant,
     last_monitor_check: Instant,
     last_battery_check: Instant,
     last_cache_check: Instant,
@@ -297,6 +297,8 @@ pub struct Daemon {
     /// Deepin DDE quirk (issue #2): whether/how DDE's covering desktop window
     /// is being handled. `Inactive` on every other desktop.
     dde_mode: dde::Mode,
+    /// True once the one-time DDE render self-check has run (it blocks ~1s).
+    dde_self_checked: bool,
 }
 
 impl Daemon {
@@ -312,7 +314,7 @@ impl Daemon {
             config,
             user_paused: false,
             battery_paused: false,
-            last_lower: Instant::now(),
+            last_stacking: Instant::now(),
             last_monitor_check: Instant::now(),
             last_battery_check: Instant::now() - BATTERY_INTERVAL,
             last_cache_check: Instant::now(),
@@ -325,6 +327,7 @@ impl Daemon {
             last_heal_check: Instant::now(),
             heals: 0,
             dde_mode: dde::Mode::Inactive,
+            dde_self_checked: false,
         })
     }
 
@@ -339,6 +342,12 @@ impl Daemon {
         let screen = self.screen();
         self.monitors = monitors::list_monitors(&self.conn, screen.root)?;
 
+        // Deepin DDE (issue #2) needs a differently declared window, and the
+        // declaration can only be chosen at creation time. Off Deepin this is
+        // `WindowKind::Desktop` — the window Fresco has always created — with
+        // no X11 roundtrip.
+        let kind = dde::window_kind(&self.conn, &self.atoms, screen.root, self.config.dde_mode);
+
         for monitor in self.monitors.clone() {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
             if wallpaper.effective_path().is_none() && wallpaper.kind != Kind::Slideshow {
@@ -351,6 +360,7 @@ impl Daemon {
                 &monitor,
                 &wallpaper,
                 self.config.scaling,
+                kind,
             ) {
                 Ok(r) => {
                     self.renderers.push(r);
@@ -368,7 +378,20 @@ impl Daemon {
             let monitors: Vec<String> = self.monitors.iter().map(|m| m.connector.clone()).collect();
             let windows: Vec<x11rb::protocol::xproto::Window> =
                 self.renderers.iter().map(|r| r.window.window).collect();
-            self.dde_mode = dde::apply(&self.conn, &self.atoms, screen.root, &monitors, &windows);
+            self.dde_mode = dde::apply(
+                &self.conn,
+                &self.atoms,
+                screen.root,
+                &monitors,
+                &windows,
+                self.config.dde_mode,
+            );
+            // One-time best-effort check that our window actually renders
+            // frames — the user's log then tells the whole DDE story.
+            if self.dde_mode != dde::Mode::Inactive && !self.dde_self_checked {
+                self.dde_self_checked = true;
+                dde::render_self_check(&self.conn, &windows);
+            }
         }
         Ok(())
     }
@@ -380,8 +403,9 @@ impl Daemon {
         monitor: &Monitor,
         wallpaper: &Wallpaper,
         scaling: Scaling,
+        kind: WindowKind,
     ) -> Result<Renderer> {
-        let window = WallpaperWindow::create(conn, screen, atoms, monitor)?;
+        let window = WallpaperWindow::create(conn, screen, atoms, monitor, kind)?;
         let player = PlayerHandle::X11(Player::new(window.window, wallpaper, scaling)?);
         let slideshow = build_slideshow(wallpaper, &player);
         Ok(Renderer {
@@ -428,9 +452,9 @@ impl Daemon {
             while let Ok(Some(_)) = self.conn.poll_for_event() {}
 
             let now = Instant::now();
-            if now.duration_since(self.last_lower) >= LOWER_INTERVAL {
-                self.lower_all();
-                self.last_lower = now;
+            if now.duration_since(self.last_stacking) >= LOWER_INTERVAL {
+                self.reassert_stacking();
+                self.last_stacking = now;
             }
             if now.duration_since(self.last_monitor_check) >= MONITOR_INTERVAL {
                 self.check_hotplug();
@@ -582,18 +606,22 @@ impl Daemon {
         }
     }
 
-    fn lower_all(&self) {
+    /// Re-assert every wallpaper window's place in the stack (~every 2s), since
+    /// other clients' stacking changes can shuffle us. Normally that means
+    /// lowering back to the bottom; in DDE restack mode our windows must be
+    /// RAISED instead — lowering there would drop the wallpaper straight back
+    /// under dde-shell's desktop window a couple of seconds after it appeared.
+    fn reassert_stacking(&self) {
+        if self.dde_mode == dde::Mode::Restack {
+            let windows: Vec<x11rb::protocol::xproto::Window> =
+                self.renderers.iter().map(|r| r.window.window).collect();
+            dde::restack_above_dde_desktop(&self.conn, &windows);
+            return;
+        }
         for r in &self.renderers {
             let _ = x11win::lower(&self.conn, r.window.window);
         }
         let _ = self.conn.flush();
-        // DDE restack fallback: lowering puts us back under dde-shell's
-        // desktop window, so re-assert the ABOVE-sibling stacking each time.
-        if self.dde_mode == dde::Mode::Restack {
-            let windows: Vec<x11rb::protocol::xproto::Window> =
-                self.renderers.iter().map(|r| r.window.window).collect();
-            dde::restack_above_dde_desktop(&self.conn, &self.atoms, self.screen().root, &windows);
-        }
     }
 
     /// Tear down all renderers, terminating each mpv instance BEFORE destroying
@@ -2005,9 +2033,9 @@ pub fn run_once(file: PathBuf) -> Result<()> {
     );
     loop {
         while let Ok(Some(_)) = daemon.conn.poll_for_event() {}
-        if Instant::now().duration_since(daemon.last_lower) >= LOWER_INTERVAL {
-            daemon.lower_all();
-            daemon.last_lower = Instant::now();
+        if Instant::now().duration_since(daemon.last_stacking) >= LOWER_INTERVAL {
+            daemon.reassert_stacking();
+            daemon.last_stacking = Instant::now();
         }
         std::thread::sleep(TICK);
     }

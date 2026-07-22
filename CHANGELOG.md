@@ -4,16 +4,37 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.3] — 2026-07-22
+## [1.1.31] — 2026-07-23
+
+### Fixed
+- **Live wallpaper now actually shows on Deepin 25 (DDE)** ([#2]). 1.1.3's DDE
+  support never worked: two bugs made it silently do nothing, both found by
+  running Fresco on a real Deepin 25 desktop.
+  - The scan for DDE's desktop window asked the X server for the client list
+    with `long_length = u32::MAX`, which Xorg rejects — so the window was
+    never found and Fresco always chose the wrong strategy.
+  - The WM_CLASS matcher expected `"dde-shell"` + `"desktop"` as two separate
+    strings; Deepin 25 reports the single token `"dde-shell/desktop"` with
+    class `"org.deepin.dde-shell"`, so it never matched.
+
+  The strategy itself changed too. Making DDE's wallpaper transparent cannot
+  work on Deepin 25, so Fresco now declares its wallpaper window as
+  `_NET_WM_WINDOW_TYPE_DESKTOP` **and** `_NET_WM_WINDOW_TYPE_NORMAL` — the
+  same pair dde-shell uses — and raises it with a sibling-less
+  `ConfigureWindow(Above)`. A sibling-relative restack is impossible here:
+  KWin reparents both windows, so they are not siblings and the request fails
+  with BadMatch. Verified on Deepin 25: the wallpaper window sits above
+  dde-shell's desktop, app windows and the dock still stack above it, and
+  clicks pass through to the desktop (right-click menu still works).
+
+  Trade-off: desktop icons are hidden while a live wallpaper is set, because
+  DDE draws icons and wallpaper inside one window. Set `dde_mode` in
+  config.toml (or `FRESCO_DDE_MODE`) to `transparent` for the old behaviour on
+  Deepin 20/23, or `restack` to force the new one.
+- Behaviour on every non-Deepin desktop is byte-identical to 1.1.3: the extra
+  window type and the raise are only used when DDE is detected.
 
 ### Added
-- **Deepin 25 (DDE) support** ([#2]). On Deepin's DDE desktop, the X11
-  wallpaper window was covered by DDE's own opaque desktop window. Fresco now
-  detects DDE and makes its wallpaper transparent via the DDE Appearance DBus
-  service (saving the original and restoring it on stop, clear, or crash
-  recovery), so live wallpapers show through with desktop icons intact. If
-  DBus is unavailable it falls back to restacking above the DDE desktop
-  window.
 - Deepin 25 (crimson) added to the distro CI matrix (build + clean-install),
   plus an install-time check that all icon sizes and the `.desktop` entry
   land correctly on every distro.

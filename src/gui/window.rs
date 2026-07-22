@@ -226,6 +226,15 @@ fn build_ui(app: &adw::Application) {
         let win_t = window.clone();
         let state_t = state.clone();
         glib::idle_add_local_once(move || show_tour_dialog(&win_t, state_t));
+    } else if state.borrow().config.onboarding_version < ONBOARDING_VERSION {
+        // Existing user on a new version: they already sat through the tour,
+        // so they'd never otherwise be shown the paste-a-link flow.
+        let win_o = window.clone();
+        let state_o = state.clone();
+        let stack_o = stack.clone();
+        glib::idle_add_local_once(move || {
+            show_onboarding_dialog(&win_o, state_o, stack_o);
+        });
     }
 
     // Lazily fill missing media metadata (resolution/fps/size) in the
@@ -515,9 +524,16 @@ fn build_library_view(
     }
     footer.append(&add_folder_btn);
 
+    // Labelled, brand-marked entry point. This was an unlabelled
+    // `insert-link-symbolic` button and telemetry showed the feature at
+    // literally zero uses — nobody recognised a generic chain-link glyph in a
+    // footer as "paste a Pinterest link". The logo names the thing people
+    // already have in their clipboard.
     let add_link_btn = gtk4::Button::new();
-    add_link_btn.set_icon_name("insert-link-symbolic");
-    add_link_btn.set_tooltip_text(Some("Add from link"));
+    add_link_btn.set_child(Some(&pinterest_button_content()));
+    add_link_btn.set_tooltip_text(Some(
+        "Paste a Pinterest or direct media link to set as wallpaper",
+    ));
     {
         let state2 = state.clone();
         let win2 = window.clone();
@@ -3036,6 +3052,37 @@ fn overline(text: &str) -> gtk4::Label {
 }
 
 /// Icon + label content for a button (Adwaita ButtonContent).
+/// The Pinterest brand glyph, embedded so it works regardless of the user's
+/// icon theme (no theme ships a Pinterest icon). Decoding is fallible only if
+/// the platform lacks an SVG loader; in that case we fall back to the generic
+/// link icon rather than shipping a blank button.
+///
+/// The mark is Pinterest's trademark — see `data/icons/pinterest.svg` for the
+/// usage terms this follows. It is rendered unmodified, at its own colour, and
+/// paired with a neutral label that describes the action rather than claiming
+/// any affiliation.
+fn pinterest_button_content() -> gtk4::Widget {
+    use gtk4::prelude::*;
+
+    const LOGO: &[u8] = include_bytes!("../../data/icons/pinterest.svg");
+
+    let texture = gtk4::gdk::Texture::from_bytes(&gtk4::glib::Bytes::from_static(LOGO)).ok();
+
+    let Some(texture) = texture else {
+        log::debug!("no SVG loader for the Pinterest glyph; using a generic link icon");
+        return button_content("insert-link-symbolic", "From link").upcast();
+    };
+
+    // Hand-built rather than adw::ButtonContent: that widget only takes a
+    // themed icon *name*, and the brand mark must keep its own colour.
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    let image = gtk4::Image::from_paintable(Some(&texture));
+    image.set_pixel_size(16);
+    content.append(&image);
+    content.append(&gtk4::Label::new(Some("From Pinterest")));
+    content.upcast()
+}
+
 fn button_content(icon: &str, label: &str) -> adw::ButtonContent {
     let c = adw::ButtonContent::new();
     c.set_icon_name(icon);
@@ -3432,6 +3479,13 @@ fn show_command_palette(
             Rc::new(move || show_tour_dialog(&w, s.clone())),
         );
     }
+    {
+        let (w, s, st) = (window.clone(), state.clone(), stack.clone());
+        add_cmd(
+            "How to set a Pinterest wallpaper",
+            Rc::new(move || show_onboarding_dialog(&w, s.clone(), st.clone())),
+        );
+    }
     let cmds = Rc::new(cmds);
 
     // Actions of the currently listed rows, parallel to the ListBox rows.
@@ -3581,6 +3635,141 @@ fn show_telemetry_consent_dialog(window: &adw::ApplicationWindow, state: Rc<RefC
     }
     accept.connect_clicked(move |_| answer(true));
 
+    content.append(&inner);
+    dialog.present();
+}
+
+/// Current onboarding revision. Bump this when the flow it teaches changes
+/// materially — every install with a lower `config.onboarding_version` is
+/// walked through once on next launch, including users upgrading from a
+/// version that predates it.
+pub(crate) const ONBOARDING_VERSION: u32 = 1;
+
+/// The tutorial video. Opened in the user's browser rather than embedded:
+/// Fresco ships no browser engine, and pulling in WebKitGTK to play one clip
+/// would dwarf the rest of the app.
+const TUTORIAL_URL: &str = "https://youtu.be/YWzD3-xkCEc";
+
+/// Open a URL in the user's browser. Best-effort — a missing `xdg-open` must
+/// never take the app down.
+fn open_in_browser(url: &str) {
+    if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        log::debug!("couldn't open {url}: {e}");
+    }
+}
+
+/// Onboarding for the paste-a-link flow. Telemetry showed `add_from_link` at
+/// zero uses over 30 days while wallpapers were being set daily — the feature
+/// worked, nobody found it. This walks through it once, in order, and links
+/// the demo video.
+///
+/// Deliberately skippable. A gate that forces a rewatch punishes the users who
+/// already know the flow and the ones who got interrupted, and "watched" is
+/// not something an external browser can report back anyway. Discovery is the
+/// problem being solved here, not compliance.
+pub(crate) fn show_onboarding_dialog(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    stack: gtk4::Stack,
+) {
+    {
+        let mut s = state.borrow_mut();
+        if s.config.onboarding_version < ONBOARDING_VERSION {
+            s.config.onboarding_version = ONBOARDING_VERSION;
+            s.config.save().ok();
+        }
+    }
+
+    let (dialog, content) = glass_dialog(window, "Set a wallpaper from Pinterest", 500, -1);
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
+    inner.set_margin_start(24);
+    inner.set_margin_end(24);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(22);
+
+    let lead = gtk4::Label::new(Some(
+        "Found a live wallpaper you like on Pinterest? Copy its link and \
+         Fresco will download it and set it — no files to manage.",
+    ));
+    lead.add_css_class("dialog-sub");
+    lead.set_wrap(true);
+    lead.set_xalign(0.0);
+    inner.append(&lead);
+
+    let steps: &[(&str, &str)] = &[
+        (
+            "1 · Copy the link",
+            "On Pinterest, open the pin and hit Share → Copy link. A pin.it or \
+             pinterest.com link both work, and so does any direct video or image URL.",
+        ),
+        (
+            "2 · Click “From Pinterest”",
+            "It's in the bar at the bottom of the window, next to Add folder.",
+        ),
+        (
+            "3 · Paste and confirm",
+            "Fresco downloads it, drops you into the editor to rotate or crop, \
+             then you click Set as wallpaper.",
+        ),
+    ];
+    for (title, body) in steps {
+        let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        let t = gtk4::Label::new(Some(title));
+        t.add_css_class("dialog-heading");
+        t.set_xalign(0.0);
+        let b = gtk4::Label::new(Some(body));
+        b.add_css_class("dim");
+        b.set_wrap(true);
+        b.set_xalign(0.0);
+        row.append(&t);
+        row.append(&b);
+        inner.append(&row);
+    }
+
+    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    buttons.set_margin_top(8);
+
+    let watch = gtk4::Button::with_label("Watch the demo");
+    watch.set_tooltip_text(Some("Opens the walkthrough video in your browser"));
+    watch.connect_clicked(|_| {
+        // Counts intent only: once the browser has it, Fresco can't tell
+        // whether it was watched. Judge the video by whether add_from_link
+        // moves, not by this number.
+        crate::telemetry::event("tutorial_opened", serde_json::json!({}));
+        open_in_browser(TUTORIAL_URL);
+    });
+    buttons.append(&watch);
+
+    let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    buttons.append(&spacer);
+
+    let skip = gtk4::Button::with_label("Not now");
+    skip.add_css_class("flat");
+    {
+        let dialog = dialog.clone();
+        skip.connect_clicked(move |_| dialog.close());
+    }
+    buttons.append(&skip);
+
+    // The point of the whole dialog: land them in the paste field while the
+    // link is still in their clipboard.
+    let go = gtk4::Button::with_label("Paste a link");
+    go.add_css_class("suggested-action");
+    {
+        let dialog = dialog.clone();
+        let win = window.clone();
+        let state = state.clone();
+        let stack = stack.clone();
+        go.connect_clicked(move |_| {
+            dialog.close();
+            super::add_link::show_add_link_dialog(&win, state.clone(), stack.clone());
+        });
+    }
+    buttons.append(&go);
+
+    inner.append(&buttons);
     content.append(&inner);
     dialog.present();
 }

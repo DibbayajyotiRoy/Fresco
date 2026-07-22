@@ -157,9 +157,22 @@ create table if not exists public.installs (
     backend       text,
     decode        text,
     monitor_count int,
+    -- UTM-style download attribution, persisted by the install one-liner
+    -- (website/github/reddit/…). Null for installs predating the tagging.
+    source        text,
+    -- Packaging channel, detected at runtime: deb / flatpak / other.
+    channel       text,
     first_seen    timestamptz not null default now(),
     last_seen     timestamptz not null default now()
 );
+
+-- Additive columns for projects created before `source`/`channel` existed.
+-- MUST be run before (or with) a client that sends them: PostgREST rejects
+-- inserts naming unknown columns, so without these every heartbeat 400s and
+-- the installs table stays empty while events keep arriving — which is
+-- exactly what happened between 1.1.1 and this migration.
+alter table public.installs add column if not exists source  text;
+alter table public.installs add column if not exists channel text;
 
 alter table public.installs enable row level security;
 

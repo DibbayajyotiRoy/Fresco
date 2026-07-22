@@ -1,17 +1,25 @@
 //! Deepin DDE (X11) quirks — GitHub issue #2.
 //!
 //! DDE's `dde-shell` paints its own opaque desktop window (WM_CLASS
-//! "dde-shell"/"desktop", also `_NET_WM_WINDOW_TYPE_DESKTOP`) that stacks
-//! above other DESKTOP-type windows, hiding Fresco's wallpaper entirely.
+//! "dde-shell"/"desktop", declaring `[DESKTOP, NORMAL]`) that covers Fresco's
+//! wallpaper entirely. Measured on a Deepin 25 VM (dde-shell, X11, KWin):
 //!
-//! Fix (fantascene-style), additive to the unchanged X11 backend:
-//!  1. Primary: make DDE's own wallpaper transparent over DBus (session
-//!     Appearance service), after persisting the user's current wallpaper to
-//!     the fresco state dir so it can be restored on shutdown — or on a later
-//!     startup after a crash.
-//!  2. Fallback (DBus unavailable): restack our wallpaper windows directly
-//!     ABOVE dde-shell's desktop window. This hides DDE's desktop icons, so
-//!     it is only a last resort and logged loudly.
+//!  * A DESKTOP-only window is pinned to KWin's bottom desktop layer, always
+//!    under dde-shell's desktop window.
+//!  * A transparent DDE wallpaper composites onto BLACK, not onto the windows
+//!    below it — a solid red root window underneath stayed invisible. Nothing
+//!    stacked below that window can ever be seen there.
+//!  * A sibling-relative restack (`ConfigureWindow(sibling, Above)`) fails with
+//!    BadMatch: KWin reparents both windows, so they are not siblings.
+//!  * What works: create our windows as [`WindowKind::DdeRaised`] and raise
+//!    them with a sibling-less `ConfigureWindow(Above)`.
+//!
+//! So on Deepin 25 the raise ("restack") is the only working strategy. The DBus
+//! transparency path is kept for the explicit `transparent` preference — it
+//! still serves older DDE (dde-desktop on Deepin 20/23), and it is the only
+//! option when no dde-shell desktop window exists at all — and it persists the
+//! user's original wallpaper to the fresco state dir so it can be restored on
+//! shutdown, or on a later startup after a crash.
 //!
 //! No DBus crate: we shell out to `gdbus` (ships with glib on Deepin) and
 //! parse its output leniently.
@@ -19,12 +27,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::*;
 
-use super::x11win::Atoms;
+use super::x11win::{self, Atoms, WindowKind};
+use crate::config::DdeMode;
 
 /// 1x1 fully-transparent RGBA PNG, written to the state dir at runtime and
 /// handed to DDE as a `file://` wallpaper URI.
@@ -59,7 +69,7 @@ pub enum Mode {
     Inactive,
     /// DDE's wallpaper was made transparent over DBus; ours shows through.
     DBus,
-    /// DBus failed — our windows are restacked above dde-shell's desktop.
+    /// Our windows are raised above dde-shell's desktop window (icons hidden).
     Restack,
 }
 
@@ -172,16 +182,159 @@ fn save_original(monitors: &[String], transparent: &str) {
     }
 }
 
-/// Apply the DDE quirk: transparent DDE wallpaper via DBus, else restack.
-/// `monitors` are connector names (they match DDE's monitor names on X11);
-/// `windows` are our wallpaper windows. Idempotent — called on every rebuild.
+/// The strategy chosen for this rebuild, before we try to enact it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strategy {
+    /// Transparent DDE wallpaper via DBus (icons stay visible).
+    Transparent,
+    /// Raise our windows above dde-shell's desktop (icons may be hidden).
+    Restack,
+}
+
+impl Strategy {
+    /// The wallpaper-window flavour this strategy needs. The raise only works
+    /// with the `[DESKTOP, NORMAL]` declaration, and that declaration is only
+    /// ever used when we are going to raise.
+    fn window_kind(self) -> WindowKind {
+        match self {
+            Strategy::Transparent => WindowKind::Desktop,
+            Strategy::Restack => WindowKind::DdeRaised,
+        }
+    }
+}
+
+/// Parse a `FRESCO_DDE_MODE` value. Unknown/empty values mean "no override".
+fn parse_mode(s: &str) -> Option<DdeMode> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(DdeMode::Auto),
+        "transparent" | "dbus" => Some(DdeMode::Transparent),
+        "restack" => Some(DdeMode::Restack),
+        _ => None,
+    }
+}
+
+/// The effective preference: `FRESCO_DDE_MODE` env var wins over config.
+fn effective_pref(config_pref: DdeMode) -> DdeMode {
+    match std::env::var("FRESCO_DDE_MODE") {
+        Ok(v) => {
+            match parse_mode(&v) {
+                Some(m) => {
+                    log::info!("DDE: FRESCO_DDE_MODE={v} overrides config (mode {m:?})");
+                    m
+                }
+                None => {
+                    log::warn!("DDE: ignoring invalid FRESCO_DDE_MODE={v:?} (want auto|transparent|restack)");
+                    config_pref
+                }
+            }
+        }
+        Err(_) => config_pref,
+    }
+}
+
+/// Pure mode-selection logic: preference x whether dde-shell's desktop
+/// window is present.
+///
+/// Auto restacks whenever that window exists, because on dde-shell nothing
+/// below it is ever visible (see the module docs). Transparency remains the
+/// auto choice only when no such window is found — an older DDE, where it is
+/// the strategy that actually works.
+fn select_strategy(pref: DdeMode, desktop_window_found: bool) -> Strategy {
+    match pref {
+        DdeMode::Transparent => Strategy::Transparent,
+        DdeMode::Restack => Strategy::Restack,
+        DdeMode::Auto => {
+            if desktop_window_found {
+                Strategy::Restack
+            } else {
+                Strategy::Transparent
+            }
+        }
+    }
+}
+
+/// Visual depth of dde-shell's desktop window, if it can be found. Logged for
+/// diagnostics only: on Deepin 25 that window is 32-bit ARGB yet still
+/// composites its wallpaper onto black, so depth says nothing about whether
+/// transparency can work.
+fn desktop_window_depth<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Option<u8> {
+    let w = find_dde_desktop_window(conn, atoms, root)?;
+    let geom = conn.get_geometry(w).ok()?.reply().ok()?;
+    Some(geom.depth)
+}
+
+/// The strategy this session will use, resolved from the preference and the
+/// live stack. Cheap enough to call once per rebuild.
+fn current_strategy<C: Connection>(
+    conn: &C,
+    atoms: &Atoms,
+    root: Window,
+    config_pref: DdeMode,
+) -> Strategy {
+    select_strategy(
+        effective_pref(config_pref),
+        find_dde_desktop_window(conn, atoms, root).is_some(),
+    )
+}
+
+/// Which flavour of wallpaper window this session must create. Called before
+/// any window exists, because the DDE raise only works when the window was
+/// created declaring `[DESKTOP, NORMAL]`.
+///
+/// Off Deepin this returns [`WindowKind::Desktop`] without touching X11, so no
+/// other desktop environment sees any change.
+pub fn window_kind<C: Connection>(
+    conn: &C,
+    atoms: &Atoms,
+    root: Window,
+    config_pref: DdeMode,
+) -> WindowKind {
+    if !crate::capability::is_deepin_dde() {
+        return WindowKind::Desktop;
+    }
+    current_strategy(conn, atoms, root, config_pref).window_kind()
+}
+
+/// Apply the DDE quirk. `monitors` are connector names (they match DDE's
+/// monitor names on X11); `windows` are our wallpaper windows;
+/// `config_pref` is the `dde_mode` config key (env `FRESCO_DDE_MODE`
+/// overrides it). Idempotent — called on every rebuild.
+///
+/// Strategy selection must agree with [`window_kind`], which ran just before
+/// the windows were created; both go through [`select_strategy`].
 pub fn apply<C: Connection>(
     conn: &C,
     atoms: &Atoms,
     root: Window,
     monitors: &[String],
     windows: &[Window],
+    config_pref: DdeMode,
 ) -> Mode {
+    let pref = effective_pref(config_pref);
+    let depth = desktop_window_depth(conn, atoms, root);
+    match depth {
+        Some(d) => log::info!("DDE: desktop window found (visual depth {d}-bit)"),
+        None => log::info!("DDE: desktop window not found"),
+    }
+    let strategy = select_strategy(pref, depth.is_some());
+    log::info!("DDE: preference {pref:?}, chosen strategy {strategy:?}");
+
+    if strategy == Strategy::Restack {
+        // Transparency is not in play: if a previous run left the user's
+        // desktop on our transparent PNG, put their real wallpaper back.
+        restore();
+        return if restack_above_dde_desktop(conn, windows) {
+            log::warn!(
+                "DDE: raising wallpaper above dde-shell's desktop window — \
+                 desktop icons may be hidden in this mode"
+            );
+            Mode::Restack
+        } else {
+            log::warn!("DDE: raise failed; wallpaper may be covered");
+            Mode::Inactive
+        };
+    }
+
     // Primary: DBus transparency.
     if let Some(transparent) = transparent_uri() {
         save_original(monitors, &transparent);
@@ -198,16 +351,63 @@ pub fn apply<C: Connection>(
         }
     }
 
-    // Fallback: restack above dde-shell's desktop window.
-    if restack_above_dde_desktop(conn, atoms, root, windows) {
+    // Fallback: raise above dde-shell's desktop window.
+    if restack_above_dde_desktop(conn, windows) {
         log::warn!(
-            "DDE: Appearance DBus service unavailable; restacking wallpaper above \
-             dde-shell's desktop window — desktop icons may be hidden in this mode"
+            "DDE: Appearance DBus service unavailable; raising wallpaper above \
+             dde-shell's desktop window — desktop icons may be hidden in this \
+             mode, and the raise is best-effort here because the windows were \
+             created for transparency (set dde_mode = \"restack\" to make it stick)"
         );
         Mode::Restack
     } else {
         log::warn!("DDE: neither DBus transparency nor restack worked; wallpaper may be covered");
         Mode::Inactive
+    }
+}
+
+/// Best-effort check that our wallpaper window is actually producing frames:
+/// grab a small central region twice ~1s apart and compare. Purely
+/// diagnostic — logs the outcome, never fails. Blocks ~1s, so callers run it
+/// once per daemon lifetime, only in DDE mode.
+pub fn render_self_check<C: Connection>(conn: &C, windows: &[Window]) {
+    let Some(&w) = windows.first() else { return };
+    let grab = |c: &C| -> Option<Vec<u8>> {
+        let geom = c.get_geometry(w).ok()?.reply().ok()?;
+        let side: u16 = 64;
+        let x = (geom.width.saturating_sub(side) / 2) as i16;
+        let y = (geom.height.saturating_sub(side) / 2) as i16;
+        let img = c
+            .get_image(
+                ImageFormat::Z_PIXMAP,
+                w,
+                x,
+                y,
+                side.min(geom.width),
+                side.min(geom.height),
+                !0,
+            )
+            .ok()?
+            .reply()
+            .ok()?;
+        Some(img.data)
+    };
+    let Some(first) = grab(conn) else {
+        log::info!("DDE: render self-check unavailable (GetImage failed)");
+        return;
+    };
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    let Some(second) = grab(conn) else {
+        log::info!("DDE: render self-check unavailable (GetImage failed)");
+        return;
+    };
+    if first != second {
+        log::info!("DDE: render self-check OK — wallpaper window frames are changing");
+    } else {
+        log::info!(
+            "DDE: render self-check — wallpaper window frames unchanged over ~1s \
+             (static wallpaper, paused video, or rendering problem)"
+        );
     }
 }
 
@@ -241,53 +441,85 @@ pub fn restore() {
     }
 }
 
-/// Find dde-shell's desktop window and stack each of `windows` directly ABOVE
-/// it. True if the sibling was found and configured. Re-asserted alongside the
-/// periodic re-lower, since DDE restacks its desktop on stacking changes.
-pub fn restack_above_dde_desktop<C: Connection>(
-    conn: &C,
-    atoms: &Atoms,
-    root: Window,
-    windows: &[Window],
-) -> bool {
-    let Some(sibling) = find_dde_desktop_window(conn, atoms, root) else {
+/// One-shot guard so the periodic re-assert (every ~2s) logs once, not forever.
+static RAISE_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// Raise each of `windows` to the top of the stack — no sibling. Verified on
+/// Deepin 25: this lands our windows above dde-shell's desktop while real app
+/// windows and the dock still stack above us. A sibling-relative request
+/// against dde-shell's window is impossible (KWin reparents both, so
+/// `ConfigureWindow(sibling, Above)` returns BadMatch), and finding that window
+/// is not needed at all here.
+///
+/// True when every configure request was sent successfully. Re-asserted on the
+/// daemon's periodic stacking pass, since DDE restacks its desktop whenever the
+/// stack changes.
+pub fn restack_above_dde_desktop<C: Connection>(conn: &C, windows: &[Window]) -> bool {
+    if windows.is_empty() {
         return false;
-    };
-    let mut ok = false;
+    }
+    let mut ok = true;
     for &w in windows {
-        let aux = ConfigureWindowAux::new()
-            .sibling(sibling)
-            .stack_mode(StackMode::ABOVE);
-        if conn.configure_window(w, &aux).is_ok() {
-            ok = true;
+        if x11win::raise(conn, w).is_err() {
+            ok = false;
         }
     }
     let _ = conn.flush();
+    if ok && !RAISE_LOGGED.swap(true, Ordering::Relaxed) {
+        log::info!(
+            "DDE: raised {} wallpaper window(s) above dde-shell's desktop \
+             (sibling-less ConfigureWindow Above)",
+            windows.len()
+        );
+    }
     ok
 }
 
 /// The client window whose WM_CLASS is "dde-shell"/"desktop", from
 /// `_NET_CLIENT_LIST_STACKING`.
 fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Option<Window> {
-    let reply = conn
+    // long_length is in 4-byte units and must stay well clear of the server's
+    // overflow guard — u32::MAX makes Xorg reject the request outright, which
+    // silently defeated the whole scan. 4096 windows is far past any real
+    // desktop.
+    let reply = match conn
         .get_property(
             false,
             root,
             atoms._NET_CLIENT_LIST_STACKING,
             AtomEnum::WINDOW,
             0,
-            u32::MAX,
+            4096,
         )
-        .ok()?
-        .reply()
-        .ok()?;
-    let clients: Vec<Window> = reply.value32()?.collect();
+        .map_err(|e| format!("{e:?}"))
+        .and_then(|c| c.reply().map_err(|e| format!("{e:?}")))
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("DDE: could not read _NET_CLIENT_LIST_STACKING: {e}");
+            return None;
+        }
+    };
+    let Some(values) = reply.value32() else {
+        log::warn!(
+            "DDE: _NET_CLIENT_LIST_STACKING has unexpected format {}",
+            reply.format
+        );
+        return None;
+    };
+    let clients: Vec<Window> = values.collect();
+    log::debug!("DDE: scanning {} client windows", clients.len());
     for w in clients {
         let Ok(cookie) = conn.get_property(false, w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 1024)
         else {
             continue;
         };
         let Ok(prop) = cookie.reply() else { continue };
+        log::debug!(
+            "DDE: window {:#x} WM_CLASS={:?}",
+            w,
+            String::from_utf8_lossy(&prop.value)
+        );
         if wm_class_is_dde_desktop(&prop.value) {
             return Some(w);
         }
@@ -297,12 +529,17 @@ fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window)
 
 /// WM_CLASS is two NUL-terminated strings: instance, class.
 fn wm_class_is_dde_desktop(value: &[u8]) -> bool {
-    let mut parts = value.split(|&b| b == 0).filter(|s| !s.is_empty());
-    let instance = parts.next().unwrap_or(&[]);
-    let class = parts.next().unwrap_or(&[]);
-    let eq = |s: &[u8], t: &str| s.eq_ignore_ascii_case(t.as_bytes());
-    (eq(instance, "dde-shell") && eq(class, "desktop"))
-        || (eq(instance, "desktop") && eq(class, "dde-shell"))
+    // Measured on Deepin 25: the instance is one slash-joined token, so the
+    // whole property reads "dde-shell/desktop\0org.deepin.dde-shell\0" — per
+    // part equality never matches. Substring matching covers that, the older
+    // "dde-desktop" of Deepin 20/23, and keeps dde-shell/dock out (no
+    // "desktop" anywhere in it).
+    let lower = value.to_ascii_lowercase();
+    let has = |needle: &str| {
+        let n = needle.as_bytes();
+        lower.windows(n.len()).any(|w| w == n)
+    };
+    has("desktop") && (has("dde-shell") || has("dde-desktop") || has("deepin"))
 }
 
 #[cfg(test)]
@@ -354,9 +591,70 @@ mod tests {
     }
 
     #[test]
+    fn mode_parsing() {
+        assert_eq!(parse_mode("auto"), Some(DdeMode::Auto));
+        assert_eq!(parse_mode("transparent"), Some(DdeMode::Transparent));
+        assert_eq!(parse_mode("dbus"), Some(DdeMode::Transparent));
+        assert_eq!(parse_mode("restack"), Some(DdeMode::Restack));
+        assert_eq!(parse_mode("  Restack \n"), Some(DdeMode::Restack));
+        assert_eq!(parse_mode("TRANSPARENT"), Some(DdeMode::Transparent));
+        assert_eq!(parse_mode(""), None);
+        assert_eq!(parse_mode("yes"), None);
+    }
+
+    #[test]
+    fn strategy_selection_matrix() {
+        use DdeMode::*;
+        // Auto: dde-shell's desktop window present → restack, the only
+        // strategy that works there (transparency composites onto black,
+        // measured on Deepin 25). No such window → transparency, since
+        // restack would have no sibling to stack above.
+        assert_eq!(select_strategy(Auto, true), Strategy::Restack);
+        assert_eq!(select_strategy(Auto, false), Strategy::Transparent);
+        // Explicit preferences win either way.
+        for found in [true, false] {
+            assert_eq!(select_strategy(Transparent, found), Strategy::Transparent);
+            assert_eq!(select_strategy(Restack, found), Strategy::Restack);
+        }
+    }
+
+    /// The window flavour and the strategy are two views of one decision: we
+    /// only ever declare `[DESKTOP, NORMAL]` when we are going to raise.
+    #[test]
+    fn strategy_picks_the_matching_window_kind() {
+        assert_eq!(Strategy::Restack.window_kind(), WindowKind::DdeRaised);
+        assert_eq!(Strategy::Transparent.window_kind(), WindowKind::Desktop);
+        // Auto on Deepin 25 (dde-shell desktop window present) ⇒ raised kind.
+        assert_eq!(
+            select_strategy(DdeMode::Auto, true).window_kind(),
+            WindowKind::DdeRaised
+        );
+        // No dde-shell desktop window ⇒ plain desktop window, as everywhere else.
+        assert_eq!(
+            select_strategy(DdeMode::Auto, false).window_kind(),
+            WindowKind::Desktop
+        );
+    }
+
+    #[test]
     fn wm_class_matching() {
+        // The real property read off a Deepin 25 desktop — the instance is one
+        // slash-joined token. This is the case that matters.
+        assert!(wm_class_is_dde_desktop(
+            b"dde-shell/desktop\0org.deepin.dde-shell\0"
+        ));
+        // Older Deepin, and defensive orderings.
+        assert!(wm_class_is_dde_desktop(b"dde-desktop\0dde-desktop\0"));
         assert!(wm_class_is_dde_desktop(b"dde-shell\0desktop\0"));
         assert!(wm_class_is_dde_desktop(b"desktop\0dde-shell\0"));
+        // Must not match the dock, which shares the dde-shell prefix, nor our
+        // own windows, nor other Deepin apps.
+        assert!(!wm_class_is_dde_desktop(
+            b"dde-shell/dock\0org.deepin.dde-shell\0"
+        ));
+        assert!(!wm_class_is_dde_desktop(
+            b"deepin-terminal\0deepin-terminal\0"
+        ));
         assert!(!wm_class_is_dde_desktop(
             b"fresco-wallpaper\0fresco-wallpaper\0"
         ));

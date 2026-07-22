@@ -62,7 +62,7 @@ export function Supported() {
             Where Fresco runs.
           </h2>
           <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
-            On any X11 desktop — including Deepin 25's DDE — and on Wayland
+            On any X11 desktop — including Deepin 25&apos;s DDE — and on Wayland
             layer-shell compositors — COSMIC, Hyprland, Sway, and KDE Plasma 6 —
             across the popular Debian and Ubuntu distributions. GNOME Wayland
             gets a static-frame fallback.

@@ -29,11 +29,11 @@ use super::x11win::Atoms;
 /// 1x1 fully-transparent RGBA PNG, written to the state dir at runtime and
 /// handed to DDE as a `file://` wallpaper URI.
 const TRANSPARENT_PNG: [u8; 68] = [
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
-    0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
-    0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60,
-    0x00, 0x02, 0x00, 0x00, 0x05, 0x00, 0x01, 0x7a, 0x5e, 0xab, 0x3f, 0x00, 0x00, 0x00, 0x00,
-    0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x00, 0x02, 0x00,
+    0x00, 0x05, 0x00, 0x01, 0x7a, 0x5e, 0xab, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+    0xae, 0x42, 0x60, 0x82,
 ];
 
 /// (dest, object path, interface) for DDE's session Appearance service.
@@ -221,7 +221,10 @@ pub fn restore() {
         return; // nothing saved — nothing to restore
     };
     let Ok(saved) = serde_json::from_slice::<SavedWallpapers>(&bytes) else {
-        log::warn!("DDE: unreadable saved-wallpaper state at {}", path.display());
+        log::warn!(
+            "DDE: unreadable saved-wallpaper state at {}",
+            path.display()
+        );
         return;
     };
     let mut all_ok = true;
@@ -313,15 +316,13 @@ mod tests {
             "HDMI-0".into(),
             "file:///usr/share/wallpapers/deepin/a.jpg".into(),
         );
-        s.monitors.insert("eDP-1".into(), "file:///home/u/b.png".into());
+        s.monitors
+            .insert("eDP-1".into(), "file:///home/u/b.png".into());
         let json = serde_json::to_string(&s).unwrap();
         let back: SavedWallpapers = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
         assert_eq!(back.monitors.len(), 2);
-        assert_eq!(
-            back.monitors["eDP-1"],
-            "file:///home/u/b.png".to_string()
-        );
+        assert_eq!(back.monitors["eDP-1"], "file:///home/u/b.png".to_string());
     }
 
     #[test]
@@ -356,7 +357,9 @@ mod tests {
     fn wm_class_matching() {
         assert!(wm_class_is_dde_desktop(b"dde-shell\0desktop\0"));
         assert!(wm_class_is_dde_desktop(b"desktop\0dde-shell\0"));
-        assert!(!wm_class_is_dde_desktop(b"fresco-wallpaper\0fresco-wallpaper\0"));
+        assert!(!wm_class_is_dde_desktop(
+            b"fresco-wallpaper\0fresco-wallpaper\0"
+        ));
         assert!(!wm_class_is_dde_desktop(b""));
         assert!(!wm_class_is_dde_desktop(b"dde-shell\0dock\0"));
     }

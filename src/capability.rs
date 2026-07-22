@@ -204,7 +204,14 @@ mod tests {
             assert!(classify_deepin_dde(Some(d), None), "current {d}");
             assert!(classify_deepin_dde(None, Some(d)), "session {d}");
         }
-        for d in ["GNOME", "KDE", "pop:GNOME", "ubuntu:GNOME", "kddesomething", ""] {
+        for d in [
+            "GNOME",
+            "KDE",
+            "pop:GNOME",
+            "ubuntu:GNOME",
+            "kddesomething",
+            "",
+        ] {
             assert!(!classify_deepin_dde(Some(d), None), "current {d}");
         }
         assert!(!classify_deepin_dde(None, None));

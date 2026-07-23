@@ -31,6 +31,46 @@ pub enum Scaling {
     High,
 }
 
+/// How hard Fresco works to cut video-decode load, trading playback smoothness
+/// for battery and heat.
+///
+/// This replaces the 1.1.32 frame-rate cap, which was actively harmful: an
+/// `fps` video filter is a *software* filter, so inserting it into a VA-API
+/// pipeline forced every frame to be downloaded from the GPU. Measured on
+/// Alder Lake-N, capping 60fps to 30 roughly DOUBLED video-engine load
+/// (~17% -> ~34%) instead of reducing it.
+///
+/// The honest lever is decoder-level frame skipping (`--vd-lavc-skipframe`),
+/// which drops frames inside libavcodec *before* they are decoded, so the work
+/// is never done and hardware decoding is left intact. It cannot express an
+/// exact fps — how much it saves depends on the file's GOP structure — so the
+/// control is named for what it does (save power) rather than promising a
+/// frame rate it cannot honour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PowerSaving {
+    /// Decode everything; mpv's normal behaviour.
+    #[default]
+    Full,
+    /// Skip frames no other frame references. Visibly less smooth on some
+    /// clips, meaningfully less decode work.
+    Reduced,
+    /// Also skip bidirectionally-predicted (B) frames — the biggest saving and
+    /// the choppiest result.
+    Minimum,
+}
+
+impl PowerSaving {
+    /// The `vd-lavc-skipframe` value, or `None` to leave mpv's default alone.
+    pub fn skipframe(self) -> Option<&'static str> {
+        match self {
+            PowerSaving::Full => None,
+            PowerSaving::Reduced => Some("nonref"),
+            PowerSaving::Minimum => Some("bidir"),
+        }
+    }
+}
+
 /// How Fresco deals with Deepin DDE's covering desktop window (issue #2).
 /// `Auto` probes the desktop window's visual depth and picks for itself;
 /// `Transparent` forces the DBus transparent-wallpaper strategy; `Restack`
@@ -218,11 +258,15 @@ pub struct Wallpaper {
     pub mute: bool,
     #[serde(default = "default_volume")]
     pub volume: u8,
-    /// Per-wallpaper frame-rate cap override, in fps. `None` inherits the
-    /// global [`Config::framerate`]; `Some(n)` overrides it (`Some(0)` forces
-    /// the original rate even if the global default caps). Lets one cinematic
-    /// clip run at 24 while everything else stays smooth.
+    /// Per-wallpaper power-saving override. `None` inherits the global
+    /// [`Config::power_saving`]; `Some(_)` overrides it for this wallpaper —
+    /// e.g. leave one showpiece clip on Full while everything else saves power.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_saving: Option<PowerSaving>,
+    /// Deprecated 1.1.32 per-wallpaper frame-rate cap; parsed for backward
+    /// compatibility and migrated on load. Never applied. See
+    /// [`Config::power_saving`].
+    #[serde(default, skip_serializing)]
     pub framerate: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slideshow: Option<Slideshow>,
@@ -237,10 +281,10 @@ impl Wallpaper {
             .or_else(|| self.paths.first().map(|p| p.as_path()))
     }
 
-    /// Frame-rate cap actually applied to this wallpaper: the per-wallpaper
-    /// override if set, otherwise the `global` default. 0 = original rate.
-    pub fn effective_framerate(&self, global: u16) -> u16 {
-        self.framerate.unwrap_or(global)
+    /// Power-saving level actually applied to this wallpaper: the per-wallpaper
+    /// override if set, otherwise the `global` default.
+    pub fn effective_power_saving(&self, global: PowerSaving) -> PowerSaving {
+        self.power_saving.unwrap_or(global)
     }
 }
 
@@ -256,6 +300,7 @@ impl Default for Wallpaper {
             crop: None,
             mute: true,
             volume: default_volume(),
+            power_saving: None,
             framerate: None,
             slideshow: None,
         }
@@ -276,11 +321,14 @@ pub struct Config {
     pub pause_on_battery: bool,
     #[serde(default)]
     pub scaling: Scaling,
-    /// Cap video-wallpaper output frame rate, in fps. `0` = the source's
-    /// original rate (default). A cap (e.g. 30) trades smoothness for lower
-    /// render/present load — a real battery and heat win on low-end hardware.
-    /// See [`fps_filter`] for how it maps to mpv.
+    /// Global decode-load reduction; see [`PowerSaving`].
     #[serde(default)]
+    pub power_saving: PowerSaving,
+    /// Deprecated 1.1.32 frame-rate cap, in fps. Retained only so configs
+    /// written by 1.1.32 still parse; the value is migrated to
+    /// [`Config::power_saving`] on load (see [`Config::migrate`]) and never
+    /// applied to mpv — the filter it drove made decode load worse, not better.
+    #[serde(default, skip_serializing)]
     pub framerate: u16,
     /// Deepin DDE strategy (auto | transparent | restack); see [`DdeMode`].
     #[serde(default)]
@@ -373,15 +421,11 @@ fn default_version() -> u32 {
     1
 }
 
-/// mpv `vf` (video-filter) value for a frame-rate cap, or `None` for the
-/// source's original rate (`fps == 0`). The libavfilter `fps` filter drops or
-/// duplicates whole frames to hit the target rate **without** changing
-/// playback speed. It runs after decode, so it cuts render/present/vsync work
-/// (the battery win) but not decode work. Crop (`video-zoom`/`video-pan`) and
-/// rotation (`video-rotate`) use mpv properties, not `vf`, so this filter is
-/// the sole occupant of the chain and can be set/cleared without composing.
-pub fn fps_filter(fps: u16) -> Option<String> {
-    (fps > 0).then(|| format!("fps={fps}"))
+/// Translate a deprecated 1.1.32 frame-rate cap into a power-saving level.
+/// Any cap meant "I want less load", which is what `Reduced` delivers — this
+/// time without making decode worse.
+fn power_saving_from_legacy_framerate(fps: u16) -> Option<PowerSaving> {
+    (fps > 0).then_some(PowerSaving::Reduced)
 }
 
 impl Default for Config {
@@ -392,6 +436,7 @@ impl Default for Config {
             enabled: true,
             pause_on_battery: false,
             scaling: Scaling::default(),
+            power_saving: PowerSaving::default(),
             framerate: 0,
             dde_mode: DdeMode::default(),
             theme_mode: ThemeMode::default(),
@@ -437,9 +482,31 @@ impl Config {
         }
         let text =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let cfg: Config =
+        let mut cfg: Config =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        cfg.migrate();
         Ok(cfg)
+    }
+
+    /// Fold deprecated keys into their replacements. Runs on every load and is
+    /// idempotent; the migrated value is persisted on the next save (the old
+    /// keys are `skip_serializing`, so they disappear then).
+    fn migrate(&mut self) {
+        // 1.1.32's frame-rate cap -> power saving. Only fills an unset value,
+        // so an explicit `power_saving` in the file always wins.
+        if self.power_saving == PowerSaving::default() {
+            if let Some(p) = power_saving_from_legacy_framerate(self.framerate) {
+                self.power_saving = p;
+            }
+        }
+        self.framerate = 0;
+        if self.wallpaper.power_saving.is_none() {
+            self.wallpaper.power_saving = self
+                .wallpaper
+                .framerate
+                .and_then(power_saving_from_legacy_framerate);
+        }
+        self.wallpaper.framerate = None;
     }
 
     pub fn save(&self) -> Result<()> {
@@ -476,41 +543,82 @@ mod tests {
         assert!(cfg.enabled);
         assert!(cfg.wallpaper.mute);
         assert_eq!(cfg.wallpaper.volume, 50);
-        // Absent framerate key → 0 = original rate (backward compatible).
-        assert_eq!(cfg.framerate, 0);
+        // Absent power_saving key → Full (backward compatible).
+        assert_eq!(cfg.power_saving, PowerSaving::Full);
     }
 
     #[test]
-    fn framerate_maps_to_fps_filter() {
-        // 0 = original rate → no filter at all.
-        assert_eq!(fps_filter(0), None);
-        assert_eq!(fps_filter(24).as_deref(), Some("fps=24"));
-        assert_eq!(fps_filter(30).as_deref(), Some("fps=30"));
-        assert_eq!(fps_filter(60).as_deref(), Some("fps=60"));
+    fn power_saving_maps_to_decoder_skipping() {
+        // Full leaves mpv's own default alone — no option written at all.
+        assert_eq!(PowerSaving::Full.skipframe(), None);
+        assert_eq!(PowerSaving::Reduced.skipframe(), Some("nonref"));
+        assert_eq!(PowerSaving::Minimum.skipframe(), Some("bidir"));
     }
 
     #[test]
-    fn effective_framerate_prefers_override_then_global() {
+    fn legacy_framerate_migrates_to_power_saving() {
+        // A config written by 1.1.32 must still load, and its frame-rate cap
+        // becomes the equivalent intent: reduce load.
+        let cfg: Config = toml::from_str("framerate = 30").unwrap();
+        let mut cfg = cfg;
+        cfg.migrate();
+        assert_eq!(cfg.power_saving, PowerSaving::Reduced);
+        assert_eq!(cfg.framerate, 0, "legacy key must not survive migration");
+
+        // framerate = 0 meant "original rate" → no power saving.
+        let mut untouched: Config = toml::from_str("framerate = 0").unwrap();
+        untouched.migrate();
+        assert_eq!(untouched.power_saving, PowerSaving::Full);
+
+        // An explicit power_saving always wins over the legacy key.
+        let mut explicit: Config =
+            toml::from_str("framerate = 30\npower_saving = \"minimum\"").unwrap();
+        explicit.migrate();
+        assert_eq!(explicit.power_saving, PowerSaving::Minimum);
+    }
+
+    #[test]
+    fn legacy_per_wallpaper_framerate_migrates() {
+        let mut cfg: Config = toml::from_str("[wallpaper]\nframerate = 24").unwrap();
+        cfg.migrate();
+        assert_eq!(cfg.wallpaper.power_saving, Some(PowerSaving::Reduced));
+        assert_eq!(cfg.wallpaper.framerate, None);
+    }
+
+    #[test]
+    fn effective_power_saving_prefers_override_then_global() {
         let mut w = Wallpaper::default();
         // No override → inherit the global default.
-        assert_eq!(w.effective_framerate(0), 0);
-        assert_eq!(w.effective_framerate(30), 30);
-        // Override wins over the global, including forcing original (0) back on.
-        w.framerate = Some(24);
-        assert_eq!(w.effective_framerate(60), 24);
-        w.framerate = Some(0);
-        assert_eq!(w.effective_framerate(30), 0);
+        assert_eq!(
+            w.effective_power_saving(PowerSaving::Full),
+            PowerSaving::Full
+        );
+        assert_eq!(
+            w.effective_power_saving(PowerSaving::Reduced),
+            PowerSaving::Reduced
+        );
+        // Override wins, including forcing Full back on under a saving default.
+        w.power_saving = Some(PowerSaving::Minimum);
+        assert_eq!(
+            w.effective_power_saving(PowerSaving::Full),
+            PowerSaving::Minimum
+        );
+        w.power_saving = Some(PowerSaving::Full);
+        assert_eq!(
+            w.effective_power_saving(PowerSaving::Minimum),
+            PowerSaving::Full
+        );
     }
 
     #[test]
-    fn framerate_roundtrips_through_toml() {
+    fn power_saving_roundtrips_through_toml() {
         let cfg = Config {
-            framerate: 30,
+            power_saving: PowerSaving::Reduced,
             ..Config::default()
         };
         let s = toml::to_string(&cfg).unwrap();
         let back: Config = toml::from_str(&s).unwrap();
-        assert_eq!(back.framerate, 30);
+        assert_eq!(back.power_saving, PowerSaving::Reduced);
     }
 
     #[test]

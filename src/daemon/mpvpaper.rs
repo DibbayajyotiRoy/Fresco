@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 
-use crate::config::{Fit, Kind, Scaling, Wallpaper};
+use crate::config::{Fit, Kind, PowerSaving, Scaling, Wallpaper};
 
 /// One `mpvpaper` process for one output, plus a client for its mpv IPC socket.
 pub struct WaylandPlayer {
@@ -48,7 +48,7 @@ impl WaylandPlayer {
         connector: &str,
         wallpaper: &Wallpaper,
         scaling: Scaling,
-        framerate: u16,
+        power_saving: PowerSaving,
         file: &Path,
     ) -> Result<WaylandPlayer> {
         let dir = crate::ipc::socket_dir();
@@ -56,7 +56,7 @@ impl WaylandPlayer {
         let socket_path = dir.join(format!("mpv-{}.sock", sanitize(connector)));
         std::fs::remove_file(&socket_path).ok();
 
-        let opts = build_mpv_opts(wallpaper, scaling, framerate, &socket_path);
+        let opts = build_mpv_opts(wallpaper, scaling, power_saving, &socket_path);
         let bin = crate::mpvpaper_command();
         log::info!(
             "[{connector}] spawning {} -o \"{opts}\" {connector} {}",
@@ -193,11 +193,11 @@ impl WaylandPlayer {
         self.set("cscale", json!(cscale));
     }
 
-    /// Change the frame-rate cap at runtime (mirrors `Player::set_framerate`):
-    /// the `fps` filter is our only `vf`, so an empty value clears the cap.
-    pub fn set_framerate(&self, framerate: u16) {
-        let vf = crate::config::fps_filter(framerate).unwrap_or_default();
-        self.set("vf", json!(vf));
+    /// Change the power-saving level at runtime (mirrors
+    /// `Player::set_power_saving`). `Full` restores mpv's own default skipping.
+    pub fn set_power_saving(&self, power_saving: PowerSaving) {
+        let skip = power_saving.skipframe().unwrap_or("default");
+        self.set("vd-lavc-skipframe", json!(skip));
     }
 
     /// Seek to an absolute position (seconds). Used to keep clones of the same
@@ -318,7 +318,12 @@ fn sanitize(connector: &str) -> String {
 
 /// Build the space-separated mpv option string passed to `mpvpaper -o`. Mirrors
 /// the options the X11 `Player` sets (minus `wid`/`vo`, which mpvpaper owns).
-fn build_mpv_opts(w: &Wallpaper, scaling: Scaling, framerate: u16, sock: &Path) -> String {
+fn build_mpv_opts(
+    w: &Wallpaper,
+    scaling: Scaling,
+    power_saving: PowerSaving,
+    sock: &Path,
+) -> String {
     // NOTE: do not pass `background=#000000` — mpvpaper forwards `-o` options
     // through an mpv config file, where `#` begins a comment, so the value is
     // truncated and mpv rejects it. mpv's default letterbox background is black.
@@ -384,10 +389,11 @@ fn build_mpv_opts(w: &Wallpaper, scaling: Scaling, framerate: u16, sock: &Path) 
     }
     // Clockwise rotation in degrees; applied before crop (zoom/pan).
     o.push(format!("video-rotate={}", w.rotation % 360));
-    // Frame-rate cap (0 = original rate). The `fps` filter is the sole `vf`
-    // occupant — crop and rotation use properties — so no chain composition.
-    if let Some(vf) = crate::config::fps_filter(framerate) {
-        o.push(format!("vf={vf}"));
+    // Power saving: decoder-level frame skipping. Deliberately NOT a `vf`
+    // filter — a software filter in a VA-API pipeline forces every frame off
+    // the GPU and doubles video-engine load (measured on Alder Lake).
+    if let Some(skip) = power_saving.skipframe() {
+        o.push(format!("vd-lavc-skipframe={skip}"));
     }
     o.join(" ")
 }
@@ -502,28 +508,47 @@ mod tests {
             mute: true,
             ..Default::default()
         };
-        let opts = build_mpv_opts(&w, Scaling::Balanced, 0, Path::new("/tmp/s.sock"));
+        let opts = build_mpv_opts(
+            &w,
+            Scaling::Balanced,
+            PowerSaving::Full,
+            Path::new("/tmp/s.sock"),
+        );
         assert!(opts.contains("aid=no"));
         assert!(opts.contains("video-sync=display-resample"));
-        // framerate 0 → no fps filter (original rate).
-        assert!(!opts.contains("vf=fps"));
+        // Full → mpv's own default skipping; and NEVER a vf filter, which is
+        // what made decode load worse on hardware-decoded video.
+        assert!(!opts.contains("vd-lavc-skipframe"));
+        assert!(!opts.contains("vf="));
         let unmuted = Wallpaper {
             kind: Kind::Video,
             mute: false,
             ..Default::default()
         };
-        let opts = build_mpv_opts(&unmuted, Scaling::Balanced, 0, Path::new("/tmp/s.sock"));
+        let opts = build_mpv_opts(
+            &unmuted,
+            Scaling::Balanced,
+            PowerSaving::Full,
+            Path::new("/tmp/s.sock"),
+        );
         assert!(!opts.contains("video-sync=display-resample"));
     }
 
     #[test]
-    fn build_mpv_opts_adds_fps_filter_when_capped() {
+    fn build_mpv_opts_uses_decoder_skipping_not_a_filter() {
         let w = Wallpaper {
             kind: Kind::Video,
             ..Default::default()
         };
-        let opts = build_mpv_opts(&w, Scaling::Balanced, 30, Path::new("/tmp/s.sock"));
-        assert!(opts.contains("vf=fps=30"), "opts were: {opts}");
+        for (level, want) in [
+            (PowerSaving::Reduced, "vd-lavc-skipframe=nonref"),
+            (PowerSaving::Minimum, "vd-lavc-skipframe=bidir"),
+        ] {
+            let opts = build_mpv_opts(&w, Scaling::Balanced, level, Path::new("/tmp/s.sock"));
+            assert!(opts.contains(want), "{level:?} opts were: {opts}");
+            // A `vf` here would force frames off the GPU — the 1.1.32 bug.
+            assert!(!opts.contains("vf="), "{level:?} must not add a filter");
+        }
     }
 
     fn have(bin: &str) -> bool {
@@ -626,7 +651,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
                 "HEADLESS-1",
                 &wp,
                 Scaling::Balanced,
-                0,
+                PowerSaving::Full,
                 &std::env::temp_dir().join("fresco-none.mp4")
             )
             .is_err(),
@@ -651,7 +676,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
             "HEADLESS-1",
             &wp,
             Scaling::Balanced,
-            0,
+            PowerSaving::Full,
             &std::env::temp_dir().join("fresco-none.mp4"),
         )
         .expect("spawn the fake mpvpaper backend");

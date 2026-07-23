@@ -62,6 +62,11 @@
   </branding>
 
   <releases>
+    <release version="1.1.33" date="2026-07-23">
+      <description>
+        <p>Replaces the 1.1.32 frame-rate cap with a Power saving control (Full quality / Reduced / Minimum). The old cap used a video filter that forced frames off the GPU and roughly doubled video decode load on hardware-decoded video; power saving now skips frames inside the decoder instead, leaving hardware decoding intact. Also fixes several light-mode readability problems, including an invisible Remove item in the wallpaper right-click menu.</p>
+      </description>
+    </release>
     <release version="1.1.32" date="2026-07-23">
       <description>
         <p>Frame-rate cap for video wallpapers: a global default in Settings plus a per-wallpaper override in the editor (24/30/48/60 fps or original) to save battery and heat on low-end hardware. Also unifies the app icon artwork across launcher and taskbar.</p>

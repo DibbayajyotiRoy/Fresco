@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::config::{Fit, Scaling, Wallpaper};
+use crate::config::{Fit, PowerSaving, Scaling, Wallpaper};
 
 use super::ffi::{fns, MpvHandle};
 
@@ -15,13 +15,13 @@ unsafe impl Send for Player {}
 
 impl Player {
     /// Create + initialize an mpv instance rendering into X11 window `wid`,
-    /// configured for the given wallpaper, scaling preference, and frame-rate
-    /// cap (`framerate` fps, or 0 for the source's original rate).
+    /// configured for the given wallpaper, scaling preference, and
+    /// power-saving level.
     pub fn new(
         wid: u32,
         wallpaper: &Wallpaper,
         scaling: Scaling,
-        framerate: u16,
+        power_saving: PowerSaving,
     ) -> Result<Player> {
         let f = fns()?;
         let handle = f.create();
@@ -128,10 +128,12 @@ impl Player {
             // Fit mode.
             apply_fit_options(f, handle, wallpaper.fit);
 
-            // Frame-rate cap: the `fps` filter is the sole `vf` occupant (crop
-            // and rotation use properties), so we can set it outright.
-            if let Some(vf) = crate::config::fps_filter(framerate) {
-                f.set_option(handle, "vf", &vf);
+            // Power saving: skip frames inside libavcodec, BEFORE they are
+            // decoded. Never a `vf` filter — a software filter in a VA-API
+            // pipeline forces every frame to be downloaded off the GPU, which
+            // measured as double the video-engine load on Alder Lake.
+            if let Some(skip) = power_saving.skipframe() {
+                f.set_option(handle, "vd-lavc-skipframe", skip);
             }
 
             if f.initialize(handle) < 0 {
@@ -268,14 +270,14 @@ impl Player {
         }
     }
 
-    /// Change the frame-rate cap at runtime (scheduled swaps replace media in
-    /// place, so a per-wallpaper cap must not leak onto the next wallpaper).
-    /// The `fps` filter is our only `vf`, so an empty value clears the cap.
-    pub fn set_framerate(&self, framerate: u16) {
+    /// Change the power-saving level at runtime (scheduled swaps replace media
+    /// in place, so a per-wallpaper level must not leak onto the next
+    /// wallpaper). `Full` restores mpv's own default skip behaviour.
+    pub fn set_power_saving(&self, power_saving: PowerSaving) {
         let Ok(f) = fns() else { return };
-        let vf = crate::config::fps_filter(framerate).unwrap_or_default();
+        let skip = power_saving.skipframe().unwrap_or("default");
         // SAFETY: `self.handle` is valid for the lifetime of this Player.
-        unsafe { f.set_property(self.handle, "vf", &vf) };
+        unsafe { f.set_property(self.handle, "vd-lavc-skipframe", skip) };
     }
 
     /// Seek to an absolute position (seconds). Used to keep clones of the same

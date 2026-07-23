@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Fit, Kind, Slideshow, Transition, Wallpaper};
+use crate::config::{Fit, Kind, PowerSaving, Slideshow, Transition, Wallpaper};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -47,10 +47,10 @@ pub struct LibraryEntry {
     pub volume: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<u16>,
-    /// Per-wallpaper frame-rate cap override (fps); `None` inherits the global
-    /// default. Remembered so a later gallery set keeps the chosen cap.
+    /// Per-wallpaper power-saving override; `None` inherits the global default.
+    /// Remembered so a later gallery set keeps the chosen level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub framerate: Option<u16>,
+    pub power_saving: Option<PowerSaving>,
     /// Catalog item this entry was installed from (ROADMAP 3.1), if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_id: Option<String>,
@@ -91,7 +91,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
-            framerate: None,
+            power_saving: None,
             catalog_id: None,
             width: None,
             height: None,
@@ -122,7 +122,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
-            framerate: None,
+            power_saving: None,
             catalog_id: None,
             width: None,
             height: None,
@@ -160,7 +160,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
-            framerate: None,
+            power_saving: None,
             catalog_id: None,
             width: None,
             height: None,
@@ -191,7 +191,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
-            framerate: None,
+            power_saving: None,
             catalog_id: None,
             width: None,
             height: None,
@@ -220,7 +220,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
-            framerate: None,
+            power_saving: None,
             catalog_id: None,
             width: None,
             height: None,
@@ -392,7 +392,8 @@ impl LibraryEntry {
             crop: None,
             mute: self.mute.unwrap_or(true),
             volume: self.volume.unwrap_or(50),
-            framerate: self.framerate,
+            power_saving: self.power_saving,
+            framerate: None, // deprecated; see Config::migrate
             slideshow: if self.kind == Kind::Slideshow {
                 Some(Slideshow {
                     folder: self.folder.clone(),

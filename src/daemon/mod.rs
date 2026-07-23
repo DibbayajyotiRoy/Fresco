@@ -22,7 +22,7 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::Screen;
 use x11rb::rust_connection::RustConnection;
 
-use crate::config::{Config, Kind, Scaling, Transition, Wallpaper};
+use crate::config::{Config, Kind, PowerSaving, Scaling, Transition, Wallpaper};
 use crate::ipc::{MonitorInfo, Request, Response, StatusReply};
 
 use monitors::Monitor;
@@ -175,12 +175,12 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.set_rotation(rotation, scaling),
         }
     }
-    /// Runtime frame-rate-cap change (scheduled swaps are media-only, so a
-    /// per-wallpaper cap must be re-applied like rotation/crop).
-    fn set_framerate(&self, framerate: u16) {
+    /// Runtime power-saving change (scheduled swaps are media-only, so a
+    /// per-wallpaper level must be re-applied like rotation/crop).
+    fn set_power_saving(&self, power_saving: PowerSaving) {
         match self {
-            PlayerHandle::X11(p) => p.set_framerate(framerate),
-            PlayerHandle::Wayland(p) => p.set_framerate(framerate),
+            PlayerHandle::X11(p) => p.set_power_saving(power_saving),
+            PlayerHandle::Wayland(p) => p.set_power_saving(power_saving),
         }
     }
     fn apply_crop(&self, wallpaper: &Wallpaper) {
@@ -368,7 +368,7 @@ impl Daemon {
                 &monitor,
                 &wallpaper,
                 self.config.scaling,
-                wallpaper.effective_framerate(self.config.framerate),
+                wallpaper.effective_power_saving(self.config.power_saving),
                 kind,
             ) {
                 Ok(r) => {
@@ -416,11 +416,16 @@ impl Daemon {
         monitor: &Monitor,
         wallpaper: &Wallpaper,
         scaling: Scaling,
-        framerate: u16,
+        power_saving: PowerSaving,
         kind: WindowKind,
     ) -> Result<Renderer> {
         let window = WallpaperWindow::create(conn, screen, atoms, monitor, kind)?;
-        let player = PlayerHandle::X11(Player::new(window.window, wallpaper, scaling, framerate)?);
+        let player = PlayerHandle::X11(Player::new(
+            window.window,
+            wallpaper,
+            scaling,
+            power_saving,
+        )?);
         let slideshow = build_slideshow(wallpaper, &player);
         Ok(Renderer {
             window,
@@ -726,7 +731,7 @@ impl Daemon {
                 // wallpaper's settings leak onto the scheduled one.
                 r.player.set_rotation(want.rotation, self.config.scaling);
                 r.player
-                    .set_framerate(want.effective_framerate(self.config.framerate));
+                    .set_power_saving(want.effective_power_saving(self.config.power_saving));
                 r.player.apply_crop(&want);
                 r.player.load_path(&path);
                 r.cache_raised.set(false); // re-check resolution for the new media
@@ -736,7 +741,7 @@ impl Daemon {
         // the on-disk config remains the user's own intent.
         self.config.wallpaper.path = Some(path.clone());
         self.config.wallpaper.rotation = want.rotation;
-        self.config.wallpaper.framerate = want.framerate;
+        self.config.wallpaper.power_saving = want.power_saving;
         self.config.wallpaper.crop = want.crop;
         self.sched.applied = Some(path);
         overview::apply(&self.config.wallpaper);
@@ -1495,13 +1500,8 @@ fn run_wayland_layershell() -> Result<()> {
         {
             continue; // nothing configured for this output
         }
-        let effective_fps = wallpaper.effective_framerate(config.framerate);
-        let mut out = WlOutput::new(
-            m.connector.clone(),
-            wallpaper,
-            config.scaling,
-            effective_fps,
-        );
+        let effective_ps = wallpaper.effective_power_saving(config.power_saving);
+        let mut out = WlOutput::new(m.connector.clone(), wallpaper, config.scaling, effective_ps);
         out.respawn(false, false);
         outputs.insert(m.connector.clone(), out);
     }
@@ -1551,10 +1551,10 @@ fn run_wayland_layershell() -> Result<()> {
                                 let has = wp.effective_path().is_some()
                                     || !wp.paths.is_empty()
                                     || wp.kind == Kind::Slideshow;
-                                let effective_fps = wp.effective_framerate(config.framerate);
+                                let effective_ps = wp.effective_power_saving(config.power_saving);
                                 match (outputs.get_mut(&m.connector), has) {
                                     (Some(o), true) => {
-                                        o.apply_wallpaper(wp, config.scaling, effective_fps, paused)
+                                        o.apply_wallpaper(wp, config.scaling, effective_ps, paused)
                                     }
                                     (Some(_), false) => {
                                         outputs.remove(&m.connector);
@@ -1564,7 +1564,7 @@ fn run_wayland_layershell() -> Result<()> {
                                             m.connector.clone(),
                                             wp,
                                             config.scaling,
-                                            effective_fps,
+                                            effective_ps,
                                         );
                                         o.respawn(paused, false);
                                         outputs.insert(m.connector.clone(), o);
@@ -1628,17 +1628,19 @@ fn run_wayland_layershell() -> Result<()> {
                         if !config.monitors.contains_key(connector) {
                             if let Some(pl) = o.player.as_ref() {
                                 // Reset per-wallpaper player state, or the previous
-                                // wallpaper's rotation/crop/framerate leak onto this one.
+                                // wallpaper's rotation/crop/power-saving leak onto this one.
                                 pl.set_rotation(want.rotation, o.scaling);
-                                pl.set_framerate(want.effective_framerate(config.framerate));
+                                pl.set_power_saving(
+                                    want.effective_power_saving(config.power_saving),
+                                );
                                 pl.apply_crop(&want);
                                 pl.load_path(&path);
                             }
                             o.wallpaper.path = Some(path.clone());
                             o.wallpaper.rotation = want.rotation;
-                            o.wallpaper.framerate = want.framerate;
+                            o.wallpaper.power_saving = want.power_saving;
                             o.wallpaper.crop = want.crop;
-                            o.framerate = want.effective_framerate(config.framerate);
+                            o.power_saving = want.effective_power_saving(config.power_saving);
                         }
                     }
                     config.wallpaper.path = Some(path.clone());
@@ -1738,8 +1740,8 @@ struct WlOutput {
     connector: String,
     wallpaper: Wallpaper,
     scaling: Scaling,
-    /// Frame-rate cap in fps (0 = original rate); global, applied at spawn.
-    framerate: u16,
+    /// Effective power-saving level for this output; applied at spawn.
+    power_saving: PowerSaving,
     player: Option<PlayerHandle>,
     slideshow: Option<Slideshow>,
     restarts: u32,
@@ -1757,12 +1759,17 @@ struct WlOutput {
 }
 
 impl WlOutput {
-    fn new(connector: String, wallpaper: Wallpaper, scaling: Scaling, framerate: u16) -> WlOutput {
+    fn new(
+        connector: String,
+        wallpaper: Wallpaper,
+        scaling: Scaling,
+        power_saving: PowerSaving,
+    ) -> WlOutput {
         WlOutput {
             connector,
             wallpaper,
             scaling,
-            framerate,
+            power_saving,
             player: None,
             slideshow: None,
             restarts: 0,
@@ -1809,7 +1816,7 @@ impl WlOutput {
             &self.connector,
             &self.wallpaper,
             self.scaling,
-            self.framerate,
+            self.power_saving,
             &file,
         ) {
             Ok(p) => {
@@ -1835,13 +1842,19 @@ impl WlOutput {
     }
 
     /// Apply a (possibly changed) wallpaper. If only the media changed, switch in
-    /// place via `loadfile replace`; otherwise respawn (fit/crop/scaling/framerate
+    /// place via `loadfile replace`; otherwise respawn (fit/crop/scaling/power-saving
     /// are spawn-time mpv options).
-    fn apply_wallpaper(&mut self, new: Wallpaper, scaling: Scaling, framerate: u16, paused: bool) {
+    fn apply_wallpaper(
+        &mut self,
+        new: Wallpaper,
+        scaling: Scaling,
+        power_saving: PowerSaving,
+        paused: bool,
+    ) {
         let media_only = self.player.is_some()
             && !self.static_fallback
             && scaling == self.scaling
-            && framerate == self.framerate
+            && power_saving == self.power_saving
             && new.fit == self.wallpaper.fit
             && new.rotation == self.wallpaper.rotation
             && new.mute == self.wallpaper.mute
@@ -1851,7 +1864,7 @@ impl WlOutput {
             && new.kind != Kind::Slideshow;
         self.wallpaper = new;
         self.scaling = scaling;
-        self.framerate = framerate;
+        self.power_saving = power_saving;
         self.audio_heal = AudioHeal::new();
         if media_only {
             if let (Some(p), Some(path)) = (self.player.as_ref(), self.wallpaper.effective_path()) {

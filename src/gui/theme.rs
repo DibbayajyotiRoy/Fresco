@@ -139,6 +139,11 @@ pub fn is_dark() -> bool {
 fn build_css(accent: Accent, dark: bool) -> String {
     let p = if dark { &Pal::DARK } else { &Pal::LIGHT };
     let (accent_bg, accent_fg) = accent_pair(accent, dark);
+    // Smoked-glass opacity is scheme-dependent. On dark, content behind a
+    // translucent dark panel stays hidden (dark on dark). On light, the dark
+    // TEXT behind bleeds straight through a light panel and collides with the
+    // modal's own text, so light needs a much higher opacity to stay readable.
+    let glass_alpha = if dark { "0.86" } else { "0.97" };
 
     format!(
         "/* ===== Fresco palette ===== */
@@ -170,7 +175,7 @@ headerbar, headerbar.flat {{ background-color: @headerbar_bg_color; box-shadow: 
 
 /* ===== Glass modals ===== translucent surface (readable), glass edge + sheen.
    GTK4 CSS has no backdrop blur, so this is a high-opacity smoked-glass look. */
-window.glass {{ background-color: alpha(@window_bg_color, 0.86); border: 1px solid alpha(@window_fg_color, 0.14); border-radius: 22px; box-shadow: inset 0 1px 0 alpha(@window_fg_color, 0.08), 0 32px 80px {shadow_md}, 0 4px 14px {shadow_sm}; }}
+window.glass {{ background-color: alpha(@window_bg_color, {glass_alpha}); border: 1px solid alpha(@window_fg_color, 0.14); border-radius: 22px; box-shadow: inset 0 1px 0 alpha(@window_fg_color, 0.08), 0 32px 80px {shadow_md}, 0 4px 14px {shadow_sm}; }}
 window.glass headerbar, window.glass headerbar.flat {{ background: transparent; box-shadow: none; border-bottom: 1px solid alpha(@window_fg_color, 0.07); }}
 window.glass .background {{ background: transparent; }}
 
@@ -297,6 +302,34 @@ entry.wp-search:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 
 /* ===== Accent audit: switches follow the accent (Adwaita default is blue) ===== */
 switch:checked {{ background-color: @accent_bg_color; }}
 
+/* ===== Semantic colors =====
+   Define these ourselves; anything left undefined falls back to Adwaita's
+   defaults, which are tuned for Adwaita's palette and not ours. */
+@define-color destructive_fg_color #FFFFFF;
+@define-color error_color {destructive};
+@define-color warning_color #D29922;
+
+/* A FLAT destructive row (the Remove-from-library item in the card right-click
+   menu) must take the destructive COLOR for its text. Adwaita's
+   .destructive-action paints a filled red button and sets the label to
+   destructive_fg_color (white) — once .flat strips the red fill, white-on-paper
+   is invisible in the light scheme. Restate both so the classes compose. */
+button.flat.destructive-action {{ background-image: none; background-color: transparent; color: @destructive_color; }}
+button.flat.destructive-action:hover {{ background-color: alpha(@destructive_color, 0.12); color: @destructive_color; }}
+button.flat.destructive-action:active {{ background-color: alpha(@destructive_color, 0.18); color: @destructive_color; }}
+
+/* An error label also carries .dim (for wrapping/type); .dim would otherwise
+   win and render the message as ordinary grey text. */
+label.error, label.error.dim {{ color: @destructive_color; }}
+
+/* Capability notice (e.g. GNOME Wayland static fallback) — was styled by no
+   rule at all, so it rendered as bare unframed text. */
+.capability-banner {{ background-color: alpha(@window_fg_color, 0.05); border: 1px solid @card_border; border-radius: 12px; padding: 8px 12px; }}
+
+/* Crop editor + transition preview stage: give the media a defined edge
+   instead of floating on the window background. */
+.crop-frame {{ background-color: @thumb_mat; border: 1px solid @card_border; border-radius: 12px; }}
+
 /* ===== Misc ===== */
 .welcome-cta {{ min-height: 40px; border-radius: 11px; font-weight: 600; }}
 ",
@@ -313,6 +346,7 @@ switch:checked {{ background-color: @accent_bg_color; }}
         destructive = p.destructive,
         shadow_sm = p.shadow_sm,
         shadow_md = p.shadow_md,
+        glass_alpha = glass_alpha,
         accent_bg = accent_bg,
         accent_fg = accent_fg,
     )

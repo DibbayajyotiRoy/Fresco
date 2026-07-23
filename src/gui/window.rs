@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     autostart,
-    config::{Accent, Config, Fit, Kind, Scaling, ThemeMode, Transition},
+    config::{Accent, Config, Fit, Kind, PowerSaving, Scaling, ThemeMode, Transition},
     APP_ID,
 };
 
@@ -2141,14 +2141,14 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     vol_row.add_suffix(&vol_scale);
     prefs.add(&vol_row);
 
-    // Per-wallpaper frame-rate cap (video/playlist only). "Default" inherits the
-    // global cap from Settings; an explicit value overrides it for this
-    // wallpaper — e.g. one clip at 24 for a cinematic feel.
-    let fps_row = adw::ComboRow::new();
-    fps_row.set_title("Frame rate");
-    fps_row.set_subtitle("Default follows Settings; a value caps just this wallpaper");
-    fps_row.set_model(Some(&gtk4::StringList::new(&FPS_EDIT_LABELS)));
-    prefs.add(&fps_row);
+    // Per-wallpaper power saving (video/playlist only). "Default" inherits the
+    // global level from Settings; an explicit level overrides it for just this
+    // wallpaper — e.g. keep one showpiece clip on Full.
+    let power_row = adw::ComboRow::new();
+    power_row.set_title("Power saving");
+    power_row.set_subtitle("Default follows Settings; overrides it for this wallpaper");
+    power_row.set_model(Some(&gtk4::StringList::new(&POWER_EDIT_LABELS)));
+    prefs.add(&power_row);
 
     // Slideshow cadence (shown only for slideshows; see the on-enter handler).
     let interval_row = adw::ComboRow::new();
@@ -2196,7 +2196,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
         let transition_ref = transition_row.clone();
-        let fps_ref = fps_row.clone();
+        let power_ref = power_row.clone();
         set_btn.connect_clicked(move |_| {
             let crop = crop_ref.crop();
             let fit = match fit_ref.selected() {
@@ -2206,7 +2206,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             };
             let interval = interval_secs(interval_ref.selected());
             let transition = transition_from_index(transition_ref.selected());
-            let framerate = fps_edit_from_index(fps_ref.selected());
+            let power_saving = power_edit_from_index(power_ref.selected());
             let name = {
                 let mut s = state_set.borrow_mut();
                 s.config.wallpaper.crop = crop;
@@ -2214,7 +2214,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 s.config.wallpaper.fit = fit;
                 s.config.wallpaper.mute = mute_ref.is_active();
                 s.config.wallpaper.volume = vol_ref.value() as u8;
-                s.config.wallpaper.framerate = framerate;
+                s.config.wallpaper.power_saving = power_saving;
                 s.config.enabled = true;
                 if let Some(ss) = s.config.wallpaper.slideshow.as_mut() {
                     ss.interval_s = interval;
@@ -2231,7 +2231,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                         e.mute = Some(mute_ref.is_active());
                         e.volume = Some(vol_ref.value() as u8);
                         e.rotation = Some(crop_ref.rotation());
-                        e.framerate = framerate;
+                        e.power_saving = power_saving;
                         // The card must show the new orientation immediately.
                         e.generate_thumbnail();
                     }
@@ -2292,7 +2292,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let transition_ref = transition_row.clone();
         let mute_row_ref = mute_row.clone();
         let vol_row_ref = vol_row.clone();
-        let fps_row_ref = fps_row.clone();
+        let power_row_ref = power_row.clone();
         let title_ref = title_widget.clone();
         let crop_frame_ref = crop_frame.clone();
         let tp_frame_ref = tp_frame.clone();
@@ -2322,8 +2322,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 let has_audio = matches!(entry.kind, Kind::Video | Kind::Playlist);
                 mute_row_ref.set_visible(has_audio);
                 vol_row_ref.set_visible(has_audio);
-                // Frame-rate cap applies to moving media (video/playlist).
-                fps_row_ref.set_visible(has_audio);
+                // Decode-skipping only matters for moving media.
+                power_row_ref.set_visible(has_audio);
                 let is_slideshow = entry.kind == Kind::Slideshow;
                 interval_ref.set_visible(is_slideshow);
                 transition_ref.set_visible(is_slideshow);
@@ -2360,9 +2360,9 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 ent.and_then(|e| e.volume)
                     .unwrap_or(st.config.wallpaper.volume) as f64,
             );
-            fps_row_ref.set_selected(fps_edit_index(
-                ent.and_then(|e| e.framerate)
-                    .or(st.config.wallpaper.framerate),
+            power_row_ref.set_selected(power_edit_index(
+                ent.and_then(|e| e.power_saving)
+                    .or(st.config.wallpaper.power_saving),
             ));
         });
     }
@@ -2435,34 +2435,25 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
 
     group.add(&scale_row);
 
-    // Frame-rate cap: trade smoothness for lower render/present load (battery,
-    // heat) — the same kind of global perf knob as scaling quality above.
-    let fps_row = adw::ComboRow::new();
-    fps_row.set_title("Frame rate");
-    fps_row.set_subtitle("Cap wallpaper fps to save power; Original uses the video's rate");
-    let fps_choices: [u16; 5] = [0, 24, 30, 48, 60];
-    let fps_labels = ["Original", "24 fps", "30 fps", "48 fps", "60 fps"];
-    fps_row.set_model(Some(&gtk4::StringList::new(&fps_labels)));
-    let current_fps = fps_choices
-        .iter()
-        .position(|&f| f == state.borrow().config.framerate)
-        .unwrap_or(0) as u32;
-    fps_row.set_selected(current_fps);
+    // Power saving: skip work in the DECODER (never a filter — see
+    // config::PowerSaving) to cut battery and heat on weak hardware.
+    let power_row = adw::ComboRow::new();
+    power_row.set_title("Power saving");
+    power_row.set_subtitle("Skip decoding some frames to save battery; lower = less smooth");
+    power_row.set_model(Some(&gtk4::StringList::new(&POWER_LABELS)));
+    power_row.set_selected(power_index(state.borrow().config.power_saving));
     {
         let state = state.clone();
-        fps_row.connect_selected_notify(move |row| {
+        power_row.connect_selected_notify(move |row| {
             let mut s = state.borrow_mut();
-            s.config.framerate = fps_choices
-                .get(row.selected() as usize)
-                .copied()
-                .unwrap_or(0);
+            s.config.power_saving = power_from_index(row.selected());
             s.config.save().ok();
             // Apply now (respawns renderers; the daemon stays up) so the change
-            // is visible immediately, not only on the next wallpaper set.
+            // takes effect immediately, not only on the next wallpaper set.
             daemon_ctl::ensure_daemon_and_apply(&s.config).ok();
         });
     }
-    group.add(&fps_row);
+    group.add(&power_row);
 
     page.add(&group);
     add_schedule_group(&page, state);
@@ -3311,23 +3302,37 @@ fn accent_name(accent: Accent) -> &'static str {
 /// "5 seconds / 15 seconds / 30 seconds / 1 minute / 5 minutes / 10 minutes".
 const INTERVAL_OPTIONS: [u64; 6] = [5, 15, 30, 60, 300, 600];
 
-/// Per-wallpaper frame-rate editor choices. Index 0 = "Default" (inherit the
-/// global cap → `None`); the rest are explicit caps in fps.
-const FPS_EDIT_LABELS: [&str; 5] = ["Default", "24 fps", "30 fps", "48 fps", "60 fps"];
-const FPS_EDIT_VALUES: [u16; 4] = [24, 30, 48, 60];
+/// Global power-saving choices (Settings). Order matches [`POWER_VALUES`].
+const POWER_LABELS: [&str; 3] = ["Full quality", "Reduced", "Minimum"];
+const POWER_VALUES: [PowerSaving; 3] = [
+    PowerSaving::Full,
+    PowerSaving::Reduced,
+    PowerSaving::Minimum,
+];
 
-/// Dropdown index → per-wallpaper override (`None` = inherit the global cap).
-fn fps_edit_from_index(index: u32) -> Option<u16> {
-    (index > 0).then(|| FPS_EDIT_VALUES[(index - 1) as usize])
+fn power_from_index(index: u32) -> PowerSaving {
+    POWER_VALUES
+        .get(index as usize)
+        .copied()
+        .unwrap_or(PowerSaving::Full)
 }
 
-/// Per-wallpaper override → dropdown index. `None`, or a value not in the list
-/// (e.g. a config-only `Some(0)`), shows as "Default".
-fn fps_edit_index(framerate: Option<u16>) -> u32 {
-    framerate
-        .and_then(|f| FPS_EDIT_VALUES.iter().position(|&v| v == f))
-        .map(|i| i as u32 + 1)
-        .unwrap_or(0)
+fn power_index(p: PowerSaving) -> u32 {
+    POWER_VALUES.iter().position(|&v| v == p).unwrap_or(0) as u32
+}
+
+/// Per-wallpaper editor choices. Index 0 = "Default" (inherit the global
+/// level → `None`); the rest override it.
+const POWER_EDIT_LABELS: [&str; 4] = ["Default", "Full quality", "Reduced", "Minimum"];
+
+/// Dropdown index → per-wallpaper override (`None` = inherit the global level).
+fn power_edit_from_index(index: u32) -> Option<PowerSaving> {
+    (index > 0).then(|| power_from_index(index - 1))
+}
+
+/// Per-wallpaper override → dropdown index; `None` shows as "Default".
+fn power_edit_index(p: Option<PowerSaving>) -> u32 {
+    p.map(|v| power_index(v) + 1).unwrap_or(0)
 }
 
 fn interval_secs(index: u32) -> u64 {

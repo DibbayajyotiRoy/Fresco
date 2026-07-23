@@ -4,16 +4,49 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.33] — 2026-07-23
+
+### Changed
+- **The frame-rate cap is replaced by a Power saving control** (Full quality /
+  Reduced / Minimum), in the same two places: a global default in Settings →
+  Advanced → Video quality and a per-wallpaper override in the editor.
+
+  1.1.32's frame-rate cap did the opposite of what it promised. Capping fps used
+  an `fps` video filter, and a video filter is *software*: inserting one into a
+  hardware-decoding (VA-API) pipeline forces every frame to be copied off the
+  GPU. A user on Intel Alder Lake-N measured video-engine load roughly
+  **doubling** — about 17% to 34% — when capping 60fps to 30. Thanks to
+  @175624 for catching it with `intel_gpu_top`.
+
+  Power saving instead uses decoder-level frame skipping
+  (`--vd-lavc-skipframe`), which discards frames inside libavcodec *before*
+  they are decoded, so the work is never done and hardware decoding stays
+  active. Measured with `cargo run --example skipframe_probe` on both
+  `vaapi-copy` and `nvdec-copy`: Reduced cuts frames reaching the output by
+  ~47%, Minimum by ~73%, with the hardware decoder still engaged throughout.
+
+  It deliberately no longer advertises an exact frame rate: how much a given
+  file saves depends on its GOP structure, so the control is named for what it
+  does rather than promising a number it cannot honour. Existing `framerate`
+  settings migrate automatically — any cap becomes Reduced.
+
+### Fixed
+- **Light mode readability.** Several surfaces were unreadable or unstyled in
+  the light scheme: the wallpaper right-click menu's "Remove from library" was
+  invisible (a flat destructive button inherited Adwaita's white label, leaving
+  white text on paper); glass modals let the content behind them bleed through
+  and collide with their own text; error messages rendered as ordinary grey
+  text; and the capability notice and crop/transition stage had no styling at
+  all. Dark mode is unchanged.
+
 ## [1.1.32] — 2026-07-23
 
 ### Added
 - **Frame-rate cap** for video wallpapers — limit to 24/30/48/60 fps (or keep
-  the original rate) to cut GPU render/present load, saving battery and heat on
-  low-end hardware, or for a deliberate cinematic cadence. Two levels: a global
-  default in Settings → Advanced → Video quality, and a per-wallpaper override
-  in the crop/rotate editor ("Default" inherits the global) so one clip can run
-  at 24 while everything else stays smooth. Applies on both X11 and Wayland.
-  (Caps output/render frame rate, not decode.)
+  the original rate). **Superseded in the next release: this made decode load
+  worse on hardware-decoded video, not better — see 1.1.33 above.** Two
+  levels: a global default in Settings → Advanced → Video quality, and a
+  per-wallpaper override in the crop/rotate editor.
 
 ### Fixed
 - **Consistent app icon.** The scalable icon still shipped the old v0.0.1

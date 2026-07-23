@@ -28,6 +28,12 @@ name = "frescod"
 path = "src/bin/frescod.rs"
 required-features = ["daemon"]
 
+# Mechanism-verification harness for the Power saving feature (uses the mpv FFI
+# in src/daemon). Gated so gui-only feature checks don't try to build it.
+[[example]]
+name = "skipframe_probe"
+required-features = ["daemon"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

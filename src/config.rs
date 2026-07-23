@@ -326,7 +326,7 @@ pub struct Config {
     pub power_saving: PowerSaving,
     /// Deprecated 1.1.32 frame-rate cap, in fps. Retained only so configs
     /// written by 1.1.32 still parse; the value is migrated to
-    /// [`Config::power_saving`] on load (see [`Config::migrate`]) and never
+    /// [`Config::power_saving`] on load (see `Config::migrate`) and never
     /// applied to mpv — the filter it drove made decode load worse, not better.
     #[serde(default, skip_serializing)]
     pub framerate: u16,

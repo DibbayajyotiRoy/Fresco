@@ -15,8 +15,14 @@ unsafe impl Send for Player {}
 
 impl Player {
     /// Create + initialize an mpv instance rendering into X11 window `wid`,
-    /// configured for the given wallpaper and scaling preference.
-    pub fn new(wid: u32, wallpaper: &Wallpaper, scaling: Scaling) -> Result<Player> {
+    /// configured for the given wallpaper, scaling preference, and frame-rate
+    /// cap (`framerate` fps, or 0 for the source's original rate).
+    pub fn new(
+        wid: u32,
+        wallpaper: &Wallpaper,
+        scaling: Scaling,
+        framerate: u16,
+    ) -> Result<Player> {
         let f = fns()?;
         let handle = f.create();
         if handle.is_null() {
@@ -121,6 +127,12 @@ impl Player {
 
             // Fit mode.
             apply_fit_options(f, handle, wallpaper.fit);
+
+            // Frame-rate cap: the `fps` filter is the sole `vf` occupant (crop
+            // and rotation use properties), so we can set it outright.
+            if let Some(vf) = crate::config::fps_filter(framerate) {
+                f.set_option(handle, "vf", &vf);
+            }
 
             if f.initialize(handle) < 0 {
                 f.terminate_destroy(handle);
@@ -254,6 +266,16 @@ impl Player {
             };
             f.set_property(self.handle, "cscale", cscale);
         }
+    }
+
+    /// Change the frame-rate cap at runtime (scheduled swaps replace media in
+    /// place, so a per-wallpaper cap must not leak onto the next wallpaper).
+    /// The `fps` filter is our only `vf`, so an empty value clears the cap.
+    pub fn set_framerate(&self, framerate: u16) {
+        let Ok(f) = fns() else { return };
+        let vf = crate::config::fps_filter(framerate).unwrap_or_default();
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        unsafe { f.set_property(self.handle, "vf", &vf) };
     }
 
     /// Seek to an absolute position (seconds). Used to keep clones of the same

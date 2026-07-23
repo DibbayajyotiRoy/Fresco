@@ -218,6 +218,12 @@ pub struct Wallpaper {
     pub mute: bool,
     #[serde(default = "default_volume")]
     pub volume: u8,
+    /// Per-wallpaper frame-rate cap override, in fps. `None` inherits the
+    /// global [`Config::framerate`]; `Some(n)` overrides it (`Some(0)` forces
+    /// the original rate even if the global default caps). Lets one cinematic
+    /// clip run at 24 while everything else stays smooth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framerate: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slideshow: Option<Slideshow>,
 }
@@ -229,6 +235,12 @@ impl Wallpaper {
         self.path
             .as_deref()
             .or_else(|| self.paths.first().map(|p| p.as_path()))
+    }
+
+    /// Frame-rate cap actually applied to this wallpaper: the per-wallpaper
+    /// override if set, otherwise the `global` default. 0 = original rate.
+    pub fn effective_framerate(&self, global: u16) -> u16 {
+        self.framerate.unwrap_or(global)
     }
 }
 
@@ -244,6 +256,7 @@ impl Default for Wallpaper {
             crop: None,
             mute: true,
             volume: default_volume(),
+            framerate: None,
             slideshow: None,
         }
     }
@@ -263,6 +276,12 @@ pub struct Config {
     pub pause_on_battery: bool,
     #[serde(default)]
     pub scaling: Scaling,
+    /// Cap video-wallpaper output frame rate, in fps. `0` = the source's
+    /// original rate (default). A cap (e.g. 30) trades smoothness for lower
+    /// render/present load — a real battery and heat win on low-end hardware.
+    /// See [`fps_filter`] for how it maps to mpv.
+    #[serde(default)]
+    pub framerate: u16,
     /// Deepin DDE strategy (auto | transparent | restack); see [`DdeMode`].
     #[serde(default)]
     pub dde_mode: DdeMode,
@@ -354,6 +373,17 @@ fn default_version() -> u32 {
     1
 }
 
+/// mpv `vf` (video-filter) value for a frame-rate cap, or `None` for the
+/// source's original rate (`fps == 0`). The libavfilter `fps` filter drops or
+/// duplicates whole frames to hit the target rate **without** changing
+/// playback speed. It runs after decode, so it cuts render/present/vsync work
+/// (the battery win) but not decode work. Crop (`video-zoom`/`video-pan`) and
+/// rotation (`video-rotate`) use mpv properties, not `vf`, so this filter is
+/// the sole occupant of the chain and can be set/cleared without composing.
+pub fn fps_filter(fps: u16) -> Option<String> {
+    (fps > 0).then(|| format!("fps={fps}"))
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -362,6 +392,7 @@ impl Default for Config {
             enabled: true,
             pause_on_battery: false,
             scaling: Scaling::default(),
+            framerate: 0,
             dde_mode: DdeMode::default(),
             theme_mode: ThemeMode::default(),
             accent: Accent::default(),
@@ -445,6 +476,41 @@ mod tests {
         assert!(cfg.enabled);
         assert!(cfg.wallpaper.mute);
         assert_eq!(cfg.wallpaper.volume, 50);
+        // Absent framerate key → 0 = original rate (backward compatible).
+        assert_eq!(cfg.framerate, 0);
+    }
+
+    #[test]
+    fn framerate_maps_to_fps_filter() {
+        // 0 = original rate → no filter at all.
+        assert_eq!(fps_filter(0), None);
+        assert_eq!(fps_filter(24).as_deref(), Some("fps=24"));
+        assert_eq!(fps_filter(30).as_deref(), Some("fps=30"));
+        assert_eq!(fps_filter(60).as_deref(), Some("fps=60"));
+    }
+
+    #[test]
+    fn effective_framerate_prefers_override_then_global() {
+        let mut w = Wallpaper::default();
+        // No override → inherit the global default.
+        assert_eq!(w.effective_framerate(0), 0);
+        assert_eq!(w.effective_framerate(30), 30);
+        // Override wins over the global, including forcing original (0) back on.
+        w.framerate = Some(24);
+        assert_eq!(w.effective_framerate(60), 24);
+        w.framerate = Some(0);
+        assert_eq!(w.effective_framerate(30), 0);
+    }
+
+    #[test]
+    fn framerate_roundtrips_through_toml() {
+        let cfg = Config {
+            framerate: 30,
+            ..Config::default()
+        };
+        let s = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert_eq!(back.framerate, 30);
     }
 
     #[test]

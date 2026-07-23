@@ -176,21 +176,75 @@ alter table public.installs add column if not exists channel text;
 
 alter table public.installs enable row level security;
 
--- Anyone with the anon key may register or refresh an install (but not read).
+-- Installs are UPSERTED (one row per install, refreshed every heartbeat), not
+-- plain-inserted. PostgREST's merge-duplicates compiles to
+-- INSERT ... ON CONFLICT DO UPDATE, which Postgres will only execute if the
+-- caller can READ the target row — even on an empty table with no conflict.
+-- This table is deliberately unreadable by anon, so a direct anon upsert fails
+-- RLS ("new row violates row-level security policy for table installs"). A
+-- plain insert works; the upsert does not. That is the whole reason installs
+-- stayed empty while events (plain inserts) flowed.
+--
+-- Rather than open the table up for SELECT (the anon key ships in every binary,
+-- so that would make the install list world-readable), the upsert is done
+-- inside a SECURITY DEFINER function. It runs as its owner, who is not subject
+-- to RLS, so the internal read/write just works — while anon keeps NO direct
+-- rights on the table at all: it cannot read installs, and cannot write
+-- arbitrary rows; the only thing it may do is call this one function.
+create or replace function public.register_install(
+    p_install_id    text,
+    p_version       text default null,
+    p_distro        text default null,
+    p_compositor    text default null,
+    p_session       text default null,
+    p_backend       text default null,
+    p_decode        text default null,
+    p_monitor_count int  default null,
+    p_source        text default null,
+    p_channel       text default null
+) returns void
+language sql
+security definer
+set search_path = ''
+as $$
+    insert into public.installs (
+        install_id, version, distro, compositor, session,
+        backend, decode, monitor_count, source, channel, last_seen
+    ) values (
+        p_install_id, p_version, p_distro, p_compositor, p_session,
+        p_backend, p_decode, p_monitor_count, p_source, p_channel, now()
+    )
+    on conflict (install_id) do update set
+        version       = excluded.version,
+        distro        = excluded.distro,
+        compositor    = excluded.compositor,
+        session       = excluded.session,
+        backend       = excluded.backend,
+        decode        = excluded.decode,
+        monitor_count = excluded.monitor_count,
+        source        = excluded.source,
+        channel       = excluded.channel,
+        last_seen     = now();
+$$;
+
+-- Calling the function is the ONLY way anon touches installs. Strip the
+-- default PUBLIC execute grant first, then grant it to anon alone.
+revoke all on function public.register_install(
+    text, text, text, text, text, text, text, int, text, text
+) from public;
+grant execute on function public.register_install(
+    text, text, text, text, text, text, text, int, text, text
+) to anon;
+
+-- Retire the direct-write policies/grants: the upsert they were meant to serve
+-- cannot work under RLS (see above), and the function fully replaces them.
 drop policy if exists "anon can insert installs" on public.installs;
-create policy "anon can insert installs"
-    on public.installs for insert
-    to anon
-    with check (true);
-
 drop policy if exists "anon can update installs" on public.installs;
-create policy "anon can update installs"
-    on public.installs for update
-    to anon
-    using (true)
-    with check (true);
-
-grant insert, update on public.installs to anon;
+revoke insert, update on public.installs from anon;
+-- RLS already denies anon every row (no SELECT policy), so this is inert
+-- belt-and-suspenders, but it matches the intent: anon has NO direct table
+-- rights — only execute on register_install().
+revoke select on public.installs from anon;
 
 create index if not exists installs_last_seen_idx
     on public.installs (last_seen);

@@ -4,6 +4,23 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.32] — 2026-07-23
+
+### Added
+- **Frame-rate cap** for video wallpapers — limit to 24/30/48/60 fps (or keep
+  the original rate) to cut GPU render/present load, saving battery and heat on
+  low-end hardware, or for a deliberate cinematic cadence. Two levels: a global
+  default in Settings → Advanced → Video quality, and a per-wallpaper override
+  in the crop/rotate editor ("Default" inherits the global) so one clip can run
+  at 24 while everything else stays smooth. Applies on both X11 and Wayland.
+  (Caps output/render frame rate, not decode.)
+
+### Fixed
+- **Consistent app icon.** The scalable icon still shipped the old v0.0.1
+  artwork while the fixed-size PNGs were the current logo, so the launcher
+  (which converts the SVG to DCI on Deepin) and the taskbar could disagree. The
+  scalable SVG is now regenerated from the current logo — every surface matches.
+
 ## [1.1.31] — 2026-07-23
 
 ### Fixed

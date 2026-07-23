@@ -175,6 +175,14 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.set_rotation(rotation, scaling),
         }
     }
+    /// Runtime frame-rate-cap change (scheduled swaps are media-only, so a
+    /// per-wallpaper cap must be re-applied like rotation/crop).
+    fn set_framerate(&self, framerate: u16) {
+        match self {
+            PlayerHandle::X11(p) => p.set_framerate(framerate),
+            PlayerHandle::Wayland(p) => p.set_framerate(framerate),
+        }
+    }
     fn apply_crop(&self, wallpaper: &Wallpaper) {
         match self {
             PlayerHandle::X11(p) => p.apply_crop(wallpaper),
@@ -360,6 +368,7 @@ impl Daemon {
                 &monitor,
                 &wallpaper,
                 self.config.scaling,
+                wallpaper.effective_framerate(self.config.framerate),
                 kind,
             ) {
                 Ok(r) => {
@@ -396,6 +405,10 @@ impl Daemon {
         Ok(())
     }
 
+    // The X11 primitives (conn/screen/atoms/monitor) plus wallpaper, render
+    // prefs, and window kind are all genuinely independent inputs; grouping
+    // them would obscure more than it saves for a single internal builder.
+    #[allow(clippy::too_many_arguments)]
     fn make_renderer(
         conn: &RustConnection,
         screen: &Screen,
@@ -403,10 +416,11 @@ impl Daemon {
         monitor: &Monitor,
         wallpaper: &Wallpaper,
         scaling: Scaling,
+        framerate: u16,
         kind: WindowKind,
     ) -> Result<Renderer> {
         let window = WallpaperWindow::create(conn, screen, atoms, monitor, kind)?;
-        let player = PlayerHandle::X11(Player::new(window.window, wallpaper, scaling)?);
+        let player = PlayerHandle::X11(Player::new(window.window, wallpaper, scaling, framerate)?);
         let slideshow = build_slideshow(wallpaper, &player);
         Ok(Renderer {
             window,
@@ -707,10 +721,12 @@ impl Daemon {
         );
         for r in &self.renderers {
             if !self.config.monitors.contains_key(&r.window.connector) {
-                // Rotation and crop are per-wallpaper state on the mpv instance;
-                // without resetting them here the previous wallpaper's rotation
-                // leaks onto the scheduled one (wrong dimensions on screen).
+                // Rotation, crop, and the frame-rate cap are per-wallpaper state
+                // on the mpv instance; without resetting them here the previous
+                // wallpaper's settings leak onto the scheduled one.
                 r.player.set_rotation(want.rotation, self.config.scaling);
+                r.player
+                    .set_framerate(want.effective_framerate(self.config.framerate));
                 r.player.apply_crop(&want);
                 r.player.load_path(&path);
                 r.cache_raised.set(false); // re-check resolution for the new media
@@ -720,6 +736,7 @@ impl Daemon {
         // the on-disk config remains the user's own intent.
         self.config.wallpaper.path = Some(path.clone());
         self.config.wallpaper.rotation = want.rotation;
+        self.config.wallpaper.framerate = want.framerate;
         self.config.wallpaper.crop = want.crop;
         self.sched.applied = Some(path);
         overview::apply(&self.config.wallpaper);
@@ -1478,7 +1495,13 @@ fn run_wayland_layershell() -> Result<()> {
         {
             continue; // nothing configured for this output
         }
-        let mut out = WlOutput::new(m.connector.clone(), wallpaper, config.scaling);
+        let effective_fps = wallpaper.effective_framerate(config.framerate);
+        let mut out = WlOutput::new(
+            m.connector.clone(),
+            wallpaper,
+            config.scaling,
+            effective_fps,
+        );
         out.respawn(false, false);
         outputs.insert(m.connector.clone(), out);
     }
@@ -1528,16 +1551,21 @@ fn run_wayland_layershell() -> Result<()> {
                                 let has = wp.effective_path().is_some()
                                     || !wp.paths.is_empty()
                                     || wp.kind == Kind::Slideshow;
+                                let effective_fps = wp.effective_framerate(config.framerate);
                                 match (outputs.get_mut(&m.connector), has) {
                                     (Some(o), true) => {
-                                        o.apply_wallpaper(wp, config.scaling, paused)
+                                        o.apply_wallpaper(wp, config.scaling, effective_fps, paused)
                                     }
                                     (Some(_), false) => {
                                         outputs.remove(&m.connector);
                                     }
                                     (None, true) => {
-                                        let mut o =
-                                            WlOutput::new(m.connector.clone(), wp, config.scaling);
+                                        let mut o = WlOutput::new(
+                                            m.connector.clone(),
+                                            wp,
+                                            config.scaling,
+                                            effective_fps,
+                                        );
                                         o.respawn(paused, false);
                                         outputs.insert(m.connector.clone(), o);
                                     }
@@ -1600,14 +1628,17 @@ fn run_wayland_layershell() -> Result<()> {
                         if !config.monitors.contains_key(connector) {
                             if let Some(pl) = o.player.as_ref() {
                                 // Reset per-wallpaper player state, or the previous
-                                // wallpaper's rotation/crop leak onto this one.
+                                // wallpaper's rotation/crop/framerate leak onto this one.
                                 pl.set_rotation(want.rotation, o.scaling);
+                                pl.set_framerate(want.effective_framerate(config.framerate));
                                 pl.apply_crop(&want);
                                 pl.load_path(&path);
                             }
                             o.wallpaper.path = Some(path.clone());
                             o.wallpaper.rotation = want.rotation;
+                            o.wallpaper.framerate = want.framerate;
                             o.wallpaper.crop = want.crop;
+                            o.framerate = want.effective_framerate(config.framerate);
                         }
                     }
                     config.wallpaper.path = Some(path.clone());
@@ -1707,6 +1738,8 @@ struct WlOutput {
     connector: String,
     wallpaper: Wallpaper,
     scaling: Scaling,
+    /// Frame-rate cap in fps (0 = original rate); global, applied at spawn.
+    framerate: u16,
     player: Option<PlayerHandle>,
     slideshow: Option<Slideshow>,
     restarts: u32,
@@ -1724,11 +1757,12 @@ struct WlOutput {
 }
 
 impl WlOutput {
-    fn new(connector: String, wallpaper: Wallpaper, scaling: Scaling) -> WlOutput {
+    fn new(connector: String, wallpaper: Wallpaper, scaling: Scaling, framerate: u16) -> WlOutput {
         WlOutput {
             connector,
             wallpaper,
             scaling,
+            framerate,
             player: None,
             slideshow: None,
             restarts: 0,
@@ -1771,7 +1805,13 @@ impl WlOutput {
             self.player = None;
             return;
         };
-        match WaylandPlayer::spawn(&self.connector, &self.wallpaper, self.scaling, &file) {
+        match WaylandPlayer::spawn(
+            &self.connector,
+            &self.wallpaper,
+            self.scaling,
+            self.framerate,
+            &file,
+        ) {
             Ok(p) => {
                 let handle = PlayerHandle::Wayland(p);
                 if paused || static_frame {
@@ -1795,12 +1835,13 @@ impl WlOutput {
     }
 
     /// Apply a (possibly changed) wallpaper. If only the media changed, switch in
-    /// place via `loadfile replace`; otherwise respawn (fit/crop/scaling are
-    /// spawn-time mpv options).
-    fn apply_wallpaper(&mut self, new: Wallpaper, scaling: Scaling, paused: bool) {
+    /// place via `loadfile replace`; otherwise respawn (fit/crop/scaling/framerate
+    /// are spawn-time mpv options).
+    fn apply_wallpaper(&mut self, new: Wallpaper, scaling: Scaling, framerate: u16, paused: bool) {
         let media_only = self.player.is_some()
             && !self.static_fallback
             && scaling == self.scaling
+            && framerate == self.framerate
             && new.fit == self.wallpaper.fit
             && new.rotation == self.wallpaper.rotation
             && new.mute == self.wallpaper.mute
@@ -1810,6 +1851,7 @@ impl WlOutput {
             && new.kind != Kind::Slideshow;
         self.wallpaper = new;
         self.scaling = scaling;
+        self.framerate = framerate;
         self.audio_heal = AudioHeal::new();
         if media_only {
             if let (Some(p), Some(path)) = (self.player.as_ref(), self.wallpaper.effective_path()) {

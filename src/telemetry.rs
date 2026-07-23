@@ -146,9 +146,13 @@ fn post_detached(table: &'static str, payload: serde_json::Value, prefer: &'stat
     });
 }
 
-/// Daily install ping: upserted (merge-duplicates on install_id) so each
-/// install is one row, updated in place. `backend`/`decode`/`monitor_count`
-/// come from the daemon when handy; None is fine.
+/// Daily install ping: one row per install, refreshed in place. Goes through
+/// the `register_install` RPC rather than a direct table upsert — the table is
+/// write-only for anon (never SELECT), and PostgREST's merge-duplicates upsert
+/// needs read access to the conflict row, which anon lacks, so a direct upsert
+/// is rejected by RLS. The RPC is SECURITY DEFINER and does the upsert as its
+/// owner; see `register_install` in supabase/schema.sql. `backend`/`decode`/
+/// `monitor_count` come from the daemon when handy; None is fine.
 pub fn heartbeat(backend: Option<&str>, decode: Option<&str>, monitor_count: Option<u32>) {
     if !enabled() {
         return;
@@ -163,20 +167,22 @@ pub fn heartbeat(backend: Option<&str>, decode: Option<&str>, monitor_count: Opt
         std::fs::create_dir_all(parent).ok();
     }
     std::fs::write(&marker, b"").ok();
+    // Named args match register_install's parameters (p_-prefixed). last_seen
+    // is intentionally omitted: the function stamps now() with the server
+    // clock, so a skewed client clock can't distort active-user windows.
     let payload = serde_json::json!({
-        "install_id": install_id(),
-        "version": env!("CARGO_PKG_VERSION"),
-        "distro": distro(),
-        "compositor": std::env::var("XDG_CURRENT_DESKTOP").ok(),
-        "session": std::env::var("XDG_SESSION_TYPE").ok(),
-        "backend": backend,
-        "decode": decode,
-        "monitor_count": monitor_count,
-        "source": install_source(),
-        "channel": install_channel(),
-        "last_seen": chrono::Utc::now().to_rfc3339(),
+        "p_install_id": install_id(),
+        "p_version": env!("CARGO_PKG_VERSION"),
+        "p_distro": distro(),
+        "p_compositor": std::env::var("XDG_CURRENT_DESKTOP").ok(),
+        "p_session": std::env::var("XDG_SESSION_TYPE").ok(),
+        "p_backend": backend,
+        "p_decode": decode,
+        "p_monitor_count": monitor_count,
+        "p_source": install_source(),
+        "p_channel": install_channel(),
     });
-    post_detached("installs", payload, "resolution=merge-duplicates");
+    post_detached("rpc/register_install", payload, "return=minimal");
 }
 
 /// UTM-style download attribution: the install one-liner persists the tag the

@@ -60,14 +60,81 @@ pub enum PowerSaving {
     Minimum,
 }
 
-impl PowerSaving {
-    /// The `vd-lavc-skipframe` value, or `None` to leave mpv's default alone.
-    pub fn skipframe(self) -> Option<&'static str> {
-        match self {
-            PowerSaving::Full => None,
-            PowerSaving::Reduced => Some("nonref"),
-            PowerSaving::Minimum => Some("bidir"),
+/// The GPU scaler configuration applied to a video wallpaper. All fields are
+/// mpv option values; [`VideoScalers::to_options`] turns them into `(key,
+/// value)` pairs the daemon sets either as spawn options or live properties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoScalers {
+    pub scale: &'static str,
+    pub cscale: &'static str,
+    pub dscale: &'static str,
+    pub dither: bool,
+    pub correct_downscaling: bool,
+    pub linear_downscaling: bool,
+}
+
+impl VideoScalers {
+    /// mpv `(option, value)` pairs for these scalers, in a stable order.
+    pub fn to_options(self) -> [(&'static str, &'static str); 6] {
+        let yn = |b| if b { "yes" } else { "no" };
+        [
+            ("scale", self.scale),
+            ("cscale", self.cscale),
+            ("dscale", self.dscale),
+            ("dither-depth", if self.dither { "auto" } else { "no" }),
+            ("correct-downscaling", yn(self.correct_downscaling)),
+            ("linear-downscaling", yn(self.linear_downscaling)),
+        ]
+    }
+}
+
+/// Choose the video scalers for a wallpaper.
+///
+/// Power saving trades image sharpness for GPU-render load — the *right* lever,
+/// because the load that pegs weak Intel GPUs for a video wallpaper is
+/// Render/3D (per-frame shading), not decode. Our quality defaults (spline36 /
+/// lanczos with linear-light downscaling + dithering) are several texture
+/// samples and extra passes per pixel; `bilinear` with no extra passes is a
+/// fraction of that. It can only reduce or match GPU work, never increase it —
+/// unlike the 1.1.32 `fps` filter, which forced frames off the GPU.
+///
+/// Rotation safety: a *custom* chroma scaler on rotated video corrupts chroma
+/// into a green cast (see the note in `mpv/player.rs`). `cscale` is therefore
+/// only ever non-`bilinear` in `Full` on unrotated video; every cheaper level,
+/// and all rotated video, uses `bilinear` chroma — mpv's default, which is safe.
+pub fn video_scalers(scaling: Scaling, power: PowerSaving, rotated: bool) -> VideoScalers {
+    match power {
+        PowerSaving::Full => {
+            let hi = matches!(scaling, Scaling::High);
+            let luma = if hi { "lanczos" } else { "spline36" };
+            VideoScalers {
+                scale: luma,
+                cscale: if rotated { "bilinear" } else { luma },
+                dscale: if hi { "lanczos" } else { "mitchell" },
+                dither: true,
+                correct_downscaling: true,
+                linear_downscaling: true,
+            }
         }
+        // Cheap luma, drop the expensive linear-light downscaling passes; keep
+        // a decent downscale filter and dithering so it isn't ugly.
+        PowerSaving::Reduced => VideoScalers {
+            scale: "bilinear",
+            cscale: "bilinear",
+            dscale: "mitchell",
+            dither: true,
+            correct_downscaling: false,
+            linear_downscaling: false,
+        },
+        // Cheapest path mpv offers: bilinear everywhere, no dither pass.
+        PowerSaving::Minimum => VideoScalers {
+            scale: "bilinear",
+            cscale: "bilinear",
+            dscale: "bilinear",
+            dither: false,
+            correct_downscaling: false,
+            linear_downscaling: false,
+        },
     }
 }
 
@@ -548,11 +615,44 @@ mod tests {
     }
 
     #[test]
-    fn power_saving_maps_to_decoder_skipping() {
-        // Full leaves mpv's own default alone — no option written at all.
-        assert_eq!(PowerSaving::Full.skipframe(), None);
-        assert_eq!(PowerSaving::Reduced.skipframe(), Some("nonref"));
-        assert_eq!(PowerSaving::Minimum.skipframe(), Some("bidir"));
+    fn power_saving_reduces_scaler_cost() {
+        // Full = quality scalers; cheaper levels drop to bilinear + fewer passes.
+        let full = video_scalers(Scaling::Balanced, PowerSaving::Full, false);
+        assert_eq!(full.scale, "spline36");
+        assert!(full.correct_downscaling && full.linear_downscaling && full.dither);
+
+        let reduced = video_scalers(Scaling::Balanced, PowerSaving::Reduced, false);
+        assert_eq!(reduced.scale, "bilinear");
+        assert!(!reduced.correct_downscaling && !reduced.linear_downscaling);
+
+        let min = video_scalers(Scaling::High, PowerSaving::Minimum, false);
+        assert_eq!(min.scale, "bilinear");
+        assert_eq!(min.dscale, "bilinear");
+        assert!(!min.dither);
+        // High quality is overridden downward by Minimum — power saving wins.
+        assert_ne!(min.scale, "lanczos");
+    }
+
+    #[test]
+    fn chroma_scaler_is_bilinear_whenever_rotated_or_saving() {
+        // The green-cast bug: a custom cscale on ROTATED video corrupts chroma.
+        // cscale may only be non-bilinear in Full + unrotated.
+        assert_ne!(
+            video_scalers(Scaling::High, PowerSaving::Full, false).cscale,
+            "bilinear"
+        );
+        assert_eq!(
+            video_scalers(Scaling::High, PowerSaving::Full, true).cscale,
+            "bilinear"
+        );
+        for power in [PowerSaving::Reduced, PowerSaving::Minimum] {
+            for rotated in [false, true] {
+                assert_eq!(
+                    video_scalers(Scaling::High, power, rotated).cscale,
+                    "bilinear"
+                );
+            }
+        }
     }
 
     #[test]

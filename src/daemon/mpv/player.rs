@@ -108,33 +108,13 @@ impl Player {
             // tests/fidelity). Luma scalers are unaffected, so on rotated
             // video we keep mpv's default chroma path.
             let rotated = !wallpaper.rotation.is_multiple_of(360);
-            f.set_option(handle, "correct-downscaling", "yes");
-            f.set_option(handle, "linear-downscaling", "yes");
-            f.set_option(handle, "dither-depth", "auto");
-            if matches!(scaling, Scaling::High) {
-                f.set_option(handle, "scale", "lanczos");
-                if !rotated {
-                    f.set_option(handle, "cscale", "lanczos");
-                }
-                f.set_option(handle, "dscale", "lanczos");
-            } else {
-                f.set_option(handle, "scale", "spline36");
-                if !rotated {
-                    f.set_option(handle, "cscale", "spline36");
-                }
-                f.set_option(handle, "dscale", "mitchell");
+            for (k, v) in crate::config::video_scalers(scaling, power_saving, rotated).to_options()
+            {
+                f.set_option(handle, k, v);
             }
 
             // Fit mode.
             apply_fit_options(f, handle, wallpaper.fit);
-
-            // Power saving: skip frames inside libavcodec, BEFORE they are
-            // decoded. Never a `vf` filter — a software filter in a VA-API
-            // pipeline forces every frame to be downloaded off the GPU, which
-            // measured as double the video-engine load on Alder Lake.
-            if let Some(skip) = power_saving.skipframe() {
-                f.set_option(handle, "vd-lavc-skipframe", skip);
-            }
 
             if f.initialize(handle) < 0 {
                 f.terminate_destroy(handle);
@@ -248,9 +228,10 @@ impl Player {
 
     /// Change rotation at runtime — the scheduled swap replaces media in place
     /// (no respawn), so the previous wallpaper's rotation must not leak onto
-    /// the next one. Re-applies the rotated-video constraints from `new`:
-    /// copy-back hwdec and mpv's default chroma scaler (green-cast bug above).
-    pub fn set_rotation(&self, rotation: u16, scaling: Scaling) {
+    /// the next one. Sets video-rotate + copy-back hwdec; the rotation-aware
+    /// chroma scaler is applied by [`Player::apply_scalers`], which the caller
+    /// invokes right after (single owner of every scaler property).
+    pub fn set_rotation(&self, rotation: u16) {
         let Ok(f) = fns() else { return };
         let rotated = !rotation.is_multiple_of(360);
         // SAFETY: `self.handle` is valid for the lifetime of this Player.
@@ -261,23 +242,23 @@ impl Player {
                 "hwdec",
                 if rotated { "auto-copy" } else { "auto-safe" },
             );
-            let cscale = match (rotated, scaling) {
-                (true, _) => "bilinear", // mpv's default chroma path
-                (false, Scaling::High) => "lanczos",
-                (false, _) => "spline36",
-            };
-            f.set_property(self.handle, "cscale", cscale);
         }
     }
 
-    /// Change the power-saving level at runtime (scheduled swaps replace media
-    /// in place, so a per-wallpaper level must not leak onto the next
-    /// wallpaper). `Full` restores mpv's own default skip behaviour.
-    pub fn set_power_saving(&self, power_saving: PowerSaving) {
+    /// Apply the scaler set for the current scaling quality, power-saving level,
+    /// and rotation. The single runtime owner of every scaler property, so a
+    /// scheduled swap can't leak the previous wallpaper's scalers (or a stale
+    /// non-bilinear chroma scaler onto rotated video — the green-cast bug).
+    pub fn apply_scalers(&self, scaling: Scaling, power_saving: PowerSaving, rotation: u16) {
         let Ok(f) = fns() else { return };
-        let skip = power_saving.skipframe().unwrap_or("default");
+        let rotated = !rotation.is_multiple_of(360);
         // SAFETY: `self.handle` is valid for the lifetime of this Player.
-        unsafe { f.set_property(self.handle, "vd-lavc-skipframe", skip) };
+        unsafe {
+            for (k, v) in crate::config::video_scalers(scaling, power_saving, rotated).to_options()
+            {
+                f.set_property(self.handle, k, v);
+            }
+        }
     }
 
     /// Seek to an absolute position (seconds). Used to keep clones of the same

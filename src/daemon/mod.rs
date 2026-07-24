@@ -169,18 +169,19 @@ impl PlayerHandle {
         }
     }
     /// Runtime rotation change (scheduled swaps are media-only, no respawn).
-    fn set_rotation(&self, rotation: u16, scaling: Scaling) {
+    fn set_rotation(&self, rotation: u16) {
         match self {
-            PlayerHandle::X11(p) => p.set_rotation(rotation, scaling),
-            PlayerHandle::Wayland(p) => p.set_rotation(rotation, scaling),
+            PlayerHandle::X11(p) => p.set_rotation(rotation),
+            PlayerHandle::Wayland(p) => p.set_rotation(rotation),
         }
     }
-    /// Runtime power-saving change (scheduled swaps are media-only, so a
-    /// per-wallpaper level must be re-applied like rotation/crop).
-    fn set_power_saving(&self, power_saving: PowerSaving) {
+    /// Runtime scaler re-apply (scheduled swaps are media-only, so per-wallpaper
+    /// rotation and power-saving level must be re-applied like crop). Call after
+    /// `set_rotation` — it is the single owner of every scaler property.
+    fn apply_scalers(&self, scaling: Scaling, power_saving: PowerSaving, rotation: u16) {
         match self {
-            PlayerHandle::X11(p) => p.set_power_saving(power_saving),
-            PlayerHandle::Wayland(p) => p.set_power_saving(power_saving),
+            PlayerHandle::X11(p) => p.apply_scalers(scaling, power_saving, rotation),
+            PlayerHandle::Wayland(p) => p.apply_scalers(scaling, power_saving, rotation),
         }
     }
     fn apply_crop(&self, wallpaper: &Wallpaper) {
@@ -726,12 +727,16 @@ impl Daemon {
         );
         for r in &self.renderers {
             if !self.config.monitors.contains_key(&r.window.connector) {
-                // Rotation, crop, and the frame-rate cap are per-wallpaper state
-                // on the mpv instance; without resetting them here the previous
-                // wallpaper's settings leak onto the scheduled one.
-                r.player.set_rotation(want.rotation, self.config.scaling);
-                r.player
-                    .set_power_saving(want.effective_power_saving(self.config.power_saving));
+                // Rotation, scalers (power-saving), and crop are per-wallpaper
+                // state on the mpv instance; without resetting them here the
+                // previous wallpaper's settings leak onto the scheduled one.
+                // apply_scalers must follow set_rotation (it owns cscale).
+                r.player.set_rotation(want.rotation);
+                r.player.apply_scalers(
+                    self.config.scaling,
+                    want.effective_power_saving(self.config.power_saving),
+                    want.rotation,
+                );
                 r.player.apply_crop(&want);
                 r.player.load_path(&path);
                 r.cache_raised.set(false); // re-check resolution for the new media
@@ -1629,9 +1634,12 @@ fn run_wayland_layershell() -> Result<()> {
                             if let Some(pl) = o.player.as_ref() {
                                 // Reset per-wallpaper player state, or the previous
                                 // wallpaper's rotation/crop/power-saving leak onto this one.
-                                pl.set_rotation(want.rotation, o.scaling);
-                                pl.set_power_saving(
+                                // apply_scalers must follow set_rotation (it owns cscale).
+                                pl.set_rotation(want.rotation);
+                                pl.apply_scalers(
+                                    o.scaling,
                                     want.effective_power_saving(config.power_saving),
+                                    want.rotation,
                                 );
                                 pl.apply_crop(&want);
                                 pl.load_path(&path);

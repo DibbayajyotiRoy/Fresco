@@ -62,6 +62,11 @@
   </branding>
 
   <releases>
+    <release version="1.1.34" date="2026-07-24">
+      <description>
+        <p>Power saving now reduces GPU scaling cost instead of skipping decoded frames — the earlier approach changed the visible frame rate but did not lower GPU load on hardware-decoded video. Also fixes the app icon not refreshing in the Deepin launcher after install, and makes removing or stopping the active wallpaper revert the desktop to its own background.</p>
+      </description>
+    </release>
     <release version="1.1.33" date="2026-07-23">
       <description>
         <p>Replaces the 1.1.32 frame-rate cap with a Power saving control (Full quality / Reduced / Minimum). The old cap used a video filter that forced frames off the GPU and roughly doubled video decode load on hardware-decoded video; power saving now skips frames inside the decoder instead, leaving hardware decoding intact. Also fixes several light-mode readability problems, including an invisible Remove item in the wallpaper right-click menu.</p>

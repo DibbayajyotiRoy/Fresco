@@ -1539,6 +1539,35 @@ fn show_card_menu(
     }
     menu.append(&set);
 
+    // When this card is the wallpaper on screen, offer to turn it off — the
+    // non-destructive counterpart to "Set" (the desktop reverts to its own
+    // background; the library entry is kept). This is the "unset" action.
+    let is_active = {
+        let s = state.borrow();
+        s.entries
+            .get(idx)
+            .map(|e| entry_is_active(e, &s.config))
+            .unwrap_or(false)
+    };
+    if is_active {
+        let stop = item("Stop wallpaper");
+        let s = state.clone();
+        let p = pop.clone();
+        stop.connect_clicked(move |_| {
+            stop_wallpaper(&s);
+            show_toast(
+                &s,
+                "Wallpaper stopped — desktop reverted to its own background",
+            );
+            let refresh = s.borrow().refresh.clone();
+            if let Some(r) = refresh {
+                r();
+            }
+            p.popdown();
+        });
+        menu.append(&stop);
+    }
+
     // Per-monitor assignment (ROADMAP 2.2): only offered with 2+ displays —
     // single-monitor users never see extra chrome.
     let displays = connected_monitors();
@@ -1773,19 +1802,55 @@ fn spawn_metadata_probe(state: &Rc<RefCell<AppState>>) {
 
 /// Remove a library entry (and its cached thumbnail). Does not touch the
 /// original media file. Refreshes the grid afterwards.
+/// Turn the wallpaper off and revert the desktop to its own background, without
+/// deleting anything. Disables autostart (so login doesn't resurrect it),
+/// clears the active wallpaper from config, and stops the daemon — which tears
+/// down its renderers (destroying the desktop window / restoring the DDE
+/// wallpaper). Setting any wallpaper again re-enables and respawns it.
+fn stop_wallpaper(state: &Rc<RefCell<AppState>>) {
+    {
+        let mut s = state.borrow_mut();
+        s.config.enabled = false;
+        s.config.wallpaper.path = None;
+        s.config.wallpaper.paths.clear();
+        s.config.wallpaper.slideshow = None;
+        s.config.monitors.clear();
+        s.config.save().ok();
+    }
+    if crate::ipc::daemon_alive() {
+        let _ = crate::ipc::request(&crate::ipc::Request::Stop);
+    }
+}
+
 fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
+    let was_active;
     {
         let mut s = state.borrow_mut();
         if idx >= s.entries.len() {
             return;
         }
         let entry = s.entries.remove(idx);
+        // Removing the wallpaper that's currently on screen must take it OFF
+        // screen — otherwise the daemon keeps playing a wallpaper the user just
+        // deleted, and the desktop never returns to its own background.
+        was_active = entry_is_active(&entry, &s.config);
         if let Some(thumb) = &entry.thumbnail {
             std::fs::remove_file(thumb).ok();
         }
         save_entries(&s.entries).ok();
     }
-    show_toast(&state, "Removed from library");
+    // Removing the wallpaper that's on screen must also take it off screen.
+    if was_active {
+        stop_wallpaper(&state);
+    }
+    show_toast(
+        &state,
+        if was_active {
+            "Removed — desktop reverted to its own wallpaper"
+        } else {
+            "Removed from library"
+        },
+    );
     let refresh = state.borrow().refresh.clone();
     if let Some(r) = refresh {
         r();
@@ -2435,11 +2500,11 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
 
     group.add(&scale_row);
 
-    // Power saving: skip work in the DECODER (never a filter — see
-    // config::PowerSaving) to cut battery and heat on weak hardware.
+    // Power saving: cheaper GPU scaling (see config::video_scalers) to cut
+    // render load on weak hardware — a softer image for less power/heat.
     let power_row = adw::ComboRow::new();
     power_row.set_title("Power saving");
-    power_row.set_subtitle("Skip decoding some frames to save battery; lower = less smooth");
+    power_row.set_subtitle("Cheaper scaling to cut GPU load; lower = softer image");
     power_row.set_model(Some(&gtk4::StringList::new(&POWER_LABELS)));
     power_row.set_selected(power_index(state.borrow().config.power_saving));
     {

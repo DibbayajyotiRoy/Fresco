@@ -4,6 +4,40 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.34] — 2026-07-24
+
+### Changed
+- **Power saving now targets the actual bottleneck (GPU scaling).** 1.1.33's
+  Power saving used decoder-level frame skipping (`vd-lavc-skipframe`). Tested
+  on real Deepin 25 hardware by @175624 with `intel_gpu_top`, that changed the
+  visible frame rate but saved nothing: for a hardware-decoded video wallpaper
+  the load is **Render/3D (~99%)**, not decode (~17%), and skipping decoded
+  frames touches neither (the GPU still decodes the stream and presents at
+  display refresh). Power saving now instead reduces the per-frame **scaler**
+  cost — Reduced and Minimum drop from the quality scalers (spline36 / lanczos
+  with linear-light downscaling and dithering) toward cheap bilinear, trading
+  sharpness for GPU-render load. It can only reduce or match GPU work, never
+  increase it, and hardware decoding is untouched. This is a quality/perf
+  trade-off, not a promised number; the magnitude of the win is pending
+  confirmation on the reporter's Intel box.
+
+### Fixed
+- **App icon now appears in the Deepin launcher without restarting it.** Since
+  the icon landed (1.1.3), it only showed after `killall dde-shell`. Root cause,
+  found by diffing our `.deb` against galculator's (which the reporter confirmed
+  works): we shipped a custom postinst that ran `gtk-update-icon-cache` /
+  `update-desktop-database` during package configure. That refresh is already
+  the job of the standard `hicolor-icon-theme` and `desktop-file-utils` dpkg
+  triggers (fired automatically when files land in their dirs), and running it
+  early interfered with Deepin's launcher refresh. Fresco now ships no
+  maintainer scripts — identical to a plain debhelper GUI package — and relies
+  on those triggers. (Fix pending confirmation on real Deepin 25.)
+- **Removing or stopping the active wallpaper now reverts the desktop.** A new
+  "Stop wallpaper" item (right-click the active card) turns the wallpaper off
+  and restores the desktop's own background without deleting the entry;
+  removing the active card does the same. Previously the daemon kept playing a
+  wallpaper you'd deleted until the app was force-closed.
+
 ## [1.1.33] — 2026-07-23
 
 ### Changed
@@ -21,14 +55,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Power saving instead uses decoder-level frame skipping
   (`--vd-lavc-skipframe`), which discards frames inside libavcodec *before*
   they are decoded, so the work is never done and hardware decoding stays
-  active. Measured with `cargo run --example skipframe_probe` on both
-  `vaapi-copy` and `nvdec-copy`: Reduced cuts frames reaching the output by
-  ~47%, Minimum by ~73%, with the hardware decoder still engaged throughout.
+  active. (Superseded in 1.1.34: this changed the visible frame rate but did
+  not reduce GPU load on hardware-decoded video.)
 
-  It deliberately no longer advertises an exact frame rate: how much a given
-  file saves depends on its GOP structure, so the control is named for what it
-  does rather than promising a number it cannot honour. Existing `framerate`
-  settings migrate automatically — any cap becomes Reduced.
+  Existing `framerate` settings migrate automatically — any cap becomes Reduced.
 
 ### Fixed
 - **Light mode readability.** Several surfaces were unreadable or unstyled in

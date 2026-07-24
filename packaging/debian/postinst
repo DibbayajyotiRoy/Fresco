@@ -1,8 +1,0 @@
-#!/bin/sh
-set -e
-
-# Refresh caches so the app icon appears immediately (best-effort).
-gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
-update-desktop-database /usr/share/applications || true
-
-exit 0

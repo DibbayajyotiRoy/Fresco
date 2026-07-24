@@ -176,28 +176,25 @@ impl WaylandPlayer {
 
     /// Change rotation at runtime — the scheduled swap replaces media in place
     /// (no respawn), so the previous wallpaper's rotation must not leak onto
-    /// the next one. Mirrors `Player::set_rotation`: copy-back hwdec and mpv's
-    /// default chroma scaler for rotated video (green-cast bug).
-    pub fn set_rotation(&self, rotation: u16, scaling: Scaling) {
+    /// the next one. Mirrors `Player::set_rotation`: video-rotate + copy-back
+    /// hwdec; scalers (incl. the rotation-aware chroma one) are set by
+    /// [`WaylandPlayer::apply_scalers`], which the caller invokes right after.
+    pub fn set_rotation(&self, rotation: u16) {
         let rotated = !rotation.is_multiple_of(360);
         self.set("video-rotate", json!(rotation % 360));
         self.set(
             "hwdec",
             json!(if rotated { "auto-copy" } else { "auto-safe" }),
         );
-        let cscale = match (rotated, scaling) {
-            (true, _) => "bilinear", // mpv's default chroma path
-            (false, Scaling::High) => "lanczos",
-            (false, _) => "spline36",
-        };
-        self.set("cscale", json!(cscale));
     }
 
-    /// Change the power-saving level at runtime (mirrors
-    /// `Player::set_power_saving`). `Full` restores mpv's own default skipping.
-    pub fn set_power_saving(&self, power_saving: PowerSaving) {
-        let skip = power_saving.skipframe().unwrap_or("default");
-        self.set("vd-lavc-skipframe", json!(skip));
+    /// Apply the scaler set (mirrors `Player::apply_scalers`) — the single
+    /// runtime owner of every scaler property.
+    pub fn apply_scalers(&self, scaling: Scaling, power_saving: PowerSaving, rotation: u16) {
+        let rotated = !rotation.is_multiple_of(360);
+        for (k, v) in crate::config::video_scalers(scaling, power_saving, rotated).to_options() {
+            self.set(k, json!(v));
+        }
     }
 
     /// Seek to an absolute position (seconds). Used to keep clones of the same
@@ -362,39 +359,17 @@ fn build_mpv_opts(
         }
         Fit::Stretch => o.push("keepaspect=no".into()),
     }
-    // Visually-correct scaling on every profile (ROADMAP 1.8.2): mpv's default
-    // bilinear + no dithering visibly softens 8K→4K downscales and bands
-    // gradients — the "quality drops on big screens" complaint. Sigmoidized
-    // spline36/mitchell with correct/linear downscaling matches gpu-hq's
-    // downscale quality at a fraction of its cost; dither-depth=auto kills
-    // banding on 8-bit outputs.
-    // A custom CHROMA scaler + `video-rotate` corrupts chroma into a green
-    // cast (see the matching note in mpv/player.rs); skip cscale when rotated.
+    // Scalers: quality (spline36/lanczos + linear-light downscaling + dither)
+    // at Full, dropping toward cheap bilinear as power saving increases — the
+    // Render/3D load that pegs weak GPUs for a video wallpaper is per-frame
+    // shading, so this is the honest power lever (see config::video_scalers).
+    // cscale stays bilinear on rotated video (green-cast bug, matching player.rs).
     let rotated = !w.rotation.is_multiple_of(360);
-    o.push("correct-downscaling=yes".into());
-    o.push("linear-downscaling=yes".into());
-    o.push("dither-depth=auto".into());
-    if matches!(scaling, Scaling::High) {
-        o.push("scale=lanczos".into());
-        if !rotated {
-            o.push("cscale=lanczos".into());
-        }
-        o.push("dscale=lanczos".into());
-    } else {
-        o.push("scale=spline36".into());
-        if !rotated {
-            o.push("cscale=spline36".into());
-        }
-        o.push("dscale=mitchell".into());
+    for (k, v) in crate::config::video_scalers(scaling, power_saving, rotated).to_options() {
+        o.push(format!("{k}={v}"));
     }
     // Clockwise rotation in degrees; applied before crop (zoom/pan).
     o.push(format!("video-rotate={}", w.rotation % 360));
-    // Power saving: decoder-level frame skipping. Deliberately NOT a `vf`
-    // filter — a software filter in a VA-API pipeline forces every frame off
-    // the GPU and doubles video-engine load (measured on Alder Lake).
-    if let Some(skip) = power_saving.skipframe() {
-        o.push(format!("vd-lavc-skipframe={skip}"));
-    }
     o.join(" ")
 }
 
@@ -516,10 +491,11 @@ mod tests {
         );
         assert!(opts.contains("aid=no"));
         assert!(opts.contains("video-sync=display-resample"));
-        // Full → mpv's own default skipping; and NEVER a vf filter, which is
-        // what made decode load worse on hardware-decoded video.
-        assert!(!opts.contains("vd-lavc-skipframe"));
+        // Full → quality scalers, and NEVER a vf filter (the 1.1.32 bug) nor
+        // decoder skipping (does nothing on hwdec).
+        assert!(opts.contains("scale=spline36"));
         assert!(!opts.contains("vf="));
+        assert!(!opts.contains("vd-lavc-skipframe"));
         let unmuted = Wallpaper {
             kind: Kind::Video,
             mute: false,
@@ -535,19 +511,19 @@ mod tests {
     }
 
     #[test]
-    fn build_mpv_opts_uses_decoder_skipping_not_a_filter() {
+    fn build_mpv_opts_power_saving_uses_cheap_scalers_not_a_filter() {
         let w = Wallpaper {
             kind: Kind::Video,
             ..Default::default()
         };
-        for (level, want) in [
-            (PowerSaving::Reduced, "vd-lavc-skipframe=nonref"),
-            (PowerSaving::Minimum, "vd-lavc-skipframe=bidir"),
-        ] {
-            let opts = build_mpv_opts(&w, Scaling::Balanced, level, Path::new("/tmp/s.sock"));
-            assert!(opts.contains(want), "{level:?} opts were: {opts}");
-            // A `vf` here would force frames off the GPU — the 1.1.32 bug.
+        for level in [PowerSaving::Reduced, PowerSaving::Minimum] {
+            let opts = build_mpv_opts(&w, Scaling::High, level, Path::new("/tmp/s.sock"));
+            // Cheap bilinear scaling, not the expensive lanczos of High.
+            assert!(opts.contains("scale=bilinear"), "{level:?}: {opts}");
+            assert!(!opts.contains("scale=lanczos"), "{level:?} overrides High");
+            // Never a filter (1.1.32 copy-back bug) nor decoder skipping (no-op).
             assert!(!opts.contains("vf="), "{level:?} must not add a filter");
+            assert!(!opts.contains("vd-lavc-skipframe"), "{level:?}");
         }
     }
 

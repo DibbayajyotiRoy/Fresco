@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.33"
+version = "1.1.34"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -28,11 +28,6 @@ name = "frescod"
 path = "src/bin/frescod.rs"
 required-features = ["daemon"]
 
-# Mechanism-verification harness for the Power saving feature (uses the mpv FFI
-# in src/daemon). Gated so gui-only feature checks don't try to build it.
-[[example]]
-name = "skipframe_probe"
-required-features = ["daemon"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -109,6 +104,9 @@ assets = [
     ["data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
     ["data/icons/hicolor/512x512/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
 ]
-# postinst/postrm refresh the icon cache and desktop database so the icon shows
-# up immediately (Deepin's bloom theme relies on a fresh hicolor cache).
-maintainer-scripts = "packaging/debian"
+# NO maintainer-scripts: the icon cache and desktop database are refreshed by
+# the standard dpkg triggers that hicolor-icon-theme and desktop-file-utils
+# declare (fired automatically when our files land in their watched dirs) —
+# exactly like a plain debhelper GUI package (e.g. galculator). A custom
+# postinst that refreshed the caches early interfered with Deepin's launcher
+# refresh, so the icon only appeared after `killall dde-shell` (issue #3).

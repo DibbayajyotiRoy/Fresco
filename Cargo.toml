@@ -103,6 +103,15 @@ assets = [
     ["data/icons/hicolor/128x128/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
     ["data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
     ["data/icons/hicolor/512x512/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    # Deepin 25 launcher icon. dde-launchpad's hot refresh after install looks
+    # only in the current theme ("bloom"), never falling back to hicolor, so a
+    # hicolor-only app appears solely after `killall dde-shell`. Confirmed by an
+    # A/B against galculator on Deepin 25: a native bloom SVG was the only
+    # difference. bloom is SVG-only, so xdgicon2dci gives us nothing.
+    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/48/", "644"],
+    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/128/", "644"],
+    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/256/", "644"],
+    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/512/", "644"],
 ]
 # NO maintainer-scripts: the icon cache and desktop database are refreshed by
 # the standard dpkg triggers that hicolor-icon-theme and desktop-file-utils

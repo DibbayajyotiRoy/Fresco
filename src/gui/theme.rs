@@ -9,17 +9,20 @@
 //! with a single restrained accent (saturation kept modest), tinted shadows
 //! instead of pure-black, and crisp accent borders instead of colored glow.
 //!
-//! GTK4's CSS is a *subset* of web CSS: this file deliberately sticks to the
-//! supported feature set (`@define-color`, `alpha()`, `shade()`,
-//! `linear-gradient()`, `box-shadow`, pseudo-classes, etc.) and never uses
-//! `transform`, `filter`, `var()`, or `calc()`.
+//! GTK4's CSS is a *subset* of web CSS: this file sticks to the supported
+//! feature set (`alpha()`, `shade()`, `linear-gradient()`, `box-shadow`,
+//! pseudo-classes) and never uses `transform`, `filter`, `var()`, or `calc()`.
+//! It also never references an `@define-color` name — GTK ignores runtime
+//! redefinitions of one, so [`build_css`] substitutes literal colors.
 
 use libadwaita as adw;
 
 use crate::config::{Accent, ThemeMode};
 
 thread_local! {
-    static PROVIDER: gtk4::CssProvider = gtk4::CssProvider::new();
+    // The attached provider, so `apply()` can detach the previous stylesheet.
+    static PROVIDER: std::cell::RefCell<Option<gtk4::CssProvider>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// A single resolved color palette (dark or light). Every field is a CSS
@@ -43,20 +46,24 @@ struct Pal {
 }
 
 impl Pal {
-    /// Obsidian dark scheme (never pitch-black).
+    /// Linear-inspired dark scheme: a near-black canvas with a faint blue tint,
+    /// a four-step surface ladder (canvas → card → hover → popover) carrying
+    /// hierarchy by lift + hairline rather than shadow.
     const DARK: Pal = Pal {
-        window_bg: "#15171C",
-        window_fg: "#ECEDF1",
-        view_bg: "#131519",
-        card_bg: "#1C1F27",
-        headerbar_bg: "#16181E",
-        popover_bg: "#1E212A",
-        card_border: "rgba(255,255,255,0.09)",
-        card_hover: "#232733",
-        thumb_mat: "#0E1014",
-        dim_fg: "#9AA0AC",
+        window_bg: "#010102", // Linear canvas — the deepest surface
+        window_fg: "#F7F8F8", // ink
+        view_bg: "#010102",
+        card_bg: "#0E0F12", // surface-1
+        headerbar_bg: "#060709",
+        popover_bg: "#16181D",  // surface-2/3
+        card_border: "#23252A", // Linear hairline (solid, not translucent)
+        card_hover: "#16181D",  // surface-2
+        thumb_mat: "#08090B",
+        dim_fg: "#8A8F98", // ink-subtle
         destructive: "#E5484D",
-        shadow_sm: "rgba(0,0,0,0.32)",
+        // Linear resists drop shadows on dark — kept minimal; the surface
+        // ladder + hairline do the lifting.
+        shadow_sm: "rgba(0,0,0,0.30)",
         shadow_md: "rgba(0,0,0,0.45)",
     };
 
@@ -79,11 +86,13 @@ impl Pal {
 }
 
 /// Resolve the `(accent_bg_color, accent_fg_color)` pair for an accent in the
-/// given scheme. Colors are kept tasteful (modest saturation) and never purple.
+/// given scheme. The default Blue is Linear's lavender-blue signature; the rest
+/// stay tasteful, modestly-saturated hues.
 fn accent_pair(accent: Accent, dark: bool) -> (&'static str, &'static str) {
     match (accent, dark) {
-        (Accent::Blue, true) => ("#4F8FF7", "#F7FAFF"),
-        (Accent::Blue, false) => ("#2A6BE0", "#F7FAFF"),
+        // Linear lavender-blue (#5e6ad2) — brand accent / primary CTA / focus.
+        (Accent::Blue, true) => ("#5E6AD2", "#F7F8FF"),
+        (Accent::Blue, false) => ("#5058C4", "#F7F8FF"),
         (Accent::Teal, true) => ("#2BB6A2", "#04221E"),
         (Accent::Teal, false) => ("#0E8C7E", "#EFFBF8"),
         (Accent::Green, true) => ("#46B96B", "#06210F"),
@@ -97,27 +106,31 @@ fn accent_pair(accent: Accent, dark: bool) -> (&'static str, &'static str) {
     }
 }
 
-/// Create the app-level [`gtk4::CssProvider`] and attach it to the default
-/// display. Call once after the GTK app has activated.
-pub fn install() {
-    let display = gtk4::gdk::Display::default()
-        .expect("Fresco theme: no default GDK display (call install() after activation)");
-    PROVIDER.with(|provider| {
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    });
-}
+/// Retained for call-site ordering; the provider is now created and attached by
+/// [`apply`], which the caller invokes right after. No-op on its own.
+pub fn install() {}
 
-/// Rebuild the stylesheet for `accent` + dark/light and load it into the
-/// installed provider (live-swappable; call again to re-theme).
+/// Swap in a freshly-built stylesheet for `accent` + dark/light. Live-safe: a
+/// running window re-resolves and repaints, so the toggle and dots work.
 #[allow(deprecated)]
 pub fn apply(accent: Accent, dark: bool) {
+    let Some(display) = gtk4::gdk::Display::default() else {
+        return;
+    };
     let css = build_css(accent, dark);
-    PROVIDER.with(|provider| {
-        provider.load_from_data(&css);
+    let new = gtk4::CssProvider::new();
+    new.load_from_data(&css);
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &new,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    PROVIDER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(old) = slot.take() {
+            gtk4::style_context_remove_provider_for_display(&display, &old);
+        }
+        *slot = Some(new);
     });
 }
 
@@ -135,6 +148,18 @@ pub fn is_dark() -> bool {
     adw::StyleManager::default().is_dark()
 }
 
+/// Whether `mode` should paint dark, right now. For explicit Light/Dark this is
+/// the mode itself — critically NOT `is_dark()`, which updates asynchronously
+/// after `set_mode` and so is stale in the same call (the "clicking Light did
+/// nothing" bug). Only `System` defers to the resolved scheme.
+pub fn resolve_dark(mode: ThemeMode) -> bool {
+    match mode {
+        ThemeMode::Light => false,
+        ThemeMode::Dark => true,
+        ThemeMode::System => is_dark(),
+    }
+}
+
 /// Build the full stylesheet for the given accent + scheme.
 fn build_css(accent: Accent, dark: bool) -> String {
     let p = if dark { &Pal::DARK } else { &Pal::LIGHT };
@@ -145,7 +170,7 @@ fn build_css(accent: Accent, dark: bool) -> String {
     // modal's own text, so light needs a much higher opacity to stay readable.
     let glass_alpha = if dark { "0.86" } else { "0.97" };
 
-    format!(
+    let css = format!(
         "/* ===== Fresco palette ===== */
 @define-color window_bg_color {window_bg};
 @define-color window_fg_color {window_fg};
@@ -190,11 +215,11 @@ window.glass .background {{ background: transparent; }}
 .changelog-body {{ font-size: 15px; }}
 
 /* ===== Wallpaper card ===== */
-.wp-card {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 12px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease; }}
+.wp-card {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 12px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 160ms cubic-bezier(0.4, 0, 0.2, 1), border-color 160ms cubic-bezier(0.4, 0, 0.2, 1), background-color 160ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .wp-card:hover {{ background-color: @card_hover; border-color: alpha(@accent_bg_color,0.55); box-shadow: 0 8px 24px {shadow_md}, 0 2px 6px {shadow_sm}; }}
 .wp-card.active {{ border: 2px solid @accent_bg_color; box-shadow: 0 1px 3px {shadow_sm}; }}
 
-.wp-thumb {{ background-color: @thumb_mat; transition: opacity 220ms ease; }}
+.wp-thumb {{ background-color: @thumb_mat; transition: opacity 260ms cubic-bezier(0.4, 0, 0.2, 1); }}
 /* Thumbnail fade-in: cards start with .thumb-loading (opacity 0); an idle
    callback removes it right after map, so the opacity transition plays. */
 .wp-thumb.thumb-loading {{ opacity: 0; }}
@@ -208,8 +233,13 @@ window.glass .background {{ background: transparent; }}
 .wp-badge-row {{ margin: 8px; }}
 .wp-badge-row .wp-badge {{ margin: 0 6px 0 0; }}
 .wp-badge.quality {{ background-color: alpha(@accent_bg_color,0.85); color: @accent_fg_color; }}
+/* ===== Select mode ===== */
+.wp-card.picked {{ border: 2px solid @accent_bg_color; }}
+.wp-check {{ background-color: alpha(black,0.55); color: @accent_fg_color; border: 2px solid #FFFFFF; border-radius: 999px; min-width: 22px; min-height: 22px; margin: 8px; font-size: 13px; font-weight: 700; }}
+.wp-check.on {{ background-color: @accent_bg_color; border-color: @accent_fg_color; }}
+
 .wp-active-pill {{ background-color: @accent_bg_color; color: @accent_fg_color; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 7px; margin: 8px; }}
-.wp-edit {{ background-color: alpha(black,0.55); color: #FFFFFF; border-radius: 999px; min-height: 26px; min-width: 26px; padding: 3px; transition: background-color 160ms ease, color 160ms ease; }}
+.wp-edit {{ background-color: alpha(black,0.55); color: #FFFFFF; border-radius: 999px; min-height: 26px; min-width: 26px; padding: 3px; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .wp-edit:hover {{ background-color: alpha(black,0.78); }}
 .wp-edit.fav-on {{ color: @accent_bg_color; }}
 /* Hover action cluster (heart / edit / menu), bottom-right. */
@@ -220,7 +250,7 @@ window.glass .background {{ background: transparent; }}
 .compact-layout .wp-badge, .compact-layout .wp-active-pill {{ margin: 6px; }}
 
 /* ===== Mini card ===== */
-.wp-mini {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 10px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 160ms ease, border-color 160ms ease; }}
+.wp-mini {{ background-color: @card_bg_color; border: 1px solid @card_border; border-radius: 10px; box-shadow: 0 1px 2px {shadow_sm}; transition: box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .wp-mini:hover {{ border-color: alpha(@accent_bg_color,0.45); box-shadow: 0 5px 14px {shadow_md}; }}
 .wp-mini.active {{ border: 2px solid @accent_bg_color; }}
 
@@ -242,14 +272,15 @@ window.glass .background {{ background: transparent; }}
 /* ===== Buttons ===== */
 .set-btn {{ min-height: 42px; font-size: 14px; font-weight: 600; border-radius: 12px; }}
 .feedback-btn {{ min-height: 38px; padding-left: 14px; padding-right: 14px; border-radius: 11px; }}
-button {{ border-radius: 9px; }}
-button.suggested-action {{ font-weight: 600; }}
+button {{ border-radius: 9px; transition: background-color 130ms cubic-bezier(0.4, 0, 0.2, 1), border-color 130ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
+button.suggested-action {{ font-weight: 600; background-color: @accent_bg_color; color: @accent_fg_color; }}
+button.suggested-action:hover {{ background-color: alpha(@accent_bg_color, 0.85); }}
 .seg button:checked {{ background-color: @accent_bg_color; color: @accent_fg_color; }}
 
 /* ===== Accent picker dots ===== */
-.accent-dot {{ min-width: 22px; min-height: 22px; border-radius: 999px; padding: 0; border: 2px solid transparent; }}
+.accent-dot {{ min-width: 22px; min-height: 22px; border-radius: 999px; padding: 0; border: 2px solid transparent; transition: border-color 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .accent-dot.selected {{ border-color: @window_fg_color; }}
-.accent-blue {{ background-image: none; background-color: #3D7BEF; }}
+.accent-blue {{ background-image: none; background-color: #5E6AD2; }}
 .accent-teal {{ background-image: none; background-color: #1FAE9A; }}
 .accent-green {{ background-image: none; background-color: #3AAE5C; }}
 .accent-amber {{ background-image: none; background-color: #CC9233; }}
@@ -271,15 +302,19 @@ button.suggested-action {{ font-weight: 600; }}
 .update-progress progress {{ min-height: 8px; border-radius: 999px; background-image: linear-gradient(to right, @accent_bg_color, shade(@accent_bg_color, 1.25)); }}
 
 /* ===== Search ===== */
-entry.wp-search {{ min-height: 36px; border-radius: 10px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 8px; padding-right: 8px; }}
+entry.wp-search {{ min-height: 36px; border-radius: 10px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 8px; padding-right: 8px; transition: border-color 130ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
 entry.wp-search image {{ color: @dim_fg; margin-right: 4px; }}
 entry.wp-search:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.22); }}
 
-/* ===== Header menu popover ===== compact grouped menu, GTK-menu-like rows. */
+/* ===== Header menu popover ===== compact grouped menu, GTK-menu-like rows.
+   Clean lifted panel: drop the default popover frame's extra outer border and
+   define the panel by surface lift + one soft shadow instead. */
+popover.background {{ background: none; box-shadow: none; border: none; }}
+popover > contents {{ background-color: @popover_bg_color; border: none; border-radius: 14px; padding: 4px; box-shadow: 0 14px 40px alpha(black, 0.55), 0 3px 10px alpha(black, 0.4); }}
 .fresco-menu .overline {{ margin-top: 8px; margin-bottom: 2px; }}
 .fresco-menu separator {{ min-height: 1px; background-color: @card_border; margin-top: 4px; margin-bottom: 4px; }}
 .menu-row {{ min-height: 30px; }}
-.menu-item {{ min-height: 22px; padding: 3px 8px; border-radius: 7px; background-image: none; background-color: transparent; border: none; box-shadow: none; font-weight: 400; }}
+.menu-item {{ min-height: 22px; padding: 3px 8px; border-radius: 7px; background-image: none; background-color: transparent; border: none; box-shadow: none; font-weight: 400; transition: background-color 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .menu-item:hover {{ background-color: alpha(@window_fg_color, 0.07); }}
 .menu-item:active {{ background-color: alpha(@window_fg_color, 0.11); }}
 .fresco-menu .seg button {{ min-height: 24px; font-size: 13px; }}
@@ -291,10 +326,10 @@ entry.wp-search:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 
 .footer-count {{ color: @dim_fg; font-size: 12px; }}
 
 /* ===== Command palette (Ctrl+K) ===== */
-.palette-entry {{ min-height: 44px; font-size: 16px; border-radius: 12px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 12px; padding-right: 12px; }}
+.palette-entry {{ min-height: 44px; font-size: 16px; border-radius: 12px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 12px; padding-right: 12px; transition: border-color 130ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .palette-entry:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.22); }}
 .palette-list {{ background: transparent; }}
-.palette-list row {{ border-radius: 10px; padding: 8px 12px; transition: background-color 140ms ease; }}
+.palette-list row {{ border-radius: 10px; padding: 8px 12px; transition: background-color 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
 .palette-list row:hover {{ background-color: alpha(@window_fg_color, 0.06); }}
 .palette-list row:selected {{ background-color: alpha(@accent_bg_color, 0.18); color: @window_fg_color; }}
 .palette-hint {{ color: @dim_fg; font-size: 11px; }}
@@ -349,5 +384,66 @@ label.error, label.error.dim {{ color: @destructive_color; }}
         glass_alpha = glass_alpha,
         accent_bg = accent_bg,
         accent_fg = accent_fg,
-    )
+    );
+    // Substitute literals: a redefined @define-color name keeps its startup
+    // value at runtime, which froze the light/dark toggle and accent picker.
+    css.replace("@window_bg_color", p.window_bg)
+        .replace("@window_fg_color", p.window_fg)
+        .replace("@view_bg_color", p.view_bg)
+        .replace("@view_fg_color", p.window_fg)
+        .replace("@card_bg_color", p.card_bg)
+        .replace("@card_fg_color", p.window_fg)
+        .replace("@headerbar_bg_color", p.headerbar_bg)
+        .replace("@headerbar_fg_color", p.window_fg)
+        .replace("@popover_bg_color", p.popover_bg)
+        .replace("@popover_fg_color", p.window_fg)
+        .replace("@card_border", p.card_border)
+        .replace("@card_hover", p.card_hover)
+        .replace("@thumb_mat", p.thumb_mat)
+        .replace("@dim_fg", p.dim_fg)
+        .replace("@destructive_bg_color", p.destructive)
+        .replace("@destructive_color", p.destructive)
+        .replace("@accent_bg_color", accent_bg)
+        .replace("@accent_fg_color", accent_fg)
+        .replace("@accent_color", accent_bg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `@name` reference in a declaration keeps its startup value at runtime,
+    /// which is what killed live theme switching. Literals only.
+    #[test]
+    fn build_css_has_no_named_color_references() {
+        for (accent, dark) in [(Accent::Blue, true), (Accent::Teal, false)] {
+            let css = build_css(accent, dark);
+            for line in css.lines() {
+                let rule = line.split_once('{').map_or("", |(_, r)| r);
+                assert!(
+                    !rule.contains('@'),
+                    "runtime-frozen @define-color reference in: {line}"
+                );
+            }
+        }
+    }
+
+    /// Light and dark must differ, so switching modes repaints.
+    #[test]
+    fn light_and_dark_palettes_differ() {
+        let dark = build_css(Accent::Blue, true);
+        let light = build_css(Accent::Blue, false);
+        assert_ne!(dark, light);
+        assert!(dark.contains(Pal::DARK.window_bg));
+        assert!(light.contains(Pal::LIGHT.window_bg));
+    }
+
+    /// Each accent must reach the stylesheet, so the dots repaint.
+    #[test]
+    fn accent_reaches_the_stylesheet() {
+        for accent in [Accent::Blue, Accent::Teal, Accent::Amber, Accent::Coral] {
+            let (bg, _) = accent_pair(accent, true);
+            assert!(build_css(accent, true).contains(bg), "{accent:?} missing");
+        }
+    }
 }

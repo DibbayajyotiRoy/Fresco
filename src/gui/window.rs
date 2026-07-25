@@ -90,6 +90,13 @@ pub(crate) struct AppState {
     /// Empty slot the async "Update available" check populates in place;
     /// installed by build_library_view (mirrors `refresh`).
     pub(crate) update_banner_slot: Option<gtk4::Box>,
+    /// `Some` while the library is in multi-select mode, holding the chosen
+    /// entry ids. Keyed by id, not index, so a concurrent library change (a
+    /// thumbnail probe finishing, an add) can't shift a selection onto the
+    /// wrong wallpaper and delete it.
+    selection: Option<std::collections::HashSet<String>>,
+    /// Swaps the footer between its normal actions and the selection bar.
+    sync_selection_ui: Option<Rc<dyn Fn()>>,
 }
 
 // ─── Main window ─────────────────────────────────────────────────────────────
@@ -124,7 +131,7 @@ fn build_ui(app: &adw::Application) {
     // Install + apply the theme before first paint so there is no flash.
     theme::install();
     theme::set_mode(config.theme_mode);
-    theme::apply(config.accent, theme::is_dark());
+    theme::apply(config.accent, theme::resolve_dark(config.theme_mode));
 
     // Session capability drives the UI: every session gets the full app; the
     // limited ones (Wayland) also get an informational banner. No hard block.
@@ -146,13 +153,18 @@ fn build_ui(app: &adw::Application) {
         toast: toast.clone(),
         refresh: None,
         update_banner_slot: None,
+        selection: None,
+        sync_selection_ui: None,
     }));
 
-    // Re-apply the palette when the system light/dark resolution flips.
+    // Re-apply the palette when the system light/dark resolution flips (System
+    // mode). Resolve via the chosen mode so an explicit Light/Dark isn't undone
+    // by this notify firing with a stale is_dark() right after set_mode.
     {
         let state = state.clone();
-        adw::StyleManager::default().connect_dark_notify(move |sm| {
-            theme::apply(state.borrow().config.accent, sm.is_dark());
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            let s = state.borrow();
+            theme::apply(s.config.accent, theme::resolve_dark(s.config.theme_mode));
         });
     }
 
@@ -556,7 +568,89 @@ fn build_library_view(
         });
     }
     footer.append(&add_btn);
+
+    // Select-mode toggle: sits with the add actions but reads as a mode switch.
+    let select_btn = gtk4::Button::new();
+    select_btn.set_child(Some(&button_content("object-select-symbolic", "Select")));
+    select_btn.set_tooltip_text(Some("Select several wallpapers to remove at once"));
+    {
+        let state2 = state.clone();
+        select_btn.connect_clicked(move |_| enter_selection(&state2, None));
+    }
+    footer.append(&select_btn);
     root.append(&footer);
+
+    // ── Selection bar (replaces the footer while in select mode) ──
+    let sel_bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    sel_bar.add_css_class("footer-bar");
+    sel_bar.set_visible(false);
+
+    let sel_count = gtk4::Label::new(None);
+    sel_count.add_css_class("footer-count");
+    sel_count.set_xalign(0.0);
+    sel_count.set_valign(gtk4::Align::Center);
+    sel_bar.append(&sel_count);
+
+    let sel_spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    sel_spacer.set_hexpand(true);
+    sel_bar.append(&sel_spacer);
+
+    let sel_all_btn = gtk4::Button::with_label("Select all");
+    sel_bar.append(&sel_all_btn);
+
+    let sel_cancel = gtk4::Button::with_label("Cancel");
+    {
+        let state2 = state.clone();
+        sel_cancel.connect_clicked(move |_| exit_selection(&state2));
+    }
+    sel_bar.append(&sel_cancel);
+
+    let sel_remove = gtk4::Button::new();
+    sel_remove.add_css_class("destructive-action");
+    sel_bar.append(&sel_remove);
+    root.append(&sel_bar);
+
+    // Swap footer ↔ selection bar and keep the count/labels current. Stored on
+    // the state so the selection helpers can call it from anywhere.
+    {
+        let state2 = state.clone();
+        let footer = footer.clone();
+        let sel_bar = sel_bar.clone();
+        let sel_count = sel_count.clone();
+        let sel_remove = sel_remove.clone();
+        let sync: Rc<dyn Fn()> = Rc::new(move || {
+            let n = {
+                let s = state2.borrow();
+                s.selection.as_ref().map(|set| set.len())
+            };
+            match n {
+                Some(n) => {
+                    footer.set_visible(false);
+                    sel_bar.set_visible(true);
+                    sel_count.set_text(&match n {
+                        0 => "Select wallpapers to remove".to_string(),
+                        1 => "1 selected".to_string(),
+                        n => format!("{n} selected"),
+                    });
+                    sel_remove.set_sensitive(n > 0);
+                    sel_remove.set_child(Some(&button_content(
+                        "user-trash-symbolic",
+                        &if n > 1 {
+                            format!("Remove {n}")
+                        } else {
+                            "Remove".to_string()
+                        },
+                    )));
+                }
+                None => {
+                    sel_bar.set_visible(false);
+                    footer.set_visible(true);
+                }
+            }
+        });
+        sync();
+        state.borrow_mut().sync_selection_ui = Some(sync);
+    }
 
     // In compact mode, condense the footer buttons to icon-only (tooltips
     // already carry the label) so they don't crowd out the search/grid at the
@@ -579,6 +673,39 @@ fn build_library_view(
 
     // ── Live-updating sectioned library ──
     let home_query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+
+    // Selection actions need the currently-listed ids, which depend on the
+    // search query — so they're wired once `home_query` exists.
+    {
+        let visible_ids = {
+            let state = state.clone();
+            let home_query = home_query.clone();
+            move || -> Vec<String> {
+                let q = home_query.borrow().clone();
+                state
+                    .borrow()
+                    .entries
+                    .iter()
+                    .filter(|e| entry_matches_query(e, &q))
+                    .map(|e| e.id.clone())
+                    .collect()
+            }
+        };
+        {
+            let state2 = state.clone();
+            let visible_ids = visible_ids.clone();
+            sel_all_btn.connect_clicked(move |_| select_all_visible(&state2, &visible_ids()));
+        }
+        let state2 = state.clone();
+        let win2 = window.clone();
+        sel_remove.connect_clicked(move |_| {
+            let ids = match state2.borrow().selection.clone() {
+                Some(ids) if !ids.is_empty() => ids,
+                _ => return,
+            };
+            confirm_remove_selected(&win2, state2.clone(), ids);
+        });
+    }
     let refresh: Rc<dyn Fn()> = {
         let state = state.clone();
         let sections_box = sections_box.clone();
@@ -747,7 +874,9 @@ fn build_menu_popover(
                 s.config.accent
             };
             theme::set_mode(mode);
-            theme::apply(accent, theme::is_dark());
+            // Derive dark/light from the chosen mode, not is_dark() — the latter
+            // is stale right after set_mode, so the palette wouldn't switch.
+            theme::apply(accent, theme::resolve_dark(mode));
         });
     }
     seg.append(&b_sys);
@@ -780,12 +909,13 @@ fn build_menu_popover(
             let state2 = state.clone();
             let dots = dot_btns.clone();
             b.connect_clicked(move |_| {
-                {
+                let mode = {
                     let mut s = state2.borrow_mut();
                     s.config.accent = acc;
                     s.config.save().ok();
-                }
-                theme::apply(acc, theme::is_dark());
+                    s.config.theme_mode
+                };
+                theme::apply(acc, theme::resolve_dark(mode));
                 for (a, btn) in dots.borrow().iter() {
                     if *a == acc {
                         btn.add_css_class("selected");
@@ -1024,9 +1154,10 @@ fn populate_library(
     let q = query.to_lowercase();
     let searching = !q.is_empty();
 
-    // Recents (hidden while searching, to focus on the matches).
+    // Recents (hidden while searching, to focus on the matches — and while
+    // selecting, since mini cards apply a wallpaper on click and can't be ticked).
     {
-        let recents = if searching {
+        let recents = if searching || state.borrow().selection.is_some() {
             Vec::new()
         } else {
             library::recent_entries(&entries, 6)
@@ -1330,6 +1461,37 @@ fn build_library_card(
         warn.set_tooltip_text(entry.error.as_deref().or(Some("Source file not found")));
         overlay.add_overlay(&warn);
         overlay.set_opacity(0.65);
+    }
+
+    // ── Select mode: a tick badge replaces every other card interaction ──
+    let selecting = {
+        let s = state.borrow();
+        s.selection.as_ref().map(|set| set.contains(&entry.id))
+    };
+    if let Some(ticked) = selecting {
+        let check = gtk4::Label::new(Some(if ticked { "\u{2713}" } else { "" }));
+        check.add_css_class("wp-check");
+        if ticked {
+            check.add_css_class("on");
+            overlay.add_css_class("picked");
+        }
+        check.set_halign(gtk4::Align::End);
+        check.set_valign(gtk4::Align::Start);
+        check.set_can_target(false);
+        overlay.add_overlay(&check);
+
+        let click = GestureClick::new();
+        {
+            let state_c = state.clone();
+            let id = entry.id.clone();
+            click.connect_released(move |_, _, _, _| toggle_selected(&state_c, &id));
+        }
+        overlay.add_controller(click);
+
+        let frame = gtk4::AspectFrame::new(0.5, 0.0, 16.0 / 9.0, false);
+        frame.set_size_request(260, 146);
+        frame.set_child(Some(&overlay));
+        return frame;
     }
 
     // Hover-revealed action cluster (bottom-right): heart · edit · menu.
@@ -1693,6 +1855,19 @@ fn show_card_menu(
 
     menu.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
+    // Gateway into multi-select, pre-ticked with the card you right-clicked.
+    let select = item("Select…");
+    {
+        let s = state.clone();
+        let p = pop.clone();
+        let id = s.borrow().entries.get(idx).map(|e| e.id.clone());
+        select.connect_clicked(move |_| {
+            enter_selection(&s, id.clone());
+            p.popdown();
+        });
+    }
+    menu.append(&select);
+
     let remove = item("Remove from library");
     remove.add_css_class("destructive-action");
     {
@@ -1855,6 +2030,189 @@ fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     if let Some(r) = refresh {
         r();
     }
+}
+
+// ─── Multi-select ────────────────────────────────────────────────────────────
+
+/// Enter select mode, optionally with `first` already ticked.
+fn enter_selection(state: &Rc<RefCell<AppState>>, first: Option<String>) {
+    {
+        let mut s = state.borrow_mut();
+        let mut set = std::collections::HashSet::new();
+        if let Some(id) = first {
+            set.insert(id);
+        }
+        s.selection = Some(set);
+    }
+    refresh_selection(state);
+}
+
+fn exit_selection(state: &Rc<RefCell<AppState>>) {
+    state.borrow_mut().selection = None;
+    refresh_selection(state);
+}
+
+fn toggle_selected(state: &Rc<RefCell<AppState>>, id: &str) {
+    {
+        let mut s = state.borrow_mut();
+        let Some(set) = s.selection.as_mut() else {
+            return;
+        };
+        if !set.remove(id) {
+            set.insert(id.to_string());
+        }
+    }
+    refresh_selection(state);
+}
+
+/// Tick every entry currently listed (honors the active search filter, so
+/// "Select all" over a search means "all matches").
+fn select_all_visible(state: &Rc<RefCell<AppState>>, visible: &[String]) {
+    {
+        let mut s = state.borrow_mut();
+        let Some(set) = s.selection.as_mut() else {
+            return;
+        };
+        // Already all ticked → clear, so the button toggles both ways.
+        if visible.iter().all(|id| set.contains(id)) {
+            set.clear();
+        } else {
+            set.extend(visible.iter().cloned());
+        }
+    }
+    refresh_selection(state);
+}
+
+/// Repaint the grid (checkboxes) and the footer together.
+fn refresh_selection(state: &Rc<RefCell<AppState>>) {
+    let (refresh, sync) = {
+        let s = state.borrow();
+        (s.refresh.clone(), s.sync_selection_ui.clone())
+    };
+    if let Some(f) = sync {
+        f();
+    }
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Pull every entry whose id is in `ids` out of `entries`, returning them.
+fn drain_by_ids(
+    entries: &mut Vec<LibraryEntry>,
+    ids: &std::collections::HashSet<String>,
+) -> Vec<LibraryEntry> {
+    let mut gone = Vec::new();
+    entries.retain(|e| {
+        if ids.contains(&e.id) {
+            gone.push(e.clone());
+            false
+        } else {
+            true
+        }
+    });
+    gone
+}
+
+/// Delete every entry in `ids` in one pass: one library write, one toast, and a
+/// single stop if any of them was the wallpaper on screen.
+fn remove_entries_by_ids(state: Rc<RefCell<AppState>>, ids: &std::collections::HashSet<String>) {
+    if ids.is_empty() {
+        return;
+    }
+    let (removed, had_active) = {
+        let mut s = state.borrow_mut();
+        let gone = drain_by_ids(&mut s.entries, ids);
+        let had_active = gone.iter().any(|e| entry_is_active(e, &s.config));
+        for e in &gone {
+            if let Some(thumb) = &e.thumbnail {
+                std::fs::remove_file(thumb).ok();
+            }
+        }
+        save_entries(&s.entries).ok();
+        s.selection = None;
+        (gone.len(), had_active)
+    };
+    if had_active {
+        stop_wallpaper(&state);
+    }
+    let msg = match (removed, had_active) {
+        (1, true) => "Removed — desktop reverted to its own wallpaper".to_string(),
+        (1, false) => "Removed from library".to_string(),
+        (n, true) => format!("Removed {n} wallpapers — desktop reverted to its own wallpaper"),
+        (n, false) => format!("Removed {n} wallpapers"),
+    };
+    show_toast(&state, &msg);
+    refresh_selection(&state);
+}
+
+/// Confirm before a bulk delete. Removing many wallpapers at once can't be
+/// undone, and the single-card path is already one click behind a menu, so the
+/// batch path gets an explicit count to check against.
+fn confirm_remove_selected(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    ids: std::collections::HashSet<String>,
+) {
+    let n = ids.len();
+    let active_hit = {
+        let s = state.borrow();
+        s.entries
+            .iter()
+            .any(|e| ids.contains(&e.id) && entry_is_active(e, &s.config))
+    };
+
+    let (dialog, content) = glass_dialog(window, "Remove wallpapers", 400, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    body.set_margin_top(4);
+    body.set_margin_bottom(16);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+
+    let heading = gtk4::Label::new(Some(&if n == 1 {
+        "Remove 1 wallpaper?".to_string()
+    } else {
+        format!("Remove {n} wallpapers?")
+    }));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_wrap(true);
+    body.append(&heading);
+
+    let sub = gtk4::Label::new(Some(if active_hit {
+        "They leave your Fresco library and the desktop reverts to its own wallpaper. The source files on disk are kept."
+    } else {
+        "They leave your Fresco library. The source files on disk are kept."
+    }));
+    sub.add_css_class("dialog-sub");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    body.append(&sub);
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    actions.set_margin_top(8);
+    let cancel = gtk4::Button::with_label("Cancel");
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    actions.append(&cancel);
+    let confirm = gtk4::Button::with_label(if n == 1 { "Remove" } else { "Remove all" });
+    confirm.add_css_class("destructive-action");
+    {
+        let d = dialog.clone();
+        let state2 = state.clone();
+        confirm.connect_clicked(move |_| {
+            remove_entries_by_ids(state2.clone(), &ids);
+            d.close();
+        });
+    }
+    actions.append(&confirm);
+    body.append(&actions);
+
+    content.append(&body);
+    dialog.present();
 }
 
 /// Small inline popover to rename a library entry.
@@ -4069,6 +4427,15 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     dialog.present();
 }
 
+/// A release-availability announcement ("Fresco vX.Y.Z is available") duplicates
+/// the in-app update banner (see `updates.rs`, driven by GitHub releases), so we
+/// don't ALSO surface it as a bottom toast. Genuine announcements (other titles)
+/// still toast normally.
+fn is_release_announcement(title: &str) -> bool {
+    let t = title.to_ascii_lowercase();
+    t.contains("fresco") && t.contains("is available")
+}
+
 fn poll_notifications(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
@@ -4082,8 +4449,9 @@ fn poll_notifications(window: &adw::ApplicationWindow, state: Rc<RefCell<AppStat
         };
         let next = {
             let s = state.borrow();
-            list.into_iter()
-                .find(|n| !s.config.seen_notifications.contains(&n.id))
+            list.into_iter().find(|n| {
+                !s.config.seen_notifications.contains(&n.id) && !is_release_announcement(&n.title)
+            })
         };
         if let Some(n) = next {
             show_notification(&window, state, n);
@@ -4153,6 +4521,43 @@ fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supab
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn release_announcements_are_filtered_but_others_toast() {
+        // These duplicate the update banner → no bottom toast.
+        assert!(is_release_announcement("Fresco v1.1.34 is available"));
+        assert!(is_release_announcement("fresco 2.0 is available now"));
+        // Genuine announcements still toast.
+        assert!(!is_release_announcement(
+            "New wallpapers added to the catalog"
+        ));
+        assert!(!is_release_announcement("Scheduled maintenance tonight"));
+    }
+
+    /// Batch remove is keyed by id precisely so it stays correct when indices
+    /// move — reordering the library between selecting and removing must still
+    /// delete the chosen wallpapers and nothing else.
+    #[test]
+    fn batch_remove_follows_ids_not_positions() {
+        let mut entries = vec![entry("/a.mp4"), entry("/b.mp4"), entry("/c.mp4")];
+        let ids: std::collections::HashSet<String> =
+            [entries[0].id.clone(), entries[2].id.clone()].into();
+
+        entries.reverse(); // library changed underneath the selection
+        let gone = drain_by_ids(&mut entries, &ids);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, Some(PathBuf::from("/b.mp4")));
+        assert_eq!(gone.len(), 2);
+    }
+
+    #[test]
+    fn batch_remove_ignores_unknown_ids_and_empty_sets() {
+        let mut entries = vec![entry("/a.mp4")];
+        assert!(drain_by_ids(&mut entries, &Default::default()).is_empty());
+        assert!(drain_by_ids(&mut entries, &["nope".to_string()].into()).is_empty());
+        assert_eq!(entries.len(), 1);
+    }
 
     fn entry(path: &str) -> LibraryEntry {
         LibraryEntry {

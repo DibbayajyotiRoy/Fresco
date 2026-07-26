@@ -11,6 +11,7 @@
 #
 # Environments:
 #   x11       Xvfb                          → DISPLAY
+#   dde       Xvfb + Deepin session vars    → DISPLAY (runs the DDE code path)
 #   sway      Sway, headless wlroots        → WAYLAND_DISPLAY (layer-shell)
 #   hyprland  Hyprland, headless wlroots    → WAYLAND_DISPLAY (layer-shell)
 #   kde       KWin, virtual backend         → WAYLAND_DISPLAY (layer-shell)
@@ -102,10 +103,22 @@ adopt_new_wayland_socket() {
 }
 
 case "$ENV_ID" in
-  x11)
+  x11|dde)
     export DISPLAY=:99
     export XDG_SESSION_TYPE=x11
     unset WAYLAND_DISPLAY
+    # Deepin's session is X11 plus a session identity; our DDE handling keys off
+    # XDG_CURRENT_DESKTOP/XDG_SESSION_DESKTOP (see capability::is_deepin_dde),
+    # so setting them here runs the real DDE branch — desktop-window lookup and
+    # restack — on a plain Xvfb. dde-shell itself isn't packaged for the runner,
+    # so this covers our code path, not DDE's own compositing.
+    if [ "$ENV_ID" = dde ]; then
+      export XDG_CURRENT_DESKTOP=Deepin
+      export XDG_SESSION_DESKTOP=deepin
+      # Without dde-shell there is no desktop window to restack behind; force
+      # the restack strategy so the code under test is the one Deepin uses.
+      export FRESCO_DDE_MODE="${FRESCO_DDE_MODE:-restack}"
+    fi
     # WITH_COMPOSITOR_X11_GEOM lets pixel tests pick e.g. 3840x2160x24.
     Xvfb :99 -screen 0 "${WITH_COMPOSITOR_X11_GEOM:-1920x1080x24}" -nolisten tcp >/dev/null 2>&1 &
     XVFB_PID=$!

@@ -246,7 +246,20 @@ Cut GPU load for a video wallpaper on weak hardware (Intel N150). Shipped at two
 2. **1.1.33-dev `vd-lavc-skipframe`** — targets *decode*, but the reporter's `intel_gpu_top` showed decode was only ~17% and flat, while Render/3D was pegged at ~99%. It changed the visible frame rate but saved nothing. (My local "verification" measured output fps, a proxy, not engine load — the same mistake in a new coat.)
 
 **The shipped mechanism (`config::video_scalers`)** reduces the *scaler* cost — the per-frame GPU shading that IS the Render/3D bottleneck. Full keeps the quality scalers (spline36/lanczos + linear-light downscaling + dither); Reduced/Minimum drop toward bilinear with fewer passes. It can only reduce or match GPU work (never the copy-back trap), and hardware decode is untouched. Rotation safety preserved: `cscale` is non-bilinear only in Full+unrotated (the green-cast constraint), enforced by a unit test.
-- **Honest status:** the *direction* is right (targets Render/3D, safe by construction) and the scaler-selection + rotation-safety are unit-tested, but the *magnitude* of the power win is UNVERIFIED — a clean measurement needs an isolated, idle, Intel-only box (the reporter's), not a shared hybrid-GPU dev machine (a local attempt was swamped by the desktop's own GPU use). The UI/docs therefore frame it as a quality/perf trade-off, not a promised number. **Next: reporter confirms with `intel_gpu_top` that Render/3D drops across Full→Reduced→Minimum.**
+- **VERIFIED (1.1.35).** The reporter measured real package power with `turbostat` on an Intel N150 (Deepin 25, VA-API), two runs per level, steady state:
+
+  | Source | Level | GFXWatt | Δ | PkgWatt | Δ |
+  |---|---|---|---|---|---|
+  | 1080p60 | Full | 1.37 W | — | 6.00 W | — |
+  | 1080p60 | Reduced | 0.63 W | −54% | 4.03 W | −33% |
+  | 1080p60 | Minimum | 0.62 W | −55% | 4.22 W | −30% |
+  | 4K60 | Full | 2.77 W | — | 7.94 W | — |
+  | 4K60 | Reduced | 1.60 W | −42% | 5.95 W | −25% |
+  | 4K60 | Minimum | 0.99 W | −65% | 4.97 W | −37% |
+
+  Reproducible across runs. **Consequence: Reduced became the default in 1.1.35** — at 1080p it captures essentially all the available saving (Minimum adds nothing and its PkgWatt is marginally *worse*), and at 4K it already saves 42%. Minimum is worth choosing only for 4K sources. Existing configs are untouched; the new default applies to fresh installs.
+  - Note for future readers: the reporter's write-up credits "skipframe + lighter scalers". **1.1.34 removed skipframe entirely** — the savings are purely from the cheaper scalers, and the 1080p Reduced→Minimum PkgWatt rise cannot be skipframe parsing. The enum docs said otherwise until 1.1.35; stale docs propagate into other people's analyses.
+  - Measurement lesson, third time: engine-utilisation percentages (`intel_gpu_top`) show *where* work moved; only package power (`turbostat` / RAPL) shows whether it *shrank*. Video% rising while Render/3D falls is the expected shape — decode stops being starved once the render bottleneck lifts — and says nothing about total draw on its own.
 
 ---
 

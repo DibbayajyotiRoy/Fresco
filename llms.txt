@@ -18,10 +18,12 @@ actively maintained, and installs as a `.deb`.
 - Or download the `.deb` from GitHub Releases and double-click it.
 
 ## Key facts
-- Platforms: Linux on X11 (GNOME, XFCE, MATE, Cinnamon) and Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6). GNOME Wayland falls back to a static frame.
+- Platforms: Linux on X11 (GNOME, XFCE, MATE, Cinnamon, Deepin 25/DDE) and Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6). GNOME Wayland falls back to a static frame.
 - Media: mp4, webm, mkv, avi, mov, GIF, jpg/png/webp, image slideshows (crossfade / fade / slide / Ken Burns), video playlists.
-- Features: drag-to-crop and 90-degree rotate editor, per-wallpaper sound and volume, wallpaper library with search, multi-monitor (a different wallpaper per display), pause-on-battery, auto-pause on fullscreen, autostart on login.
+- Features: drag-to-crop and 90-degree rotate editor, per-wallpaper sound and volume, wallpaper library with search, multi-select for removing many wallpapers at once, multi-monitor (a different wallpaper per display), day/night schedules, add-from-URL (Pinterest or direct links), Ctrl+K command palette, pause-on-battery, auto-pause on fullscreen, autostart on login.
+- Power saving: three levels (Full quality / Reduced / Minimum) that trade image sharpness for GPU load by using cheaper scalers. No frames are dropped and hardware decoding is untouched. Measured with turbostat on an Intel N150: a 1080p wallpaper drops from 1.37 W to 0.63 W of GPU power (-54%) on Reduced, and a 4K wallpaper from 2.77 W to 0.99 W (-65%) on Minimum. Reduced is the default.
 - Built with Rust + GTK4/libadwaita + libmpv (plus a bundled mpvpaper backend on Wayland). License: GPL-3.0-or-later.
+- Free: no ads, no account, no paid tier.
 
 ## Docs
 - README: https://github.com/DibbayajyotiRoy/fresco/blob/main/README.md

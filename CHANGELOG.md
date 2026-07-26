@@ -4,6 +4,49 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.35] — 2026-07-25
+
+### Added
+- **Select several wallpapers and remove them in one go.** Requested by @175624
+  for managing a large library: the counterpart to adding many at once with
+  "Add folder". Enter select mode from the footer's **Select** button or a
+  card's right-click **Select…** (which pre-ticks that card), tick any number of
+  cards, then **Remove**. **Select all** honors the active search, so searching
+  and then selecting all is the fast path for clearing a batch. Removal is
+  confirmed first, states that the source files on disk are kept, and if one of
+  the selected wallpapers is the one on screen the desktop reverts to its own
+  background.
+
+### Changed
+- **Power saving now defaults to Reduced instead of Full quality.** @175624
+  measured actual package power with `turbostat` on an Intel N150 (Deepin 25,
+  VA-API), two runs per level: at 1080p, Reduced halves GPU power (1.37 W →
+  0.63 W, −54%) and cuts total package power by 33%, while Minimum adds nothing
+  further; at 4K, Reduced saves 42% of GPU power and Minimum 65% (2.77 W →
+  0.99 W), nearly 3 W off the package. Reduced captures most of the available
+  saving at every resolution for a softening that is hard to notice on a
+  wallpaper sitting behind windows, so it is the better default — Minimum is
+  worth choosing for 4K sources, and Full remains available for the sharpest
+  image. **Existing settings are untouched:** any config that already records a
+  power-saving level keeps it, so this only changes fresh installs.
+
+### Fixed
+- **Light/Dark and the accent colors now actually apply while the app is
+  running.** Choosing Light, Dark, or a different accent changed the setting but
+  left the window painted in whatever theme it started with. Every rule in the
+  stylesheet referenced a named `@define-color`, and GTK keeps an already-defined
+  named color at its startup value — runtime redefinitions are silently ignored —
+  so no theme change could ever take effect. The stylesheet is now built with
+  literal colors and repaints live. The Add button also follows the accent
+  instead of staying a fixed blue.
+- **App icon appears in the Deepin 25 launcher immediately after install.**
+  Following a controlled A/B against galculator on real hardware by @175624:
+  dde-launchpad's hot refresh after a dpkg install looks the icon up only in the
+  current theme ("bloom") and does not walk the freedesktop fallback chain into
+  hicolor, so an app shipping icons only in hicolor stayed invisible until
+  `killall dde-shell` restarted the launcher (a cold start, where fallback
+  works). The package now also installs the icon into bloom's own directories.
+
 ## [1.1.34] — 2026-07-24
 
 ### Changed

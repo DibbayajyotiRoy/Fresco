@@ -5,6 +5,7 @@ name: _environments
 # (tests/ci/with-compositor.sh + tests/ci/env-smoke.sh) inside it:
 #
 #   x11       Xvfb                        → expect capability: x11
+#   dde       Xvfb + Deepin session vars  → expect capability: x11 (DDE path)
 #   sway      Sway, headless wlroots      → expect capability: wayland-layer-shell
 #   hyprland  Hyprland, headless wlroots  → expect capability: wayland-layer-shell
 #   kde       KWin, virtual backend       → expect capability: wayland-layer-shell
@@ -42,6 +43,12 @@ jobs:
       matrix:
         include:
           - { id: x11,      name: 'X11 (Xvfb)',         expect: x11,                  comp: 'xvfb x11-utils' }
+          # Deepin 25 (DDE) is an X11 session; our handling keys off the session
+          # env vars, so this leg runs the real DDE branch (desktop-window
+          # lookup + restack) on Xvfb. dde-shell isn't in the Ubuntu archive, so
+          # this covers OUR code path — where both 1.1.3 DDE bugs actually were —
+          # not DDE's own compositing.
+          - { id: dde,      name: 'Deepin DDE (X11)',   expect: x11,                  comp: 'xvfb x11-utils' }
           - { id: sway,     name: 'Sway (wlroots)',     expect: wayland-layer-shell,  comp: 'sway grim' }
           - { id: hyprland, name: 'Hyprland (wlroots)', expect: wayland-layer-shell,  comp: 'hyprland' }
           - { id: kde,      name: 'KDE Plasma (KWin)',  expect: wayland-layer-shell,  comp: 'kwin-wayland dbus-x11' }
@@ -91,7 +98,7 @@ jobs:
         run: cargo build --no-default-features --features daemon --bin frescod --locked
 
       - name: Build mpvpaper (Wayland renderer)
-        if: matrix.id != 'x11'
+        if: matrix.id != 'x11' && matrix.id != 'dde'
         run: |
           sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config
           scripts/build-mpvpaper.sh || echo "::warning::mpvpaper build failed — live Wayland checks will degrade"

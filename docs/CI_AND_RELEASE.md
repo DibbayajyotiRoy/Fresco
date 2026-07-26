@@ -42,10 +42,17 @@ it by the harness in [`tests/ci/`](../tests/ci):
 | env id | environment | started with | expected backend |
 |---|---|---|---|
 | `x11` | X11 | `Xvfb` | `x11` |
+| `dde` | Deepin 25 (DDE) | `Xvfb` + Deepin session vars | `x11` |
 | `sway` | Sway (wlroots) | headless wlroots backend | `wayland-layer-shell` |
 | `hyprland` | Hyprland (wlroots) | headless wlroots backend | `wayland-layer-shell` |
 | `kde` | KDE Plasma | `kwin_wayland --virtual` | `wayland-layer-shell` |
 | `weston` | Weston | headless backend (no layer-shell) | `wayland-gnome-static` |
+
+`dde` is X11 plus `XDG_CURRENT_DESKTOP=Deepin` / `XDG_SESSION_DESKTOP=deepin`,
+which is exactly what `capability::is_deepin_dde()` keys off — so the real DDE
+branch (desktop-window lookup and restack) executes. `dde-shell` isn't in the
+Ubuntu archive, so this leg covers **our** code path, not DDE's compositing;
+both real Deepin bugs to date were in our code, which is where the value is.
 
 For each environment the harness asserts the things that must hold for Fresco to
 be *usable* there, independent of GPU pixel output (which is unreliable under
@@ -56,6 +63,10 @@ software rendering on CI):
 2. **libmpv loads** at runtime in that environment.
 3. `frescod` launches with a real video config and **stays alive** through
    startup — no crash, no Rust panic.
+4. *(`dde` only)* the daemon reports taking the **DDE code path**. 1.1.3's
+   Deepin support shipped and silently did nothing — it never reached its
+   restack — so "the branch ran at all" is the regression this leg exists to
+   catch.
 
 **Best-effort (reported, never fail the gate — flaky on software rendering):**
 the renderer/IPC backend actually came up, idle CPU, the self-heal restart, and
@@ -121,6 +132,8 @@ The harness runs locally for any environment you have installed:
 cargo build --no-default-features --features daemon --bin frescod
 # X11:
 tests/ci/with-compositor.sh x11  -- tests/ci/env-smoke.sh x11  x11
+# Deepin DDE (X11 + Deepin session vars; needs only xvfb):
+tests/ci/with-compositor.sh dde  -- tests/ci/env-smoke.sh dde  x11
 # Sway (headless):
 tests/ci/with-compositor.sh sway -- tests/ci/env-smoke.sh sway wayland-layer-shell
 ```

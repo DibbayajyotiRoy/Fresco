@@ -50,14 +50,14 @@ impl Pal {
     /// a four-step surface ladder (canvas → card → hover → popover) carrying
     /// hierarchy by lift + hairline rather than shadow.
     const DARK: Pal = Pal {
-        window_bg: "#010102", // Linear canvas — the deepest surface
+        window_bg: "#090A0C", // Linear canvas — the deepest surface
         window_fg: "#F7F8F8", // ink
-        view_bg: "#010102",
-        card_bg: "#0E0F12", // surface-1
-        headerbar_bg: "#060709",
+        view_bg: "#090A0C",
+        card_bg: "#14171B",
+        headerbar_bg: "#121418",
         popover_bg: "#16181D",  // surface-2/3
         card_border: "#23252A", // Linear hairline (solid, not translucent)
-        card_hover: "#16181D",  // surface-2
+        card_hover: "#1D2127",
         thumb_mat: "#08090B",
         dim_fg: "#8A8F98", // ink-subtle
         destructive: "#E5484D",
@@ -69,16 +69,16 @@ impl Pal {
 
     /// Off-white "paper" light scheme (never pure-white) with obsidian ink text.
     const LIGHT: Pal = Pal {
-        window_bg: "#F6F5F1",
         window_fg: "#1C1D21",
-        view_bg: "#F4F2EE",
-        card_bg: "#FCFBF8",
-        headerbar_bg: "#F1EFEA",
-        popover_bg: "#FCFBF8",
+        window_bg: "#F8F7F3",
+        view_bg: "#F4F2ED",
+        headerbar_bg: "#d7cfcb",
+        card_bg: "#FFFFFF",
+        popover_bg: "#F6F3EE",
+        card_hover: "#FFFFFF",
+        thumb_mat: "#0c0c0b",
         card_border: "rgba(20,20,22,0.10)",
-        card_hover: "#FFFDFA",
-        thumb_mat: "#ECEAE3",
-        dim_fg: "#6B6E77",
+        dim_fg: "#212126",
         destructive: "#DC2626",
         shadow_sm: "rgba(40,38,33,0.07)",
         shadow_md: "rgba(40,38,33,0.13)",
@@ -171,32 +171,19 @@ fn build_css(accent: Accent, dark: bool) -> String {
     let glass_alpha = if dark { "0.86" } else { "0.97" };
 
     let css = format!(
-        "/* ===== Fresco palette ===== */
-@define-color window_bg_color {window_bg};
-@define-color window_fg_color {window_fg};
-@define-color view_bg_color {view_bg};
-@define-color view_fg_color {window_fg};
-@define-color card_bg_color {card_bg};
-@define-color card_fg_color {window_fg};
-@define-color headerbar_bg_color {headerbar_bg};
-@define-color headerbar_fg_color {window_fg};
-@define-color popover_bg_color {popover_bg};
-@define-color popover_fg_color {window_fg};
-@define-color card_border {card_border};
-@define-color card_hover {card_hover};
-@define-color thumb_mat {thumb_mat};
-@define-color dim_fg {dim_fg};
-@define-color destructive_bg_color {destructive};
-@define-color destructive_color {destructive};
-
-/* ===== Accent (single, locked) ===== */
-@define-color accent_color {accent_bg};
-@define-color accent_bg_color {accent_bg};
-@define-color accent_fg_color {accent_fg};
-
-/* ===== Surfaces + type ===== */
-window, .background {{ background-color: @window_bg_color; color: @window_fg_color; font-family: \"Inter\", \"Adwaita Sans\", \"Cantarell\", sans-serif; }}
-headerbar, headerbar.flat {{ background-color: @headerbar_bg_color; box-shadow: none; border-bottom: 1px solid @card_border; }}
+        "/* ===== Surfaces + type =====
+   Deliberately NO @define-color block: GTK keeps an already-defined named
+   color at its startup value, so redefining the palette here would freeze
+   every libadwaita-drawn widget (window title, window controls, popover
+   labels) in the scheme the app launched in. Colors are literal, and anything
+   we don't style follows libadwaita's own scheme via set_mode(). */
+window, .background {{ background-color: {window_bg}; color: {window_fg}; font-family: \"Inter\", \"Adwaita Sans\", \"Cantarell\", sans-serif; }}
+headerbar, headerbar.flat {{ background-color: {headerbar_bg}; color: {window_fg}; box-shadow: none; border-bottom: 1px solid {card_border}; }}
+headerbar label, headerbar .title {{ color: {window_fg}; }}
+/* Window controls + header buttons: libadwaita would otherwise draw these in
+   the frozen startup foreground, which is invisible after a live switch. */
+windowcontrols button image, headerbar button image {{ color: {window_fg}; }}
+popover label, popover > contents label {{ color: {window_fg}; }}
 
 /* ===== Glass modals ===== translucent surface (readable), glass edge + sheen.
    GTK4 CSS has no backdrop blur, so this is a high-opacity smoked-glass look. */
@@ -370,20 +357,12 @@ label.error, label.error.dim {{ color: @destructive_color; }}
 ",
         window_bg = p.window_bg,
         window_fg = p.window_fg,
-        view_bg = p.view_bg,
-        card_bg = p.card_bg,
         headerbar_bg = p.headerbar_bg,
-        popover_bg = p.popover_bg,
         card_border = p.card_border,
-        card_hover = p.card_hover,
-        thumb_mat = p.thumb_mat,
-        dim_fg = p.dim_fg,
         destructive = p.destructive,
         shadow_sm = p.shadow_sm,
         shadow_md = p.shadow_md,
         glass_alpha = glass_alpha,
-        accent_bg = accent_bg,
-        accent_fg = accent_fg,
     );
     // Substitute literals: a redefined @define-color name keeps its startup
     // value at runtime, which froze the light/dark toggle and accent picker.
@@ -416,14 +395,28 @@ mod tests {
     /// which is what killed live theme switching. Literals only.
     #[test]
     fn build_css_has_no_named_color_references() {
-        for (accent, dark) in [(Accent::Blue, true), (Accent::Teal, false)] {
-            let css = build_css(accent, dark);
-            for line in css.lines() {
-                let rule = line.split_once('{').map_or("", |(_, r)| r);
-                assert!(
-                    !rule.contains('@'),
-                    "runtime-frozen @define-color reference in: {line}"
-                );
+        // A *reference* (`@name` in a declaration) is what freezes; the
+        // `@define-color` / `@keyframes` at-rules themselves are fine.
+        let is_reference = |line: &str| {
+            let line = line.trim();
+            line.match_indices('@').any(|(i, _)| {
+                let rest = &line[i + 1..];
+                !rest.starts_with("define-color") && !rest.starts_with("keyframes")
+            }) && !line.starts_with("/*")
+                && !line.starts_with("Deliberately")
+        };
+        for accent in [
+            Accent::Blue,
+            Accent::Teal,
+            Accent::Green,
+            Accent::Amber,
+            Accent::Coral,
+            Accent::Graphite,
+        ] {
+            for dark in [true, false] {
+                let css = build_css(accent, dark);
+                let bad: Vec<&str> = css.lines().filter(|l| is_reference(l)).collect();
+                assert!(bad.is_empty(), "frozen color reference: {bad:?}");
             }
         }
     }

@@ -135,6 +135,20 @@ else
   sed 's/^/      /' "$DLOG" 2>/dev/null | head -20
 fi
 
+# ── REQUIRED 4 (DDE only): the Deepin branch actually runs ───────────────────
+# Deepin 25 support shipped in 1.1.3 and silently did nothing: the code never
+# reached its restack, so users saw no wallpaper at all. Detection is by session
+# env var, so on this leg the daemon MUST report taking the DDE path — that is
+# precisely the regression this environment exists to catch.
+if [ "$ENV_ID" = dde ]; then
+  if grep -q 'DDE:' "$DLOG" "$WORK/frescod.stdio" 2>/dev/null; then
+    pass "DDE code path ran (Deepin session detected)"
+  else
+    fail "DDE session not detected — the Deepin branch never ran"
+    sed 's/^/      /' "$DLOG" 2>/dev/null | head -20
+  fi
+fi
+
 # ── BEST-EFFORT depth checks (never fail the gate) ───────────────────────────
 if alive; then
   # backend present?

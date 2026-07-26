@@ -31,32 +31,36 @@ pub enum Scaling {
     High,
 }
 
-/// How hard Fresco works to cut video-decode load, trading playback smoothness
-/// for battery and heat.
+/// How hard Fresco works to cut GPU load, trading image sharpness for battery
+/// and heat.
 ///
-/// This replaces the 1.1.32 frame-rate cap, which was actively harmful: an
-/// `fps` video filter is a *software* filter, so inserting it into a VA-API
-/// pipeline forced every frame to be downloaded from the GPU. Measured on
-/// Alder Lake-N, capping 60fps to 30 roughly DOUBLED video-engine load
-/// (~17% -> ~34%) instead of reducing it.
+/// Two earlier designs were measured and abandoned. The 1.1.32 frame-rate cap
+/// was actively harmful: `fps` is a *software* filter, so putting it in a
+/// VA-API pipeline forced every frame back off the GPU and roughly DOUBLED
+/// video-engine load. The 1.1.33 decoder-level skipping (`vd-lavc-skipframe`)
+/// was merely useless: for a hardware-decoded wallpaper the load is
+/// **Render/3D (~99%)**, not decode (~17%), so skipping frames inside
+/// libavcodec saved nothing measurable.
 ///
-/// The honest lever is decoder-level frame skipping (`--vd-lavc-skipframe`),
-/// which drops frames inside libavcodec *before* they are decoded, so the work
-/// is never done and hardware decoding is left intact. It cannot express an
-/// exact fps — how much it saves depends on the file's GOP structure — so the
-/// control is named for what it does (save power) rather than promising a
-/// frame rate it cannot honour.
+/// What actually works is reducing the per-frame *scaler* cost — the thing the
+/// render engine is busy with (see [`video_scalers`]). Confirmed with
+/// `turbostat` on Alder Lake-N (Intel N150): at 4K, GPU power fell 2.77 W ->
+/// 1.60 W on Reduced (-42%) and -> 0.99 W on Minimum (-65%); at 1080p, Reduced
+/// halved GPU power (1.37 W -> 0.63 W) and Minimum added nothing further.
+/// No frame is ever dropped and hardware decoding is untouched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PowerSaving {
-    /// Decode everything; mpv's normal behaviour.
-    #[default]
+    /// Quality scalers (spline36 / lanczos, dithering, linear-light
+    /// downscaling) — the sharpest image and the most GPU work.
     Full,
-    /// Skip frames no other frame references. Visibly less smooth on some
-    /// clips, meaningfully less decode work.
+    /// Cheap bilinear scaling with dithering kept. The default: at 1080p it
+    /// captures nearly all the available saving, and the softening is hard to
+    /// see on a wallpaper sitting behind windows.
+    #[default]
     Reduced,
-    /// Also skip bidirectionally-predicted (B) frames — the biggest saving and
-    /// the choppiest result.
+    /// Bilinear everywhere with no dithering — the largest saving, and worth it
+    /// mainly for 4K sources, where it roughly halves GPU power again.
     Minimum,
 }
 
@@ -559,8 +563,10 @@ impl Config {
     /// idempotent; the migrated value is persisted on the next save (the old
     /// keys are `skip_serializing`, so they disappear then).
     fn migrate(&mut self) {
-        // 1.1.32's frame-rate cap -> power saving. Only fills an unset value,
-        // so an explicit `power_saving` in the file always wins.
+        // 1.1.32's frame-rate cap -> power saving. Only fills a value left at
+        // the default, so an explicit `power_saving` in the file always wins.
+        // (Now largely moot: 1.1.32 configs have no `power_saving` key at all,
+        // so serde already defaults them to Reduced — the same target.)
         if self.power_saving == PowerSaving::default() {
             if let Some(p) = power_saving_from_legacy_framerate(self.framerate) {
                 self.power_saving = p;
@@ -610,8 +616,9 @@ mod tests {
         assert!(cfg.enabled);
         assert!(cfg.wallpaper.mute);
         assert_eq!(cfg.wallpaper.volume, 50);
-        // Absent power_saving key → Full (backward compatible).
-        assert_eq!(cfg.power_saving, PowerSaving::Full);
+        // Absent power_saving key → Reduced: measured to capture nearly all the
+        // available GPU saving at 1080p for a barely-visible softening.
+        assert_eq!(cfg.power_saving, PowerSaving::Reduced);
     }
 
     #[test]
@@ -665,10 +672,12 @@ mod tests {
         assert_eq!(cfg.power_saving, PowerSaving::Reduced);
         assert_eq!(cfg.framerate, 0, "legacy key must not survive migration");
 
-        // framerate = 0 meant "original rate" → no power saving.
+        // framerate = 0 meant "original rate". There is no power_saving key to
+        // preserve, so such a config lands on the current default like any
+        // other — the legacy key must simply not push it further.
         let mut untouched: Config = toml::from_str("framerate = 0").unwrap();
         untouched.migrate();
-        assert_eq!(untouched.power_saving, PowerSaving::Full);
+        assert_eq!(untouched.power_saving, PowerSaving::default());
 
         // An explicit power_saving always wins over the legacy key.
         let mut explicit: Config =

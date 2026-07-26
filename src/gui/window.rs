@@ -2862,7 +2862,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     // render load on weak hardware — a softer image for less power/heat.
     let power_row = adw::ComboRow::new();
     power_row.set_title("Power saving");
-    power_row.set_subtitle("Cheaper scaling to cut GPU load; lower = softer image");
+    power_row.set_subtitle("Reduced saves most of the GPU cost; Full is sharpest");
     power_row.set_model(Some(&gtk4::StringList::new(&POWER_LABELS)));
     power_row.set_selected(power_index(state.borrow().config.power_saving));
     {

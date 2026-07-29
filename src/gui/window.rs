@@ -6596,10 +6596,14 @@ mod tests {
     /// before the user has seen every step.
     #[test]
     fn onboarding_finishes_only_on_the_last_step() {
-        assert!(
-            !ONBOARDING_STEPS.is_empty(),
-            "a flow with no steps would never complete, and would reopen every launch"
-        );
+        // A const array's emptiness is known at compile time, so assert it there —
+        // a runtime `assert!` on it is a no-op clippy rightly rejects.
+        const {
+            assert!(
+                !ONBOARDING_STEPS.is_empty(),
+                "a flow with no steps would never complete, and would reopen every launch"
+            )
+        };
         let (last, rest) = ONBOARDING_STEPS.split_last().expect("non-empty above");
         assert_eq!(
             last.end,

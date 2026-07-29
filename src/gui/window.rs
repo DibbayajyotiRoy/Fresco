@@ -13,7 +13,11 @@ use super::{
 };
 use crate::{
     autostart,
-    config::{Accent, Config, Fit, Kind, PowerSaving, Scaling, ThemeMode, Transition},
+    config::{
+        Accent, Clock, ClockThemeCfg, Config, Disc, Fit, GradientMode, Kind, LyricAnchor,
+        LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition, Visualizer,
+        VisualizerStyleCfg, Widgets,
+    },
     APP_ID,
 };
 
@@ -239,13 +243,14 @@ fn build_ui(app: &adw::Application) {
         let state_t = state.clone();
         glib::idle_add_local_once(move || show_tour_dialog(&win_t, state_t));
     } else if state.borrow().config.onboarding_version < ONBOARDING_VERSION {
-        // Existing user on a new version: they already sat through the tour,
-        // so they'd never otherwise be shown the paste-a-link flow.
+        // Existing user on a new version: they already sat through the tour, so
+        // the what's-new flow is the only thing that will ever show them what
+        // changed. It runs again on every launch until it is finished — nothing
+        // is recorded until its last step (see ONBOARDING_STEPS).
         let win_o = window.clone();
         let state_o = state.clone();
-        let stack_o = stack.clone();
         glib::idle_add_local_once(move || {
-            show_onboarding_dialog(&win_o, state_o, stack_o);
+            show_onboarding_dialog(&win_o, state_o);
         });
     }
 
@@ -2879,7 +2884,11 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     group.add(&power_row);
 
     page.add(&group);
-    add_schedule_group(&page, state);
+    add_schedule_group(&page, state.clone());
+    add_lyrics_group(&page, state.clone());
+    add_clock_group(&page, state.clone());
+    add_visualizer_group(&page, state.clone());
+    add_disc_group(&page, state);
     dialog.add(&page);
     dialog.present();
 }
@@ -3037,6 +3046,1342 @@ fn sync_wallpaper_to_schedule(cfg: &mut Config) {
     if let Some(w) = crate::schedule::desired(sch, now.naive_local(), off) {
         cfg.wallpaper = w.clone();
     }
+}
+
+// ─── Lyrics widget ────────────────────────────────────────────────────────────
+
+/// Style presets in the order the "Style" combo lists them. The table is the
+/// index map both ways, so the labels and the ordering live in one place.
+const LYRIC_STYLES: [(LyricStylePreset, &str); 4] = [
+    (LyricStylePreset::Minimal, "Minimal"),
+    (LyricStylePreset::Karaoke, "Karaoke"),
+    (LyricStylePreset::Subtitle, "Subtitle"),
+    (LyricStylePreset::Card, "Card"),
+];
+
+/// The nine placement anchors with the names a person would use for them,
+/// listed in reading order (top row first) so the combo matches the screen.
+const LYRIC_ANCHORS: [(LyricAnchor, &str); 9] = [
+    (LyricAnchor::TopLeft, "Top left"),
+    (LyricAnchor::TopCenter, "Top center"),
+    (LyricAnchor::TopRight, "Top right"),
+    (LyricAnchor::MidLeft, "Middle left"),
+    (LyricAnchor::MidCenter, "Middle center"),
+    (LyricAnchor::MidRight, "Middle right"),
+    (LyricAnchor::BottomLeft, "Bottom left"),
+    (LyricAnchor::BottomCenter, "Bottom center"),
+    (LyricAnchor::BottomRight, "Bottom right"),
+];
+
+/// Shown as the folder row's subtitle while no folder is set.
+const LYRIC_FOLDER_HINT: &str = "Searched when no .lrc file sits beside the audio file.";
+
+/// Subtitle of the lyric colour row while no colour has been chosen, i.e.
+/// while the style preset is still picking one.
+const LYRIC_COLOUR_HINT: &str =
+    "Currently the colour the style picks. Used while “Follow accent colour” is off.";
+
+/// What the lyric colour button shows before a colour has been chosen. The
+/// fill three of the four presets use, and near enough for the fourth to be a
+/// sensible place to start dragging from.
+const LYRIC_PRESET_COLOUR: &str = "#FFFFFF";
+
+/// Redraws the lyrics-folder row for a given folder, or for none. Shared by the
+/// folder picker and the Clear button so the two cannot disagree about it.
+type FolderDisplay = Rc<dyn Fn(Option<&std::path::Path>)>;
+
+/// Position of `value` in a label table. The tables above cover every variant,
+/// so the fallback is unreachable; it exists so adding a variant degrades to
+/// "first entry selected" instead of a panic in a settings dialog.
+fn table_index<T: Copy + PartialEq>(table: &[(T, &str)], value: T) -> u32 {
+    table.iter().position(|(v, _)| *v == value).unwrap_or(0) as u32
+}
+
+/// The label column of a table, ready for [`gtk4::StringList`].
+fn table_labels<'a, T>(table: &[(T, &'a str)]) -> Vec<&'a str> {
+    table.iter().map(|(_, label)| *label).collect()
+}
+
+/// The lyric settings currently in force — the defaults when `config.widgets`
+/// is absent, which is the normal state for anyone who has never opened this
+/// group. Read-only: it takes a shared borrow and returns a copy, so callers
+/// can populate widgets without holding a borrow across GTK calls.
+fn lyrics_settings(state: &Rc<RefCell<AppState>>) -> Lyrics {
+    state
+        .borrow()
+        .config
+        .widgets
+        .as_ref()
+        .map(|w| w.lyrics.clone())
+        .unwrap_or_default()
+}
+
+/// Apply one edit to the widget block, save, and push the result to the daemon
+/// — the single mutation path behind every row in every widget group.
+///
+/// `Config::widgets` is `Option<Widgets>` so that a config written by someone
+/// who never asked for a widget carries no `[widgets]` key at all. The first
+/// edit here is what materialises the block; doing it in one helper keeps
+/// `get_or_insert_with` out of twenty call sites.
+///
+/// The scoping is load-bearing, not style: `ensure_daemon_and_apply` re-reads
+/// the config through a shared borrow, so the mutable borrow must be dropped
+/// before it runs or the dialog panics on the first toggle. Every widget group
+/// funnels through this one function so that discipline exists in one place
+/// and cannot be got wrong twice.
+fn edit_widgets(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut Widgets)) {
+    {
+        let mut s = state.borrow_mut();
+        edit(s.config.widgets.get_or_insert_with(Widgets::default));
+        s.config.save().ok();
+    }
+    let s = state.borrow();
+    daemon_ctl::ensure_daemon_and_apply(&s.config).ok();
+}
+
+/// Apply one edit to the lyric settings — see [`edit_widgets`].
+fn edit_lyrics(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut Lyrics)) {
+    edit_widgets(state, |w| edit(&mut w.lyrics));
+}
+
+/// Apply one edit to the clock settings — see [`edit_widgets`].
+fn edit_clock(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut Clock)) {
+    edit_widgets(state, |w| edit(&mut w.clock));
+}
+
+/// An [`adw::ActionRow`] carrying a trailing switch. `apply` takes the new
+/// state and routes it to whichever widget block owns the setting. Activating
+/// the row anywhere flips the switch.
+fn widget_switch_row(
+    title: &str,
+    subtitle: &str,
+    active: bool,
+    apply: impl Fn(bool) + 'static,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    let sw = gtk4::Switch::new();
+    sw.set_valign(gtk4::Align::Center);
+    // Set before connecting: populating the dialog must not look like a user
+    // edit and must not wake the daemon.
+    sw.set_active(active);
+    sw.connect_active_notify(move |sw| apply(sw.is_active()));
+    row.add_suffix(&sw);
+    row.set_activatable_widget(Some(&sw));
+    row
+}
+
+/// An [`adw::ActionRow`] carrying a trailing spin button. `libadwaita` is
+/// pinned to 1.1 for Debian (see `Cargo.toml`), which predates `AdwSpinRow`,
+/// so numeric rows are assembled the same way the schedule group builds its
+/// time rows.
+fn widget_spin_row(
+    title: &str,
+    subtitle: &str,
+    range: (f64, f64, f64),
+    value: f64,
+    apply: impl Fn(i32) + 'static,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    let (min, max, step) = range;
+    let spin = gtk4::SpinButton::with_range(min, max, step);
+    spin.set_valign(gtk4::Align::Center);
+    spin.set_numeric(true);
+    spin.set_value(value);
+    spin.connect_value_changed(move |spin| apply(spin.value_as_int()));
+    // Deliberately not the row's activatable widget: activating a GtkSpinButton
+    // re-parses and snaps its entry, so a stray click on the row would write a
+    // value and wake the daemon.
+    row.add_suffix(&spin);
+    row
+}
+
+/// An [`adw::ActionRow`] carrying a trailing colour button.
+///
+/// `gtk4::ColorDialogButton` is the modern spelling and needs GTK 4.10;
+/// `adw::ActionRow` + a control is what every other setting in this file uses
+/// and works on the pinned GTK 4.6, so this is assembled the same way
+/// [`widget_spin_row`] is. `GtkColorButton` is deprecated *in GTK 4.10*, which
+/// is precisely why it is still the right choice here: nothing in the pinned
+/// version is deprecated, and bumping the pin to avoid a widget would cost
+/// Debian users the package.
+///
+/// `apply` receives a normalised `#RRGGBB`, never a `rgb()` string or an alpha
+/// channel — the button is told not to offer one, because every colour this
+/// dialog sets ends up in an ASS payload that has a separate opacity slider.
+fn widget_colour_row(
+    title: &str,
+    subtitle: &str,
+    hex: &str,
+    apply: impl Fn(String) + 'static,
+) -> (adw::ActionRow, gtk4::ColorButton) {
+    let row = adw::ActionRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    let button = gtk4::ColorButton::new();
+    button.set_valign(gtk4::Align::Center);
+    button.set_use_alpha(false);
+    button.set_title(title);
+    // Set before connecting: populating the dialog must not look like a user
+    // edit and must not wake the daemon.
+    button.set_rgba(&hex_to_rgba(hex));
+    button.connect_rgba_notify(move |b| apply(rgba_to_hex(&b.rgba())));
+    row.add_suffix(&button);
+    row.set_activatable_widget(Some(&button));
+    (row, button)
+}
+
+/// `#RRGGBB` → a GDK colour, falling back to opaque white on anything the
+/// parser cannot read — the same fallback the renderers use, so a broken value
+/// looks the same in the dialog as it does on the wallpaper.
+fn hex_to_rgba(hex: &str) -> gtk4::gdk::RGBA {
+    gtk4::gdk::RGBA::parse(hex).unwrap_or_else(|_| gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0))
+}
+
+/// A GDK colour as `#RRGGBB`.
+///
+/// Rounded to bytes here rather than anywhere downstream: the config file, the
+/// ASS payload and the colour button must all agree on the same eight bits per
+/// channel, or a colour picked once starts drifting every time the dialog is
+/// reopened.
+fn rgba_to_hex(c: &gtk4::gdk::RGBA) -> String {
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02X}{:02X}{:02X}", q(c.red()), q(c.green()), q(c.blue()))
+}
+
+/// [`widget_switch_row`] wired to the lyric block.
+fn lyric_switch_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    active: bool,
+    edit: impl Fn(&mut Lyrics, bool) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_switch_row(title, subtitle, active, move |on| {
+        edit_lyrics(&state, |l| edit(l, on));
+    })
+}
+
+/// [`widget_spin_row`] wired to the lyric block.
+fn lyric_spin_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    range: (f64, f64, f64),
+    value: f64,
+    edit: impl Fn(&mut Lyrics, i32) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_spin_row(title, subtitle, range, value, move |v| {
+        edit_lyrics(&state, |l| edit(l, v));
+    })
+}
+
+/// "Lyrics" preferences group (WIDGETS_ROADMAP W1 GUI). Off by default, and
+/// every row below the master switch is insensitive until it is on, so the
+/// group reads as one feature rather than nine unrelated settings.
+///
+/// v1 is local `.lrc` files only — there is no network source and no key for
+/// one, so nothing here promises lyrics the user has not supplied.
+fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let cur = lyrics_settings(&state);
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Lyrics");
+    group.set_description(Some(
+        "Show the current line of the song that is playing on top of your wallpaper.",
+    ));
+
+    let enable = adw::ActionRow::new();
+    enable.set_title("Show song lyrics");
+    enable.set_subtitle(
+        "Reads .lrc files saved beside your music. Needs a media player that reports \
+         what it is playing over MPRIS.",
+    );
+    let enable_switch = gtk4::Switch::new();
+    enable_switch.set_valign(gtk4::Align::Center);
+    enable_switch.set_active(cur.enabled);
+    enable.add_suffix(&enable_switch);
+    enable.set_activatable_widget(Some(&enable_switch));
+
+    let style_row = adw::ComboRow::new();
+    style_row.set_title("Style");
+    style_row.set_subtitle("Minimal is one quiet line; Subtitle outlines the text for busy video");
+    style_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_STYLES))));
+    style_row.set_selected(table_index(&LYRIC_STYLES, cur.style));
+
+    let anchor_row = adw::ComboRow::new();
+    anchor_row.set_title("Position");
+    anchor_row.set_subtitle("Where the line sits on the screen");
+    anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
+    anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
+
+    let size_row = lyric_spin_row(
+        &state,
+        "Text size",
+        "In points. Larger text reads from further away and wraps sooner.",
+        (12.0, 96.0, 1.0),
+        f64::from(cur.font_size_pt),
+        |l, v| l.font_size_pt = v.max(0) as u32,
+    );
+
+    let margin_row = lyric_spin_row(
+        &state,
+        "Margin",
+        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        (0.0, 300.0, 1.0),
+        f64::from(cur.margin_px),
+        |l, v| l.margin_px = v.max(0) as u32,
+    );
+
+    let offset_row = lyric_spin_row(
+        &state,
+        "Sync offset",
+        "Milliseconds added to every timestamp. .lrc files are hand-timed, so lines can \
+         run early or late; a positive value shows each line later.",
+        (-5000.0, 5000.0, 50.0),
+        f64::from(cur.offset_ms),
+        |l, v| l.offset_ms = v,
+    );
+
+    // ── Colour ──
+    // The switch and the picker below it are one decision in two rows, so the
+    // picker goes insensitive while the switch is on rather than sitting there
+    // looking editable and doing nothing.
+    let (colour_row, colour_btn) = {
+        let state = state.clone();
+        widget_colour_row(
+            "Lyric colour",
+            LYRIC_COLOUR_HINT,
+            cur.colour.as_deref().unwrap_or(LYRIC_PRESET_COLOUR),
+            move |hex| edit_lyrics(&state, |l| l.colour = Some(hex.clone())),
+        )
+    };
+    // Clearing hands the colour back to the style preset — Karaoke's amber,
+    // Card's ink — which is a different thing from any colour the picker can
+    // produce, so it needs its own control.
+    let colour_clear = gtk4::Button::from_icon_name("edit-clear-symbolic");
+    colour_clear.add_css_class("flat");
+    colour_clear.set_valign(gtk4::Align::Center);
+    colour_clear.set_tooltip_text(Some("Use the colour the style picks"));
+    colour_clear.set_visible(cur.colour.is_some());
+    colour_row.add_prefix(&colour_clear);
+    {
+        let state = state.clone();
+        let colour_btn = colour_btn.clone();
+        let colour_row = colour_row.clone();
+        colour_clear.connect_clicked(move |btn| {
+            edit_lyrics(&state, |l| l.colour = None);
+            btn.set_visible(false);
+            colour_row.set_subtitle(LYRIC_COLOUR_HINT);
+            colour_btn.set_rgba(&hex_to_rgba(LYRIC_PRESET_COLOUR));
+        });
+    }
+    {
+        let colour_clear = colour_clear.clone();
+        let colour_row = colour_row.clone();
+        colour_btn.connect_rgba_notify(move |_| {
+            colour_clear.set_visible(true);
+            colour_row.set_subtitle("Used while “Follow accent colour” is off.");
+        });
+    }
+
+    let accent_row = {
+        let state = state.clone();
+        let colour_row = colour_row.clone();
+        widget_switch_row(
+            "Follow accent colour",
+            "Tint the lyric with the app accent instead of the colour below.",
+            cur.accent_follow,
+            move |on| {
+                edit_lyrics(&state, |l| l.accent_follow = on);
+                // Only meaningful while the group itself is on; the master
+                // switch's own handler re-applies this rule.
+                colour_row.set_sensitive(!on && lyrics_settings(&state).enabled);
+            },
+        )
+    };
+
+    let next_row = lyric_switch_row(
+        &state,
+        "Show next line",
+        "Also show the upcoming line, dimmed. Covers twice as much of the desktop.",
+        cur.show_next_line,
+        |l, on| l.show_next_line = on,
+    );
+
+    // Beside "Show next line" because it is the same kind of choice: how much
+    // else to put on the wallpaper alongside the lyric itself.
+    let track_info_row = lyric_switch_row(
+        &state,
+        "Show track title and artist",
+        "Adds the song title and artist above the lyric line. Stays on screen between \
+         songs, where the lyric line does not.",
+        cur.show_track_info,
+        |l, on| l.show_track_info = on,
+    );
+
+    // ── Lyrics folder ──
+    let folder_row = adw::ActionRow::new();
+    folder_row.set_title("Lyrics folder");
+    let choose_btn = gtk4::Button::with_label("Choose\u{2026}");
+    choose_btn.set_valign(gtk4::Align::Center);
+    let clear_btn = gtk4::Button::from_icon_name("edit-clear-symbolic");
+    clear_btn.add_css_class("flat");
+    clear_btn.set_valign(gtk4::Align::Center);
+    clear_btn.set_tooltip_text(Some("Use only .lrc files beside the music"));
+    folder_row.add_suffix(&clear_btn);
+    folder_row.add_suffix(&choose_btn);
+
+    // One place decides what the row says and whether Clear is offered.
+    let show_folder: FolderDisplay = {
+        let folder_row = folder_row.clone();
+        let clear_btn = clear_btn.clone();
+        Rc::new(move |folder: Option<&std::path::Path>| match folder {
+            // Escaped: Adwaita row subtitles are Pango markup, and a path may
+            // legitimately contain '&' or '<'.
+            Some(p) => {
+                folder_row.set_subtitle(&glib::markup_escape_text(&p.display().to_string()));
+                clear_btn.set_visible(true);
+            }
+            None => {
+                folder_row.set_subtitle(LYRIC_FOLDER_HINT);
+                clear_btn.set_visible(false);
+            }
+        })
+    };
+    show_folder(cur.folder.as_deref());
+
+    {
+        let state = state.clone();
+        let show_folder = show_folder.clone();
+        choose_btn.connect_clicked(move |btn| {
+            // The chooser needs the dialog it was opened from as its parent;
+            // take it from the widget tree rather than threading a window
+            // argument through every preferences helper.
+            let parent = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
+            let chooser = gtk4::FileChooserNative::new(
+                Some("Choose Lyrics Folder"),
+                parent.as_ref(),
+                FileChooserAction::SelectFolder,
+                Some("Select"),
+                Some("Cancel"),
+            );
+            let state_cb = state.clone();
+            let show_folder = show_folder.clone();
+            chooser.connect_response(move |ch, resp| {
+                state_cb.borrow_mut().current_picker = None;
+                if resp != ResponseType::Accept {
+                    return;
+                }
+                let Some(folder) = ch.file().and_then(|f| f.path()) else {
+                    return;
+                };
+                edit_lyrics(&state_cb, |l| l.folder = Some(folder.clone()));
+                show_folder(Some(folder.as_path()));
+            });
+            // Same lifetime trap as the other pickers in this file: a local
+            // FileChooserNative is dropped before the portal replies.
+            state.borrow_mut().current_picker = Some(chooser.clone());
+            chooser.show();
+        });
+    }
+
+    {
+        let state = state.clone();
+        let show_folder = show_folder.clone();
+        clear_btn.connect_clicked(move |_| {
+            edit_lyrics(&state, |l| l.folder = None);
+            show_folder(None);
+        });
+    }
+
+    // Combos last: set_selected above would otherwise fire these while the
+    // dialog is still being built.
+    {
+        let state = state.clone();
+        style_row.connect_selected_notify(move |row| {
+            let Some((style, _)) = LYRIC_STYLES.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_lyrics(&state, |l| l.style = style);
+        });
+    }
+    {
+        let state = state.clone();
+        anchor_row.connect_selected_notify(move |row| {
+            let Some((anchor, _)) = LYRIC_ANCHORS.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_lyrics(&state, |l| l.anchor = anchor);
+        });
+    }
+
+    let dependents: Vec<gtk4::Widget> = vec![
+        style_row.clone().upcast(),
+        anchor_row.clone().upcast(),
+        size_row.clone().upcast(),
+        margin_row.clone().upcast(),
+        offset_row.clone().upcast(),
+        accent_row.clone().upcast(),
+        next_row.clone().upcast(),
+        track_info_row.clone().upcast(),
+        folder_row.clone().upcast(),
+    ];
+    let sync_sensitive = {
+        let colour_row = colour_row.clone();
+        let state = state.clone();
+        move |on: bool| {
+            for row in &dependents {
+                row.set_sensitive(on);
+            }
+            // The colour is only in force when the accent is not, so it carries
+            // the group's switch *and* the accent switch.
+            colour_row.set_sensitive(on && !lyrics_settings(&state).accent_follow);
+        }
+    };
+    sync_sensitive(cur.enabled);
+    {
+        let state = state.clone();
+        enable_switch.connect_active_notify(move |sw| {
+            let on = sw.is_active();
+            sync_sensitive(on);
+            edit_lyrics(&state, |l| l.enabled = on);
+        });
+    }
+
+    group.add(&enable);
+    group.add(&style_row);
+    group.add(&anchor_row);
+    group.add(&size_row);
+    group.add(&margin_row);
+    group.add(&offset_row);
+    group.add(&accent_row);
+    group.add(&colour_row);
+    group.add(&next_row);
+    group.add(&track_info_row);
+    group.add(&folder_row);
+    page.add(&group);
+}
+
+// ─── Clock widget ─────────────────────────────────────────────────────────────
+
+/// Clock themes in the order the "Theme" combo lists them. The labels are the
+/// ones `clock::ClockTheme::label` returns and the order is `ClockTheme::ALL`'s
+/// — `clock_theme_labels_match_the_renderer` holds the two together, so the
+/// picker cannot start naming a look the renderer spells differently.
+const CLOCK_THEMES: [(ClockThemeCfg, &str); 6] = [
+    (ClockThemeCfg::Digital, "Digital"),
+    (ClockThemeCfg::Minimal, "Minimal"),
+    (ClockThemeCfg::Segment, "Segment"),
+    (ClockThemeCfg::Stacked, "Stacked"),
+    (ClockThemeCfg::Wordy, "Wordy"),
+    (ClockThemeCfg::Card, "Card"),
+];
+
+/// The clock settings currently in force — the defaults when `config.widgets`
+/// is absent, which is the normal state for anyone who has never opened this
+/// group. Read-only: it takes a shared borrow and returns a copy, so callers
+/// can populate widgets without holding a borrow across GTK calls.
+fn clock_settings(state: &Rc<RefCell<AppState>>) -> Clock {
+    state
+        .borrow()
+        .config
+        .widgets
+        .as_ref()
+        .map(|w| w.clock.clone())
+        .unwrap_or_default()
+}
+
+/// [`widget_switch_row`] wired to the clock block.
+fn clock_switch_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    active: bool,
+    edit: impl Fn(&mut Clock, bool) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_switch_row(title, subtitle, active, move |on| {
+        edit_clock(&state, |c| edit(c, on));
+    })
+}
+
+/// [`widget_spin_row`] wired to the clock block.
+fn clock_spin_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    range: (f64, f64, f64),
+    value: f64,
+    edit: impl Fn(&mut Clock, i32) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_spin_row(title, subtitle, range, value, move |v| {
+        edit_clock(&state, |c| edit(c, v));
+    })
+}
+
+/// "Clock" preferences group (WIDGETS_ROADMAP W1 GUI). Built exactly like
+/// [`add_lyrics_group`]: off by default, and every row below the master switch
+/// is insensitive until it is on, so the group reads as one feature rather than
+/// nine unrelated settings.
+///
+/// Two subtitles here state a cost rather than describing a control, and both
+/// are deliberate. "Show seconds" is the only switch in the dialog that changes
+/// how often Fresco wakes the machine, so it says so in the row instead of
+/// hiding it in the docs. "Show date" is overruled by two themes, so it says
+/// that too — a switch that silently does nothing reads as a bug.
+fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let cur = clock_settings(&state);
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Clock");
+    group.set_description(Some(
+        "Show the time on top of your wallpaper, behind your windows.",
+    ));
+
+    let enable = adw::ActionRow::new();
+    enable.set_title("Show a clock");
+    enable.set_subtitle(
+        "Draws the current time on top of the wallpaper. Needs nothing playing and no \
+         internet connection.",
+    );
+    let enable_switch = gtk4::Switch::new();
+    enable_switch.set_valign(gtk4::Align::Center);
+    enable_switch.set_active(cur.enabled);
+    enable.add_suffix(&enable_switch);
+    enable.set_activatable_widget(Some(&enable_switch));
+
+    let theme_row = adw::ComboRow::new();
+    theme_row.set_title("Theme");
+    theme_row.set_subtitle(
+        "Digital reads at a glance; Wordy spells the time out, like \"half past ten\"",
+    );
+    theme_row.set_model(Some(&gtk4::StringList::new(&table_labels(&CLOCK_THEMES))));
+    theme_row.set_selected(table_index(&CLOCK_THEMES, cur.theme));
+
+    // The same nine anchors, with the same names, as the lyric overlay: one
+    // placement vocabulary for every widget.
+    let anchor_row = adw::ComboRow::new();
+    anchor_row.set_title("Position");
+    anchor_row.set_subtitle("Where the clock sits on the screen");
+    anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
+    anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
+
+    let size_row = clock_spin_row(
+        &state,
+        "Text size",
+        "In points at 1080p, and scaled with the screen. Each theme sizes itself around it.",
+        (12.0, 200.0, 1.0),
+        f64::from(cur.font_size_pt),
+        |c, v| c.font_size_pt = v.max(0) as u32,
+    );
+
+    let margin_row = clock_spin_row(
+        &state,
+        "Margin",
+        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        (0.0, 300.0, 1.0),
+        f64::from(cur.margin_px),
+        |c, v| c.margin_px = v.max(0) as u32,
+    );
+
+    let hour_row = clock_switch_row(
+        &state,
+        "24-hour time",
+        "Show 13:00 rather than 1:00 PM. Fixed width, so a clock in a corner does not \
+         shift as the hour changes.",
+        cur.use_24h,
+        |c, on| c.use_24h = on,
+    );
+
+    let date_row = clock_switch_row(
+        &state,
+        "Show date",
+        "Adds the date under the time. Minimal never shows one and Stacked always does, \
+         whatever this says.",
+        cur.show_date,
+        |c, on| c.show_date = on,
+    );
+
+    let seconds_row = clock_switch_row(
+        &state,
+        "Show seconds",
+        "Uses more power: the clock is redrawn every second instead of once a minute. \
+         Wordy ignores it.",
+        cur.show_seconds,
+        |c, on| c.show_seconds = on,
+    );
+
+    let accent_row = clock_switch_row(
+        &state,
+        "Follow accent colour",
+        "Draw the clock in the app accent colour instead of plain white.",
+        cur.accent_follow,
+        |c, on| c.accent_follow = on,
+    );
+
+    // Combos last: set_selected above would otherwise fire these while the
+    // dialog is still being built.
+    {
+        let state = state.clone();
+        theme_row.connect_selected_notify(move |row| {
+            let Some((theme, _)) = CLOCK_THEMES.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_clock(&state, |c| c.theme = theme);
+        });
+    }
+    {
+        let state = state.clone();
+        anchor_row.connect_selected_notify(move |row| {
+            let Some((anchor, _)) = LYRIC_ANCHORS.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_clock(&state, |c| c.anchor = anchor);
+        });
+    }
+
+    let dependents: Vec<gtk4::Widget> = vec![
+        theme_row.clone().upcast(),
+        anchor_row.clone().upcast(),
+        size_row.clone().upcast(),
+        margin_row.clone().upcast(),
+        hour_row.clone().upcast(),
+        date_row.clone().upcast(),
+        seconds_row.clone().upcast(),
+        accent_row.clone().upcast(),
+    ];
+    let sync_sensitive = move |on: bool| {
+        for row in &dependents {
+            row.set_sensitive(on);
+        }
+    };
+    sync_sensitive(cur.enabled);
+    {
+        let state = state.clone();
+        enable_switch.connect_active_notify(move |sw| {
+            let on = sw.is_active();
+            sync_sensitive(on);
+            edit_clock(&state, |c| c.enabled = on);
+        });
+    }
+
+    group.add(&enable);
+    group.add(&theme_row);
+    group.add(&anchor_row);
+    group.add(&size_row);
+    group.add(&margin_row);
+    group.add(&hour_row);
+    group.add(&date_row);
+    group.add(&seconds_row);
+    group.add(&accent_row);
+    page.add(&group);
+}
+
+// ─── Visualiser widget ────────────────────────────────────────────────────────
+
+/// Visualiser styles in the order the "Style" combo lists them, matching
+/// `visualizer::VisualStyle::ALL`. The table is the index map both ways, so the
+/// labels and the ordering live in one place.
+const VISUAL_STYLES: [(VisualizerStyleCfg, &str); 5] = [
+    (VisualizerStyleCfg::Bars, "Bars"),
+    (VisualizerStyleCfg::Mirror, "Mirror"),
+    (VisualizerStyleCfg::Wave, "Wave"),
+    (VisualizerStyleCfg::Dots, "Dots"),
+    (VisualizerStyleCfg::Ring, "Ring"),
+];
+
+/// Gradient modes in the order the "Colour blend" combo lists them, matching
+/// `config::GradientMode`. Named for what they do rather than for how they are
+/// implemented: "Linear" is a graphics term, and the choice being made here is
+/// between one colour, two, and a rainbow.
+const VISUAL_GRADIENTS: [(GradientMode, &str); 3] = [
+    (GradientMode::None, "Single colour"),
+    (GradientMode::Linear, "Blend two colours"),
+    (GradientMode::Spectrum, "Rainbow"),
+];
+
+/// The visualiser settings currently in force — the defaults when
+/// `config.widgets` is absent, which is the normal state for anyone who has
+/// never opened this group. Read-only: it takes a shared borrow and returns a
+/// copy, so callers can populate widgets without holding a borrow across GTK
+/// calls.
+fn visualizer_settings(state: &Rc<RefCell<AppState>>) -> Visualizer {
+    state
+        .borrow()
+        .config
+        .widgets
+        .as_ref()
+        .map(|w| w.visualizer.clone())
+        .unwrap_or_default()
+}
+
+/// Apply one edit to the visualiser settings — see [`edit_widgets`].
+fn edit_visualizer(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut Visualizer)) {
+    edit_widgets(state, |w| edit(&mut w.visualizer));
+}
+
+/// [`widget_switch_row`] wired to the visualiser block.
+fn visualizer_switch_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    active: bool,
+    edit: impl Fn(&mut Visualizer, bool) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_switch_row(title, subtitle, active, move |on| {
+        edit_visualizer(&state, |v| edit(v, on));
+    })
+}
+
+/// [`widget_spin_row`] wired to the visualiser block.
+fn visualizer_spin_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    range: (f64, f64, f64),
+    value: f64,
+    edit: impl Fn(&mut Visualizer, i32) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_spin_row(title, subtitle, range, value, move |v| {
+        edit_visualizer(&state, |vis| edit(vis, v));
+    })
+}
+
+/// "Audio visualiser" preferences group (WIDGETS_ROADMAP W2 GUI). Built exactly
+/// like [`add_lyrics_group`] and [`add_clock_group`]: off by default, and every
+/// row below the master switch is insensitive until it is on.
+///
+/// The master switch's subtitle says, in the row and not in the docs, that this
+/// widget listens to the computer's audio output. That is the one thing a
+/// person must know *before* flipping it: no other widget in this dialog opens
+/// a capture device, and finding out afterwards — from a desktop recording
+/// indicator, say — would be a nasty surprise. It also names the two sound
+/// servers that can provide it, because on a machine with neither the switch
+/// would otherwise just appear not to work.
+fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let cur = visualizer_settings(&state);
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Audio visualiser");
+    group.set_description(Some(
+        "Show a moving spectrum of whatever is playing on top of your wallpaper.",
+    ));
+
+    let enable = adw::ActionRow::new();
+    enable.set_title("Show audio visualiser");
+    enable.set_subtitle(
+        "Listens to your computer's audio output so the bars can react to the music. \
+         Needs PipeWire or PulseAudio. Uses more power than the other widgets, because \
+         it is redrawn continuously while sound is playing.",
+    );
+    let enable_switch = gtk4::Switch::new();
+    enable_switch.set_valign(gtk4::Align::Center);
+    enable_switch.set_active(cur.enabled);
+    enable.add_suffix(&enable_switch);
+    enable.set_activatable_widget(Some(&enable_switch));
+
+    let style_row = adw::ComboRow::new();
+    style_row.set_title("Style");
+    style_row.set_subtitle("Bars is the classic spectrum; Ring lays the same bars out in a circle");
+    style_row.set_model(Some(&gtk4::StringList::new(&table_labels(&VISUAL_STYLES))));
+    style_row.set_selected(table_index(&VISUAL_STYLES, cur.style));
+
+    // The same nine anchors, with the same names, as every other widget.
+    let anchor_row = adw::ComboRow::new();
+    anchor_row.set_title("Position");
+    anchor_row.set_subtitle("Where the visualiser sits on the screen");
+    anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
+    anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
+
+    let width_row = visualizer_spin_row(
+        &state,
+        "Width",
+        "Percentage of the screen width the visualiser spans. Stays right when the \
+         resolution changes.",
+        (5.0, 100.0, 5.0),
+        f64::from(cur.width_pct),
+        |v, n| v.width_pct = n.clamp(0, 100) as u32,
+    );
+
+    let height_row = visualizer_spin_row(
+        &state,
+        "Height",
+        "How tall the bars can grow, in pixels at 1080p and scaled with the screen.",
+        (16.0, 600.0, 8.0),
+        f64::from(cur.height_px),
+        |v, n| v.height_px = n.max(0) as u32,
+    );
+
+    let margin_row = visualizer_spin_row(
+        &state,
+        "Margin",
+        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        (0.0, 300.0, 1.0),
+        f64::from(cur.margin_px),
+        |v, n| v.margin_px = n.max(0) as u32,
+    );
+
+    let bands_row = visualizer_spin_row(
+        &state,
+        "Bands",
+        "How many bars the sound is split into. Past a couple of hundred they are \
+         thinner than the gaps between them and read as noise.",
+        (4.0, 192.0, 1.0),
+        f64::from(cur.bands),
+        |v, n| v.bands = n.max(1) as u32,
+    );
+
+    let rounded_row = visualizer_switch_row(
+        &state,
+        "Rounded shapes",
+        "Round the bar caps, dots and wave. Off gives the same layout with hard edges.",
+        cur.rounded,
+        |v, on| v.rounded = on,
+    );
+
+    // ── Colour ──
+    // Four rows that are really one decision, so they explain each other by
+    // going insensitive rather than by being documented somewhere else: the
+    // accent switch overrides the first colour, and the blend mode decides
+    // whether the second colour means anything at all.
+    let gradient_row = adw::ComboRow::new();
+    gradient_row.set_title("Colour blend");
+    gradient_row.set_subtitle(
+        "Rainbow sweeps the whole spectrum and needs no colours of its own. \
+         Blending steps the colour along the bars — the wave style is a single \
+         shape and always draws in one colour.",
+    );
+    gradient_row.set_model(Some(&gtk4::StringList::new(&table_labels(
+        &VISUAL_GRADIENTS,
+    ))));
+    gradient_row.set_selected(table_index(&VISUAL_GRADIENTS, cur.gradient));
+
+    let (colour_row, _) = {
+        let state = state.clone();
+        widget_colour_row(
+            "Colour",
+            "The colour of the bars, or the near end of a blend.",
+            &cur.colour,
+            move |hex| edit_visualizer(&state, |v| v.colour = hex.clone()),
+        )
+    };
+    let (colour_end_row, _) = {
+        let state = state.clone();
+        widget_colour_row(
+            "Blend to",
+            "The far end of the blend — the colour the last bar is drawn in.",
+            &cur.colour_end,
+            move |hex| edit_visualizer(&state, |v| v.colour_end = hex.clone()),
+        )
+    };
+
+    // The three switches that decide which colour rows mean anything, tracked
+    // here because a GTK widget cannot be asked "would you be sensitive if your
+    // group were on".
+    let group_on = Rc::new(Cell::new(cur.enabled));
+    let accent_on = Rc::new(Cell::new(cur.accent_follow));
+    let blend = Rc::new(Cell::new(cur.gradient));
+    let sync_colours: Rc<dyn Fn()> = {
+        let (colour_row, colour_end_row) = (colour_row.clone(), colour_end_row.clone());
+        let (group_on, accent_on, blend) = (group_on.clone(), accent_on.clone(), blend.clone());
+        Rc::new(move || {
+            let on = group_on.get();
+            // Ignored while the accent is in force, and by Rainbow, which picks
+            // its own colours from end to end.
+            colour_row
+                .set_sensitive(on && !accent_on.get() && blend.get() != GradientMode::Spectrum);
+            colour_end_row.set_sensitive(on && blend.get() == GradientMode::Linear);
+        })
+    };
+
+    let accent_row = {
+        let state = state.clone();
+        let sync_colours = sync_colours.clone();
+        let accent_on = accent_on.clone();
+        widget_switch_row(
+            "Follow accent colour",
+            "Draw the spectrum in the app accent colour instead of the colour below.",
+            cur.accent_follow,
+            move |on| {
+                accent_on.set(on);
+                edit_visualizer(&state, |v| v.accent_follow = on);
+                sync_colours();
+            },
+        )
+    };
+
+    // Combos last: set_selected above would otherwise fire these while the
+    // dialog is still being built.
+    {
+        let state = state.clone();
+        style_row.connect_selected_notify(move |row| {
+            let Some((style, _)) = VISUAL_STYLES.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_visualizer(&state, |v| v.style = style);
+        });
+    }
+    {
+        let state = state.clone();
+        anchor_row.connect_selected_notify(move |row| {
+            let Some((anchor, _)) = LYRIC_ANCHORS.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_visualizer(&state, |v| v.anchor = anchor);
+        });
+    }
+    {
+        let state = state.clone();
+        let sync_colours = sync_colours.clone();
+        let blend = blend.clone();
+        gradient_row.connect_selected_notify(move |row| {
+            let Some((mode, _)) = VISUAL_GRADIENTS.get(row.selected() as usize).copied() else {
+                return;
+            };
+            blend.set(mode);
+            edit_visualizer(&state, |v| v.gradient = mode);
+            sync_colours();
+        });
+    }
+
+    let dependents: Vec<gtk4::Widget> = vec![
+        style_row.clone().upcast(),
+        anchor_row.clone().upcast(),
+        width_row.clone().upcast(),
+        height_row.clone().upcast(),
+        margin_row.clone().upcast(),
+        bands_row.clone().upcast(),
+        rounded_row.clone().upcast(),
+        accent_row.clone().upcast(),
+        gradient_row.clone().upcast(),
+    ];
+    let sync_sensitive = {
+        let sync_colours = sync_colours.clone();
+        let group_on = group_on.clone();
+        move |on: bool| {
+            group_on.set(on);
+            for row in &dependents {
+                row.set_sensitive(on);
+            }
+            sync_colours();
+        }
+    };
+    sync_sensitive(cur.enabled);
+    {
+        let state = state.clone();
+        enable_switch.connect_active_notify(move |sw| {
+            let on = sw.is_active();
+            // The one switch in this dialog that opens a capture device. It may
+            // not do so before the question has been asked and answered — see
+            // `show_audio_consent_dialog`, and `Config::audio_capture_consented`
+            // for why the check is duplicated where the config is loaded.
+            if on && !state.borrow().config.audio_capture_consented {
+                // Back off until the question is answered: a switch that reads
+                // "on" while nothing is capturing is a lie either way round.
+                sw.set_active(false);
+                let switch = sw.clone();
+                show_audio_consent_dialog(sw, state.clone(), move |agreed| {
+                    if agreed {
+                        // Re-enters this handler, now with consent on file.
+                        switch.set_active(true);
+                    }
+                });
+                return;
+            }
+            sync_sensitive(on);
+            edit_visualizer(&state, |v| v.enabled = on);
+        });
+    }
+
+    group.add(&enable);
+    group.add(&style_row);
+    group.add(&anchor_row);
+    group.add(&width_row);
+    group.add(&height_row);
+    group.add(&margin_row);
+    group.add(&bands_row);
+    group.add(&rounded_row);
+    group.add(&accent_row);
+    group.add(&gradient_row);
+    group.add(&colour_row);
+    group.add(&colour_end_row);
+    page.add(&group);
+}
+
+/// One-time audio-capture consent, asked the first time the visualiser is
+/// switched on and never again.
+///
+/// Modelled on [`show_telemetry_consent_dialog`] deliberately, down to both
+/// buttons carrying equal weight: this is the same kind of promise, and the
+/// visualiser's is the larger one. It is asked *here*, at the switch, rather
+/// than at startup — consent for a feature nobody has asked for yet is noise,
+/// and noise is what teaches people to click through consent dialogs.
+///
+/// `answer(false)` for Cancel and for closing the window, so the only way to
+/// start a capture is to have read the dialog and pressed the button on it.
+/// The flag is written before the callback runs, so the caller may simply flip
+/// the switch back on and let the normal path take over.
+fn show_audio_consent_dialog(
+    anchor: &gtk4::Switch,
+    state: Rc<RefCell<AppState>>,
+    answer: impl Fn(bool) + 'static,
+) {
+    let dialog = adw::Window::new();
+    dialog.add_css_class("glass");
+    dialog.set_transient_for(
+        anchor
+            .root()
+            .and_then(|r| r.downcast::<gtk4::Window>().ok())
+            .as_ref(),
+    );
+    dialog.set_modal(true);
+    dialog.set_title(Some("Let the visualiser listen?"));
+    dialog.set_default_size(460, -1);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.append(&adw::HeaderBar::new());
+    dialog.set_content(Some(&content));
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    inner.set_margin_start(24);
+    inner.set_margin_end(24);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(22);
+
+    let body = gtk4::Label::new(Some(
+        "The audio visualiser reads your computer's sound output so the bars can \
+         react to what is playing.\n\n\
+         The sound is analysed on this computer and never leaves it. Nothing is \
+         recorded, saved or sent anywhere — the samples become bar heights and are \
+         thrown away.\n\n\
+         It captures everything your speakers play, not only your music player, and \
+         some desktops show a recording indicator while it runs. You can turn it off \
+         again at any time from this switch.",
+    ));
+    body.set_wrap(true);
+    body.set_xalign(0.0);
+    inner.append(&body);
+
+    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    buttons.set_halign(gtk4::Align::End);
+    buttons.set_margin_top(6);
+    let cancel = gtk4::Button::with_label("Cancel");
+    let accept = gtk4::Button::with_label("Enable visualiser");
+    accept.add_css_class("suggested-action");
+    buttons.append(&cancel);
+    buttons.append(&accept);
+    inner.append(&buttons);
+
+    // Shared so that closing the window counts as Cancel exactly once: the
+    // close-request fires on the button path too, and answering twice would
+    // flip the switch back and forth.
+    let answered = Rc::new(Cell::new(false));
+    let answer = Rc::new(answer);
+    let reply = {
+        let dialog = dialog.clone();
+        let answered = answered.clone();
+        let answer = answer.clone();
+        move |agreed: bool| {
+            if answered.replace(true) {
+                return;
+            }
+            if agreed {
+                let mut s = state.borrow_mut();
+                s.config.audio_capture_consented = true;
+                s.config.save().ok();
+            }
+            dialog.close();
+            answer(agreed);
+        }
+    };
+    {
+        let reply = reply.clone();
+        cancel.connect_clicked(move |_| reply(false));
+    }
+    {
+        let reply = reply.clone();
+        accept.connect_clicked(move |_| reply(true));
+    }
+    dialog.connect_close_request(move |_| {
+        reply(false);
+        glib::Propagation::Proceed
+    });
+
+    content.append(&inner);
+    dialog.present();
+}
+
+// ─── Album art widget ─────────────────────────────────────────────────────────
+
+/// The disc settings currently in force — the defaults when `config.widgets` is
+/// absent, which is the normal state for anyone who has never opened this
+/// group. Read-only: it takes a shared borrow and returns a copy, so callers can
+/// populate widgets without holding a borrow across GTK calls.
+fn disc_settings(state: &Rc<RefCell<AppState>>) -> Disc {
+    state
+        .borrow()
+        .config
+        .widgets
+        .as_ref()
+        .map(|w| w.disc.clone())
+        .unwrap_or_default()
+}
+
+/// Apply one edit to the disc settings — see [`edit_widgets`].
+fn edit_disc(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut Disc)) {
+    edit_widgets(state, |w| edit(&mut w.disc));
+}
+
+/// [`widget_switch_row`] wired to the disc block.
+fn disc_switch_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    active: bool,
+    edit: impl Fn(&mut Disc, bool) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_switch_row(title, subtitle, active, move |on| {
+        edit_disc(&state, |d| edit(d, on));
+    })
+}
+
+/// [`widget_spin_row`] wired to the disc block.
+fn disc_spin_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    range: (f64, f64, f64),
+    value: f64,
+    edit: impl Fn(&mut Disc, i32) + 'static,
+) -> adw::ActionRow {
+    let state = state.clone();
+    widget_spin_row(title, subtitle, range, value, move |v| {
+        edit_disc(&state, |d| edit(d, v));
+    })
+}
+
+/// "Album art" preferences group (WIDGETS_ROADMAP W2 GUI). Built exactly like
+/// the three groups above it: off by default, and every row below the master
+/// switch is insensitive until it is on.
+///
+/// "Spin while playing" carries its cost in the row for the same reason the
+/// clock's "Show seconds" does — it is the difference between a widget drawn
+/// once per track and one drawn continuously — and says that a paused track
+/// stops, so nobody reads the switch as "spin forever".
+fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let cur = disc_settings(&state);
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Album art");
+    group.set_description(Some(
+        "Show the cover of the song that is playing as a record on top of your wallpaper.",
+    ));
+
+    let enable = adw::ActionRow::new();
+    enable.set_title("Show album art");
+    enable.set_subtitle(
+        "Shows the current track's cover art. Needs a media player that reports what it \
+         is playing over MPRIS; nothing is drawn while nothing is playing.",
+    );
+    let enable_switch = gtk4::Switch::new();
+    enable_switch.set_valign(gtk4::Align::Center);
+    enable_switch.set_active(cur.enabled);
+    enable.add_suffix(&enable_switch);
+    enable.set_activatable_widget(Some(&enable_switch));
+
+    // The same nine anchors, with the same names, as every other widget.
+    let anchor_row = adw::ComboRow::new();
+    anchor_row.set_title("Position");
+    anchor_row.set_subtitle("Where the record sits on the screen");
+    anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
+    anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
+
+    let size_row = disc_spin_row(
+        &state,
+        "Size",
+        "Diameter in pixels at 1080p, and scaled with the screen.",
+        (48.0, 800.0, 8.0),
+        f64::from(cur.size_px),
+        |d, v| d.size_px = v.max(1) as u32,
+    );
+
+    let margin_row = disc_spin_row(
+        &state,
+        "Margin",
+        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        (0.0, 300.0, 1.0),
+        f64::from(cur.margin_px),
+        |d, v| d.margin_px = v.max(0) as u32,
+    );
+
+    let spin_row = disc_switch_row(
+        &state,
+        "Spin while playing",
+        "Turns the record at 33\u{2153} rpm, and stops when the track is paused. Uses more \
+         power: a still cover is drawn once per song, a turning one continuously.",
+        cur.spin,
+        |d, on| d.spin = on,
+    );
+
+    let opacity_row = disc_spin_row(
+        &state,
+        "Opacity",
+        "0 is invisible, 255 is solid. Lower it to let the wallpaper through.",
+        (0.0, 255.0, 5.0),
+        f64::from(cur.opacity),
+        |d, v| d.opacity = v.clamp(0, 255) as u8,
+    );
+
+    // Combo last: set_selected above would otherwise fire this while the dialog
+    // is still being built.
+    {
+        let state = state.clone();
+        anchor_row.connect_selected_notify(move |row| {
+            let Some((anchor, _)) = LYRIC_ANCHORS.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_disc(&state, |d| d.anchor = anchor);
+        });
+    }
+
+    let dependents: Vec<gtk4::Widget> = vec![
+        anchor_row.clone().upcast(),
+        size_row.clone().upcast(),
+        margin_row.clone().upcast(),
+        spin_row.clone().upcast(),
+        opacity_row.clone().upcast(),
+    ];
+    let sync_sensitive = move |on: bool| {
+        for row in &dependents {
+            row.set_sensitive(on);
+        }
+    };
+    sync_sensitive(cur.enabled);
+    {
+        let state = state.clone();
+        enable_switch.connect_active_notify(move |sw| {
+            let on = sw.is_active();
+            sync_sensitive(on);
+            edit_disc(&state, |d| d.enabled = on);
+        });
+    }
+
+    group.add(&enable);
+    group.add(&anchor_row);
+    group.add(&size_row);
+    group.add(&margin_row);
+    group.add(&spin_row);
+    group.add(&opacity_row);
+    page.add(&group);
 }
 
 // ─── Add from URL ─────────────────────────────────────────────────────────────
@@ -3977,10 +5322,10 @@ fn show_command_palette(
         );
     }
     {
-        let (w, s, st) = (window.clone(), state.clone(), stack.clone());
+        let (w, s) = (window.clone(), state.clone());
         add_cmd(
-            "How to set a Pinterest wallpaper",
-            Rc::new(move || show_onboarding_dialog(&w, s.clone(), st.clone())),
+            "What\u{2019}s new in Fresco",
+            Rc::new(move || show_onboarding_dialog(&w, s.clone())),
         );
     }
     let cmds = Rc::new(cmds);
@@ -4140,7 +5485,12 @@ fn show_telemetry_consent_dialog(window: &adw::ApplicationWindow, state: Rc<RefC
 /// materially — every install with a lower `config.onboarding_version` is
 /// walked through once on next launch, including users upgrading from a
 /// version that predates it.
-pub(crate) const ONBOARDING_VERSION: u32 = 1;
+///
+/// Revision 2 replaces the single paste-a-link screen with a two-step
+/// what's-new flow: setting a wallpaper from a Pinterest or direct link (with
+/// a working link already in the box, so it can be finished in one click), and
+/// where the lyrics and clock widget settings live.
+pub(crate) const ONBOARDING_VERSION: u32 = 2;
 
 /// The tutorial video. Opened in the user's browser rather than embedded:
 /// Fresco ships no browser engine, and pulling in WebKitGTK to play one clip
@@ -4155,120 +5505,647 @@ fn open_in_browser(url: &str) {
     }
 }
 
-/// Onboarding for the paste-a-link flow. Telemetry showed `add_from_link` at
-/// zero uses over 30 days while wallpapers were being set daily — the feature
-/// worked, nobody found it. This walks through it once, in order, and links
-/// the demo video.
+/// A Pinterest pin that is a live wallpaper, pre-filled into step 1 so someone
+/// with nothing to paste can still finish the step in one click. Typing over it
+/// imports whatever they pasted instead — the entry is not special-cased.
+const ONBOARDING_SAMPLE_LINK: &str = "https://pin.it/2q9awnLre";
+
+/// Same 1 GB ceiling the "Add from link" and "Add from URL" flows use.
+const ONBOARDING_MAX_BYTES: u64 = 1_000_000_000;
+
+/// What finishing a step does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum StepEnd {
+    /// Show the next step. Nothing is persisted.
+    Advance,
+    /// The last step: finishing it is what marks onboarding done.
+    Complete,
+}
+
+/// One screen of the what's-new flow.
+struct OnboardingStep {
+    /// `gtk4::Stack` child name for this step's page.
+    id: &'static str,
+    heading: &'static str,
+    /// Label on the primary (right-hand) button.
+    primary: &'static str,
+    /// Label the primary button takes once this step's own action has
+    /// succeeded, and the marker for "this step has an action at all".
+    /// `None` for steps that only read.
+    primary_done: Option<&'static str>,
+    end: StepEnd,
+}
+
+/// The flow, in order.
 ///
-/// Deliberately skippable. A gate that forces a rewatch punishes the users who
-/// already know the flow and the ones who got interrupted, and "watched" is
-/// not something an external browser can report back anyway. Discovery is the
-/// problem being solved here, not compliance.
+/// **Completion is all-or-nothing.** Exactly one step ends in
+/// [`StepEnd::Complete`] — the last one — and [`complete_onboarding`] is called
+/// from nowhere else. Nothing about the flow's progress is written while it
+/// runs, so quitting Fresco on step 2 shows step 1 again on the next launch.
+/// That is deliberate: a half-remembered position turns "the user has seen
+/// what's new" into a per-step ledger that can disagree with itself, and
+/// repeating two screens is the cheaper failure. `ONBOARDING_VERSION` stays a
+/// single honest fact — either the whole flow was seen, or it wasn't.
+const ONBOARDING_STEPS: [OnboardingStep; 2] = [
+    OnboardingStep {
+        id: "link",
+        heading: "Set a wallpaper from a link",
+        primary: "Set wallpaper",
+        primary_done: Some("Next"),
+        end: StepEnd::Advance,
+    },
+    OnboardingStep {
+        id: "widgets",
+        heading: "Put widgets on your wallpaper",
+        primary: "Done",
+        primary_done: None,
+        end: StepEnd::Complete,
+    },
+];
+
+/// Record that the whole flow was seen. The only writer of
+/// `config.onboarding_version` in the GUI — see the note on
+/// [`ONBOARDING_STEPS`] for why it is called once, at the end, and never
+/// mid-flow. Re-running the flow from the command palette after it has already
+/// been completed writes nothing.
+fn complete_onboarding(state: &Rc<RefCell<AppState>>) {
+    let mut s = state.borrow_mut();
+    if s.config.onboarding_version < ONBOARDING_VERSION {
+        s.config.onboarding_version = ONBOARDING_VERSION;
+        s.config.save().ok();
+    }
+}
+
+/// A bold title over a dim body — the row shape used inside the step pages.
+fn onboarding_row(title: &str, body: &str) -> gtk4::Box {
+    let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    let t = gtk4::Label::new(Some(title));
+    t.add_css_class("heading");
+    t.set_xalign(0.0);
+    let b = gtk4::Label::new(Some(body));
+    b.add_css_class("dim");
+    b.set_wrap(true);
+    b.set_xalign(0.0);
+    row.append(&t);
+    row.append(&b);
+    row
+}
+
+/// Heading + lead paragraph + labelled rows: the shape both steps share.
+fn onboarding_page(step: &OnboardingStep, lead: &str, rows: &[(&str, &str)]) -> gtk4::Box {
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let heading = gtk4::Label::new(Some(step.heading));
+    heading.add_css_class("dialog-heading");
+    heading.set_wrap(true);
+    heading.set_xalign(0.0);
+    page.append(&heading);
+
+    let lead_label = gtk4::Label::new(Some(lead));
+    lead_label.add_css_class("dialog-sub");
+    lead_label.set_wrap(true);
+    lead_label.set_xalign(0.0);
+    page.append(&lead_label);
+
+    for (title, body) in rows {
+        page.append(&onboarding_row(title, body));
+    }
+    page
+}
+
+/// Step 1's widgets, grouped so its background job can be handed all of them.
+#[derive(Clone)]
+struct LinkStep {
+    entry: gtk4::Entry,
+    error: gtk4::Label,
+    status: gtk4::Label,
+    progress: gtk4::ProgressBar,
+}
+
+/// Every library entry paired with the file names backing it.
+///
+/// Step 1 dedupes against these the way "Add from link" does — by looking for
+/// the Pinterest pin id stamped into a downloaded file's name. Replaying the
+/// flow is normal here, not an edge case: it restarts from step 1 whenever it
+/// is quit part-way, so pressing the same pre-filled button a second time must
+/// recognise the wallpaper instead of fetching another copy of it.
+fn library_file_names(state: &Rc<RefCell<AppState>>) -> Vec<(usize, String)> {
+    state
+        .borrow()
+        .entries
+        .iter()
+        .enumerate()
+        .flat_map(|(i, e)| {
+            e.path
+                .iter()
+                .chain(e.paths.iter())
+                .chain(e.folder.iter())
+                .filter_map(|p| p.file_name().map(|n| (i, n.to_string_lossy().into_owned())))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Rename a freshly downloaded file so its name carries the Pinterest pin id.
+/// That id is the dedupe key both this flow and "Add from link" search for, and
+/// the CDN file name does not contain it. Best-effort: a failed rename keeps
+/// the URL-derived name, which is still a perfectly good library entry.
+fn stamp_pin_id(path: PathBuf, pin_id: &str) -> PathBuf {
+    let already = path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().contains(pin_id));
+    if already {
+        return path;
+    }
+    let Some(stem) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+        return path;
+    };
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let target = (0..)
+        .map(|i| {
+            if i == 0 {
+                dir.join(format!("{stem}-{pin_id}{ext}"))
+            } else {
+                dir.join(format!("{stem}-{pin_id}-{i}{ext}"))
+            }
+        })
+        .find(|p| !p.exists())
+        .expect("some suffix is free");
+    match std::fs::rename(&path, &target) {
+        Ok(()) => target,
+        Err(_) => path,
+    }
+}
+
+/// Step 1's action: resolve the pasted link, download it, add it to the library
+/// and set it as the wallpaper.
+///
+/// This drives [`crate::linkresolve::resolve`] and [`crate::download::download`]
+/// directly — the same functions behind the "Add from link" dialog — rather
+/// than opening that dialog on top of this one. Two reasons: it takes no
+/// pre-fill (it reads the clipboard, which this step must not clobber), and it
+/// ends in the crop editor, whereas this step has to end with the wallpaper
+/// actually on screen. No URL handling is repeated here; every bit of
+/// resolution stays in `linkresolve`.
+fn run_link_step(
+    state: &Rc<RefCell<AppState>>,
+    ui: &LinkStep,
+    primary: &gtk4::Button,
+    done: &Rc<Cell<bool>>,
+    render: &Rc<dyn Fn()>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let url = ui.entry.text().trim().to_string();
+    if !url.starts_with("http") {
+        ui.error.set_text("That doesn\u{2019}t look like a link.");
+        ui.error.set_visible(true);
+        return;
+    }
+    // Telemetry label only — the resolver decides how the URL is handled.
+    let source = if url.contains("pin.it") || url.contains("pinterest.com") {
+        "pinterest"
+    } else {
+        "direct"
+    };
+
+    ui.entry.set_sensitive(false);
+    primary.set_sensitive(false);
+    ui.error.set_visible(false);
+    ui.status.set_text("Resolving link\u{2026}");
+    ui.status.add_css_class("shimmer");
+    ui.status.set_visible(true);
+    ui.progress.set_visible(true);
+
+    enum Msg {
+        Downloading,
+        Progress(f64),
+        /// Already downloaded by an earlier run through this flow.
+        Duplicate(String),
+        /// Downloaded file, plus the resolved title to name the entry after.
+        Done(Result<(PathBuf, Option<String>), String>),
+    }
+    let (tx, rx) = async_channel::bounded::<Msg>(16);
+    let existing: Vec<String> = library_file_names(state)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect();
+    let dest = library::library_dir().join("downloads");
+    let cancel_worker = cancel.clone();
+    std::thread::spawn(move || {
+        let resolved = match crate::linkresolve::resolve(&url) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tx.send_blocking(Msg::Done(Err(e.to_string())));
+                return;
+            }
+        };
+        if let Some(pin) = &resolved.pin_id {
+            if existing.iter().any(|n| n.contains(pin.as_str())) {
+                let _ = tx.send_blocking(Msg::Duplicate(pin.clone()));
+                return;
+            }
+        }
+        let _ = tx.send_blocking(Msg::Downloading);
+        let tx_p = tx.clone();
+        let got = crate::download::download(
+            &resolved.media_url,
+            &dest,
+            ONBOARDING_MAX_BYTES,
+            &cancel_worker,
+            move |got, total| {
+                if let Some(t) = total {
+                    let _ = tx_p.try_send(Msg::Progress(got as f64 / t as f64));
+                }
+            },
+        );
+        let _ = tx.send_blocking(Msg::Done(
+            got.map(|p| {
+                let p = match &resolved.pin_id {
+                    Some(pin) => stamp_pin_id(p, pin),
+                    None => p,
+                };
+                (p, resolved.title.clone())
+            })
+            .map_err(|e| e.to_string()),
+        ));
+    });
+
+    // Pulse while no byte-level progress is known (the resolve phase, or a
+    // server that omits Content-Length); the first Progress switches the bar to
+    // determinate.
+    let pulsing = Rc::new(Cell::new(true));
+    {
+        let progress = ui.progress.clone();
+        let pulsing = pulsing.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(120), move || {
+            if !pulsing.get() || !progress.is_visible() {
+                return glib::ControlFlow::Break;
+            }
+            progress.pulse();
+            glib::ControlFlow::Continue
+        });
+    }
+
+    let state = state.clone();
+    let ui = ui.clone();
+    let primary = primary.clone();
+    let done = done.clone();
+    let render = render.clone();
+    glib::spawn_future_local(async move {
+        // The step counts as done only once the wallpaper is on screen.
+        let finish = |idx: usize, downloaded: bool| {
+            // Mirrors the "Add from link" event so the two are comparable, but
+            // tagged: onboarding-driven adds must be excludable from the
+            // discovery metric this flow exists to move.
+            crate::telemetry::event(
+                "add_from_link",
+                serde_json::json!({
+                    "ok": true,
+                    "source": source,
+                    "onboarding": true,
+                    "reused": !downloaded,
+                }),
+            );
+            apply_entry_by_idx(state.clone(), idx);
+            pulsing.set(false);
+            done.set(true);
+            ui.status.remove_css_class("shimmer");
+            ui.status.set_text("Set as your wallpaper.");
+            ui.progress.set_visible(false);
+            primary.set_sensitive(true);
+            render();
+        };
+        // Never wedge the flow: the entry and the primary button come back, so
+        // the same link can be retried, and Skip was never disabled.
+        let fail = |msg: &str| {
+            pulsing.set(false);
+            ui.error.set_text(msg);
+            ui.error.set_visible(true);
+            ui.status.set_visible(false);
+            ui.progress.set_visible(false);
+            ui.entry.set_sensitive(true);
+            primary.set_sensitive(true);
+        };
+
+        while let Ok(msg) = rx.recv().await {
+            match msg {
+                Msg::Downloading => ui.status.set_text("Downloading\u{2026}"),
+                Msg::Progress(f) => {
+                    pulsing.set(false);
+                    ui.progress.set_fraction(f.clamp(0.0, 1.0));
+                }
+                Msg::Duplicate(pin) => {
+                    // Re-scan rather than trust an index captured before the
+                    // download: cheap, and immune to the library moving.
+                    match library_file_names(&state)
+                        .into_iter()
+                        .find(|(_, n)| n.contains(&pin))
+                    {
+                        Some((idx, _)) => finish(idx, false),
+                        None => fail(
+                            "That wallpaper is in your library but its file has moved. \
+                             Set it from the grid instead.",
+                        ),
+                    }
+                    break;
+                }
+                Msg::Done(Ok((path, title))) => {
+                    let mut e = if library::is_video(&path) {
+                        LibraryEntry::new_video(path)
+                    } else {
+                        LibraryEntry::new_image(path)
+                    };
+                    // The pin's own title reads better than the CDN file name.
+                    if let Some(t) = title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                        e.name = t.to_string();
+                    }
+                    e.generate_thumbnail();
+                    let idx = {
+                        let mut s = state.borrow_mut();
+                        s.entries.push(e);
+                        save_entries(&s.entries).ok();
+                        s.entries.len() - 1
+                    };
+                    finish(idx, true);
+                    break;
+                }
+                Msg::Done(Err(msg)) => {
+                    crate::telemetry::event(
+                        "add_from_link",
+                        serde_json::json!({ "ok": false, "source": source, "onboarding": true }),
+                    );
+                    // `linkresolve` and `download` both return user-readable
+                    // messages ("no network", "that pin.it link didn't lead to
+                    // a pin"), so they go straight on screen.
+                    fail(&msg);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// The what's-new flow: a stepper through [`ONBOARDING_STEPS`], shown once per
+/// [`ONBOARDING_VERSION`] and reachable afterwards from the command palette.
+///
+/// Every step has to be *seen*. An individual step can be skipped — Skip moves
+/// to the next one without acting — but the flow itself cannot be dismissed
+/// early: there is no close button and no "skip all". The cost of that is one
+/// extra click for a user who wants none of it; the benefit is that "this
+/// install has been shown what changed" stays true rather than nearly true.
+///
+/// Nothing is written until the last step is finished. See [`ONBOARDING_STEPS`].
 pub(crate) fn show_onboarding_dialog(
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
-    stack: gtk4::Stack,
 ) {
-    {
-        let mut s = state.borrow_mut();
-        if s.config.onboarding_version < ONBOARDING_VERSION {
-            s.config.onboarding_version = ONBOARDING_VERSION;
-            s.config.save().ok();
-        }
-    }
+    let (dialog, content) = glass_dialog(window, "What\u{2019}s new in Fresco", 520, -1);
 
-    let (dialog, content) = glass_dialog(window, "Set a wallpaper from Pinterest", 500, -1);
-
-    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     inner.set_margin_start(24);
     inner.set_margin_end(24);
-    inner.set_margin_top(8);
+    inner.set_margin_top(4);
     inner.set_margin_bottom(22);
 
-    let lead = gtk4::Label::new(Some(
-        "Found a live wallpaper you like on Pinterest? Copy its link and \
-         Fresco will download it and set it — no files to manage.",
+    let indicator = overline(&format!("Step 1 of {}", ONBOARDING_STEPS.len()));
+    inner.append(&indicator);
+
+    let pages = gtk4::Stack::new();
+    pages.set_transition_type(gtk4::StackTransitionType::SlideLeft);
+    pages.set_transition_duration(180);
+    inner.append(&pages);
+
+    // ── Step 1: add from a link ──────────────────────────────────────────────
+    let link_page = onboarding_page(
+        &ONBOARDING_STEPS[0],
+        "Paste a Pinterest pin — a pin.it or pinterest.com link — or a direct \
+         link to a video, GIF or image. Fresco downloads it, adds it to your \
+         library and sets it.",
+        &[],
+    );
+    let link_ui = LinkStep {
+        entry: gtk4::Entry::new(),
+        error: gtk4::Label::new(None),
+        status: gtk4::Label::new(None),
+        progress: gtk4::ProgressBar::new(),
+    };
+    link_ui
+        .entry
+        .set_placeholder_text(Some("Paste a Pinterest or direct video/image link"));
+    // Pre-filled, not merely suggested: pressing the button uses this pin,
+    // typing replaces it. The clipboard is left alone — unlike "Add from link",
+    // this dialog opens on its own, before the user has copied anything.
+    link_ui.entry.set_text(ONBOARDING_SAMPLE_LINK);
+    link_page.append(&link_ui.entry);
+
+    link_ui.error.add_css_class("error");
+    link_ui.error.add_css_class("dim");
+    link_ui.error.set_wrap(true);
+    link_ui.error.set_xalign(0.0);
+    link_ui.error.set_visible(false);
+    link_page.append(&link_ui.error);
+
+    link_ui.status.set_xalign(0.0);
+    link_ui.status.set_visible(false);
+    link_page.append(&link_ui.status);
+
+    link_ui.progress.add_css_class("update-progress");
+    link_ui.progress.set_hexpand(true);
+    link_ui.progress.set_visible(false);
+    link_page.append(&link_ui.progress);
+
+    link_page.append(&onboarding_row(
+        "Where this lives afterwards",
+        "The From Pinterest button in the bar at the bottom of the window, or \
+         Ctrl+K \u{2192} \u{201c}Add from link\u{201d}.",
     ));
-    lead.add_css_class("dialog-sub");
-    lead.set_wrap(true);
-    lead.set_xalign(0.0);
-    inner.append(&lead);
 
-    let steps: &[(&str, &str)] = &[
-        (
-            "1 · Copy the link",
-            "On Pinterest, open the pin and hit Share → Copy link. A pin.it or \
-             pinterest.com link both work, and so does any direct video or image URL.",
-        ),
-        (
-            "2 · Click “From Pinterest”",
-            "It's in the bar at the bottom of the window, next to Add folder.",
-        ),
-        (
-            "3 · Paste and confirm",
-            "Fresco downloads it, drops you into the editor to rotate or crop, \
-             then you click Set as wallpaper.",
-        ),
-    ];
-    for (title, body) in steps {
-        let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-        let t = gtk4::Label::new(Some(title));
-        t.add_css_class("dialog-heading");
-        t.set_xalign(0.0);
-        let b = gtk4::Label::new(Some(body));
-        b.add_css_class("dim");
-        b.set_wrap(true);
-        b.set_xalign(0.0);
-        row.append(&t);
-        row.append(&b);
-        inner.append(&row);
-    }
-
-    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    buttons.set_margin_top(8);
-
-    let watch = gtk4::Button::with_label("Watch the demo");
-    watch.set_tooltip_text(Some("Opens the walkthrough video in your browser"));
-    watch.connect_clicked(|_| {
+    let demo = gtk4::Button::with_label("Watch the demo");
+    demo.add_css_class("flat");
+    demo.set_halign(gtk4::Align::Start);
+    demo.set_tooltip_text(Some("Opens the walkthrough video in your browser"));
+    demo.connect_clicked(|_| {
         // Counts intent only: once the browser has it, Fresco can't tell
         // whether it was watched. Judge the video by whether add_from_link
         // moves, not by this number.
         crate::telemetry::event("tutorial_opened", serde_json::json!({}));
         open_in_browser(TUTORIAL_URL);
     });
-    buttons.append(&watch);
+    link_page.append(&demo);
 
+    pages.add_named(&link_page, Some(ONBOARDING_STEPS[0].id));
+
+    // ── Step 2: widgets ──────────────────────────────────────────────────────
+    // This screen points at settings, and claims nothing about what gets drawn.
+    // As of writing, the Lyrics and Clock groups exist in Advanced but the
+    // daemon does not yet render either overlay (`daemon/widgets.rs` is not
+    // registered as a module), so promising a working widget would be a lie the
+    // user discovers in about ten seconds. When the daemon does draw them, this
+    // copy can say so — until then it stays where-not-what.
+    let widgets_page = onboarding_page(
+        &ONBOARDING_STEPS[1],
+        "Widgets draw on top of the wallpaper, underneath your windows. The \
+         settings for the first two are in place — here is what they cover and \
+         where to find them.",
+        &[
+            (
+                "Lyrics",
+                "The current line of the song that is playing. It reads .lrc \
+                 files saved beside your music, and needs a media player that \
+                 reports what it is playing over MPRIS. Style, position, text \
+                 size and a sync offset are all adjustable.",
+            ),
+            (
+                "Clock",
+                "The time, in one of five themes — Digital, Minimal, Segment, \
+                 Stacked and Wordy — with position, text size, 24-hour time, \
+                 date and seconds.",
+            ),
+            (
+                "Where the settings are",
+                "Open the app menu (Ctrl+,), choose Advanced…, and scroll to \
+                 the Lyrics and Clock groups. Both start switched off.",
+            ),
+        ],
+    );
+    pages.add_named(&widgets_page, Some(ONBOARDING_STEPS[1].id));
+
+    // ── Footer ───────────────────────────────────────────────────────────────
+    let footer = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    footer.set_margin_top(4);
+    let skip = gtk4::Button::with_label("Skip");
+    skip.add_css_class("flat");
+    skip.set_tooltip_text(Some("Go to the next step without doing anything"));
     let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
-    buttons.append(&spacer);
+    let primary = gtk4::Button::with_label(ONBOARDING_STEPS[0].primary);
+    primary.add_css_class("suggested-action");
+    footer.append(&skip);
+    footer.append(&spacer);
+    footer.append(&primary);
+    inner.append(&footer);
 
-    let skip = gtk4::Button::with_label("Not now");
-    skip.add_css_class("flat");
-    {
-        let dialog = dialog.clone();
-        skip.connect_clicked(move |_| dialog.close());
-    }
-    buttons.append(&skip);
+    content.append(&inner);
 
-    // The point of the whole dialog: land them in the paste field while the
-    // link is still in their clipboard.
-    let go = gtk4::Button::with_label("Paste a link");
-    go.add_css_class("suggested-action");
-    {
+    // Which step we're on, whether step 1's wallpaper landed, and whether the
+    // flow is over. All of it lives and dies with this dialog — none of it is
+    // persisted, by design (see ONBOARDING_STEPS).
+    let step = Rc::new(Cell::new(0usize));
+    let link_done = Rc::new(Cell::new(false));
+    let finished = Rc::new(Cell::new(false));
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let render: Rc<dyn Fn()> = {
+        let pages = pages.clone();
+        let indicator = indicator.clone();
+        let skip = skip.clone();
+        let primary = primary.clone();
+        let step = step.clone();
+        let link_done = link_done.clone();
+        Rc::new(move || {
+            let i = step.get();
+            let current = &ONBOARDING_STEPS[i];
+            pages.set_visible_child_name(current.id);
+            indicator
+                .set_label(&format!("Step {} of {}", i + 1, ONBOARDING_STEPS.len()).to_uppercase());
+            // Skip means "advance without acting". The last step has nothing to
+            // advance to and its primary button is already the no-op finish, so
+            // showing both would be two buttons doing the same thing.
+            skip.set_visible(i + 1 < ONBOARDING_STEPS.len());
+            // Once a step's action has succeeded its button stops being the
+            // action and becomes the way forward — nobody should be left
+            // staring at a button that repeats work they already did.
+            primary.set_label(match current.primary_done {
+                Some(label) if link_done.get() => label,
+                _ => current.primary,
+            });
+        })
+    };
+
+    let advance: Rc<dyn Fn()> = {
+        let step = step.clone();
+        let render = render.clone();
+        let finished = finished.clone();
         let dialog = dialog.clone();
-        let win = window.clone();
         let state = state.clone();
-        let stack = stack.clone();
-        go.connect_clicked(move |_| {
+        let cancel = cancel.clone();
+        Rc::new(move || {
+            let i = step.get();
+            if ONBOARDING_STEPS[i].end == StepEnd::Advance {
+                step.set(i + 1);
+                render();
+                return;
+            }
+            // Last step finished — the one and only place the flow is recorded.
+            complete_onboarding(&state);
+            // Same convention as "Add from link": a transfer does not outlive
+            // the window that asked for it.
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            finished.set(true);
+            dialog.set_deletable(true);
             dialog.close();
-            super::add_link::show_add_link_dialog(&win, state.clone(), stack.clone());
+        })
+    };
+
+    {
+        let advance = advance.clone();
+        skip.connect_clicked(move |_| advance());
+    }
+    {
+        let step = step.clone();
+        let link_done = link_done.clone();
+        let render = render.clone();
+        let state = state.clone();
+        let ui = link_ui.clone();
+        let cancel = cancel.clone();
+        primary.connect_clicked(move |btn| {
+            let current = &ONBOARDING_STEPS[step.get()];
+            // A step with an action runs it; once it has succeeded (or on any
+            // step without one) the same button moves the flow along.
+            if current.primary_done.is_some() && !link_done.get() {
+                run_link_step(&state, &ui, btn, &link_done, &render, &cancel);
+                return;
+            }
+            advance();
         });
     }
-    buttons.append(&go);
+    {
+        // Enter in the link box does what the primary button does — routed
+        // through the button so it goes past the same "already set?" check.
+        let primary = primary.clone();
+        link_ui
+            .entry
+            .connect_activate(move |_| primary.emit_clicked());
+    }
 
-    inner.append(&buttons);
-    content.append(&inner);
+    // Non-closable until the flow is over. `set_deletable(false)` takes the
+    // close button out of the header bar; `close-request` is what actually
+    // holds the line, because the button is far from the only way to ask a
+    // window to close (Escape, the window manager, an alt-F4). Skip is always
+    // available, so this can never trap anyone — it costs one click per step,
+    // not an escape hatch.
+    dialog.set_deletable(false);
+    {
+        let finished = finished.clone();
+        dialog.connect_close_request(move |_| {
+            if finished.get() {
+                glib::Propagation::Proceed
+            } else {
+                glib::Propagation::Stop
+            }
+        });
+    }
+
+    render();
     dialog.present();
+    // Focus last: the pre-filled link is selected, so the first keystroke
+    // replaces it and Enter alone accepts it.
+    link_ui.entry.grab_focus();
+    link_ui.entry.select_region(0, -1);
 }
 
 /// "What can Fresco do?" — a compact feature tour. Users kept missing features
@@ -4618,6 +6495,186 @@ mod tests {
             .clone()
             .unwrap();
         assert_eq!(got, want);
+    }
+
+    /// The lyric combos map selection index → enum through these tables, so a
+    /// variant missing from one of them would silently become unreachable in
+    /// the GUI (and `table_index` would park the combo on the wrong entry).
+    #[test]
+    fn lyric_label_tables_cover_every_variant() {
+        for (i, (style, label)) in LYRIC_STYLES.iter().enumerate() {
+            assert_eq!(table_index(&LYRIC_STYLES, *style), i as u32, "{label}");
+        }
+        for (i, (anchor, label)) in LYRIC_ANCHORS.iter().enumerate() {
+            assert_eq!(table_index(&LYRIC_ANCHORS, *anchor), i as u32, "{label}");
+        }
+        // Both tables are exhaustive over their enums: every default must be
+        // found, not fall through to index 0.
+        assert_eq!(
+            table_index(&LYRIC_ANCHORS, LyricAnchor::default()),
+            7,
+            "BottomCenter is the default and must select its own row"
+        );
+        assert_eq!(table_labels(&LYRIC_STYLES).len(), LYRIC_STYLES.len());
+        assert_eq!(table_labels(&LYRIC_ANCHORS).len(), 9);
+    }
+
+    /// Same trap as the lyric tables, for the clock's theme combo.
+    #[test]
+    fn clock_label_table_covers_every_variant() {
+        for (i, (theme, label)) in CLOCK_THEMES.iter().enumerate() {
+            assert_eq!(table_index(&CLOCK_THEMES, *theme), i as u32, "{label}");
+        }
+        assert_eq!(
+            table_index(&CLOCK_THEMES, ClockThemeCfg::default()),
+            0,
+            "Digital is the default and must select its own row"
+        );
+        // The clock reuses the lyric anchor table, so a variant missing there
+        // would silently be unreachable from *both* groups.
+        assert_eq!(
+            table_index(&LYRIC_ANCHORS, Clock::default().anchor),
+            2,
+            "the default clock anchor (top right) must select its own row"
+        );
+    }
+
+    /// Same trap as the lyric and clock tables, for the visualiser's style
+    /// combo — and for the anchor table, which all four widget groups now share.
+    #[test]
+    fn visualizer_and_disc_label_tables_cover_every_variant() {
+        for (i, (style, label)) in VISUAL_STYLES.iter().enumerate() {
+            assert_eq!(table_index(&VISUAL_STYLES, *style), i as u32, "{label}");
+        }
+        assert_eq!(
+            table_index(&VISUAL_STYLES, VisualizerStyleCfg::default()),
+            0,
+            "Bars is the default and must select its own row"
+        );
+        // The visualiser style list must name the same looks, in the same
+        // order, as the renderer's own `VisualStyle::ALL` — otherwise the
+        // picker offers a shape the renderer does not draw, or offers them in
+        // an order that makes the labels point at the wrong style.
+        assert_eq!(
+            VISUAL_STYLES.len(),
+            crate::visualizer::VisualStyle::ALL.len(),
+            "GUI style list must cover every renderer style"
+        );
+        // Both new groups reuse the lyric anchor table, so a variant missing
+        // there would be unreachable from four groups rather than two.
+        assert_eq!(
+            table_index(&LYRIC_ANCHORS, Visualizer::default().anchor),
+            7,
+            "the default visualiser anchor (bottom center) must select its own row"
+        );
+        assert_eq!(
+            table_index(&LYRIC_ANCHORS, Disc::default().anchor),
+            8,
+            "the default disc anchor (bottom right) must select its own row"
+        );
+    }
+
+    /// The combo names the user picks from and the names the renderer knows are
+    /// two hand-written lists in two modules. Pin them together — otherwise
+    /// renaming a theme in `clock.rs` leaves the picker offering the old word,
+    /// or reordering `ClockTheme::ALL` leaves the two lists disagreeing about
+    /// which look is which.
+    #[test]
+    fn clock_theme_labels_match_the_renderer() {
+        let ours = table_labels(&CLOCK_THEMES);
+        let theirs: Vec<&str> = crate::clock::ClockTheme::ALL
+            .iter()
+            .map(|t| t.label())
+            .collect();
+        assert_eq!(ours, theirs, "GUI theme list must match clock::ClockTheme");
+    }
+
+    /// Completion is all-or-nothing, and the whole guarantee rests on the shape
+    /// of this table: exactly one step ends the flow, it is the last one, and
+    /// nothing before it can. Get that wrong in either direction and the flow
+    /// either never records itself (shown again forever) or records itself
+    /// before the user has seen every step.
+    #[test]
+    fn onboarding_finishes_only_on_the_last_step() {
+        assert!(
+            !ONBOARDING_STEPS.is_empty(),
+            "a flow with no steps would never complete, and would reopen every launch"
+        );
+        let (last, rest) = ONBOARDING_STEPS.split_last().expect("non-empty above");
+        assert_eq!(
+            last.end,
+            StepEnd::Complete,
+            "the last step must be the one that completes onboarding"
+        );
+        assert!(
+            rest.iter().all(|s| s.end == StepEnd::Advance),
+            "no step before the last may complete onboarding"
+        );
+
+        // The ids double as gtk4::Stack child names; a duplicate would silently
+        // show the wrong page.
+        let mut ids: Vec<&str> = ONBOARDING_STEPS.iter().map(|s| s.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), ONBOARDING_STEPS.len(), "step ids must be unique");
+
+        // `primary_done` is what the primary button consults to decide between
+        // running a step's action and advancing, so only steps that actually
+        // have one may set it — and the finishing step never does.
+        assert_eq!(
+            ONBOARDING_STEPS
+                .iter()
+                .filter(|s| s.primary_done.is_some())
+                .count(),
+            1,
+            "the link step is the only one with an action of its own"
+        );
+        assert!(
+            ONBOARDING_STEPS[0].primary_done.is_some(),
+            "step 1 is the link step"
+        );
+        assert!(
+            last.primary_done.is_none(),
+            "the finishing step takes no action, so its button never changes label"
+        );
+
+        // 0 is config.rs's "never shown" sentinel; a flow pinned there would be
+        // completed and immediately un-completed.
+        const { assert!(ONBOARDING_VERSION > 0) };
+    }
+
+    #[test]
+    fn the_colour_button_and_the_config_agree_on_a_colour() {
+        // The picker is the only writer of these keys, so a rounding
+        // disagreement between it and the config would show up as a colour that
+        // drifts every time the dialog is reopened.
+        for hex in ["#000000", "#FFFFFF", "#3584E4", "#FF3B6B", "#22D3EE"] {
+            assert_eq!(rgba_to_hex(&hex_to_rgba(hex)), hex, "round trip {hex}");
+        }
+        // Anything the GDK parser cannot read lands on the same white the
+        // renderers fall back to, rather than on transparent black.
+        assert_eq!(rgba_to_hex(&hex_to_rgba("not a colour")), "#FFFFFF");
+        assert_eq!(rgba_to_hex(&hex_to_rgba("")), "#FFFFFF");
+        // GDK understands more spellings than the config file does; whatever it
+        // reads must still leave here as a plain six-digit hex.
+        let named = rgba_to_hex(&hex_to_rgba("red"));
+        assert_eq!(named, "#FF0000");
+    }
+
+    #[test]
+    fn the_gradient_combo_lists_every_mode_exactly_once() {
+        // A combo that silently omits a variant is a setting nobody can reach,
+        // and `table_index` would quietly select the first entry for it.
+        for mode in [
+            GradientMode::None,
+            GradientMode::Linear,
+            GradientMode::Spectrum,
+        ] {
+            let at = table_index(&VISUAL_GRADIENTS, mode) as usize;
+            assert_eq!(VISUAL_GRADIENTS[at].0, mode, "{mode:?} is not in the combo");
+        }
+        assert_eq!(VISUAL_GRADIENTS.len(), 3);
+        assert_eq!(table_labels(&VISUAL_GRADIENTS).len(), 3);
     }
 
     #[test]

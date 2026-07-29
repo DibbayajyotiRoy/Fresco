@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.35"
+version = "1.1.36"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -16,6 +16,8 @@ daemon = [
     # Event-driven push: the daemon subscribes to Supabase Realtime over a
     # blocking websocket and raises native desktop notifications.
     "dep:ureq", "dep:tungstenite", "dep:notify-rust", "dep:semver",
+    # Album-art widget: decode cover art to RGBA for mpv's `overlay-add`.
+    "dep:image",
 ]
 
 [[bin]]
@@ -58,6 +60,12 @@ async-channel = { version = "2", optional = true }
 tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
 notify-rust = { version = "4", optional = true }
 semver = { version = "1", optional = true }
+# Cover-art decode for the album-art widget. Only the formats MPRIS players
+# actually serve as artwork — no TIFF/EXR/etc, which keeps the build small.
+# Audio capture needs no crate (we read PCM from `parec`/`pw-cat`, the same
+# shell-out approach dde.rs uses for D-Bus) and the FFT is our own, so this is
+# the single dependency the visualiser/disc widgets add.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
 
 [profile.release]
 opt-level = 3
@@ -103,19 +111,26 @@ assets = [
     ["data/icons/hicolor/128x128/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
     ["data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
     ["data/icons/hicolor/512x512/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
-    # Deepin 25 launcher icon. dde-launchpad's hot refresh after install looks
-    # only in the current theme ("bloom"), never falling back to hicolor, so a
-    # hicolor-only app appears solely after `killall dde-shell`. Confirmed by an
-    # A/B against galculator on Deepin 25: a native bloom SVG was the only
-    # difference. bloom is SVG-only, so xdgicon2dci gives us nothing.
-    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/48/", "644"],
-    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/128/", "644"],
-    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/256/", "644"],
-    ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/512/", "644"],
+    # Deepin/DDE-only icon variant. Same icon name, installed into Deepin's
+    # "bloom" theme, so ONLY a DDE session resolves it — every other desktop
+    # keeps the hicolor artwork above. It is drawn to bloom's conventions
+    # (full-bleed squircle, single frame) so Fresco doesn't look foreign in the
+    # Deepin launcher.
+    #
+    # This is a LOOK change, not a fix: shipping icons into bloom was tried as a
+    # fix for the launcher not showing Fresco until `killall dde-shell` and was
+    # disproved — with bloom SVGs installed AND a generated .dci, GtkIconTheme
+    # resolves our icon in bloom, hicolor and Papirus and the launcher still
+    # skips us. See docs/AUDIT.md "Deepin launcher hot refresh".
+    ["data/icons/bloom/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/48/", "644"],
+    ["data/icons/bloom/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/128/", "644"],
+    ["data/icons/bloom/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/256/", "644"],
+    ["data/icons/bloom/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/bloom/apps/512/", "644"],
 ]
-# NO maintainer-scripts: the icon cache and desktop database are refreshed by
-# the standard dpkg triggers that hicolor-icon-theme and desktop-file-utils
-# declare (fired automatically when our files land in their watched dirs) —
-# exactly like a plain debhelper GUI package (e.g. galculator). A custom
-# postinst that refreshed the caches early interfered with Deepin's launcher
-# refresh, so the icon only appeared after `killall dde-shell` (issue #3).
+# The postinst NEVER refreshes the icon cache or desktop database: the standard
+# hicolor-icon-theme and desktop-file-utils triggers own that (they fire when our
+# files land in their watched dirs), exactly like a plain debhelper GUI package.
+# Duplicating that work is what 1.1.34 removed. All the postinst does is
+# re-announce our .desktop file on Deepin, after dpkg's triggers finish — see the
+# script and docs/AUDIT.md "Deepin launcher hot refresh".
+maintainer-scripts = "packaging/debian"

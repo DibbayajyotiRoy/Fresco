@@ -1,18 +1,29 @@
+#[cfg(feature = "daemon")]
+pub mod artwork;
+#[cfg(feature = "daemon")]
+pub mod audio_capture;
 pub mod autostart;
 pub mod capability;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod catalog;
 pub mod cli;
+pub mod clock;
 pub mod config;
 #[cfg(feature = "daemon")]
 pub mod daemon;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod download;
+pub mod dsp;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod ipc;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod linkresolve;
+pub mod lyrics;
+#[cfg(feature = "daemon")]
+pub mod lyrics_fetch;
+#[cfg(feature = "daemon")]
+pub mod mpris;
 pub mod schedule;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod supabase;
@@ -20,6 +31,7 @@ pub mod supabase;
 pub mod telemetry;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod update;
+pub mod visualizer;
 
 /// Application ID used for the desktop file, autostart entry, and GTK app.
 pub const APP_ID: &str = "io.github.dibbayajyotiroy.Fresco";

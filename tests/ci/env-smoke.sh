@@ -206,6 +206,49 @@ kill "$DPID" 2>/dev/null
 pkill -f mpvpaper 2>/dev/null || true
 wait 2>/dev/null
 
+# ── REQUIRED 5 (layer-shell): a still image is not a wedged renderer ─────────
+# The Wayland supervisor respawns a renderer whose playback clock stops. Images
+# are spawned with image-display-duration=inf, so their clock never moves BY
+# DESIGN — 1.1.35 read that as wedged and respawned every image and slideshow
+# wallpaper until it gave up on the output (telemetry: renderer_giveup). Every
+# check above ran a VIDEO, which is exactly why that shipped. Only meaningful
+# where a renderer actually came up, so it stays a note under software GL.
+if [ "$EXPECT" = "wayland-layer-shell" ]; then
+  IMAGE="$WORK/test.png"
+  ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=teal:s=640x360 \
+    -frames:v 1 "$IMAGE" </dev/null 2>/dev/null
+  cat > "$XDG_CONFIG_HOME/fresco/config.toml" <<EOF
+enabled = true
+autostart = false
+[wallpaper]
+kind = "image"
+path = "$IMAGE"
+mute = true
+EOF
+  : > "$DLOG" 2>/dev/null || true
+  RUST_BACKTRACE=1 "$FRESCOD" >"$WORK/frescod-image.stdio" 2>&1 &
+  IPID=$!
+  # A misdiagnosis surfaces after STALL_STRIKES (3) supervise ticks (2s each);
+  # watch for four cycles' worth so a slow start can't hide it, and stop early
+  # the moment it does appear.
+  for _ in $(seq 1 30); do
+    sleep 0.5
+    grep -qE 'playback frozen|giving up live playback' "$DLOG" 2>/dev/null && break
+  done
+  if ! ls "${XDG_RUNTIME_DIR:-/nonexistent}"/fresco/mpv-*.sock >/dev/null 2>&1 \
+     && ! grep -q 'spawning' "$DLOG" 2>/dev/null; then
+    note "image-wallpaper stall check skipped (no renderer came up here)"
+  elif grep -qE 'playback frozen|giving up live playback' "$DLOG" 2>/dev/null; then
+    fail "a still image was misread as a wedged renderer (respawn/give-up loop)"
+    grep -E 'frozen|giving up|restarting' "$DLOG" 2>/dev/null | sed 's/^/      /' | head -10
+  else
+    pass "still image held its frame without tripping the stall detector"
+  fi
+  kill "$IPID" 2>/dev/null
+  pkill -f mpvpaper 2>/dev/null || true
+  wait 2>/dev/null
+fi
+
 echo "--------------------------------------------------------------"
 echo " required: ${req_pass} passed, ${req_fail} failed; ${#bonus[@]} best-effort notes"
 if [ "$req_fail" -eq 0 ] && [ "$req_pass" -ge 3 ]; then

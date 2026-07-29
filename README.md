@@ -67,6 +67,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 - **Power saving** — cheaper GPU scaling for laptops; measured to roughly halve GPU power (see [Performance](#performance-and-battery-life))
 - **Multi-monitor** — a different wallpaper per display, with synced playback for the same video across monitors
 - **Day & night schedules** — swap wallpapers on a timer, arbitrary time slots, or sunrise/sunset
+- **Wallpaper widgets** — synced song lyrics and a themed clock drawn onto the wallpaper itself; both off by default (see [FAQ](#can-i-show-song-lyrics-or-a-clock-on-my-wallpaper))
 - **Batch management** — select several wallpapers at once and remove them in one step
 - **Built-in catalog** — browse curated, properly licensed wallpapers in-app
 - **Command palette** — Ctrl+K to set any wallpaper or reach any feature from the keyboard
@@ -148,9 +149,81 @@ Yes. Fresco supports per-display wallpapers, and when the same video is used acr
 
 Yes — animated GIFs, static images, image slideshows with transitions (crossfade, fade, slide, Ken Burns), and multi-video playlists, in addition to video files.
 
+### Can I show song lyrics or a clock on my wallpaper?
+
+Yes. Fresco can draw **time-synced lyrics** and a **themed clock** onto the
+wallpaper. Both are **off by default** — open the app menu (Ctrl+,), choose **Advanced…**,
+and scroll to the **Lyrics** and **Clock** groups.
+The lyrics widget follows whatever is playing on your system and shows the
+current line in time with the music (with the next line dimmed underneath, if
+you want it); the clock has five themes and needs no music and no network.
+Both offer a nine-point placement grid, a size and margin, and accent tinting,
+and both appear on every display unless you name a single connector in the
+`[widgets]` block of `config.toml`.
+
+Widgets are drawn into the wallpaper itself, so they never sit above your
+windows and never intercept a click. They are **not available on GNOME under
+Wayland**, which has no live wallpaper surface for Fresco to draw into (the same
+reason it falls back to a static frame). Lyrics and the clock are the two
+widgets available today; an audio visualiser and a spinning album-art disc are
+in progress and not shipped yet.
+
+### Which music players work with the lyrics widget?
+
+Anything that publishes standard MPRIS metadata, but they are not equally
+reliable:
+
+| Player | Works? | Notes |
+|---|---|---|
+| **Firefox** | ✅ | The reliable choice, and what the feature was verified against |
+| Chrome / Brave / Edge / Vivaldi / Opera | ⚠️ | See below |
+| Spotify — **in a browser** | ✅ | Reports playback position correctly |
+| Spotify — **native Linux client** | ⚠️ | Reports its position as 0 forever, so lyrics can't stay in sync |
+| Local players (VLC, mpv, Rhythmbox, …) | ✅ | Also the case where a local `.lrc` file is most likely to exist |
+
+Chromium-family browsers claim an MPRIS name the first time any tab plays media
+and **never release it** — a long-standing Chromium bug. When playback ends, the
+title clears but a stale "zombie" session is left on the bus, sometimes still
+carrying artwork. Fresco ignores any player publishing no track title, which
+skips those sessions, but Chromium's own reporting stays inconsistent enough
+that Firefox is the browser to use for this.
+
+Spotify's native Linux client has returned `Position: 0` and never emitted a
+seek since 2018, across native, Flatpak and snap builds. Fresco detects that
+behaviorally — three spaced-out zero readings while playing — and free-runs the
+lyric clock from the track change instead, which drifts if you skip around.
+Spotify in a browser has no such problem.
+
+### Where do the lyrics come from?
+
+A local `.lrc` file first: one sitting next to the audio file, or a matching one
+in a lyrics folder you point Fresco at. That path works offline and is the best
+match, because it's the file you chose.
+
+When there is no local file — which is most of the time if you stream — Fresco
+looks the track up on [LRCLIB](https://lrclib.net), a free community-run synced
+lyrics database, and caches the answer under `~/.cache/fresco/lyrics` so the
+same song is never fetched twice. That lookup sends the track's title, artist
+and album to LRCLIB; nothing is sent unless the lyrics widget is on and the
+track has no local file. Fresco does not host, own or license lyric content —
+LRCLIB's entries are contributed by its users and LRCLIB states no license over
+them, so Fresco fetches on demand and caches per-user rather than shipping a
+lyrics database of its own.
+
+Lyric timing in `.lrc` files is hand-made and often a little off. There is a
+sync offset slider in the lyrics settings for exactly that.
+
 ### Which Linux distros are supported?
 
 Fresco ships a `.deb` package for Debian- and Ubuntu-based distributions: Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, and Deepin 25. Other distributions can build from source — see [docs/INSTALL.md](docs/INSTALL.md).
+
+### Fresco doesn't show up in the Deepin launcher after installing — why?
+
+A known dde-launchpad issue: its post-install refresh doesn't pick Fresco up.
+Run `killall dde-shell` (it restarts automatically) or log out and back in, and
+the entry appears permanently. Fresco itself installs correctly — it's listed by
+Deepin's own application manager, and its icon resolves in every installed
+theme. Being tracked in [docs/AUDIT.md](docs/AUDIT.md#deepin-launcher-hot-refresh-open-2026-07-26).
 
 ### How do I remove several wallpapers at once?
 
@@ -170,4 +243,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland). A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, and Deepin. Last updated: 2026-07-26.</sub>
+<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland). A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, and Deepin. Last updated: 2026-07-29.</sub>

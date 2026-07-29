@@ -1,14 +1,16 @@
 import { FAQ, FEATURE_LIST, AUTHOR } from "@/lib/content";
 import { ALTERNATIVES } from "@/lib/alternatives";
 import { GITHUB_URL, RELEASES_URL, LICENSE_URL } from "@/lib/site";
+import { VIDEOS, embedUrl, posterUrl, watchUrl } from "@/lib/videos";
 
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 /**
  * Structured data for SEO and GEO. A single @graph carries the
  * SoftwareApplication (with a live version and download counter), the WebSite,
- * the maintainer (Person), the FAQPage, and a HowTo install walkthrough. AI
- * answer engines and Google read this from the server-rendered HTML.
+ * the maintainer (Person), the FAQPage, a HowTo install walkthrough, and a
+ * VideoObject per demo on the page. AI answer engines and Google read this
+ * from the server-rendered HTML.
  */
 export function JsonLd({
   version,
@@ -45,6 +47,33 @@ export function JsonLd({
       "live wallpaper linux, video wallpaper linux, animated wallpaper ubuntu, wallpaper engine alternative linux, hidamari alternative, live wallpaper wayland, hyprland live wallpaper, kde plasma live wallpaper",
   };
 
+  /**
+   * One VideoObject per demo in <VideoShowcase />. Google needs name,
+   * description, thumbnailUrl, and uploadDate at minimum; embedUrl is what
+   * makes the result eligible for the video carousel. @id lets the
+   * SoftwareApplication point at these rather than restating them.
+   */
+  const videos = VIDEOS.map((video) => ({
+    "@type": "VideoObject",
+    "@id": `${SITE_URL}/#video-${video.id}`,
+    name: video.title,
+    description: video.description,
+    thumbnailUrl: [posterUrl(video.id)],
+    uploadDate: video.uploadDate,
+    duration: video.duration,
+    embedUrl: embedUrl(video.id),
+    // No contentUrl: schema.org wants a direct media file there, and YouTube
+    // does not expose one. embedUrl alone is sufficient for rich results.
+    url: watchUrl(video.id),
+    inLanguage: "en",
+    isFamilyFriendly: true,
+    author: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
+    publisher: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
+    about: { "@type": "SoftwareApplication", name: "Fresco", url: SITE_URL },
+  }));
+
+  software.video = videos.map((video) => ({ "@id": video["@id"] }));
+
   if (typeof downloads === "number") {
     software.interactionStatistic = {
       "@type": "InteractionCounter",
@@ -57,6 +86,7 @@ export function JsonLd({
     "@context": "https://schema.org",
     "@graph": [
       software,
+      ...videos,
       {
         "@type": "WebSite",
         name: "Fresco",

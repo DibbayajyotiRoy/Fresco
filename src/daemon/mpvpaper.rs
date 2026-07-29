@@ -39,6 +39,43 @@ struct Inner {
     ipc: MpvIpc,
 }
 
+/// Why a spawn failed, as a **content-free** code (no paths, no file names) the
+/// supervisor can put in telemetry. Attached to the returned `anyhow` error so
+/// callers classify by type instead of matching on prose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnFail {
+    /// The mpvpaper binary could not be executed at all.
+    Missing,
+    /// It started, then exited before its IPC socket appeared — a broken GL/EGL
+    /// stack, or an output the compositor no longer advertises.
+    ExitedEarly,
+    /// It stayed up but never opened its mpv IPC socket.
+    IpcTimeout,
+}
+
+impl SpawnFail {
+    pub fn code(self) -> &'static str {
+        match self {
+            SpawnFail::Missing => "mpvpaper_missing",
+            SpawnFail::ExitedEarly => "exited_early",
+            SpawnFail::IpcTimeout => "ipc_timeout",
+        }
+    }
+
+    /// Classify an error returned by [`WaylandPlayer::spawn`].
+    pub fn of(e: &anyhow::Error) -> Option<SpawnFail> {
+        e.downcast_ref::<SpawnFail>().copied()
+    }
+}
+
+impl std::fmt::Display for SpawnFail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for SpawnFail {}
+
 impl WaylandPlayer {
     /// Spawn `mpvpaper <connector> <file>` and connect to its mpv IPC socket.
     /// `file` is the initial media (for a slideshow, the first image — later ones
@@ -70,6 +107,7 @@ impl WaylandPlayer {
             .arg(connector)
             .arg(file)
             .spawn()
+            .map_err(|e| anyhow::Error::new(SpawnFail::Missing).context(e))
             .with_context(|| {
                 format!(
                     "failed to start mpvpaper at {} for output {connector} — is it bundled next to frescod?",
@@ -85,9 +123,9 @@ impl WaylandPlayer {
         for _ in 0..50 {
             if let Ok(Some(status)) = child.try_wait() {
                 std::fs::remove_file(&socket_path).ok();
-                return Err(anyhow!(
+                return Err(anyhow::Error::new(SpawnFail::ExitedEarly).context(format!(
                     "mpvpaper for {connector} exited immediately ({status})"
-                ));
+                )));
             }
             if ipc.connect_retry(1).is_ok() {
                 connected = true;
@@ -98,7 +136,8 @@ impl WaylandPlayer {
             let _ = child.kill();
             let _ = child.wait();
             std::fs::remove_file(&socket_path).ok();
-            return Err(anyhow!("mpv IPC for {connector} never came up"));
+            return Err(anyhow::Error::new(SpawnFail::IpcTimeout)
+                .context(format!("mpv IPC for {connector} never came up")));
         }
         let hwdec = ipc.get("hwdec-current");
 
@@ -162,6 +201,60 @@ impl WaylandPlayer {
 
     pub fn set_gamma(&self, gamma: i32) {
         self.set("gamma", json!(gamma));
+    }
+
+    /// Draw an ASS overlay on the OSD layer; empty `ass` clears it.
+    ///
+    /// Mirrors [`super::mpv::player::Player::set_overlay`] exactly — same
+    /// command, same overlay id, same explicit `res_x`/`res_y`. Keeping the two
+    /// backends in lockstep matters here: an overlay that silently no-ops on one
+    /// of them is the `raise_demuxer_cache` bug in a far more visible place.
+    ///
+    /// Note this goes over IPC rather than through a spawn option, which also
+    /// sidesteps mpvpaper's `-o` parsing — colours are `#RRGGBB`, and `#` starts
+    /// a comment in the mpv config file mpvpaper forwards those through.
+    /// Place a raw BGRA bitmap on the OSD layer at `(x, y)`.
+    ///
+    /// Mirrors [`super::mpv::player::Player::overlay_add`]. ASS carries no
+    /// bitmaps, so image-bearing widgets go through mpv's `overlay-add`, which
+    /// reads the pixels from `path`; the caller keeps that file alive while the
+    /// overlay is shown. `stride` is bytes per row (`w * 4`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn overlay_add(&self, id: u32, x: i32, y: i32, path: &str, w: u32, h: u32, stride: u32) {
+        self.command(&[
+            json!("overlay-add"),
+            json!(id),
+            json!(x),
+            json!(y),
+            json!(path),
+            json!(0),
+            json!("bgra"),
+            json!(w),
+            json!(h),
+            json!(stride),
+        ]);
+    }
+
+    /// Remove a bitmap overlay previously added with [`WaylandPlayer::overlay_add`].
+    pub fn overlay_remove(&self, id: u32) {
+        self.command(&[json!("overlay-remove"), json!(id)]);
+    }
+
+    pub fn set_overlay(&self, id: u32, ass: &str, res_x: u32, res_y: u32) {
+        if ass.is_empty() {
+            self.command(&[json!("osd-overlay"), json!(id), json!("none"), json!("")]);
+        } else {
+            self.command(&[
+                json!("osd-overlay"),
+                json!(id),
+                json!("ass-events"),
+                json!(ass),
+                json!(res_x),
+                json!(res_y),
+                json!(0),
+                json!(false),
+            ]);
+        }
     }
 
     pub fn set_zoom_pan(&self, zoom: f64, pan_x: f64, pan_y: f64) {
@@ -238,6 +331,19 @@ impl WaylandPlayer {
             .borrow_mut()
             .ipc
             .get("playback-time")?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    /// Length of the current file in seconds. A still image reports `0` — the
+    /// supervisor uses that to tell a frame held on purpose apart from a wedged
+    /// renderer (see `WlOutput::check_stall`).
+    pub fn duration(&self) -> Option<f64> {
+        self.inner
+            .borrow_mut()
+            .ipc
+            .get("duration")?
             .trim()
             .parse()
             .ok()
@@ -525,6 +631,23 @@ mod tests {
             assert!(!opts.contains("vf="), "{level:?} must not add a filter");
             assert!(!opts.contains("vd-lavc-skipframe"), "{level:?}");
         }
+    }
+
+    /// Every spawn failure must survive its `.context()` wrapper as a code the
+    /// supervisor can report — telemetry classifies by type, never by prose.
+    #[test]
+    fn spawn_failures_carry_a_content_free_code() {
+        for f in [
+            SpawnFail::Missing,
+            SpawnFail::ExitedEarly,
+            SpawnFail::IpcTimeout,
+        ] {
+            let e = anyhow::Error::new(f).context("mpvpaper for DP-1 exited immediately (code 1)");
+            assert_eq!(SpawnFail::of(&e), Some(f));
+            assert_eq!(SpawnFail::of(&e).map(SpawnFail::code), Some(f.code()));
+        }
+        // An unrelated error classifies as unknown rather than mis-attributing.
+        assert_eq!(SpawnFail::of(&anyhow!("no playable file configured")), None);
     }
 
     fn have(bin: &str) -> bool {

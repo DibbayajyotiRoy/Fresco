@@ -4,6 +4,10 @@
 mod control;
 mod dde;
 mod fullscreen;
+// Public so the widget engine's API stays visible while the daemon-loop call
+// sites are being built out; the module is otherwise internal.
+#[allow(dead_code)]
+pub mod lyrics_runtime;
 pub mod monitors;
 pub mod mpv;
 mod mpvpaper;
@@ -11,6 +15,8 @@ mod notifier;
 mod overview;
 mod wayland_outputs;
 mod webbridge;
+#[allow(dead_code)]
+pub mod widgets;
 mod x11_fullscreen;
 mod x11win;
 
@@ -31,6 +37,12 @@ use mpvpaper::WaylandPlayer;
 use x11win::{Atoms, WallpaperWindow, WindowKind};
 
 const TICK: Duration = Duration::from_millis(100);
+
+/// Bitmap overlays (`overlay-add`) use an id space separate from the ASS
+/// overlays, whose ids live in `widgets` so engine and daemon can't disagree.
+#[allow(dead_code)]
+const OVERLAY_BMP_DISC: u32 = 0;
+
 const LOWER_INTERVAL: Duration = Duration::from_secs(2);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 const BATTERY_INTERVAL: Duration = Duration::from_secs(30);
@@ -215,12 +227,51 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.set_paused(paused),
         }
     }
+    /// Draw an ASS overlay over the wallpaper; empty `ass` clears it.
+    ///
+    /// `id` separates widgets: each owns one overlay slot ([`OVERLAY_LYRICS`],
+    /// [`OVERLAY_CLOCK`]) so they compose instead of overwriting each other.
+    ///
+    /// Deliberately implemented on BOTH arms. `raise_demuxer_cache` below is the
+    /// standing example of a handle method that quietly does nothing on one
+    /// backend; a widget that rendered only on Wayland would be that bug where
+    /// users can see it.
+    #[allow(dead_code)] // wired up by the widget runtime (docs/WIDGETS_ROADMAP.md W1)
+    fn set_overlay(&self, id: u32, ass: &str, res_x: u32, res_y: u32) {
+        match self {
+            PlayerHandle::X11(p) => p.set_overlay(id, ass, res_x, res_y),
+            PlayerHandle::Wayland(p) => p.set_overlay(id, ass, res_x, res_y),
+        }
+    }
+    /// Place a raw BGRA bitmap over the wallpaper (the album-art disc).
+    /// Symmetric across backends for the same reason as `set_overlay`.
+    #[allow(dead_code, clippy::too_many_arguments)]
+    fn overlay_add(&self, id: u32, x: i32, y: i32, path: &str, w: u32, h: u32, stride: u32) {
+        match self {
+            PlayerHandle::X11(p) => p.overlay_add(id, x, y, path, w, h, stride),
+            PlayerHandle::Wayland(p) => p.overlay_add(id, x, y, path, w, h, stride),
+        }
+    }
+    #[allow(dead_code)]
+    fn overlay_remove(&self, id: u32) {
+        match self {
+            PlayerHandle::X11(p) => p.overlay_remove(id),
+            PlayerHandle::Wayland(p) => p.overlay_remove(id),
+        }
+    }
     /// Current playback position in seconds, used by both backends' stall
     /// detectors (X11 cold-boot self-heal; Wayland frozen-but-alive supervision).
     fn time_pos(&self) -> Option<f64> {
         match self {
             PlayerHandle::X11(p) => p.time_pos(),
             PlayerHandle::Wayland(p) => p.time_pos(),
+        }
+    }
+    /// Length of the current file; `0` for a still image (see `check_stall`).
+    fn duration(&self) -> Option<f64> {
+        match self {
+            PlayerHandle::X11(p) => p.duration(),
+            PlayerHandle::Wayland(p) => p.duration(),
         }
     }
     fn hwdec_current(&self) -> Option<String> {
@@ -308,6 +359,10 @@ pub struct Daemon {
     dde_mode: dde::Mode,
     /// True once the one-time DDE render self-check has run (it blocks ~1s).
     dde_self_checked: bool,
+    /// On-wallpaper widgets (lyrics, clock). Owns its own worker thread and
+    /// hands back only overlays whose content actually changed, so an idle
+    /// desktop costs nothing (see docs/WIDGETS_ROADMAP.md "Power model").
+    widgets: widgets::WidgetEngine,
 }
 
 impl Daemon {
@@ -315,6 +370,9 @@ impl Daemon {
         let (conn, screen_num) =
             x11rb::connect(None).context("connecting to X11 (is DISPLAY set?)")?;
         let atoms = Atoms::new(&conn)?.reply()?;
+        let mut widgets =
+            widgets::WidgetEngine::new(config.widgets.as_ref(), accent_hex(config.accent));
+        apply_widget_config(&mut widgets, &config);
         Ok(Daemon {
             conn,
             screen_num,
@@ -337,7 +395,74 @@ impl Daemon {
             heals: 0,
             dde_mode: dde::Mode::Inactive,
             dde_self_checked: false,
+            widgets,
         })
+    }
+
+    /// Push any widget overlay whose content changed onto the renderer that
+    /// owns them. Returns immediately with nothing to do on the overwhelming
+    /// majority of ticks — the engine compares rendered content, so a static
+    /// lyric line paints once and a clock showing 14:32 paints nothing until
+    /// 14:33.
+    fn push_widgets(&mut self) {
+        if !self.widgets.is_active() {
+            return;
+        }
+        let updates = self.widgets.tick();
+        if updates.is_empty() {
+            return;
+        }
+        // A widget belongs to one display: the configured connector, else the
+        // first renderer. Pushing to every renderer would duplicate the lyric
+        // across monitors, which reads as a bug rather than a feature.
+        // No configured connector = every display, matching the wallpaper
+        // itself: the widget is part of the wallpaper, so a two-monitor desktop
+        // showing it on one screen reads as half-broken. Naming a connector in
+        // `widgets.monitor` narrows it to that one.
+        let want = self.widgets.monitor().map(str::to_string);
+        let targets: Vec<&Renderer> = self
+            .renderers
+            .iter()
+            .filter(|r| {
+                want.as_deref()
+                    .is_none_or(|c| c == r.window.connector.as_str())
+            })
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        // The bitmap widgets place pixels in real output coordinates, not the
+        // ASS PLAY_RES space, so the engine needs this display's actual mode.
+        if let Some(m) = self
+            .monitors
+            .iter()
+            .find(|m| m.connector == targets[0].window.connector)
+        {
+            self.widgets
+                .set_output_size(u32::from(m.width), u32::from(m.height));
+        }
+        for u in updates {
+            log::debug!(
+                "widget: overlay {} -> {} chars on {} display(s)",
+                u.overlay_id,
+                u.ass.len(),
+                targets.len()
+            );
+            for r in &targets {
+                dispatch_widget(&r.player, &u);
+            }
+        }
+    }
+
+    /// Blank every widget overlay. Called before a rebuild/teardown so an
+    /// overlay can never survive onto the next wallpaper — the leak class the
+    /// scheduled-swap comments warn about.
+    fn clear_widgets(&mut self) {
+        for u in self.widgets.clear_all() {
+            for r in &self.renderers {
+                dispatch_widget(&r.player, &u);
+            }
+        }
     }
 
     fn screen(&self) -> Screen {
@@ -499,6 +624,7 @@ impl Daemon {
                 self.last_sync_check = now;
             }
             self.check_cold_boot_stall(now);
+            self.push_widgets();
             let animating = self.advance_slideshows(now);
 
             std::thread::sleep(if animating { ANIM_TICK } else { TICK });
@@ -510,6 +636,12 @@ impl Daemon {
             Request::Apply => {
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
                 self.sched.hold_current(&self.config);
+                // Widget settings live in the same file, so a GUI toggle arrives
+                // here. Re-push unconditionally: a style change must repaint even
+                // when the lyric line itself hasn't moved.
+                let cfg = self.config.clone();
+                apply_widget_config(&mut self.widgets, &cfg);
+                self.widgets.invalidate();
                 match self.rebuild() {
                     Ok(_) => {
                         overview::apply(&self.config.wallpaper);
@@ -649,6 +781,10 @@ impl Daemon {
     /// window first can hang or leak the GPU context (notably on NVIDIA), which
     /// otherwise piles up on every wallpaper change.
     fn teardown_renderers(&mut self) {
+        // Blank widgets first: the players are about to go, and a fresh mpv
+        // starts with no overlays, so state must be re-established after.
+        self.clear_widgets();
+        self.widgets.invalidate();
         for r in self.renderers.drain(..) {
             let Renderer { window, player, .. } = r;
             drop(player);
@@ -1442,6 +1578,13 @@ fn run_wayland_layershell() -> Result<()> {
     // How often to re-poll fullscreen state (coarse — pausing is not latency
     // critical, and this bounds the per-tick roundtrip cost).
     const FS_POLL: Duration = Duration::from_millis(250);
+    // How often to ask whether a parked display has come back. Nothing is
+    // retrying at that point, so this only bounds how long a returning monitor
+    // stays blank.
+    const PARKED_PROBE: Duration = Duration::from_secs(10);
+    // mpvpaper's "every output" target, used when enumeration failed at start.
+    // It is not a real connector name, so it can never appear in an output list.
+    const ALL_OUTPUTS: &str = "ALL";
 
     setup_vaapi_env();
     let mut config = Config::load().unwrap_or_default();
@@ -1458,7 +1601,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut monitors = wayland_outputs::list_outputs().unwrap_or_else(|e| {
         log::warn!("output enumeration failed ({e:#}); targeting all outputs as one");
         vec![Monitor {
-            connector: "ALL".into(),
+            connector: ALL_OUTPUTS.into(),
             x: 0,
             y: 0,
             width: 0,
@@ -1477,6 +1620,10 @@ fn run_wayland_layershell() -> Result<()> {
     let mut user_paused = false;
     let mut battery_paused = false;
     let mut last_supervise = Instant::now() - SUPERVISE;
+    // Display-presence probe: due immediately, then paced by whether anything is
+    // still restarting (see the supervise block).
+    let mut next_output_probe = Instant::now();
+    let mut probed = false;
     let mut sched = SchedState::default();
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
@@ -1494,6 +1641,17 @@ fn run_wayland_layershell() -> Result<()> {
     );
     let mut hidden: HashSet<String> = HashSet::new();
     let mut last_fs_poll = Instant::now() - FS_POLL;
+    // Sum of every output's respawn counter. A fresh mpv has no overlays, so a
+    // change here means the widget engine must re-push. Summing (rather than
+    // tracking per output) is enough: the engine re-pushes everything it owns,
+    // and it emits nothing when content is unchanged, so a re-push costs one
+    // repaint rather than a stream of them.
+    let mut last_generations: u64 = 0;
+    // On-wallpaper widgets. Same engine the X11 loop uses, so the two backends
+    // cannot drift apart — the failure mode `raise_demuxer_cache` is named for.
+    let mut widget_engine =
+        widgets::WidgetEngine::new(config.widgets.as_ref(), accent_hex(config.accent));
+    apply_widget_config(&mut widget_engine, &config);
 
     // One supervised mpvpaper per output, keyed by connector name.
     let mut outputs: BTreeMap<String, WlOutput> = BTreeMap::new();
@@ -1529,6 +1687,11 @@ fn run_wayland_layershell() -> Result<()> {
                     Request::Apply => {
                         config = Config::load().unwrap_or_else(|_| config.clone());
                         sched.hold_current(&config);
+                        // Widget settings ride in the same file, so a GUI toggle
+                        // arrives here. invalidate() forces a repaint even when
+                        // the content itself (e.g. the lyric line) is unchanged.
+                        apply_widget_config(&mut widget_engine, &config);
+                        widget_engine.invalidate();
                         let paused = user_paused || battery_paused;
                         // A display plugged in after startup must be reachable
                         // without a daemon restart (interim until the native
@@ -1669,8 +1832,38 @@ fn run_wayland_layershell() -> Result<()> {
             }
 
             let paused = user_paused || battery_paused;
-            for o in outputs.values_mut() {
-                o.supervise(paused, MAX_RESTARTS);
+            // A renderer that is down may be down because its display went away
+            // (monitor asleep, DisplayPort link dropped) — restarting into a
+            // connector the compositor no longer advertises can only fail, and
+            // burns the anti-flap budget permanently. Enumerating costs a
+            // Wayland roundtrip, so ask only when something is actually down.
+            let present: Option<HashSet<String>> =
+                if outputs.values().any(|o| o.renderer_down()) && now >= next_output_probe {
+                    probed = true;
+                    wayland_outputs::list_outputs()
+                        .ok()
+                        .map(|m| m.into_iter().map(|x| x.connector).collect())
+                } else {
+                    None
+                };
+            for (connector, o) in outputs.iter_mut() {
+                // No probe this tick, or enumeration failed → assume present,
+                // i.e. exactly the behaviour before the display check existed.
+                let here = connector == ALL_OUTPUTS
+                    || present.as_ref().is_none_or(|s| s.contains(connector));
+                o.supervise(paused, MAX_RESTARTS, here);
+            }
+            if probed {
+                probed = false;
+                // While restarts are still in flight the answer is needed every
+                // tick, before the budget is spent; once every down output is
+                // parked we are only waiting for a display to come back.
+                next_output_probe = now
+                    + if outputs.values().any(|o| o.renderer_down() && !o.absent) {
+                        Duration::ZERO
+                    } else {
+                        PARKED_PROBE
+                    };
             }
 
             sync_wayland_outputs(&outputs);
@@ -1689,6 +1882,45 @@ fn run_wayland_layershell() -> Result<()> {
         let base_paused = user_paused || battery_paused;
         for (connector, o) in &outputs {
             o.reconcile_pause(base_paused || hidden.contains(connector));
+        }
+
+        // A respawn anywhere (supervisor heal, static-frame fallback, output
+        // re-creation) leaves that mpv with no overlays. Re-push once when the
+        // total changes, instead of threading a callback through every heal
+        // path — the class of bug where one path gets missed.
+        let generations: u64 = outputs.values().map(|o| o.generation).sum();
+        if generations != last_generations {
+            last_generations = generations;
+            widget_engine.invalidate();
+        }
+
+        // Widgets: only overlays whose content actually changed come back, so
+        // this is a cheap no-op on almost every pass.
+        if widget_engine.is_active() {
+            let updates = widget_engine.tick();
+            if !updates.is_empty() {
+                // Every display unless a connector is configured — see the
+                // X11 `push_widgets` note; the two backends must agree.
+                let want = widget_engine.monitor().map(str::to_string);
+                // Bitmap widgets place pixels in real output coordinates, not
+                // the ASS PLAY_RES space, so the engine needs the actual mode.
+                if let Some(m) = monitors
+                    .iter()
+                    .find(|m| want.as_deref().is_none_or(|w| w == m.connector.as_str()))
+                {
+                    widget_engine.set_output_size(u32::from(m.width), u32::from(m.height));
+                }
+                for u in updates {
+                    for (c, o) in &outputs {
+                        if want.as_deref().is_some_and(|w| w != c.as_str()) {
+                            continue;
+                        }
+                        if let Some(p) = o.player.as_ref() {
+                            dispatch_widget(p, &u);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1764,6 +1996,21 @@ struct WlOutput {
     stall_strikes: u32,
     last_pos: Option<f64>,
     audio_heal: AudioHeal,
+    /// Parked because the compositor no longer advertises this connector (the
+    /// monitor slept, or a DisplayPort link dropped). Nothing can render to a
+    /// display that isn't there, so failures against it must not count.
+    absent: bool,
+    /// Why the last renderer went down ("dead"/"frozen") and, if respawning also
+    /// failed, its content-free [`SpawnFail`] code — reported with `renderer_giveup`
+    /// so a warning in the field says what actually broke.
+    last_down: &'static str,
+    last_spawn_fail: Option<&'static str>,
+    /// Bumped on every [`WlOutput::respawn`]. A fresh mpv carries no overlays,
+    /// so the widget engine must re-push after one — but the supervisor has
+    /// several heal paths and threading a callback through each is how one gets
+    /// missed. The loop instead watches this counter, which cannot go stale
+    /// because `respawn` is the only writer.
+    generation: u64,
 }
 
 impl WlOutput {
@@ -1788,6 +2035,10 @@ impl WlOutput {
             stall_strikes: 0,
             last_pos: None,
             audio_heal: AudioHeal::new(),
+            absent: false,
+            last_down: "never_started",
+            last_spawn_fail: None,
+            generation: 0,
         }
     }
 
@@ -1795,6 +2046,9 @@ impl WlOutput {
     /// state; `static_frame` spawns then pauses (holds frame one) — the no-black
     /// per-output fallback when live playback keeps failing.
     fn respawn(&mut self, paused: bool, static_frame: bool) {
+        // Bumped first: every exit from this function leaves a player that has
+        // no overlays, including the failure paths.
+        self.generation = self.generation.wrapping_add(1);
         drop(self.player.take());
         self.slideshow = None;
         self.animating = false;
@@ -1838,9 +2092,13 @@ impl WlOutput {
                 }
                 self.player = Some(handle);
                 self.applied_paused.set(paused || static_frame);
+                self.last_spawn_fail = None;
             }
             Err(e) => {
                 log::error!("[{}] {e:#}", self.connector);
+                self.last_spawn_fail = Some(
+                    crate::daemon::mpvpaper::SpawnFail::of(&e).map_or("spawn_failed", |f| f.code()),
+                );
                 if self.error.is_none() {
                     self.error = Some(e.to_string());
                 }
@@ -1944,19 +2202,50 @@ impl WlOutput {
     /// (dead GL context / stopped decode that still passes `is_alive`).
     fn check_stall(&mut self) -> bool {
         let pos = self.player.as_ref().and_then(|p| p.time_pos());
-        match (pos, self.last_pos) {
-            (Some(cur), Some(prev)) if (cur - prev).abs() < 1e-3 => self.stall_strikes += 1,
-            (Some(_), _) => self.stall_strikes = 0,
-            (None, _) => {} // couldn't read the position; don't penalize
-        }
+        let strikes = stall_step(self.last_pos, pos, self.stall_strikes, || {
+            self.player.as_ref().is_some_and(holds_frame_by_design)
+        });
+        self.stall_strikes = strikes;
         self.last_pos = pos;
         self.stall_strikes >= STALL_STRIKES
+    }
+
+    /// True while this output has no running renderer — the supervisor's cue to
+    /// ask the compositor whether the display is still there before spending the
+    /// restart budget on it.
+    fn renderer_down(&self) -> bool {
+        self.player.as_ref().is_none_or(|p| !p.is_alive())
+    }
+
+    /// Park an output whose display is gone: kill the renderer and stop counting
+    /// failures against it. Idempotent — called on every tick while it's away.
+    fn park_absent(&mut self) {
+        if !self.absent {
+            log::info!(
+                "[{}] display is no longer connected; parking until it returns",
+                self.connector
+            );
+            self.absent = true;
+            self.error = Some(format!(
+                "{}: display disconnected — waiting for it to come back",
+                self.connector
+            ));
+        }
+        drop(self.player.take());
+        self.slideshow = None;
+        self.animating = false;
+        self.stall_strikes = 0;
+        self.last_pos = None;
     }
 
     /// Per-output supervision: restart a dead — or frozen-but-alive — renderer with
     /// an anti-flap cap; after `max` consecutive failures fall back to a paused
     /// static frame (so the output never goes black) and surface it in `Status`.
-    fn supervise(&mut self, paused: bool, max: u32) {
+    ///
+    /// `output_present` is the compositor's answer to "is this connector still
+    /// there?" — only consulted once the renderer is down, so a bad enumeration
+    /// can never tear down a healthy one.
+    fn supervise(&mut self, paused: bool, max: u32, output_present: bool) {
         let alive = self.player.as_ref().map(|p| p.is_alive()).unwrap_or(false);
         if alive {
             // A paused or static-fallback frame is not expected to advance — don't
@@ -1979,14 +2268,36 @@ impl WlOutput {
                 "[{}] playback frozen (mpvpaper wedged); respawning",
                 self.connector
             );
+            self.last_down = "frozen";
             // fall through to the restart path below
+        } else if self.player.is_some() {
+            self.last_down = "dead";
         }
         // Renderer is dead, never started, or frozen.
+        if !output_present {
+            // Nothing can render to a display the compositor no longer
+            // advertises (monitor asleep, DisplayPort link dropped). Spending
+            // the restart budget here is what turned a sleeping monitor into a
+            // permanent give-up that outlived the display's return.
+            self.park_absent();
+            return;
+        }
+        if self.absent {
+            // It's back. The failures we counted belonged to the vanished
+            // display, not to this renderer — start clean rather than resuming
+            // a budget that was already spent.
+            log::info!("[{}] display is back; restoring playback", self.connector);
+            self.absent = false;
+            self.restarts = 0;
+            self.static_fallback = false;
+            self.error = None;
+        }
         if self.restarts < max {
             self.restarts += 1;
             log::warn!(
-                "[{}] renderer exited; restarting ({}/{max})",
+                "[{}] renderer down ({}); restarting ({}/{max})",
                 self.connector,
+                self.last_down,
                 self.restarts
             );
             self.respawn(paused, false);
@@ -2004,14 +2315,60 @@ impl WlOutput {
                 "[{}] giving up live playback; attempting a static frame",
                 self.connector
             );
+            // Content-free by construction: a connector name, the failure mode,
+            // the wallpaper kind and a SpawnFail code — never a path or a file
+            // name. Without them a report in the field says only "it failed".
             crate::telemetry::error(
                 "renderer_giveup",
-                &format!("{}: renderer failed {max}x", self.connector),
+                &format!(
+                    "{}: renderer failed {max}x (mode={}, kind={:?}, cause={})",
+                    self.connector,
+                    self.last_down,
+                    self.wallpaper.kind,
+                    self.last_spawn_fail.unwrap_or("spawn_ok"),
+                ),
             );
             self.respawn(true, true);
         }
         // restarts > max → given up; do nothing (anti-flap). Error stays in Status.
     }
+}
+
+/// One stall-detector step: the strike count given the previous and current
+/// playback positions. Split out of `WlOutput::check_stall` so the decision —
+/// including the held-frame exemption — is unit-testable without a renderer.
+fn stall_step(
+    prev: Option<f64>,
+    cur: Option<f64>,
+    strikes: u32,
+    holds_frame: impl FnOnce() -> bool,
+) -> u32 {
+    match (cur, prev) {
+        // The position hasn't moved. Only media that is *supposed* to advance
+        // earns a strike; `holds_frame` costs an IPC round-trip, so it is asked
+        // lazily — never on the healthy path.
+        (Some(c), Some(p)) if (c - p).abs() < 1e-3 => {
+            if holds_frame() {
+                0
+            } else {
+                strikes + 1
+            }
+        }
+        (Some(_), _) => 0,
+        (None, _) => strikes, // couldn't read the position; don't penalize
+    }
+}
+
+/// True when the player is showing media that legitimately never advances its
+/// clock. Images are spawned with `image-display-duration=inf`, so mpv holds
+/// `time-pos` at 0 forever while reporting `duration` 0 — reading that as a
+/// wedged renderer is what made image and slideshow wallpapers respawn until
+/// the supervisor gave up on the output. The X11 backend has always skipped
+/// stills in `check_cold_boot_stall`; asking the player rather than the
+/// configured kind also covers a playlist that mixes stills with video. An
+/// unreadable duration counts as held, matching the unreadable-position case.
+fn holds_frame_by_design(player: &PlayerHandle) -> bool {
+    player.duration().is_none_or(|d| d <= 0.0)
 }
 
 /// Aggregate `Status` across all Wayland outputs for the GUI / diagnostics.
@@ -2205,9 +2562,274 @@ fn which(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Send one widget update to a player. Text widgets go through `set_overlay`;
+/// the album-art disc is a bitmap and goes through `overlay_add`/`overlay_remove`
+/// instead — an empty ASS payload does NOT take a bitmap overlay down, which is
+/// why this is a match and not a single call.
+fn dispatch_widget(p: &PlayerHandle, u: &widgets::WidgetUpdate) {
+    match &u.bitmap {
+        None => p.set_overlay(u.overlay_id, &u.ass, widgets::RES_X, widgets::RES_Y),
+        Some(widgets::BitmapUpdate::Draw(b)) => {
+            p.overlay_add(u.overlay_id, b.x, b.y, &b.path_str(), b.w, b.h, b.stride)
+        }
+        Some(widgets::BitmapUpdate::Remove) => p.overlay_remove(u.overlay_id),
+    }
+}
+
+/// `config::Visualizer` -> the widget engine's visualiser settings.
+fn widget_visual_cfg(v: &crate::config::Visualizer) -> widgets::VisualCfg {
+    use crate::config::{GradientMode, VisualizerStyleCfg};
+    use crate::visualizer::{Gradient, VisualStyle, VisualStyleCfg};
+    widgets::VisualCfg {
+        enabled: v.enabled,
+        style: VisualStyleCfg {
+            style: match v.style {
+                VisualizerStyleCfg::Bars => VisualStyle::Bars,
+                VisualizerStyleCfg::Mirror => VisualStyle::Mirror,
+                VisualizerStyleCfg::Wave => VisualStyle::Wave,
+                VisualizerStyleCfg::Dots => VisualStyle::Dots,
+                VisualizerStyleCfg::Ring => VisualStyle::Ring,
+            },
+            anchor: widget_anchor(v.anchor),
+            width_pct: v.width_pct as f32,
+            height_px: v.height_px,
+            margin_px: v.margin_px,
+            // The user's own colour, not the accent: `accent_follow` is what
+            // decides between the two, and `render_ass` is given the accent
+            // separately. Passing the accent here as well made the fill the
+            // accent either way, so turning the switch off changed nothing.
+            colour: v.colour.clone(),
+            accent_follow: v.accent_follow,
+            gradient: match v.gradient {
+                GradientMode::None => Gradient::None,
+                GradientMode::Linear => Gradient::Linear,
+                GradientMode::Spectrum => Gradient::Spectrum,
+            },
+            colour_end: v.colour_end.clone(),
+            opacity: v.opacity,
+            gap_px: 4,
+            rounded: v.rounded,
+        },
+        bands: v.bands as usize,
+        ..widgets::VisualCfg::default()
+    }
+}
+
+/// `config::Disc` -> the widget engine's album-art settings.
+fn widget_disc_cfg(d: &crate::config::Disc) -> widgets::DiscWidgetCfg {
+    widgets::DiscWidgetCfg {
+        enabled: d.enabled,
+        anchor: widget_anchor(d.anchor),
+        size_px: d.size_px,
+        margin_px: d.margin_px,
+        spin: d.spin,
+        opacity: d.opacity,
+    }
+}
+
+/// The one place `config::LyricAnchor` becomes `lyrics::Anchor`. Every widget
+/// shares the nine-point grid, so this mapping must exist exactly once.
+fn widget_anchor(a: crate::config::LyricAnchor) -> crate::lyrics::Anchor {
+    use crate::config::LyricAnchor as C;
+    use crate::lyrics::Anchor as A;
+    match a {
+        C::TopLeft => A::TopLeft,
+        C::TopCenter => A::TopCenter,
+        C::TopRight => A::TopRight,
+        C::MidLeft => A::MidLeft,
+        C::MidCenter => A::MidCenter,
+        C::MidRight => A::MidRight,
+        C::BottomLeft => A::BottomLeft,
+        C::BottomCenter => A::BottomCenter,
+        C::BottomRight => A::BottomRight,
+    }
+}
+
+/// Push every widget setting from `config` into `engine`, in one place so the
+/// three loops cannot drift on which widgets they remember to update.
+fn apply_widget_config(engine: &mut widgets::WidgetEngine, config: &Config) {
+    let accent = accent_hex(config.accent);
+    let w = config.widgets.as_ref();
+    engine.set_config(w, accent);
+    engine.set_clock(w.map(|w| widget_clock_cfg(&w.clock)).as_ref());
+    engine.set_visualizer(w.map(|w| widget_visual_cfg(&w.visualizer)).as_ref());
+    engine.set_disc(w.map(|w| widget_disc_cfg(&w.disc)).as_ref());
+}
+
+/// `config::Clock` -> the widget engine's clock settings. The mapping
+/// `config::Clock` documents as "the daemon owns the one small mapping".
+fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
+    use crate::clock::{ClockStyle, ClockTheme};
+    use crate::config::{ClockThemeCfg, LyricAnchor};
+    use crate::lyrics::Anchor;
+    widgets::ClockCfg {
+        enabled: c.enabled,
+        style: ClockStyle {
+            theme: match c.theme {
+                ClockThemeCfg::Digital => ClockTheme::Digital,
+                ClockThemeCfg::Minimal => ClockTheme::Minimal,
+                ClockThemeCfg::Segment => ClockTheme::Segment,
+                ClockThemeCfg::Stacked => ClockTheme::Stacked,
+                ClockThemeCfg::Wordy => ClockTheme::Wordy,
+                ClockThemeCfg::Card => ClockTheme::Card,
+            },
+            anchor: match c.anchor {
+                LyricAnchor::TopLeft => Anchor::TopLeft,
+                LyricAnchor::TopCenter => Anchor::TopCenter,
+                LyricAnchor::TopRight => Anchor::TopRight,
+                LyricAnchor::MidLeft => Anchor::MidLeft,
+                LyricAnchor::MidCenter => Anchor::MidCenter,
+                LyricAnchor::MidRight => Anchor::MidRight,
+                LyricAnchor::BottomLeft => Anchor::BottomLeft,
+                LyricAnchor::BottomCenter => Anchor::BottomCenter,
+                LyricAnchor::BottomRight => Anchor::BottomRight,
+            },
+            font_size_pt: c.font_size_pt,
+            margin_px: c.margin_px,
+            show_seconds: c.show_seconds,
+            show_date: c.show_date,
+            use_24h: c.use_24h,
+            // No colour key in the config on purpose; accent-follow is the path.
+            colour: "#FFFFFF".to_string(),
+            accent_follow: c.accent_follow,
+        },
+    }
+}
+
+/// Accent hex for widget text. `gui::theme::accent_pair` is the same table but
+/// lives behind the `gui` feature, and the daemon must not depend on that; these
+/// are its dark variants, which read best over video.
+fn accent_hex(a: crate::config::Accent) -> &'static str {
+    use crate::config::Accent;
+    match a {
+        Accent::Blue => "#5E6AD2",
+        Accent::Teal => "#2BB6A2",
+        Accent::Green => "#46B96B",
+        Accent::Amber => "#DBA13C",
+        Accent::Coral => "#F0708A",
+        Accent::Graphite => "#98A1B0",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_stat_ticks;
+    use super::{parse_stat_ticks, stall_step, WlOutput, STALL_STRIKES};
+    use crate::config::{PowerSaving, Scaling, Wallpaper};
+
+    /// A still image holds `time-pos` at 0 forever (`image-display-duration=inf`),
+    /// so the frozen-renderer detector must never strike it — that misread is
+    /// what respawned image and slideshow wallpapers until the supervisor gave
+    /// up on the output and reported `renderer_giveup`.
+    #[test]
+    fn a_held_frame_is_never_a_stall() {
+        let mut strikes = 0;
+        for _ in 0..STALL_STRIKES * 3 {
+            strikes = stall_step(Some(0.0), Some(0.0), strikes, || true);
+            assert_eq!(strikes, 0, "an image must not accumulate strikes");
+        }
+    }
+
+    /// A video whose clock stops is a wedged renderer, and must still be caught.
+    #[test]
+    fn a_stopped_video_still_strikes_out() {
+        let mut strikes = 0;
+        for expected in 1..=STALL_STRIKES {
+            strikes = stall_step(Some(12.5), Some(12.5), strikes, || false);
+            assert_eq!(strikes, expected);
+        }
+        assert!(strikes >= STALL_STRIKES);
+        // Progress clears the count, held frame or not.
+        assert_eq!(stall_step(Some(12.5), Some(13.0), strikes, || false), 0);
+        assert_eq!(stall_step(Some(12.5), Some(13.0), strikes, || true), 0);
+    }
+
+    /// A display that goes away — monitor asleep, DisplayPort link dropped — must
+    /// not spend the restart budget: nothing can render to a connector the
+    /// compositor no longer advertises, and those failures used to outlive the
+    /// display's return as a permanent give-up on that output.
+    ///
+    /// Hermetic: the wallpaper has no playable file, so `respawn` bails before
+    /// it executes anything — the counter logic is all that runs.
+    #[test]
+    fn a_vanished_display_does_not_burn_the_restart_budget() {
+        use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
+        const MAX: u32 = 5;
+        let mut o = super::WlOutput::new(
+            "DP-1".into(),
+            Wallpaper {
+                kind: Kind::Image,
+                ..Default::default()
+            },
+            Scaling::Balanced,
+            PowerSaving::Full,
+        );
+
+        // Away: every tick parks instead of restarting, however long it lasts.
+        for _ in 0..MAX * 3 {
+            o.supervise(false, MAX, false);
+        }
+        assert!(o.absent, "a missing display must park its output");
+        assert_eq!(o.restarts, 0, "and must not count as a renderer failure");
+        assert!(!o.static_fallback, "nor reach the give-up fallback");
+
+        // Back: retried from a clean slate.
+        o.supervise(false, MAX, true);
+        assert!(!o.absent);
+        assert_eq!(o.restarts, 1, "the display's return retries the renderer");
+
+        // A renderer that keeps failing while its display is present still
+        // counts — the anti-flap cap is intact.
+        for _ in 1..MAX {
+            o.supervise(false, MAX, true);
+        }
+        assert_eq!(o.restarts, MAX, "real failures still exhaust the budget");
+
+        // ...but a display that vanishes at that moment and returns starts over
+        // instead of giving up on an output that is now perfectly fine.
+        o.supervise(false, MAX, false);
+        o.supervise(false, MAX, true);
+        assert_eq!(o.restarts, 1);
+        assert!(
+            !o.static_fallback,
+            "a give-up must never survive the display's return"
+        );
+    }
+
+    /// An unreadable position is a failed IPC read, not evidence of a freeze.
+    #[test]
+    fn an_unreadable_position_holds_the_count() {
+        assert_eq!(stall_step(Some(4.0), None, 2, || false), 2);
+        assert_eq!(stall_step(None, None, 0, || false), 0);
+        // First sample after a respawn: nothing to compare against yet.
+        assert_eq!(stall_step(None, Some(0.0), 0, || false), 0);
+    }
+
+    /// Every respawn must be visible to the widget engine.
+    ///
+    /// A fresh mpv carries no overlays, so a healed renderer comes back blank
+    /// unless something re-pushes. The loop watches the summed generation
+    /// counter rather than being told by each heal path, because there are
+    /// several of them (supervisor heal, static-frame fallback, output
+    /// re-creation, apply) and threading a callback through each is how one
+    /// gets missed. `respawn` is the counter's only writer, so a path added
+    /// later is covered without being told to be.
+    #[test]
+    fn every_respawn_bumps_the_generation() {
+        let mut o = WlOutput::new(
+            "TEST-1".into(),
+            Wallpaper::default(),
+            Scaling::default(),
+            PowerSaving::default(),
+        );
+        assert_eq!(o.generation, 0, "a fresh output has not respawned yet");
+
+        // Spawning will fail here (no compositor in a unit test) — the counter
+        // must still move, because a failed respawn also leaves no overlays.
+        o.respawn(false, false);
+        assert_eq!(o.generation, 1);
+        o.respawn(true, true);
+        assert_eq!(o.generation, 2, "the static-frame path counts too");
+    }
 
     #[test]
     fn stat_ticks_survive_weird_comm() {

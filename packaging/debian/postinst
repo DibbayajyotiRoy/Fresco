@@ -1,0 +1,56 @@
+#!/bin/sh
+# Deepin (DDE) only: re-announce our .desktop file once dpkg has finished.
+#
+# On Deepin 25, Fresco installs correctly but dde-launchpad does not show it
+# until `killall dde-shell`. Everything on our side checks out — the .desktop
+# file validates, GAppInfo and ApplicationManager1 both list Fresco, and the
+# icon resolves in bloom, hicolor and Papirus (@175624's 2026-07-26 test log).
+#
+# The difference from a package that DOES appear (xpad) is dpkg's trigger order.
+# `deepin-home-appstore-daemon` is what tells the launcher to hot-refresh:
+#
+#   xpad:    desktop-theme, desktop-file-utils, hicolor, man-db, appstore-daemon
+#   Fresco:  hicolor, appstore-daemon, desktop-theme, desktop-file-utils
+#
+# For Fresco that signal fires SECOND — before desktop-file-utils has rebuilt
+# the desktop database and before deepin-desktop-theme has generated the DCI
+# icon — so the launcher refreshes against an incomplete state and drops us. For
+# xpad it fires last, against a finished state.
+#
+# So we re-announce the file after everything has settled, using the exact write
+# pattern the reporter verified does get picked up (write a temp file in the same
+# directory, then rename over the target — the same CREATE + MOVED_TO sequence
+# dpkg itself produces). Detached and delayed so it lands after the remaining
+# triggers, and so apt is never blocked.
+#
+# This does NOT refresh any cache: the standard hicolor-icon-theme and
+# desktop-file-utils triggers own that, and a postinst that duplicated their
+# work is what we removed in 1.1.34. It only re-emits the file event.
+set -e
+
+DESKTOP=/usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop
+
+case "$1" in
+configure)
+    # Deepin only — every other desktop picks the app up immediately, so there
+    # is nothing to fix and no reason to touch their filesystem.
+    if [ -d /usr/share/dsg ] || command -v dde-am >/dev/null 2>&1; then
+        if [ -f "$DESKTOP" ]; then
+            tmp="$(dirname "$DESKTOP")/.$(basename "$DESKTOP").renotify"
+            # setsid detaches us from dpkg's process group so apt returns at
+            # once and the rename lands after the remaining triggers.
+            setsid sh -c "
+                sleep 8
+                cp -a '$DESKTOP' '$tmp' 2>/dev/null &&
+                mv -f '$tmp' '$DESKTOP' 2>/dev/null
+                rm -f '$tmp' 2>/dev/null
+            " >/dev/null 2>&1 </dev/null &
+        fi
+    fi
+    ;;
+abort-upgrade | abort-remove | abort-deconfigure) ;;
+esac
+
+#DEBHELPER#
+
+exit 0

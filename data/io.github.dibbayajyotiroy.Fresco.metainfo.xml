@@ -62,9 +62,14 @@
   </branding>
 
   <releases>
+    <release version="1.1.36" date="2026-07-30">
+      <description>
+        <p>Widgets on your wallpaper. Synced song lyrics that follow whatever is playing, a clock with six themes including a translucent glass card with an analog face, an audio visualiser that draws the music, and a spinning album-art disc. All are off until you turn them on, none repaint unless what they show has changed, and the visualiser asks before it listens to your audio. Also a new app icon, and fixes for lyrics not following an automatic track change and for widgets appearing on only one display.</p>
+      </description>
+    </release>
     <release version="1.1.35" date="2026-07-25">
       <description>
-        <p>Select several wallpapers at once and remove them in a single step, with Select all honoring the current search. Power saving now defaults to Reduced, which measured about half the GPU power of Full quality for a barely noticeable softening; existing settings are kept. Fixes the Light/Dark toggle and accent colors not applying until the app was restarted, and makes the app icon show up in the Deepin 25 launcher immediately after install instead of only after restarting the launcher.</p>
+        <p>Select several wallpapers at once and remove them in a single step, with Select all honoring the current search. Power saving now defaults to Reduced, which measured about half the GPU power of Full quality for a barely noticeable softening; existing settings are kept. Also fixes the Light/Dark toggle and accent colors not applying until the app was restarted.</p>
       </description>
     </release>
     <release version="1.1.34" date="2026-07-24">

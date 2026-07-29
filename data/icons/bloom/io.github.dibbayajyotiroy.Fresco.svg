@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Fresco app icon. The mark is raster artwork; this SVG is a scalable
-     wrapper so themes that only look in scalable/ still find it. -->
+<!-- Fresco app icon — Deepin "bloom" theme variant.
+     Deepin's launcher looks only in the current theme, so this ships under
+     /usr/share/icons/bloom/ with the same icon name; every other desktop keeps
+     the hicolor artwork. Same mark, full-bleed to match bloom's silhouette. -->
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      viewBox="0 0 512 512" width="512" height="512">
   <image x="0" y="0" width="512" height="512"

@@ -213,6 +213,82 @@ impl Player {
         }
     }
 
+    /// Draw an ASS overlay on the OSD layer; empty `ass` clears it.
+    ///
+    /// Verified against libmpv 2.2.0: this renders even though we set
+    /// `osd-level=0` above — that option gates mpv's *own* OSD (the seek bar and
+    /// status text), not `osd-overlay`. So the overlay is available without
+    /// re-enabling chrome we deliberately hide.
+    ///
+    /// `res_x`/`res_y` are passed explicitly and must not be left at 0. With 0
+    /// the overlay inherits the *video's* render area, so a rotated wallpaper
+    /// rescales and clips the text (observed with `video-rotate=90`). Pinning
+    /// the coordinate space keeps placement identical regardless of rotation,
+    /// crop or output size — the caller re-pushes when the text changes.
+    /// Place a raw BGRA bitmap on the OSD layer at `(x, y)`.
+    ///
+    /// ASS has no bitmap support, so image-bearing widgets (the album-art disc)
+    /// go through mpv's `overlay-add` instead, which reads pixels from a file
+    /// path — hence `path`, which the caller keeps alive for as long as the
+    /// overlay is shown. `stride` is bytes per row (`w * 4` for BGRA).
+    #[allow(clippy::too_many_arguments)]
+    pub fn overlay_add(&self, id: u32, x: i32, y: i32, path: &str, w: u32, h: u32, stride: u32) {
+        let Ok(f) = fns() else { return };
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        unsafe {
+            f.command(
+                self.handle,
+                &[
+                    "overlay-add",
+                    &id.to_string(),
+                    &x.to_string(),
+                    &y.to_string(),
+                    path,
+                    "0",
+                    "bgra",
+                    &w.to_string(),
+                    &h.to_string(),
+                    &stride.to_string(),
+                ],
+            );
+        }
+    }
+
+    /// Remove a bitmap overlay previously added with [`Player::overlay_add`].
+    pub fn overlay_remove(&self, id: u32) {
+        let Ok(f) = fns() else { return };
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        unsafe { f.command(self.handle, &["overlay-remove", &id.to_string()]) };
+    }
+
+    pub fn set_overlay(&self, id: u32, ass: &str, res_x: u32, res_y: u32) {
+        let Ok(f) = fns() else { return };
+        let id = id.to_string();
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        unsafe {
+            if ass.is_empty() {
+                f.command(
+                    self.handle,
+                    &["osd-overlay", &id, "none", "", "0", "0", "0", "no"],
+                );
+            } else {
+                f.command(
+                    self.handle,
+                    &[
+                        "osd-overlay",
+                        &id,
+                        "ass-events",
+                        ass,
+                        &res_x.to_string(),
+                        &res_y.to_string(),
+                        "0",
+                        "no",
+                    ],
+                );
+            }
+        }
+    }
+
     /// Set VO zoom/pan directly (composed on top of any crop's base values);
     /// used by the slide and Ken Burns slideshow transitions.
     pub fn set_zoom_pan(&self, zoom: f64, pan_x: f64, pan_y: f64) {
@@ -371,6 +447,15 @@ impl Player {
     pub fn time_pos(&self) -> Option<f64> {
         // SAFETY: `self.handle` is valid for the lifetime of this Player.
         let s = unsafe { fns().ok()?.get_property(self.handle, "time-pos") }?;
+        s.trim().parse().ok()
+    }
+
+    /// Length of the current file in seconds, if known. A still image reports
+    /// `0` — mirrors `WaylandPlayer::duration`, keeping the two backends' control
+    /// surfaces identical.
+    pub fn duration(&self) -> Option<f64> {
+        // SAFETY: `self.handle` is valid for the lifetime of this Player.
+        let s = unsafe { fns().ok()?.get_property(self.handle, "duration") }?;
         s.trim().parse().ok()
     }
 

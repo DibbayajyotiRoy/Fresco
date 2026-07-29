@@ -226,6 +226,13 @@ The sharpest available differentiation ("the only GUI Linux wallpaper app with o
   - Catalog gains a Shaders category (≥15 curated, license-verified) using the `content_type` field reserved in 3.1 — zero schema migration.
 - Audio-reactive (PipeWire capture → FFT → iChannel0 texture) is a stretch **after** shader MVP. AC: synthetic 440Hz buffer lights the correct FFT texel bin (unit test); live capture degrades gracefully when PipeWire absent.
 
+### 6.5 Desktop widgets over the wallpaper (lyrics, audio visualiser, clock, album art)
+User-requested (2026-07-26): song lyrics with themes, audio-level waves, a spinning disc carrying the album art, clock widgets — drawn on top of whatever wallpaper is set. The feature people most often name when asking for a Wallpaper Engine equivalent on Linux.
+
+**Full plan: [WIDGETS_ROADMAP.md](WIDGETS_ROADMAP.md).** Kept there rather than inline because it is a multi-phase feature with its own dependencies, licensing constraints and open questions.
+
+The one structural fact that belongs here: **text and rich widgets are different architectures.** Text can ride mpv's `osd-overlay` on today's substrate. Bitmaps and animation cannot — ASS has no bitmap support — so the album-art disc, visualiser and clock need a surface Fresco owns, i.e. **hard-depends on 5.1**, exactly like 6.1. Audio reactivity needs PipeWire capture + FFT, which **shares 6.1's audio-reactive module** rather than growing a second one.
+
 ### 6.2 Catalog v2: community submissions
 Only now, once traffic justifies moderation: submissions via GitHub PRs to the `fresco-wallpapers` repo — deliberately not an in-app upload flow (no accounts, no abuse surface; reuses GitHub identity + review tooling).
 - **AC:** submission-to-published ≤1 week; CI validates license field, loop cleanliness (first/last frame diff), size caps; contributor credited in-app.

@@ -4,6 +4,169 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.36] — 2026-07-30
+
+### Added
+- **Widgets on your wallpaper: synced lyrics and a clock.** The thing people ask
+  for when they ask for a Wallpaper Engine equivalent, and the thing nothing on
+  Linux does well. Both are drawn *into* the wallpaper itself rather than into a
+  new window, so there is no extra surface to stack, nothing to click through,
+  and they behave the same on X11 and on every layer-shell compositor. **Both
+  are off until you turn them on** — app menu (Ctrl+,) → **Advanced…** → the
+  **Lyrics** and **Clock** groups — and when they are off nothing is created at
+  all: no watcher, no overlay, no wakeups.
+
+  **Lyrics** follow whatever is playing anywhere on the system (any player that
+  publishes MPRIS: browsers, music apps, video players) and show the current
+  line in time with the music, optionally with the next line dimmed underneath.
+  Four looks (Minimal, Karaoke, Subtitle, Card), a nine-point placement grid, a
+  margin and type size, tinting that follows your accent color, and a sync
+  offset slider — because `.lrc` timing is contributed by strangers and a file
+  can simply sit a second off no matter how exact Fresco's own clock is.
+  Lyrics come from a local `.lrc` file first (next to the audio file, or in a
+  lyrics folder you choose) and only then from the online database; see the
+  privacy note below.
+
+  **The clock** needs no music and no network. Five themes (Digital, Minimal,
+  Segment, Stacked, Wordy), 12- or 24-hour, optional date, the same placement
+  grid and accent-follow. Seconds are **off by default and that is a battery
+  decision, not an oversight**: without seconds the clock repaints once a
+  minute, with them sixty times — a permanent 60× increase in wakeups on an idle
+  desktop, for a digit pair few people look at.
+
+  Neither widget repaints unless what it says has actually changed: a lyric line
+  held for eight seconds paints once, and a clock reading `14:32` paints nothing
+  until `14:33`. Widgets appear on **every display** by default, matching the
+  wallpaper itself; set `monitor` in the `[widgets]` block of `config.toml` to a
+  connector name (`"DP-1"`) to keep them on one screen.
+
+  **Where it does not work:** GNOME on Wayland, which has no live wallpaper
+  surface to draw into and so has no widget layer either — the same limitation
+  that makes it a static-frame fallback today.
+
+- **Two more widgets: an audio visualiser and a spinning album-art disc.** The
+  visualiser draws the music itself — five looks (bars, mirrored, wave, dots and
+  a radial ring) with a colour you pick, a two-colour blend, or a rainbow sweep.
+  The disc shows the current track's cover art on a turning record, and stops
+  turning the moment playback pauses, because a disc spinning over a paused song
+  is a lie about what your computer is doing.
+
+  Both are off by default, and the visualiser asks before it listens — see the
+  privacy note. Measured on a live desktop with music playing and all four
+  widgets on: **0.8% of one CPU core**, essentially all of it the audio capture;
+  the daemon's own share rounds to zero, because nothing repaints unless what it
+  shows has actually changed.
+
+- **A sixth clock theme: Card.** A rounded glass panel carrying the time,
+  weekday and date with an analog face beneath them. The card is genuinely
+  translucent — your wallpaper shows through it — with a lit edge and a soft
+  scrim behind the text so the type survives a bright frame. (ASS has no
+  backdrop blur, so this is translucency and edge lighting rather than true
+  frosted glass; the scrim is what stands in for the blur that would otherwise
+  protect contrast.)
+
+- **Colours you choose, for lyrics and the visualiser.** A colour picker for
+  each, plus a blend across the visualiser's bars. The blend interpolates around
+  the colour wheel rather than straight through it, so a pink-to-cyan ramp stays
+  vivid the whole way instead of passing through mud in the middle.
+
+- **Optional track title and artist above the lyric line.** Off by default. With
+  it on, a song with no lyrics available still shows what is playing, rather than
+  showing nothing at all — which is exactly when you would want it.
+
+- **A new app icon**, across every size, the scalable variant, Deepin's bloom
+  theme, and the website.
+
+- **The first-run tour now covers setting a wallpaper from a link, and where the
+  widget settings live.** It is a two-step flow, and step one arrives with a
+  working link already in the box so it can be finished in one click. Anyone who
+  has already seen the old tour sees the new one once.
+
+### Privacy
+- **Lyrics lookups leave your machine on a cache miss.** Local `.lrc` files are
+  tried first and cost nothing. When there is no local file, Fresco asks
+  [LRCLIB](https://lrclib.net) — a free, community-run database — for that one
+  track, which means **the track title, artist and album are sent to a third
+  party**. The result is cached under `~/.cache/fresco/lyrics`, so replaying the
+  same song never touches the network again. Nothing is sent unless you turn the
+  lyrics widget on and something is playing that has no local lyrics file.
+  Fresco does not host, own or license lyric content; LRCLIB's entries are
+  user-contributed and LRCLIB states no license over them, so Fresco fetches on
+  demand and caches per-user rather than bundling or redistributing anything.
+- **The audio visualiser reads your system's audio output, and asks first.** It
+  has to: bars that react to the music need the actual sound, which MPRIS never
+  carries. So the first time you switch it on, Fresco asks — plainly, in a
+  one-time dialog — and does nothing until you agree, exactly as the
+  usage-statistics prompt does. The audio is analysed on your machine, is never
+  recorded, stored or sent anywhere, and the capture stops the moment you turn
+  the widget off. Declining leaves it off. The consent is enforced when the
+  config is *loaded*, not in the settings window, so hand-editing `config.toml`
+  cannot start a capture you never agreed to.
+
+### Fixed
+- **Lyrics now follow an automatic track change.** They did not: playing through
+  a queue in Firefox left the previous song's words on screen until you toggled
+  the widget off and on. Firefox publishes a **constant** MPRIS track id — its
+  own object path, identical for every song it will ever play — and Fresco
+  treated that id as authoritative, so every advance looked like the same track.
+  Track identity now requires the metadata *and* the id to agree. Verified
+  against a live capture of three automatic advances across four songs: four
+  titles, one id.
+
+- **Chromium-family browsers no longer block the lyrics widget.** Chrome, Brave
+  and Edge claim an MPRIS name the first time anything plays and never release
+  it, so a finished session lingers on the bus carrying artwork but no track
+  title. Fresco would select that corpse and sit there. Sessions without a title
+  are now skipped, with a log line naming the bus so the reason is visible
+  rather than mysterious. Firefox remains the most reliable browser for this.
+
+- **Widgets appear on every display**, matching the wallpaper itself. They were
+  drawn on one, which read as half-broken on a two-monitor desk; naming a
+  connector in `[widgets] monitor` is the way back to a single screen.
+
+- **A healed renderer keeps its widgets.** When the supervisor restarts a wedged
+  or dead mpvpaper the new player starts with no overlays, and nothing told the
+  widget layer to redraw — so a recovered wallpaper came back bare until its
+  content next changed. Every respawn is now counted, and the widgets are
+  re-pushed once when the count moves.
+
+- **"Follow accent colour" now does something when you turn it off.** The
+  visualiser passed the accent colour unconditionally, so the switch had no
+  effect in either position.
+
+- **Image and slideshow wallpapers no longer reload themselves every 8 seconds
+  on Wayland.** The supervisor restarts a renderer whose playback clock stops —
+  a real symptom of a wedged mpvpaper. But Fresco starts every renderer with
+  `image-display-duration=inf`, so a still image holds `time-pos` at 0 *by
+  design*: measured against a live mpvpaper, an image reports the same position
+  forever while claiming to be playing. Every image was therefore diagnosed as
+  wedged after 6 seconds and killed, on repeat, for as long as it was on screen.
+  **Slideshows were the worst hit: a respawn rebuilds the slideshow from image
+  one, so a cycle that respawned faster than the interval — 8 seconds against
+  the 30-second default — could never reach the second image at all.** The
+  detector now asks the player whether the media is a still frame (mpv reports
+  duration 0) before counting a strike, so a genuinely frozen *video* is still
+  caught. The X11 backend has always skipped stills in its equivalent check;
+  the Wayland supervisor was written without that guard.
+
+- **A sleeping monitor no longer permanently disables its wallpaper.** When a
+  display goes away — DisplayPort links commonly drop when a monitor powers
+  off — mpvpaper for that connector dies and cannot be started again, because
+  the compositor no longer advertises the output. Fresco counted those as
+  renderer failures, burned all five restarts in ten seconds and gave up on the
+  output *for good*: the display came back to a dead wallpaper until the user
+  re-applied one or restarted the daemon. The supervisor now asks the
+  compositor whether the connector is still there before spending a restart, and
+  only when a renderer is already down, so a stale enumeration can never tear
+  down a healthy one. A vanished display parks its output instead; when it
+  returns, playback is restored from a clean slate.
+
+- **`renderer_giveup` reports now say what actually broke.** The warning carried
+  only "renderer failed 5×", which cannot distinguish a missing mpvpaper from a
+  broken GL stack or a display that walked away. It now also carries the failure
+  mode (dead or frozen), the wallpaper kind, and a spawn-failure code — all
+  content-free, no paths or file names.
+
 ## [1.1.35] — 2026-07-25
 
 ### Added
@@ -16,6 +179,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   confirmed first, states that the source files on disk are kept, and if one of
   the selected wallpapers is the one on screen the desktop reverts to its own
   background.
+
+- **A Deepin-styled app icon on DDE.** Fresco's icon is redrawn to the bloom
+  theme's conventions — full-bleed squircle, a single frame instead of the
+  standard icon's nested rings, stronger interior contrast so it still reads in
+  the launcher grid — while keeping the same framed-wallpaper identity. It ships
+  inside Deepin's `bloom` theme under the same icon name, so **only a DDE
+  session resolves it**; every other desktop is untouched.
 
 ### Changed
 - **Power saving now defaults to Reduced instead of Full quality.** @175624
@@ -39,13 +209,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so no theme change could ever take effect. The stylesheet is now built with
   literal colors and repaints live. The Add button also follows the accent
   instead of staying a fixed blue.
-- **App icon appears in the Deepin 25 launcher immediately after install.**
-  Following a controlled A/B against galculator on real hardware by @175624:
-  dde-launchpad's hot refresh after a dpkg install looks the icon up only in the
-  current theme ("bloom") and does not walk the freedesktop fallback chain into
-  hicolor, so an app shipping icons only in hicolor stayed invisible until
-  `killall dde-shell` restarted the launcher (a cold start, where fallback
-  works). The package now also installs the icon into bloom's own directories.
+- **Deepin 25: another attempt at the launcher not showing Fresco until
+  `killall dde-shell`.** Not an icon problem — @175624's 2026-07-26 test log
+  rules out our whole side of it: the `.desktop` file validates, GAppInfo and
+  `ApplicationManager1` both list Fresco, a `.dci` icon is generated, and
+  `GtkIconTheme` resolves our icon in bloom, hicolor **and** Papirus. (The bloom
+  icons 1.1.35 briefly shipped for this are reverted; they changed nothing.)
+  What differs from a package that *does* appear (`xpad`) is dpkg's trigger
+  order: `deepin-home-appstore-daemon`, the trigger that makes the launcher
+  hot-refresh, runs **second** for Fresco — before `desktop-file-utils` rebuilds
+  the desktop database and before the `.dci` is generated — but **last** for
+  xpad. The launcher appears to refresh against an incomplete state and drop us.
+  Fresco now re-announces its `.desktop` file a few seconds after install, on
+  Deepin only, using the exact write pattern the log shows is picked up. If it
+  still doesn't appear, `killall dde-shell` (or logging out) remains the
+  workaround and the diagnosis continues in `docs/AUDIT.md`.
 
 ## [1.1.34] — 2026-07-24
 

@@ -1366,11 +1366,21 @@ mod scratch_dump {
     use crate::clock::{ClockStyle, ClockTheme};
     use chrono::{Local, TimeZone};
 
+    /// Write a representative payload to `$LYRICS_DUMP`, for rasterising
+    /// through libass by hand. Leading and font weight are the two things no
+    /// assertion can approve — the tests can prove the offsets are right and
+    /// the picture can still look wrong.
+    ///
+    /// `#[ignore]` **and** env-gated: a developer harness must never fail on a
+    /// machine that has no such directory, which is every CI runner.
     #[test]
+    #[ignore]
     fn dump() {
-        let dir = std::path::Path::new(
-            "/tmp/claude-1000/-home-roy-programs-livewallpaper/d825a7b6-7be3-4635-9960-a0824a802a75/scratchpad",
-        );
+        let dir = std::env::var("LYRICS_DUMP").unwrap_or_default();
+        if dir.is_empty() {
+            return;
+        }
+        let dir = std::path::Path::new(&dir);
         let now = Local.with_ymd_and_hms(2026, 7, 15, 21, 5, 0).unwrap();
         let mut out = String::new();
         // lyric: 4-line stack the runtime WOULD produce if it adopted render_ass_line
@@ -1413,6 +1423,6 @@ mod scratch_dump {
                 ..Default::default()
             },
         ));
-        std::fs::write(dir.join("p_real.txt"), out).unwrap();
+        std::fs::write(dir.join("p_real.txt"), out).expect("$LYRICS_DUMP must be writable");
     }
 }

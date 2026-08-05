@@ -9,6 +9,19 @@
  * `dict.compare.rows` / `dict.compare.cells`.
  */
 
+/**
+ * The release the What's New section actually describes.
+ *
+ * Deliberately pinned, and deliberately NOT the live version from the GitHub
+ * API. The section used to take `stats.version`, so the moment a new release
+ * was tagged the page re-labelled the previous release's copy as the new one's
+ * — 1.1.36's four widgets would have been announced as what shipped in 1.1.37.
+ * A stale-but-true section beats a current-but-wrong one.
+ *
+ * Bump this in the same commit as the copy in `dict.whatsNew`, never on its own.
+ */
+export const WHATS_NEW_VERSION = "1.1.36";
+
 export const FORMATS = [
   "mp4",
   "webm",

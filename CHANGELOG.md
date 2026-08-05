@@ -4,6 +4,79 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.37] — 2026-08-04
+
+### Added
+- **Talk to the maintainer, from inside Fresco.** App menu → **Message the
+  maintainer**. A private, two-way thread with no account, no email address, and
+  no GitHub login, anonymous in **both** directions: you never learn who they
+  are beyond "the maintainer", and they never learn who you are — only your
+  messages and, if you leave the box ticked, the same setup summary a bug report
+  would carry.
+
+  This exists because the most useful feedback was the least actionable. A 👎
+  reading "does not work, wallpaper is just black" carried no identifier and no
+  environment, so there was nobody to ask what broke, and the only two-way
+  channel was an issue tracker that needs an account.
+
+  The thread is addressed by a random ticket kept in your state dir. It is
+  **deliberately not** the telemetry install id: support has to work for people
+  who declined the optional statistics, and a thread is the one place you write
+  in your own words, so keying it by the telemetry id would make that writing
+  joinable to an environment profile. The two ids are generated separately,
+  stored in different files, and never sent in the same request. Nothing is
+  created until you send a first message — if you never write, no thread exists.
+
+  If the maintainer replies while Fresco is closed, a desktop notification says
+  so and opens straight into the conversation.
+
+- **Bad feedback can be replied to.** The feedback dialog now offers **"Let the
+  maintainer reply (stays anonymous)"**, on by default. Ticked, submitting also
+  opens a thread seeded with your comment, your rating, and your setup, so a
+  problem can actually be worked through. Unticked, the rating is sent with no
+  way to reach you, and the admin side shows no reply option on that row — the
+  absence is honoured, not merely recorded.
+
+- **Country, and optionally city, on usage statistics.** Which countries Fresco
+  runs in decides where downloads need a mirror. The country is resolved from
+  your IP **at the network edge** and only ever arrives as a two-letter code, so
+  no IP is read, logged, or stored by Fresco or its database.
+
+### Changed
+- **Everyone is asked about statistics again, because the two answers now mean
+  something different.** Previously, declining meant an identifier-free country
+  tally that could never be counted as people. Both answers now record one
+  anonymous install and its country once a day, so "how many people use Fresco"
+  has a real answer in either case.
+
+  What **accepting all** adds is the detail: your distro, desktop, session type,
+  video backend, monitor count, install source, which features you use, error
+  kinds, your city and region, and the exact time of each check-in. Declining
+  sends none of that, and your check-in is stored as a **date rather than a
+  time** — the server truncates it before writing, so the time of day is never
+  stored at all.
+
+  Your previous answer is not carried over, because it was given to a different
+  question. The dialog records which revision of the terms you agreed to and
+  re-asks only when that changes.
+
+- **The full terms are now a document, not a paragraph.** [TERMS.md](TERMS.md)
+  lists every field in a table with nothing omitted, including what cannot be
+  done with the data and how to send nothing at all. Linked from the README and
+  from the consent dialog itself.
+
+- Coordinates are never collected at any consent level. The geolocation endpoint
+  receives latitude and longitude from the edge and drops them rather than
+  returning them, so there is nothing to store even by accident.
+
+### Privacy
+- Never collected, under any setting: your name or email (there are no
+  accounts), your IP address, your coordinates, your wallpapers or their file
+  names, any file path, screenshots, audio, keystrokes, or clipboard contents.
+  Your city is not collected if you decline the optional statistics.
+- To send nothing at all, set `telemetry = false` and
+  `telemetry_prompted = false` in `~/.config/fresco/config.toml`.
+
 ## [1.1.36] — 2026-07-30
 
 ### Added

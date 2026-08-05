@@ -13,6 +13,7 @@ import { Download } from "@/components/download";
 import { Faq } from "@/components/faq";
 import { SiteFooter } from "@/components/site-footer";
 import { JsonLd } from "@/components/json-ld";
+import { WHATS_NEW_VERSION } from "@/lib/content";
 import { getDictionary } from "@/lib/i18n";
 import { isLocale, type Locale } from "@/lib/i18n/config";
 
@@ -38,7 +39,8 @@ export default async function Home({
         <AtAGlance dict={dict} />
         <Features dict={dict} />
         <Comparison dict={dict} />
-        <WhatsNew version={stats.version} dict={dict} />
+        {/* Pinned, not stats.version — see WHATS_NEW_VERSION. */}
+        <WhatsNew version={WHATS_NEW_VERSION} dict={dict} />
         <HowItWorks dict={dict} />
         <VideoShowcase dict={dict} />
         <Supported dict={dict} />

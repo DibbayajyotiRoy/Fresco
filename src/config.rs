@@ -1176,12 +1176,11 @@ pub struct Config {
     pub telemetry_prompted: bool,
     /// Which revision of the consent terms the answer above was given under.
     ///
-    /// This exists because declining is no longer total silence: since
-    /// revision 1, declining the optional statistics still sends a daily
-    /// country-only ping that carries no identifier of any kind (see
-    /// [`crate::telemetry::anonymous_ping`]). Someone who declined under
-    /// revision 0 agreed to something different, so re-asking them once is the
-    /// only honest way to change what declining means. Bump
+    /// This exists because declining is no longer total silence: declining the
+    /// optional statistics still sends a daily install id + country check-in
+    /// (see [`crate::telemetry::minimal_heartbeat`]). Someone who declined
+    /// under an earlier revision agreed to something different, so re-asking
+    /// them once is the only honest way to change what declining means. Bump
     /// [`crate::telemetry::CONSENT_VERSION`] whenever the terms change again,
     /// and every install below it is asked exactly once more.
     #[serde(default)]

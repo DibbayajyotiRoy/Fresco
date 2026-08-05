@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.36"
+version = "1.1.37"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -82,8 +82,35 @@ priority = "optional"
 # All of these exist in Debian/Ubuntu/Pop!_OS/Mint repos. mpvpaper itself is NOT
 # in the repos, so we BUNDLE its binary (see assets → usr/lib/fresco/mpvpaper)
 # and only depend on the shared libraries it links at runtime.
-depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer"
-recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg"
+# libglib2.0-bin is a HARD dependency because it owns two binaries the app
+# shells out to and cannot work without (verified: `dpkg -S $(which gdbus)`):
+#   * `gsettings` — the ONLY way Fresco paints a wallpaper on GNOME Wayland
+#     (src/daemon/overview.rs; Mutter has no live-wallpaper surface, so the
+#     static frame is the whole backend there). Without it `gnome_available()`
+#     is false and a GNOME Wayland user gets no wallpaper at all.
+#   * `gdbus` — every MPRIS query in src/mpris.rs and src/daemon/widgets.rs,
+#     i.e. all of the 1.1.36 lyrics / album-art / track-synced widgets, plus
+#     the DDE background calls in src/daemon/dde.rs.
+# libgtk-4-1 pulls libglib2.0-0, NOT libglib2.0-bin, so a minimal desktop or a
+# container genuinely may not have it — transitive presence is not a guarantee.
+depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
+# Recommends, not Depends: every one of these powers a feature that degrades to
+# a logged, actionable message rather than breaking the app.
+#   * pulseaudio-utils | pipewire-bin — `parec` / `pw-cat` for the audio
+#     visualiser widget (src/audio_capture.rs). Opt-in and off by default, and
+#     src/daemon/widgets.rs::open_capture already logs which package to install,
+#     so this must not be a hard dependency. pulseaudio-utils leads because it
+#     is the smaller, daemon-free package and pipewire-pulse serves `parec`
+#     too; on a PipeWire box pipewire-bin is already installed, which satisfies
+#     the alternative and pulls nothing extra.
+#   * xdg-utils — `xdg-open` for the help/tutorial/notification links.
+#   * pkexec | policykit-1 — the in-app updater's privilege prompt. The package
+#     that owns /usr/bin/pkexec was renamed: `pkexec` on Debian 12 / Ubuntu
+#     24.04+, `policykit-1` on Debian 11 / Ubuntu 22.04.
+#   * ffmpeg — `ffmpeg` for rotated thumbnails/overview frames (falls back to
+#     ffmpegthumbnailer unrotated) and `ffprobe` for library metadata (fields
+#     just stay empty). Both already degrade silently by design.
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1"
 extended-description = """\
 Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
 desktop wallpaper. Pick media in a simple app, click Set, close the app — \

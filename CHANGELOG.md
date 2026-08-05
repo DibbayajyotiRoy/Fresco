@@ -167,6 +167,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mode (dead or frozen), the wallpaper kind, and a spawn-failure code — all
   content-free, no paths or file names.
 
+- **"Renderer failed 5×" no longer stands in for "that folder has no images in
+  it".** Field reports showed the give-up warning landing 10–15 seconds after a
+  slideshow was set, over and over — the shape of a wallpaper with nothing
+  behind it. If the media cannot be resolved, every respawn bails before it
+  starts anything, five ticks spend the whole anti-flap budget, and the output
+  is given up on, reported as a renderer failure. That is not what went wrong,
+  and it points you at the wrong thing. A wallpaper is now checked for a file
+  that is actually *there* before a restart is spent, and an output with nothing
+  to play says so — "the wallpaper's file or slideshow folder is empty, missing,
+  or unreadable" — and waits, picking playback back up by itself once a readable
+  file exists. Media that was deleted, or that lives on a drive which is
+  currently away, is treated the same way, and a slideshow now starts on its
+  first image that still exists rather than failing on a stale entry.
+  `renderer_giveup` gained a `no_file` cause so this can no longer hide behind a
+  generic spawn failure.
+
 ## [1.1.35] — 2026-07-25
 
 ### Added

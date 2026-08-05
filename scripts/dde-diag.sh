@@ -83,3 +83,110 @@ if [ -n "$FRESCO" ] && command -v wmctrl >/dev/null; then
 else
     echo "wmctrl not installed — run: sudo apt install wmctrl && re-run this script"
 fi
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Z-ORDER PROBE — added for the desktop-icon visibility problem.
+#
+# The question everything hinges on: does dde-shell paint the wallpaper AND the
+# desktop icons into ONE window, or are the icons a separate child/sibling
+# window?
+#
+#   * One window  -> no stacking order can put Fresco between them. Fresco must
+#                    be above (icons hidden, today's behaviour) or below
+#                    (wallpaper invisible). A dde-shell plugin would be the only
+#                    real fix, exactly like the GNOME/Mutter situation.
+#   * Two windows -> Fresco can sit between them, and this is fixable.
+#
+# Clicks still reaching the icons does NOT distinguish these: Fresco sets an
+# empty input shape, so clicks pass through it either way.
+# 点击仍然有效并不能区分这两种情况：Fresco 的输入区域为空，点击本来就会穿透。
+# ─────────────────────────────────────────────────────────────────────────────
+
+echo "=== Z-ORDER PROBE / 层级探测 ==="
+echo
+
+echo "--- every window declaring _NET_WM_WINDOW_TYPE_DESKTOP ---"
+# More than one is expected (dde-shell's and ours). Note the ORDER: this list is
+# bottom-most first.
+for id in $(xprop -root _NET_CLIENT_LIST_STACKING 2>/dev/null \
+            | sed 's/.*# //' | tr -d ' ' | tr ',' '\n'); do
+    [ -n "$id" ] || continue
+    type=$(xprop -id "$id" _NET_WM_WINDOW_TYPE 2>/dev/null)
+    case "$type" in
+        *DESKTOP*)
+            echo "  id=$id"
+            xprop -id "$id" WM_CLASS _NET_WM_NAME _NET_WM_WINDOW_TYPE _NET_WM_STATE 2>/dev/null \
+                | sed 's/^/    /'
+            xwininfo -id "$id" 2>/dev/null \
+                | grep -E "Absolute|Width|Height|Depth|Visual Class|Override Redirect|Map State" \
+                | sed 's/^/    /'
+            ;;
+    esac
+done
+echo
+
+echo "--- FULL stacking order, bottom→top, with class (the decisive list) ---"
+n=0
+for id in $(xprop -root _NET_CLIENT_LIST_STACKING 2>/dev/null \
+            | sed 's/.*# //' | tr -d ' ' | tr ',' '\n'); do
+    [ -n "$id" ] || continue
+    n=$((n + 1))
+    cls=$(xprop -id "$id" WM_CLASS 2>/dev/null | sed 's/WM_CLASS(STRING) = //')
+    printf "  %2d  %-12s %s\n" "$n" "$id" "$cls"
+done
+echo
+
+echo "--- window TREE under the DDE desktop window (H4 decider) ---"
+# If this shows CHILD windows sized like the screen, the icons may live in their
+# own window and Fresco could be stacked between them. If dde-shell's desktop
+# window has NO children, icons are painted into the same surface as the
+# wallpaper and stacking cannot solve this.
+# 若下面显示有子窗口，图标可能在独立窗口中；若没有子窗口，则图标与壁纸同属一个
+# 窗口，调整层级无法解决。
+if [ -n "$DDE" ]; then
+    xwininfo -id "$DDE" -children 2>/dev/null | sed 's/^/  /'
+else
+    echo "  dde desktop window NOT FOUND — cannot probe"
+fi
+echo
+
+echo "--- override-redirect windows the WM does not manage ---"
+# These never appear in _NET_CLIENT_LIST_STACKING. If the icon layer is here,
+# EWMH hints cannot affect it at all.
+xwininfo -root -tree 2>/dev/null \
+    | grep -iE "desktop|icon|deepin|dde" \
+    | head -30 \
+    | sed 's/^/  /'
+echo
+
+echo "--- TRANSPARENCY RE-TEST (please run and report) ---"
+# The earlier conclusion "a transparent DDE wallpaper composites onto black" was
+# reached by putting a red ROOT window underneath. Under a compositing WM the
+# root window is generally NOT shown — the compositor paints over it — so that
+# test may have proved the wrong thing. This re-tests it with a REAL window
+# (Fresco's own), which is the case that actually matters.
+# 之前的结论用的是根窗口，在合成器下根窗口本来就不显示，该结论可能不成立。
+# 这里用真实窗口重新验证。
+cat <<'PROBE'
+  Run these two commands, and report whether the VIDEO is visible each time
+  (ignore the icons for a moment — we only want to know if the video shows):
+
+    1) systemctl --user stop fresco 2>/dev/null; pkill -x frescod
+       FRESCO_DDE_MODE=transparent frescod
+
+       -> Video visible?  YES / NO
+       -> Desktop icons visible?  YES / NO
+
+    2) pkill -x frescod
+       FRESCO_DDE_MODE=restack frescod
+
+       -> Video visible?  YES / NO
+       -> Desktop icons visible?  YES / NO
+
+  Expected from the current code: (1) video hidden, icons visible.
+                                  (2) video visible, icons hidden.
+  If (1) shows the VIDEO as well as the icons, the transparency path works
+  after all and this is fixed by defaulting to it on Deepin 25.
+  如果第 (1) 项视频和图标都可见，说明透明方案其实可行。
+PROBE

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { usePlaySound } from "@/hooks/use-play-sound";
 
-export function ThemeToggle() {
+export function ThemeToggle({ label }: { label: string }) {
   const [dark, setDark] = useState<boolean | null>(null);
   const { play } = usePlaySound({ sound: "interaction.toggle" });
 
@@ -30,7 +30,7 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      aria-label={label}
       className="flex size-8 items-center justify-center rounded-sm border border-hairline text-ink-subtle transition-colors hover:bg-raised hover:text-ink"
     >
       {dark === null ? (

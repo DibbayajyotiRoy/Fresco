@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import * as React from "react";
 
 import { SentimentBadge } from "@/components/sentiment-badge";
@@ -88,6 +90,7 @@ export function FeedbackTable({ feedback }: { feedback: Feedback[] }) {
               <TH>Comment</TH>
               <TH className="w-[110px]">Version</TH>
               <TH className="w-[130px]">OS</TH>
+              <TH className="w-[90px]">Reply</TH>
               <TH className="w-[100px] text-right">When</TH>
             </TR>
           </THead>
@@ -116,6 +119,27 @@ export function FeedbackTable({ feedback }: { feedback: Feedback[] }) {
                     </span>
                   ) : (
                     <NullCell />
+                  )}
+                </TD>
+                {/* A ticket exists only when the submitter ticked "let the
+                    maintainer reply". No ticket is not a missing feature, it
+                    is them saying do not contact me — so there is deliberately
+                    no way to reply to those rows from here. */}
+                <TD>
+                  {f.ticket ? (
+                    <Link
+                      href="/support"
+                      className="font-mono text-meta uppercase tracking-widest text-stone-900 underline underline-offset-4 transition-opacity hover:opacity-60"
+                    >
+                      Open
+                    </Link>
+                  ) : (
+                    <span
+                      className="font-mono text-meta text-stone-400"
+                      title="They did not opt into a reply"
+                    >
+                      —
+                    </span>
                   )}
                 </TD>
                 <TD className="text-right">

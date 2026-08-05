@@ -53,6 +53,26 @@ function topDistribution(
 
 const DEPTH_EVENTS = ["add_from_link", "browser_wallpaper_set"] as const;
 
+/** Two-letter code -> display name, for the countries that actually show up.
+ *  Anything unmapped renders as its own code, which is still readable. */
+const COUNTRY_NAMES: Record<string, string> = {
+  US: "United States", IN: "India", BR: "Brazil", DE: "Germany",
+  FR: "France", GB: "United Kingdom", RU: "Russia", CN: "China",
+  JP: "Japan", ES: "Spain", IT: "Italy", PL: "Poland", NL: "Netherlands",
+  CA: "Canada", AU: "Australia", MX: "Mexico", ID: "Indonesia",
+  TR: "Turkey", UA: "Ukraine", KR: "South Korea", VN: "Vietnam",
+  AR: "Argentina", SE: "Sweden", CZ: "Czechia", PT: "Portugal",
+  RO: "Romania", BD: "Bangladesh", PK: "Pakistan", PH: "Philippines",
+  NG: "Nigeria", EG: "Egypt", TH: "Thailand", TW: "Taiwan",
+};
+
+/** '??' is the daily_country sentinel for "the edge header did not arrive";
+ *  installs.country uses SQL null for the same case. Both read "Unknown". */
+const countryLabel = (code: string | null) => {
+  if (!code || code === "??") return "Unknown";
+  return COUNTRY_NAMES[code] ? `${COUNTRY_NAMES[code]} (${code})` : code;
+};
+
 /** Bucket a freeform prop value, mapping absent/odd values to "unknown". */
 function propBucket(props: Record<string, unknown> | null, key: string): string {
   const v = props?.[key];
@@ -148,6 +168,10 @@ export default async function UsagePage() {
   const now = Date.now();
   const since30d = new Date(now - 30 * DAY_MS).toISOString();
 
+  // No daily_country fetch: that table is the consent-revision-1 tally, and
+  // since revision 2 the essential tier writes a real install row instead. The
+  // rows already in it are historical and are deliberately not mixed into
+  // these counts, which would double-count anyone who spanned both revisions.
   const [installsRes, eventsRes, depthRes] = await Promise.all([
     getInstalls(),
     getEventsSince(since30d),
@@ -165,13 +189,53 @@ export default async function UsagePage() {
   const active7d = activeIn(7);
   const active30d = activeIn(30);
 
-  const versionDist = topDistribution(installs.map((i) => i.version));
-  const distroDist = topDistribution(installs.map((i) => i.distro));
-  const compositorDist = topDistribution(installs.map((i) => i.compositor));
-  const sessionDist = topDistribution(installs.map((i) => i.session));
-  const decodeDist = topDistribution(installs.map((i) => i.decode));
-  const sourceDist = topDistribution(installs.map((i) => i.source));
-  const channelDist = topDistribution(installs.map((i) => i.channel));
+  // ── Cohorts (consent revision 2) ─────────────────────────────────────────
+  // Both tiers now write a real install row keyed by a random install id, so
+  // every window de-duplicates properly and "unique users" is a plain distinct
+  // count — no extrapolation, and no same-day-only caveat.
+  //
+  // The difference is depth, not countability: `minimal` rows carry identity,
+  // country, version and packaging, and nothing describing the machine. The
+  // environment breakdowns below therefore run over full-consent rows only,
+  // because counting a minimal row as "unknown distro" would misreport
+  // not-collected as unknown and silently skew every percentage.
+  const fullInstalls = installs.filter((i) => !i.minimal);
+  const minimalInstalls = installs.filter((i) => i.minimal);
+  const detailShare =
+    installs.length > 0
+      ? Math.round((fullInstalls.length / installs.length) * 100)
+      : null;
+
+  // Country spans both tiers, because both send it.
+  const countryCounts = new Map<string, number>();
+  for (const i of installs) {
+    const k = countryLabel(i.country);
+    countryCounts.set(k, (countryCounts.get(k) ?? 0) + 1);
+  }
+  const countryDist: DistributionItem[] = [...countryCounts.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12);
+  const countryTotal = [...countryCounts.values()].reduce((a, b) => a + b, 0);
+  const countryUnknown = countryCounts.get("Unknown") ?? 0;
+
+  // City is optional-tier only, so the base is full-consent rows and the panel
+  // says so — an essential row has no city because it was never sent, which is
+  // a different thing from a full-consent row whose city did not resolve.
+  const cityDist = topDistribution(
+    fullInstalls.map((i) =>
+      i.city ? (i.region ? `${i.city}, ${i.region}` : i.city) : null
+    ),
+    10
+  );
+
+  const versionDist = topDistribution(fullInstalls.map((i) => i.version));
+  const distroDist = topDistribution(fullInstalls.map((i) => i.distro));
+  const compositorDist = topDistribution(fullInstalls.map((i) => i.compositor));
+  const sessionDist = topDistribution(fullInstalls.map((i) => i.session));
+  const decodeDist = topDistribution(fullInstalls.map((i) => i.decode));
+  const sourceDist = topDistribution(fullInstalls.map((i) => i.source));
+  const channelDist = topDistribution(fullInstalls.map((i) => i.channel));
 
   const cutoff7d = now - 7 * DAY_MS;
   const featureCounts = new Map<string, { c7: number; c30: number }>();
@@ -239,6 +303,48 @@ export default async function UsagePage() {
         </Notice>
       ) : null}
 
+      {/* The answer to "how many people use Fresco". A real distinct count in
+          every window since consent revision 2 put the install id in both
+          tiers — nothing here is extrapolated. */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <StatCard
+          label="Unique users 30d"
+          value={!installsRes.ok || installsBroken ? "—" : formatNumber(active30d)}
+          hint={
+            installsBroken
+              ? "not recorded — see above"
+              : "distinct installs seen this month"
+          }
+        />
+        <StatCard
+          label="Unique users total"
+          value={
+            !installsRes.ok || installsBroken ? "—" : formatNumber(installs.length)
+          }
+          hint="distinct installs ever seen"
+        />
+        <StatCard
+          label="Countries"
+          value={
+            countryTotal === 0
+              ? "—"
+              : formatNumber(
+                  countryCounts.size - (countryCounts.has("Unknown") ? 1 : 0)
+                )
+          }
+          hint={
+            countryUnknown > 0
+              ? `${formatNumber(countryUnknown)} unresolved`
+              : "resolved at the edge"
+          }
+        />
+        <StatCard
+          label="Shared full detail"
+          value={detailShare === null ? "—" : `${detailShare}%`}
+          hint={`${formatNumber(minimalInstalls.length)} essential-only`}
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <StatCard
           label="Active today"
@@ -283,8 +389,44 @@ export default async function UsagePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <Panel className="lg:col-span-3">
+          <PanelHeader
+            title="Country"
+            meta={
+              countryTotal === 0
+                ? "no data"
+                : `${formatNumber(countryTotal)} installs · every tier`
+            }
+          />
+          {countryDist.length === 0 ? (
+            <EmptyState
+              className="py-6"
+              title="No country data yet"
+              description="Countries arrive as clients on 1.1.37+ check in. The edge header is already confirmed working."
+            />
+          ) : (
+            <DistributionList items={countryDist} total={countryTotal} />
+          )}
+        </Panel>
+
         <Panel>
-          <PanelHeader title="App version" meta="by install" />
+          <PanelHeader
+            title="City"
+            meta={`${formatNumber(fullInstalls.length)} full-consent installs`}
+          />
+          {cityDist.length === 0 ? (
+            <EmptyState
+              className="py-6"
+              title="No city data yet"
+              description="City is optional-tier only and arrives from the landing site's /api/geo. Curl that endpoint to confirm this deployment supplies one."
+            />
+          ) : (
+            <DistributionList items={cityDist} total={fullInstalls.length} />
+          )}
+        </Panel>
+
+        <Panel>
+          <PanelHeader title="App version" meta="full-consent installs" />
           {!installsRes.ok ? (
             <ErrorPanel
               title="Couldn't load installs"

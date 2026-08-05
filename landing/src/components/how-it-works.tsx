@@ -1,33 +1,17 @@
 import { FolderOpen, MousePointerClick, X } from "lucide-react";
+import type { Dictionary } from "@/lib/i18n";
 
+/**
+ * Step order, icon, and the mono command line under each step. The commands
+ * are literal CLI strings, so they read the same in every language.
+ */
 const STEPS = [
-  {
-    n: "01",
-    title: "Pick your media",
-    description:
-      "Open Fresco from your app menu and choose a video, GIF, image, folder, or playlist.",
-    command: "fresco — add wallpaper.mp4",
-    Icon: FolderOpen,
-  },
-  {
-    n: "02",
-    title: "Click Set",
-    description:
-      "Set it as your wallpaper. It starts playing on your desktop right away.",
-    command: "fresco — set-as-wallpaper",
-    Icon: MousePointerClick,
-  },
-  {
-    n: "03",
-    title: "Close the app",
-    description:
-      "Quit the window. A lightweight daemon keeps the wallpaper running, even after a reboot.",
-    command: "frescod — detach",
-    Icon: X,
-  },
+  { id: "pick", n: "01", command: "fresco — add wallpaper.mp4", Icon: FolderOpen },
+  { id: "set", n: "02", command: "fresco — set-as-wallpaper", Icon: MousePointerClick },
+  { id: "close", n: "03", command: "frescod — detach", Icon: X },
 ] as const;
 
-export function HowItWorks() {
+export function HowItWorks({ dict }: { dict: Dictionary }) {
   return (
     <section
       id="how-it-works"
@@ -35,13 +19,14 @@ export function HowItWorks() {
     >
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <p className="instrument-label !text-ink-faint">how it works</p>
+          <p className="instrument-label !text-ink-faint">
+            {dict.howItWorks.kicker}
+          </p>
           <h2 className="mt-3 font-serif text-display-sm text-ink">
-            Three clicks, then forget about it.
+            {dict.howItWorks.title}
           </h2>
           <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
-            Open Fresco, click add, click set, close. The daemon keeps the
-            wallpaper running, even after you reboot.
+            {dict.howItWorks.lead}
           </p>
         </div>
 
@@ -53,6 +38,7 @@ export function HowItWorks() {
 
           {STEPS.map((step) => {
             const Icon = step.Icon;
+            const copy = dict.howItWorks.steps[step.id];
             return (
               <li
                 key={step.n}
@@ -64,12 +50,14 @@ export function HowItWorks() {
                     {Number(step.n)}
                   </span>
                 </div>
-                <span className="instrument-label mt-5">step {step.n}</span>
+                <span className="instrument-label mt-5">
+                  {dict.howItWorks.step(step.n)}
+                </span>
                 <h3 className="mt-2 text-lg font-semibold text-ink">
-                  {step.title}
+                  {copy.title}
                 </h3>
                 <p className="mt-2 max-w-xs text-sm text-ink-subtle">
-                  {step.description}
+                  {copy.description}
                 </p>
                 <code className="mt-3 block font-mono text-sm text-ink-faint">
                   {step.command}

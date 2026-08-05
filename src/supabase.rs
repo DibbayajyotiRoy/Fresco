@@ -26,10 +26,18 @@ pub struct Notification {
 /// Submit one anonymous feedback row. `rating` is +1 (👍) or -1 (👎).
 /// Sends only the rating, an optional comment, the app version, and the OS —
 /// no identifiers.
-pub fn submit_feedback(rating: i8, comment: Option<String>) -> Result<()> {
+///
+/// `ticket` is the support ticket that makes the row replyable, and is Some
+/// only when the user ticked "let the maintainer reply". Null means "do not
+/// contact me": the admin UI shows no reply affordance on those rows, so the
+/// absence is honoured rather than merely recorded. It is a support ticket and
+/// not the telemetry install id, so it still identifies nobody — see
+/// [`crate::support`].
+pub fn submit_feedback(rating: i8, comment: Option<String>, ticket: Option<String>) -> Result<()> {
     let payload = serde_json::json!({
         "rating": rating,
         "comment": comment,
+        "ticket": ticket,
         "app_version": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
         // Coarse "where are our users" signal — region-level only, still no

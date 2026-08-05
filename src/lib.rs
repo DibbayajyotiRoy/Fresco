@@ -16,6 +16,7 @@ pub mod download;
 pub mod dsp;
 #[cfg(feature = "gui")]
 pub mod gui;
+pub mod i18n;
 pub mod ipc;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod linkresolve;
@@ -27,6 +28,7 @@ pub mod mpris;
 pub mod schedule;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod supabase;
+pub mod support;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod telemetry;
 #[cfg(any(feature = "gui", feature = "daemon"))]

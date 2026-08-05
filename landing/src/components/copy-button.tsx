@@ -7,9 +7,13 @@ import { usePlaySound } from "@/hooks/use-play-sound";
 
 export function CopyButton({
   value,
+  copyLabel,
+  copiedLabel,
   className,
 }: {
   value: string;
+  copyLabel: string;
+  copiedLabel: string;
   className?: string;
 }) {
   const [copied, setCopied] = React.useState(false);
@@ -27,7 +31,7 @@ export function CopyButton({
     <button
       type="button"
       onClick={onCopy}
-      aria-label={copied ? "Copied" : "Copy to clipboard"}
+      aria-label={copied ? copiedLabel : copyLabel}
       className={cn(
         "flex size-7 shrink-0 items-center justify-center rounded-sm border transition-colors",
         copied

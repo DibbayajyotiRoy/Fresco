@@ -745,6 +745,20 @@ pub fn parse_status(out: &str) -> Option<PlaybackStatus> {
 // Queries (blocking — never call these from the daemon loop)
 // ---------------------------------------------------------------------------
 
+/// True when the `gdbus` binary this module drives is on `PATH`.
+///
+/// Exists so a caller can tell "no player is running" (the overwhelmingly
+/// common reason [`list_players`] is empty, and not worth a word) from "the
+/// tool we ask with is not installed" (a packaging problem the user can fix in
+/// five seconds, but only if somebody names it). `gdbus_call` itself must
+/// stay quiet — it fails constantly and by design as players come and go — so
+/// the check belongs at the point a feature turns on, not in the hot path.
+pub fn gdbus_available() -> bool {
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d.join("gdbus").is_file()))
+        .unwrap_or(false)
+}
+
 /// Run `gdbus call --session` with a short timeout; stdout on success.
 ///
 /// `--timeout` is the guard against a wedged player: without it `gdbus` waits

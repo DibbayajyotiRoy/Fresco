@@ -8,15 +8,20 @@ import {
   INSTALL_ONELINER_COPY,
   RELEASES_URL,
 } from "@/lib/site";
+import type { Dictionary } from "@/lib/i18n";
 
 function TerminalBlock({
   title,
   lines,
+  copyLabel,
+  copiedLabel,
 }: {
   title: string;
   /** `copy` lets a line place a different string on the clipboard than it
    *  displays (the FRESCO_SOURCE-tagged installer). */
   lines: { code: string; copy?: string; comment?: string }[];
+  copyLabel: string;
+  copiedLabel: string;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-stone-800 bg-terminal">
@@ -44,7 +49,11 @@ function TerminalBlock({
               <code className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm leading-relaxed text-stone-200">
                 {line.code}
               </code>
-              <CopyButton value={line.copy ?? line.code} />
+              <CopyButton
+                value={line.copy ?? line.code}
+                copyLabel={copyLabel}
+                copiedLabel={copiedLabel}
+              />
             </div>
           </div>
         ))}
@@ -53,43 +62,38 @@ function TerminalBlock({
   );
 }
 
-export function Download() {
+export function Download({ dict }: { dict: Dictionary }) {
   return (
     <section id="download" className="border-b border-hairline py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="max-w-2xl">
-            <p className="instrument-label">download</p>
+            <p className="instrument-label">{dict.download.kicker}</p>
             <h2 className="mt-3 font-serif text-display-sm text-ink">
-              Deploy on Debian, Ubuntu, Pop!_OS, and Mint.
+              {dict.download.title}
             </h2>
           </div>
-          <Badge variant="secondary">x11 · wayland</Badge>
+          <Badge variant="secondary">{dict.download.badge}</Badge>
         </div>
 
         <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
-          The official one-line installer or the .deb release. Either path
-          copies to your clipboard and runs instantly. Fresco keeps playing
-          after you close the window.
+          {dict.download.lead}
         </p>
 
         <div className="mt-12">
           <Card className="flex flex-col p-7">
-            <p className="instrument-label">one-line install</p>
+            <p className="instrument-label">{dict.download.cardTitle}</p>
             <p className="mt-3 text-sm text-ink-subtle">
-              Run this in a terminal. It downloads and installs the latest{" "}
-              <code className="font-mono text-sm">.deb</code> for you — always
-              the newest release:
+              {dict.download.cardBody}
             </p>
             <div className="mt-4">
               <TerminalBlock
-                title="fresco install"
+                title={dict.download.terminalTitle}
+                copyLabel={dict.download.copy}
+                copiedLabel={dict.download.copied}
                 lines={[
                   { code: INSTALL_ONELINER, copy: INSTALL_ONELINER_COPY },
-                  {
-                    code: APT_INSTALL,
-                    comment: "already have the .deb downloaded?",
-                  },
+                  { code: APT_INSTALL, comment: dict.download.aptComment },
                 ]}
               />
             </div>
@@ -100,18 +104,15 @@ export function Download() {
                 rel="noopener noreferrer"
                 className="font-mono text-meta uppercase tracking-widest text-ink-subtle underline decoration-hairline-strong underline-offset-4 transition-colors hover:text-ink"
               >
-                Browse all releases
+                {dict.download.releases}
               </a>
             </div>
             <p className="mt-4 text-sm text-ink-subtle">
-              For the lowest CPU usage, install your GPU&apos;s hardware-decode
-              driver (Intel media VA driver, Mesa VA drivers, or the NVIDIA
-              proprietary driver for NVDEC).
+              {dict.download.gpuNote}
             </p>
           </Card>
         </div>
-
-        </div>
+      </div>
     </section>
   );
 }

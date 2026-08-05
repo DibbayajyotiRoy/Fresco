@@ -73,6 +73,29 @@ finish-args:
   - --share=network
   # Raise native desktop notifications (admin announcements + update prompts).
   - --talk-name=org.freedesktop.Notifications
+  # MPRIS — the lyrics, album-art disc and track-synced widgets (1.1.36).
+  # src/mpris.rs discovers players with org.freedesktop.DBus.ListNames and then
+  # reads properties off each org.mpris.MediaPlayer2.* name, all via `gdbus`
+  # (which the GNOME runtime ships at /usr/bin/gdbus — verified).
+  #
+  # This rule is REQUIRED, not a nicety: xdg-dbus-proxy filters the ListNames
+  # reply down to the names the policy already allows. Measured on this
+  # manifest's runtime, a sandbox with no talk-name rule sees 6 bus names where
+  # the host session sees 167, and no org.mpris.* name among them — so without
+  # the line below list_players() returns empty and every MPRIS-driven widget
+  # silently never appears.
+  - --talk-name=org.mpris.MediaPlayer2.*
+  # System-audio capture for the audio visualiser widget (opt-in, off by
+  # default). src/audio_capture.rs spawns `pw-cat` or `parec`; the GNOME
+  # runtime ships both, so this is purely about reaching the sound server:
+  #   * --socket=pulseaudio binds the PulseAudio socket and sets PULSE_SERVER,
+  #     which is what `parec` needs (pipewire-pulse serves it too).
+  #   * it does NOT expose the PipeWire native socket — verified by inspecting
+  #     a sandbox's XDG_RUNTIME_DIR, which contains only `pulse/`. `pw-cat`
+  #     therefore needs the socket shared explicitly, or it fails to connect
+  #     even with audio permission granted.
+  - --socket=pulseaudio
+  - --filesystem=xdg-run/pipewire-0
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin

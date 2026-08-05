@@ -4,8 +4,9 @@
  *
  * Titles, descriptions, durations, and upload dates are taken verbatim from
  * YouTube (oEmbed + the watch page's own metadata) — nothing here is invented.
- * `blurb` is the site-voice one-liner shown under each player; `description`
- * is what ships in the schema.org payload.
+ * `description` is what ships in the schema.org payload. The site-voice
+ * caption and the mono tag live in the i18n dictionaries, keyed by video id,
+ * because those are ours to translate while everything here is not.
  */
 export type Video = {
   /** YouTube video id. */
@@ -14,10 +15,6 @@ export type Video = {
   title: string;
   /** Schema.org description — faithful to the real YouTube description. */
   description: string;
-  /** Short caption rendered under the player. */
-  blurb: string;
-  /** Mono label above the title, matching the site's instrument-label rhythm. */
-  tag: string;
   /** ISO 8601 duration. */
   duration: string;
   /** Human duration for the badge. */
@@ -34,9 +31,6 @@ export const VIDEOS: Video[] = [
     title: "World's best Linux Wallpaper app Fresco, has Pinterest Link support!",
     description:
       "Paste Pinterest Link into this Linux app and set it as your Wallpaper.",
-    blurb:
-      "Copy a Pinterest link, paste it into Fresco, set it as your wallpaper. No download step, no file juggling.",
-    tag: "add from link",
     duration: "PT45S",
     runtime: "0:45",
     uploadDate: "2026-07-22T12:42:41-07:00",
@@ -46,13 +40,9 @@ export const VIDEOS: Video[] = [
     title: "I Added Live Song Lyrics Widgets to Linux Desktop | Fresco",
     description:
       "Your Linux desktop just got a lot more enjoyable. An upcoming Fresco feature: live synchronized song lyrics as desktop widgets, along with a new clock widget. Whether you're coding, studying, or just listening to music, your lyrics stay on your desktop without needing to keep another window open. Lightweight, works over animated wallpapers, and supports both Wayland and X11.",
-    blurb:
-      "Synchronized lyrics and a clock as floating desktop widgets, drawn over a live wallpaper on Wayland and X11. In development, not in a stable release yet.",
-    tag: "lyrics widgets",
     duration: "PT30S",
     runtime: "0:30",
     uploadDate: "2026-07-28T21:25:50-07:00",
-    preview: true,
   },
 ];
 

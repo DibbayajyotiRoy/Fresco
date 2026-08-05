@@ -6,6 +6,9 @@ export type Feedback = {
   comment: string | null;
   app_version: string | null;
   os: string | null;
+  /** Support ticket, present only when the submitter ticked "let the
+   *  maintainer reply". Null means do not contact — show no reply button. */
+  ticket: string | null;
 };
 
 export type Notification = {
@@ -71,6 +74,18 @@ export type Install = {
   source: string | null;
   /** Packaging channel (deb/flatpak/other). */
   channel: string | null;
+  /** Two-letter country, resolved at the edge server-side. Null for installs
+   *  predating it, or when the edge header did not arrive. */
+  country: string | null;
+  /** True when this row was written under the essential tier: identity and
+   *  country are real, the environment columns are simply not collected (not
+   *  "unknown"), and last_seen is truncated to the day. */
+  minimal: boolean;
+  /** Coarse place names, full-consent tier only. Client-supplied via the
+   *  landing site's /api/geo, so unlike `country` these are spoofable — fine
+   *  for a chart, never to be trusted for anything. Null on essential rows. */
+  city: string | null;
+  region: string | null;
   monitor_count: number | null;
   /** ISO timestamps. */
   first_seen: string;
@@ -115,4 +130,51 @@ export type CatalogItem = {
   source_url: string | null;
   published: boolean;
   install_count: number;
+};
+
+/**
+ * One bucket of the country-only cohort: everyone who declined the optional
+ * statistics, on one day, in one country, on one version and channel.
+ *
+ * `pings` counts requests, NOT people. The client throttles itself to one ping
+ * per ~20h, so a day's total is a close proxy for daily-active installs in this
+ * cohort — but there is no identifier in this table, so it can never be
+ * de-duplicated across days into a monthly figure the way `installs` can.
+ */
+export type DailyCountry = {
+  /** ISO date (no time). */
+  day: string;
+  /** Two-letter code, or the '??' sentinel when the edge header did not
+   *  arrive (this table's key columns are NOT NULL — see schema.sql). */
+  country: string;
+  version: string | null;
+  channel: string | null;
+  pings: number;
+};
+
+/** One anonymous support thread, as the maintainer sees it. */
+export type SupportThread = {
+  /** Random uuid the client generated. Not the telemetry install id, and not
+   *  linkable to one — see src/support.rs. It is all we know about them. */
+  ticket: string;
+  created_at: string;
+  last_at: string;
+  /** The environment block the user chose to attach, if any. */
+  env: string | null;
+  app_version: string | null;
+  status: "open" | "answered" | "closed";
+  unread_for_maintainer: boolean;
+  unread_for_user: boolean;
+  /** "feedback" when the thread was opened by submitting a rating. */
+  origin: "direct" | "feedback";
+  /** -1 / 1 when it came from feedback, else null. */
+  rating: number | null;
+};
+
+export type SupportMessage = {
+  id: number;
+  ticket: string;
+  sender: "user" | "maintainer";
+  body: string;
+  created_at: string;
 };

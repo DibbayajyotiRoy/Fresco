@@ -13,13 +13,24 @@ pkgdesc="Live wallpapers for Linux — video, GIF, image, slideshow and playlist
 arch=('x86_64')
 url="https://github.com/DibbayajyotiRoy/fresco"
 license=('GPL-3.0-or-later')
-depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'mpvpaper')
+# glib2 owns /usr/bin/gdbus and /usr/bin/gsettings, which Fresco shells out to
+# for all MPRIS work (lyrics / album-art / track-synced widgets) and for the
+# GNOME Wayland static-frame background. It arrives transitively via gtk4, but
+# it is a direct runtime dependency of ours, so it is declared directly.
+depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'mpvpaper' 'glib2')
 makedepends=('rust' 'cargo' 'git')
 optdepends=(
   'libva-intel-driver: VA-API hardware decode on Intel GPUs'
   'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
   'gst-plugins-good: hover-to-play previews in the library'
   'gst-libav: hover-to-play previews in the library'
+  # The audio visualiser widget captures the default sink monitor through
+  # whichever of these is installed (pw-cat is preferred). Opt-in and off by
+  # default, so this is optional, not a hard dependency.
+  'pipewire: system-audio capture for the audio visualiser widget (pw-cat)'
+  'libpulse: system-audio capture fallback for the audio visualiser (parec)'
+  'ffmpeg: rotated thumbnails and library media metadata (ffprobe)'
+  'xdg-utils: opening help and tutorial links in your browser'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')  # pin per release: curl -L <source-url> | sha256sum

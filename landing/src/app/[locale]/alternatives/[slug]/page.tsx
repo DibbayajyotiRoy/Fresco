@@ -8,17 +8,26 @@ import { SiteFooter } from "@/components/site-footer";
 import { ALTERNATIVES, getAlternative } from "@/lib/alternatives";
 import { COMPARISON, type CompareCell } from "@/lib/content";
 import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
+import { en } from "@/lib/i18n/dictionaries/en";
+import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
+/**
+ * English only. These pages target English search queries ("hidamari
+ * alternative", "wallpaper engine linux") with copy written for them, so they
+ * are generated for the default locale alone and linked without a prefix from
+ * every language. Middleware sends /<locale>/alternatives/* back to the bare
+ * URL rather than 404ing it.
+ */
 export function generateStaticParams() {
-  return ALTERNATIVES.map((a) => ({ slug: a.slug }));
+  return ALTERNATIVES.map((a) => ({ locale: DEFAULT_LOCALE, slug: a.slug }));
 }
 
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ locale: string; slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
   const alt = getAlternative(slug);
@@ -29,6 +38,7 @@ export async function generateMetadata({
     // "%s | Fresco" template to avoid a duplicated brand in the title.
     title: { absolute: alt.metaTitle },
     description: alt.metaDescription,
+    // No hreflang cluster: there is exactly one language for this page.
     alternates: { canonical: `/alternatives/${alt.slug}` },
     openGraph: {
       title: alt.metaTitle,
@@ -52,13 +62,15 @@ function CompareValue({ value }: { value: CompareCell }) {
     return <Check className="size-4 text-ink" aria-label="Yes" />;
   if (value === false)
     return <X className="size-4 text-ink-faint" aria-label="No" />;
-  return <span className="text-xs text-ink-subtle">{value}</span>;
+  return (
+    <span className="text-xs text-ink-subtle">{en.compare.cells[value]}</span>
+  );
 }
 
 export default async function AlternativePage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ locale: string; slug: string }>;
 }) {
   const { slug } = await params;
   const alt = getAlternative(slug);
@@ -189,14 +201,14 @@ export default async function AlternativePage({
                   <tbody>
                     {COMPARISON.rows.map((row) => (
                       <tr
-                        key={row.label}
+                        key={row.id}
                         className="border-b border-hairline last:border-0"
                       >
                         <th
                           scope="row"
                           className="px-4 py-3 text-left font-normal text-ink-subtle"
                         >
-                          {row.label}
+                          {en.compare.rows[row.id]}
                         </th>
                         <td className="border-l border-hairline bg-accent/[0.06] px-4 py-3 text-center">
                           <span className="inline-flex justify-center">
@@ -251,7 +263,7 @@ export default async function AlternativePage({
           </div>
         </article>
       </main>
-      <SiteFooter />
+      <SiteFooter dict={en} />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

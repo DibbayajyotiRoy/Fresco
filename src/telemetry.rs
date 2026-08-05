@@ -1,10 +1,35 @@
-//! Anonymous, opt-out usage telemetry. Everything here is deliberately
+//! Anonymous, consent-gated usage telemetry. Everything here is deliberately
 //! boring-by-design: a random install id (never derived from hardware or
 //! hostname, so it identifies an *install*, not a person), coarse environment
 //! facts, feature-usage counts, and error kinds. No paths, no file names, no
-//! wallpaper content. The Settings switch ("Share anonymous usage statistics")
-//! gates every call; when off, every function returns before touching the
-//! network or disk markers.
+//! wallpaper content.
+//!
+//! # The two tiers
+//!
+//! Knowing how many people use Fresco, and roughly where, is treated as
+//! essential to maintaining it: a release cannot be tested where users are if
+//! nobody knows where they are. So **both** tiers carry the random install id
+//! and the country. What the dialog actually asks about is the detail:
+//!
+//! * **Accept all** — [`Tier::Full`]. The daily [`heartbeat`] with the full
+//!   environment (distro, desktop, session, backend, monitor count, install
+//!   source), the precise time of each check-in, [`event`] counts, and
+//!   [`error`] kinds.
+//! * **Decline optional** — [`Tier::Essential`]. The install id, the country,
+//!   the app version, and how it was packaged. No environment, no events, no
+//!   errors, and the check-in is recorded to the DAY rather than the moment
+//!   (`register_install_minimal` truncates the timestamp server-side, so the
+//!   exact time of use is not merely unused, it is never stored).
+//!
+//! Both tiers can therefore be counted as distinct users over any window.
+//!
+//! Nothing at all is sent before the dialog is answered ([`Tier::Unanswered`]),
+//! and the country in both tiers is resolved by Cloudflare at the network edge
+//! from an IP this code never sees, receives, or stores.
+//!
+//! Setting `telemetry = false` in config.toml by hand leaves the essential
+//! heartbeat running; [`opt_out_completely`] documents how to silence
+//! everything.
 //!
 //! All network I/O runs on a detached thread with short timeouts so telemetry
 //! can never slow down or break the app — failures are logged at debug level
@@ -15,6 +40,51 @@ use std::time::Duration;
 
 use crate::config::Config;
 
+/// Current revision of the consent terms, mirroring TERMS.md.
+///
+/// Installs whose `telemetry_consent_version` is lower answered a materially
+/// different question and are asked again, once. Bump this whenever what is
+/// collected, or what declining means, changes.
+///
+/// * Revision 1 — declining stopped being total silence: it sent an
+///   identifier-free country tally.
+/// * Revision 2 — declining now sends the install id too, so unique users are
+///   countable in both tiers. Re-prompting is **mandatory** here and not a
+///   nicety: revision 1's dialog said in as many words that declining sends
+///   "no install id", and shipping revision 2 silently would make that a lie
+///   told to people who are still running on it.
+pub const CONSENT_VERSION: u32 = 2;
+
+/// What the user agreed to share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    /// Dialog not answered yet (or answered under older terms). Send nothing.
+    Unanswered,
+    /// Declined the optional detail: install id, country, version, packaging.
+    /// Check-in recorded to the day, not the moment.
+    Essential,
+    /// Accepted everything: the above plus environment, precise timestamps,
+    /// feature events, and error kinds.
+    Full,
+}
+
+/// Resolve the current tier from config. Read fresh on every call so a toggle
+/// in Settings takes effect immediately, without plumbing state through every
+/// call site.
+pub fn tier() -> Tier {
+    let Ok(c) = Config::load() else {
+        return Tier::Unanswered;
+    };
+    if !c.telemetry_prompted || c.telemetry_consent_version < CONSENT_VERSION {
+        return Tier::Unanswered;
+    }
+    if c.telemetry {
+        Tier::Full
+    } else {
+        Tier::Essential
+    }
+}
+
 /// Same project/key as `supabase.rs` — RLS protects the data, not key secrecy.
 const URL: &str = "https://mmoxgmvrpiaflfnsrynx.supabase.co";
 const ANON_KEY: &str = "sb_publishable_eWKJzAuME5rstSxGyCBoHA_8hrTwkQM";
@@ -23,16 +93,46 @@ const ANON_KEY: &str = "sb_publishable_eWKJzAuME5rstSxGyCBoHA_8hrTwkQM";
 /// opens their laptop at slightly different times each day still pings daily.
 const HEARTBEAT_MIN_AGE: Duration = Duration::from_secs(20 * 60 * 60);
 
-/// Whether the user has telemetry enabled (Settings → "Share anonymous usage
-/// statistics"). Reads the config fresh so a toggle takes effect immediately,
-/// without plumbing state through every call site.
+/// Where the app asks for its own coarse location.
+///
+/// Postgres can see the country for free (Cloudflare's `CF-IPCountry`, read by
+/// `request_country()`), but not the city: `CF-IPCity` is a Cloudflare
+/// Enterprise header that Supabase does not enable. Vercel injects the
+/// equivalents on every plan and the Fresco site already runs there, so this
+/// endpoint costs nothing extra and adds no third-party service.
+///
+/// It returns place names only, never coordinates and never an IP — Vercel
+/// resolves the address at the edge before the handler runs. See
+/// landing/src/app/api/geo/route.ts.
+const GEO_URL: &str = "https://fresco.dibbayajyoti.com/api/geo";
+
+/// Short by design. City is a nice-to-have on an optional-tier heartbeat: if
+/// the lookup is slow the right answer is to give up and send without it, not
+/// to delay or drop the heartbeat itself.
+const GEO_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Whether the optional detail (environment, events, errors, precise times)
+/// may be sent.
+///
+/// Deliberately not "is any network call allowed": [`Tier::Essential`] is
+/// false here and still sends its identity + country heartbeat. Gate
+/// [`event`] and [`error`] on this, not the heartbeat.
 pub fn enabled() -> bool {
-    // Consent-gated: nothing is sent until the user has answered the one-time
-    // consent dialog (telemetry_prompted), and then only if they said yes.
-    Config::load()
-        .map(|c| c.telemetry_prompted && c.telemetry)
-        .unwrap_or(false)
+    tier() == Tier::Full
 }
+
+/// How to send absolutely nothing, documented in one place because the
+/// Settings switch alone does not do it — off means [`Tier::Essential`], not
+/// silence. Setting both of these in config.toml puts the app back to
+/// [`Tier::Unanswered`], which is silent:
+///
+/// ```toml
+/// telemetry = false
+/// telemetry_prompted = false
+/// ```
+///
+/// Referenced by TERMS.md; keep the two in step.
+pub const fn opt_out_completely() {}
 
 /// Path of the persisted install id, next to config.toml.
 fn install_id_path() -> PathBuf {
@@ -69,7 +169,11 @@ fn install_id_at(path: &Path) -> String {
 
 /// UUID v4 from /dev/urandom (no new deps). Falls back to hashing clock+pid
 /// entropy if urandom is unreadable — weaker uniqueness, same anonymity.
-fn random_uuid_v4() -> String {
+///
+/// Shared with [`crate::support`] for its ticket. Sharing the *generator* is
+/// fine and sharing the *value* would not be: the two ids are drawn
+/// independently and must never be equal.
+pub(crate) fn random_uuid_v4() -> String {
     use std::io::Read as _;
     let mut b = [0u8; 16];
     let filled = std::fs::File::open("/dev/urandom")
@@ -116,6 +220,56 @@ fn heartbeat_due(marker: &Path, min_age: Duration) -> bool {
     }
 }
 
+/// Coarse location for the [`Tier::Full`] heartbeat: `(city, region)`.
+///
+/// Only ever called on the full-consent path. The essential tier does not call
+/// it at all, which is what makes "declining means the city is never sent"
+/// literally true rather than a promise about what the server does with it.
+///
+/// Returns `(None, None)` on any failure — offline, endpoint down, malformed
+/// response, or Vercel simply not supplying a city for that address. A missing
+/// city is a normal outcome and never an error worth surfacing.
+///
+/// The country deliberately is NOT taken from here even though the endpoint
+/// returns it: `request_country()` resolves it server-side from a header the
+/// client cannot forge, and a spoofable country would corrupt the one
+/// geographic number that matters. City and region are client-supplied and
+/// therefore spoofable; nothing is authorised on them.
+fn geo() -> (Option<String>, Option<String>) {
+    #[derive(serde::Deserialize)]
+    struct Geo {
+        #[serde(default)]
+        city: Option<String>,
+        #[serde(default)]
+        region: Option<String>,
+    }
+
+    let clean = |value: Option<String>| -> Option<String> {
+        let text = value?;
+        let text = text.trim();
+        // Bound what a compromised or confused endpoint can put in a column.
+        (!text.is_empty() && text.chars().count() <= 80).then(|| text.to_string())
+    };
+
+    // Matched in two steps rather than chained through and_then: ureq::Error
+    // is a large enum, and threading it through a closure's Err makes clippy
+    // (rightly) complain about the size of the returned Result.
+    let response = match ureq::get(GEO_URL).timeout(GEO_TIMEOUT).call() {
+        Ok(r) => r,
+        Err(e) => {
+            log::debug!("geo lookup failed: {e}");
+            return (None, None);
+        }
+    };
+    match response.into_json::<Geo>() {
+        Ok(g) => (clean(g.city), clean(g.region)),
+        Err(e) => {
+            log::debug!("geo response was not usable json: {e}");
+            (None, None)
+        }
+    }
+}
+
 /// Value of PRETTY_NAME (preferred) or ID from /etc/os-release — the distro
 /// name only, nothing machine-specific.
 fn distro() -> Option<String> {
@@ -132,7 +286,14 @@ fn distro() -> Option<String> {
 /// Fire one POST on a detached thread; telemetry must never block a caller
 /// or surface a failure.
 fn post_detached(table: &'static str, payload: serde_json::Value, prefer: &'static str) {
-    std::thread::spawn(move || {
+    std::thread::spawn(move || post_blocking(table, payload, prefer));
+}
+
+/// The actual POST. Split out of [`post_detached`] so a caller already running
+/// on its own thread (the full heartbeat, which does a geo lookup first) does
+/// not spawn a second one just to make one request.
+fn post_blocking(table: &str, payload: serde_json::Value, prefer: &str) {
+    {
         let result = ureq::post(&format!("{URL}/rest/v1/{table}"))
             .timeout(Duration::from_secs(5))
             .set("apikey", ANON_KEY)
@@ -143,7 +304,7 @@ fn post_detached(table: &'static str, payload: serde_json::Value, prefer: &'stat
         if let Err(e) = result {
             log::debug!("telemetry post to {table} failed: {e}");
         }
-    });
+    }
 }
 
 /// Daily install ping: one row per install, refreshed in place. Goes through
@@ -154,8 +315,12 @@ fn post_detached(table: &'static str, payload: serde_json::Value, prefer: &'stat
 /// owner; see `register_install` in supabase/schema.sql. `backend`/`decode`/
 /// `monitor_count` come from the daemon when handy; None is fine.
 pub fn heartbeat(backend: Option<&str>, decode: Option<&str>, monitor_count: Option<u32>) {
-    if !enabled() {
-        return;
+    match tier() {
+        Tier::Unanswered => return,
+        // Declined the optional detail: identity and country still go out, so
+        // this user is counted, but nothing describing their machine does.
+        Tier::Essential => return minimal_heartbeat(),
+        Tier::Full => {}
     }
     let marker = heartbeat_marker();
     if !heartbeat_due(&marker, HEARTBEAT_MIN_AGE) {
@@ -170,19 +335,63 @@ pub fn heartbeat(backend: Option<&str>, decode: Option<&str>, monitor_count: Opt
     // Named args match register_install's parameters (p_-prefixed). last_seen
     // is intentionally omitted: the function stamps now() with the server
     // clock, so a skewed client clock can't distort active-user windows.
+    // Everything below runs on its own thread: the geo lookup is a second
+    // network round trip, and the heartbeat is called from the daemon's start-up
+    // path where blocking would delay the first wallpaper appearing.
+    let backend = backend.map(str::to_string);
+    let decode = decode.map(str::to_string);
+    std::thread::spawn(move || {
+        let (city, region) = geo();
+        let payload = serde_json::json!({
+            "p_install_id": install_id(),
+            "p_version": env!("CARGO_PKG_VERSION"),
+            "p_distro": distro(),
+            "p_compositor": std::env::var("XDG_CURRENT_DESKTOP").ok(),
+            "p_session": std::env::var("XDG_SESSION_TYPE").ok(),
+            "p_backend": backend,
+            "p_decode": decode,
+            "p_monitor_count": monitor_count,
+            "p_source": install_source(),
+            "p_channel": install_channel(),
+            "p_city": city,
+            "p_region": region,
+        });
+        post_blocking("rpc/register_install", payload, "return=minimal");
+    });
+}
+
+/// The [`Tier::Essential`] heartbeat: install id, country, version, packaging.
+///
+/// What is deliberately absent: the distro, the desktop, the session type, the
+/// rendering backend, the monitor count, the install source, every feature
+/// event, every error — and the time. The server truncates the timestamp to
+/// the day (`register_install_minimal` in supabase/schema.sql), so this records
+/// that the user was active on a date and never that they were active at
+/// 21:47. The country is resolved at the edge and is never sent by this client.
+///
+/// This replaces revision 1's identifier-free `count_anonymous_ping`, which is
+/// no longer called: writing both would count every essential user twice.
+pub fn minimal_heartbeat() {
+    if tier() == Tier::Unanswered {
+        return;
+    }
+    // Shares the full heartbeat's marker on purpose: a user who switches tiers
+    // must not get a second check-in the same day out of the switch itself.
+    let marker = heartbeat_marker();
+    if !heartbeat_due(&marker, HEARTBEAT_MIN_AGE) {
+        return;
+    }
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(&marker, b"").ok();
+
     let payload = serde_json::json!({
         "p_install_id": install_id(),
         "p_version": env!("CARGO_PKG_VERSION"),
-        "p_distro": distro(),
-        "p_compositor": std::env::var("XDG_CURRENT_DESKTOP").ok(),
-        "p_session": std::env::var("XDG_SESSION_TYPE").ok(),
-        "p_backend": backend,
-        "p_decode": decode,
-        "p_monitor_count": monitor_count,
-        "p_source": install_source(),
         "p_channel": install_channel(),
     });
-    post_detached("rpc/register_install", payload, "return=minimal");
+    post_detached("rpc/register_install_minimal", payload, "return=minimal");
 }
 
 /// UTM-style download attribution: the install one-liner persists the tag the
@@ -211,6 +420,33 @@ fn install_channel() -> &'static str {
         return "deb";
     }
     "other"
+}
+
+/// Human-readable environment block for a bug report.
+///
+/// Not telemetry: nothing here is posted by us. It is pre-filled into a GitHub
+/// issue the user reviews in their browser and submits themselves, so it
+/// deliberately ignores the [`enabled`] opt-out — and carries no install id.
+///
+/// This exists because feedback rows are anonymous and carry no environment at
+/// all (`os` is a compile-time constant, always "linux"), which is why a 👎 like
+/// "does not work, wallpaper is just black" arrives undiagnosable.
+pub fn env_summary() -> String {
+    let var = |k: &str| std::env::var(k).unwrap_or_else(|_| "unknown".into());
+    format!(
+        "- Fresco: {}\n\
+         - Distro: {}\n\
+         - Desktop: {}\n\
+         - Session: {}\n\
+         - Backend: {}\n\
+         - Install: {}",
+        env!("CARGO_PKG_VERSION"),
+        distro().unwrap_or_else(|| "unknown".into()),
+        var("XDG_CURRENT_DESKTOP"),
+        var("XDG_SESSION_TYPE"),
+        crate::capability::detect().id(),
+        install_channel(),
+    )
 }
 
 /// Count one feature use. `props` must stay content-free (kinds, outcomes —

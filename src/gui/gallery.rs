@@ -12,6 +12,7 @@ use libadwaita::prelude::*;
 use crate::catalog::{self, CatalogItem};
 use crate::gui::library;
 use crate::gui::window::AppState;
+use crate::{t, tf};
 
 const MAX_MEDIA_BYTES: u64 = 500_000_000;
 
@@ -27,16 +28,16 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
     win.set_transient_for(Some(parent));
     win.set_modal(false);
     win.set_default_size(760, 560);
-    win.set_title(Some("Browse wallpapers"));
+    win.set_title(Some(t!("Browse wallpapers")));
 
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
     let search = gtk4::SearchEntry::new();
-    search.set_placeholder_text(Some("Search wallpapers"));
+    search.set_placeholder_text(Some(t!("Search wallpapers")));
     header.set_title_widget(Some(&search));
     root.append(&header);
 
-    let status = gtk4::Label::new(Some("Loading catalog…"));
+    let status = gtk4::Label::new(Some(t!("Loading catalog…")));
     status.add_css_class("dim");
     status.set_margin_top(24);
     root.append(&status);
@@ -67,7 +68,7 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
             }
             Err(e) => match catalog::load_cache(&cache_dir()) {
                 Some(items) => Ok(items), // offline: cached catalog still browses
-                None => Err(format!("Couldn’t load the catalog: {e:#}")),
+                None => Err(tf!("Couldn’t load the catalog: {error}", "error" => format!("{e:#}"))),
             },
         };
         let _ = tx.send_blocking(result);
@@ -86,7 +87,7 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
                     log::info!("gallery: {} catalog item(s)", items.len());
                     status.set_visible(items.is_empty());
                     if items.is_empty() {
-                        status.set_text("The catalog is empty right now — check back soon.");
+                        status.set_text(t!("The catalog is empty right now — check back soon."));
                     }
                     *items_store.borrow_mut() = items;
                     render(&flow, &items_store.borrow(), "", &state);
@@ -103,7 +104,7 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
                     });
                 }
                 Ok(Err(msg)) => status.set_text(&msg),
-                Err(_) => status.set_text("Couldn’t load the catalog."),
+                Err(_) => status.set_text(t!("Couldn’t load the catalog.")),
             }
         });
     }
@@ -146,15 +147,15 @@ fn card(item: &CatalogItem, state: &Rc<RefCell<AppState>>) -> gtk4::Widget {
     b.append(&title);
 
     // Attribution is a launch requirement: license + author on EVERY card.
-    let meta = gtk4::Label::new(Some(&format!(
-        "{} · {} · {} MB",
-        if item.author.is_empty() {
-            "Unknown"
+    let meta = gtk4::Label::new(Some(&tf!(
+        "{author} · {license} · {size} MB",
+        "author" => if item.author.is_empty() {
+            t!("Unknown")
         } else {
-            &item.author
+            item.author.as_str()
         },
-        item.license,
-        item.size_bytes / 1_048_576
+        "license" => item.license.as_str(),
+        "size" => (item.size_bytes / 1_048_576).to_string(),
     )));
     meta.add_css_class("dim");
     meta.set_wrap(true);
@@ -169,7 +170,7 @@ fn card(item: &CatalogItem, state: &Rc<RefCell<AppState>>) -> gtk4::Widget {
     progress.set_margin_end(12);
     b.append(&progress);
 
-    let btn = gtk4::Button::with_label("Set as wallpaper");
+    let btn = gtk4::Button::with_label(t!("Set as wallpaper"));
     btn.add_css_class("suggested-action");
     btn.set_margin_top(4);
     btn.set_margin_bottom(10);
@@ -239,7 +240,7 @@ fn install(
                     };
                     crate::gui::window::apply_entry_by_idx(state.clone(), idx);
                     progress.set_visible(false);
-                    btn.set_label("Set ✓");
+                    btn.set_label(t!("Set ✓"));
                     break;
                 }
                 Msg::Done(Err(msg)) => {

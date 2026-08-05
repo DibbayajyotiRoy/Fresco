@@ -1,6 +1,10 @@
 //! Shared update-check logic used by both the GUI and the daemon: version
 //! comparison, locating the bundled updater script, running it, and querying
-//! GitHub Releases for the latest version.
+//! the release host for the latest version.
+//!
+//! "The release host" rather than "GitHub" because Fresco also publishes to a
+//! Gitee mirror for mainland China, where github.com is unreliable. Which host
+//! an install talks to is fixed at install time — see [`Origin`].
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -16,8 +20,102 @@ const EXIT_UP_TO_DATE: i32 = 2;
 /// (Flatpak sandbox or no `apt-get`), matching the script's documented codes.
 const EXIT_UNSUPPORTED: i32 = 3;
 
-/// Where releases are published.
-const RELEASES_API: &str = "https://api.github.com/repos/DibbayajyotiRoy/fresco/releases/latest";
+/// Where this copy of Fresco gets its releases from.
+///
+/// GitHub is unreliable to reach from mainland China, so Fresco also publishes
+/// to a Gitee mirror. Which host a given install should talk to is decided
+/// **once, at install time**, not per request: a user who installed from Gitee
+/// because GitHub was unreachable must not then be sent to GitHub to update —
+/// that is precisely how a mirrored install ends up frozen on the version it
+/// was installed at.
+///
+/// The installer records the choice in `~/.config/fresco/install-origin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Origin {
+    #[default]
+    GitHub,
+    /// gitee.com mirror, for mainland China.
+    Gitee,
+}
+
+impl Origin {
+    /// The origin this install should use.
+    ///
+    /// `FRESCO_ORIGIN` wins (for testing and for anyone who wants to switch),
+    /// then the marker the installer wrote, then GitHub. An unrecognised value
+    /// falls back to GitHub rather than failing: being sent to the wrong host
+    /// is recoverable, having no update path at all is not.
+    pub fn current() -> Origin {
+        if let Ok(v) = std::env::var("FRESCO_ORIGIN") {
+            if let Some(o) = Origin::from_tag(v.trim()) {
+                return o;
+            }
+        }
+        std::fs::read_to_string(Origin::marker_path())
+            .ok()
+            .and_then(|s| Origin::from_tag(s.trim()))
+            .unwrap_or(Origin::GitHub)
+    }
+
+    /// The stable identifier written to the marker file and passed to the
+    /// updater script. Inverse of `Origin::from_tag` (private).
+    pub fn tag(self) -> &'static str {
+        match self {
+            Origin::GitHub => "github",
+            Origin::Gitee => "gitee",
+        }
+    }
+
+    fn from_tag(tag: &str) -> Option<Origin> {
+        match tag.to_ascii_lowercase().as_str() {
+            "github" => Some(Origin::GitHub),
+            "gitee" => Some(Origin::Gitee),
+            _ => None,
+        }
+    }
+
+    /// Where `install.sh` records which host this copy came from. Kept beside
+    /// `install-source` (the campaign tag) rather than in `config.toml`,
+    /// because it describes the *installation*, not the user's preferences —
+    /// it must survive a config reset and must be readable before config loads.
+    pub fn marker_path() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("fresco")
+            .join("install-origin")
+    }
+
+    /// The REST endpoint describing the newest release. Both hosts answer with
+    /// a `tag_name` and `browser_download_url` fields, which is why one
+    /// `Release` struct deserialises either.
+    pub fn releases_api(self) -> &'static str {
+        match self {
+            Origin::GitHub => "https://api.github.com/repos/DibbayajyotiRoy/fresco/releases/latest",
+            Origin::Gitee => "https://gitee.com/api/v5/repos/dibbayajyoti/fresco/releases/latest",
+        }
+    }
+
+    /// The human-facing releases page, for "Open releases page" and for the
+    /// notification that fires when a new version ships.
+    pub fn releases_page(self) -> &'static str {
+        match self {
+            Origin::GitHub => "https://github.com/DibbayajyotiRoy/fresco/releases/latest",
+            Origin::Gitee => "https://gitee.com/dibbayajyoti/fresco/releases/latest",
+        }
+    }
+
+    /// The one-liner shown when Fresco cannot update itself in place.
+    pub fn install_command(self) -> &'static str {
+        match self {
+            Origin::GitHub => {
+                "curl -fsSL https://github.com/DibbayajyotiRoy/fresco/releases/latest/download/install.sh | bash"
+            }
+            Origin::Gitee => {
+                "curl -fsSL https://gitee.com/dibbayajyoti/fresco/releases/latest/download/install.sh | FRESCO_ORIGIN=gitee bash"
+            }
+        }
+    }
+}
 
 /// The version this binary was built as.
 pub fn current_version() -> &'static str {
@@ -79,7 +177,16 @@ pub fn run_updater_blocking() -> UpdateOutcome {
     let Some(script) = updater_script() else {
         return UpdateOutcome::Failed("updater script not found".into());
     };
-    match std::process::Command::new("pkexec").arg(&script).status() {
+    // The origin is passed as an ARGUMENT, not an env var: pkexec runs the
+    // script as root with a sanitised environment and root's $HOME, so it can
+    // neither inherit FRESCO_ORIGIN nor read the marker from the invoking
+    // user's config directory.
+    match std::process::Command::new("pkexec")
+        .arg(&script)
+        .arg("--origin")
+        .arg(Origin::current().tag())
+        .status()
+    {
         Ok(status) => outcome_from_status(status),
         Err(e) => UpdateOutcome::Failed(format!("failed to launch pkexec: {e}")),
     }
@@ -105,6 +212,9 @@ pub fn run_updater_with_progress(on_progress: impl Fn(Progress) + Send + 'static
     };
     let mut cmd = std::process::Command::new("pkexec");
     cmd.arg(&script);
+    // See run_updater_blocking: pkexec drops the environment, so the host has
+    // to travel as an argument.
+    cmd.arg("--origin").arg(Origin::current().tag());
     run_command_with_progress(cmd, on_progress)
 }
 
@@ -169,24 +279,89 @@ pub struct LatestRelease {
 #[derive(Debug, Deserialize)]
 struct ReleaseResponse {
     tag_name: String,
-    html_url: String,
+    /// GitHub returns this; Gitee's v5 release object does not. Optional so one
+    /// struct deserialises both, with the origin's releases page as the
+    /// fallback link.
+    #[serde(default)]
+    html_url: Option<String>,
 }
 
-/// Fetch the latest release from the GitHub Releases API (unauthenticated).
+/// Fetch the latest release from whichever host this copy was installed from
+/// (unauthenticated). See [`Origin`].
 pub fn fetch_latest() -> anyhow::Result<LatestRelease> {
-    let resp = ureq::get(RELEASES_API)
+    let origin = Origin::current();
+    let resp = ureq::get(origin.releases_api())
         .set("Accept", "application/vnd.github+json")
         .call()?;
     let release: ReleaseResponse = resp.into_json()?;
     Ok(LatestRelease {
         version: release.tag_name,
-        notes_url: release.html_url,
+        notes_url: release
+            .html_url
+            .unwrap_or_else(|| origin.releases_page().to_string()),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every origin must round-trip through its tag, because the tag is what
+    /// crosses two process boundaries: the marker file the installer writes,
+    /// and the `--origin` argument handed to the updater under pkexec. A
+    /// mismatch on either side silently sends a Gitee install back to GitHub.
+    #[test]
+    fn origins_round_trip_through_their_tag() {
+        for origin in [Origin::GitHub, Origin::Gitee] {
+            assert_eq!(Origin::from_tag(origin.tag()), Some(origin));
+        }
+        // The installer writes lowercase, but be forgiving of a hand-edited file.
+        assert_eq!(Origin::from_tag("GITEE"), Some(Origin::Gitee));
+        assert_eq!(Origin::from_tag("nonsense"), None);
+    }
+
+    /// An unknown or absent marker must degrade to GitHub rather than leaving
+    /// the install with no update path at all.
+    #[test]
+    fn unknown_origin_falls_back_to_github() {
+        assert_eq!(Origin::default(), Origin::GitHub);
+        assert_eq!(Origin::from_tag(""), None);
+    }
+
+    /// The Gitee mirror exists because GitHub is unreachable from mainland
+    /// China. An endpoint that still points at github.com would defeat the
+    /// entire purpose, so assert the hosts really differ.
+    #[test]
+    fn gitee_endpoints_never_point_at_github() {
+        for url in [
+            Origin::Gitee.releases_api(),
+            Origin::Gitee.releases_page(),
+            Origin::Gitee.install_command(),
+        ] {
+            assert!(
+                !url.contains("github.com") && !url.contains("api.github"),
+                "Gitee origin leaks a GitHub host: {url}"
+            );
+            assert!(url.contains("gitee.com"), "not a Gitee URL: {url}");
+        }
+        // And the reverse, so a copy-paste edit can't quietly swap them.
+        assert!(Origin::GitHub.releases_api().contains("api.github.com"));
+        assert!(Origin::GitHub.releases_page().contains("github.com"));
+    }
+
+    /// The Gitee install one-liner must carry the origin forward, or the copy
+    /// it installs will check GitHub for updates and never find them.
+    #[test]
+    fn gitee_install_command_records_its_origin() {
+        assert!(
+            Origin::Gitee
+                .install_command()
+                .contains("FRESCO_ORIGIN=gitee"),
+            "the Gitee one-liner must set FRESCO_ORIGIN so the install is \
+             marked as coming from Gitee: {}",
+            Origin::Gitee.install_command()
+        );
+    }
 
     #[test]
     fn failed_update_carries_stderr_detail() {

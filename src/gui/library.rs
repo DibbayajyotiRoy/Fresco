@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Fit, Kind, PowerSaving, Slideshow, Transition, Wallpaper};
+use crate::{t, tf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -143,7 +144,7 @@ impl LibraryEntry {
                     paths.len().saturating_sub(1)
                 )
             })
-            .unwrap_or_else(|| "Playlist".to_string());
+            .unwrap_or_else(|| t!("Playlist").to_string());
         Self {
             id: make_id(),
             name,
@@ -174,7 +175,7 @@ impl LibraryEntry {
         let name = folder
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Slideshow".to_string());
+            .unwrap_or_else(|| t!("Slideshow").to_string());
         Self {
             id: make_id(),
             name,
@@ -203,7 +204,7 @@ impl LibraryEntry {
 
     /// A slideshow built from hand-picked image files (no folder).
     pub fn new_image_set(paths: Vec<PathBuf>) -> Self {
-        let name = format!("Slideshow ({} images)", paths.len());
+        let name = tf!("Slideshow ({count} images)", "count" => paths.len().to_string());
         Self {
             id: make_id(),
             name,

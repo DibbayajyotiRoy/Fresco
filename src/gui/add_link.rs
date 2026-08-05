@@ -16,6 +16,7 @@ use libadwaita as adw;
 use super::library::{self, save_entries};
 use super::window::{glass_dialog, show_toast, AppState};
 use crate::linkresolve::{MediaKind, ResolvedMedia};
+use crate::{t, tf};
 
 /// Same cap as the "Add from URL" flow: refuse >1 GB outright.
 const MAX_BYTES: u64 = 1_000_000_000;
@@ -107,14 +108,14 @@ pub(crate) fn show_add_link_dialog(
     state: Rc<RefCell<AppState>>,
     stack: gtk4::Stack,
 ) {
-    let (dialog, content) = glass_dialog(window, "Add from link", 440, -1);
+    let (dialog, content) = glass_dialog(window, t!("Add from link"), 440, -1);
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
     inner.set_margin_start(20);
     inner.set_margin_end(20);
     inner.set_margin_bottom(18);
 
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Paste a Pinterest or direct video/image link"));
+    entry.set_placeholder_text(Some(t!("Paste a Pinterest or direct video/image link")));
     inner.append(&entry);
 
     let error = gtk4::Label::new(None);
@@ -139,8 +140,8 @@ pub(crate) fn show_add_link_dialog(
 
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     row.set_halign(gtk4::Align::End);
-    let cancel_btn = gtk4::Button::with_label("Cancel");
-    let add_btn = gtk4::Button::with_label("Add");
+    let cancel_btn = gtk4::Button::with_label(t!("Cancel"));
+    let add_btn = gtk4::Button::with_label(t!("Add"));
     add_btn.add_css_class("suggested-action");
     row.append(&cancel_btn);
     row.append(&add_btn);
@@ -183,7 +184,7 @@ pub(crate) fn show_add_link_dialog(
         add_btn.connect_clicked(move |btn| {
             let url = entry_w.text().trim().to_string();
             if !url.starts_with("http") {
-                error.set_text("That doesn\u{2019}t look like a link.");
+                error.set_text(t!("That doesn’t look like a link."));
                 error.set_visible(true);
                 return;
             }
@@ -197,7 +198,7 @@ pub(crate) fn show_add_link_dialog(
             btn.set_sensitive(false);
             entry_w.set_sensitive(false);
             error.set_visible(false);
-            status.set_text("Resolving link\u{2026}");
+            status.set_text(t!("Resolving link…"));
             status.set_visible(true);
             progress.set_visible(true);
 
@@ -272,13 +273,13 @@ pub(crate) fn show_add_link_dialog(
             glib::spawn_future_local(async move {
                 while let Ok(msg) = rx.recv().await {
                     match msg {
-                        Msg::Downloading => status.set_text("Downloading\u{2026}"),
+                        Msg::Downloading => status.set_text(t!("Downloading…")),
                         Msg::Progress(f) => {
                             pulsing.set(false);
                             progress.set_fraction(f.clamp(0.0, 1.0));
                         }
                         Msg::Duplicate => {
-                            show_toast(&state, "Already in your library");
+                            show_toast(&state, t!("Already in your library"));
                             dialog.close();
                             break;
                         }
@@ -308,8 +309,9 @@ pub(crate) fn show_add_link_dialog(
                             };
                             show_toast(
                                 &state,
-                                &format!(
-                                    "\u{201c}{name}\u{201d} added \u{2014} preview and adjust, then set"
+                                &tf!(
+                                    "“{name}” added — preview and adjust, then set",
+                                    "name" => name
                                 ),
                             );
                             let refresh = state.borrow().refresh.clone();

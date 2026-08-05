@@ -1,38 +1,54 @@
-import { FAQ, FEATURE_LIST, AUTHOR } from "@/lib/content";
+import { AUTHOR } from "@/lib/content";
 import { ALTERNATIVES } from "@/lib/alternatives";
 import { GITHUB_URL, RELEASES_URL, LICENSE_URL } from "@/lib/site";
 import { VIDEOS, embedUrl, posterUrl, watchUrl } from "@/lib/videos";
+import type { Dictionary } from "@/lib/i18n";
+import { LOCALE_META, localePath, type Locale } from "@/lib/i18n/config";
 
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
 /**
  * Structured data for SEO and GEO. A single @graph carries the
  * SoftwareApplication (with a live version and download counter), the WebSite,
- * the maintainer (Person), the FAQPage, a HowTo install walkthrough, and a
- * VideoObject per demo on the page. AI answer engines and Google read this
- * from the server-rendered HTML.
+ * the maintainer (Person), the FAQPage, and a VideoObject per demo on the
+ * page. AI answer engines and Google read this from the server-rendered HTML.
+ *
+ * Every locale emits its own graph, in its own language, with @id and url
+ * scoped to that locale's URL, so the Japanese page does not claim to be the
+ * same document as the English one.
  */
 export function JsonLd({
   version,
   downloads,
+  locale,
+  dict,
 }: {
   version: string;
   downloads: number | null;
+  locale: Locale;
+  dict: Dictionary;
 }) {
+  const lang = LOCALE_META[locale].hreflang;
+  const pageUrl = `${SITE_URL}${localePath(locale)}`;
+
   const software: Record<string, unknown> = {
     "@type": "SoftwareApplication",
+    "@id": `${pageUrl}#software`,
     name: "Fresco",
     applicationCategory: "UtilitiesApplication",
     operatingSystem: "Linux",
-    description:
-      "Fresco is a free, open-source live-wallpaper app for Linux. It sets video, GIF, image, slideshow, and playlist wallpapers as your animated desktop background, with hardware-accelerated playback. A free Wallpaper Engine alternative for Pop!_OS, Ubuntu, Linux Mint, Debian, and elementary OS, on X11 and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6).",
-    url: SITE_URL,
+    description: dict.softwareDescription,
+    inLanguage: lang,
+    url: pageUrl,
     downloadUrl: RELEASES_URL,
     softwareVersion: version,
     releaseNotes: `${GITHUB_URL}/blob/main/CHANGELOG.md`,
+    // No Review / aggregateRating here: the one community quote on the page is
+    // a named testimonial, and emitting review rich-result markup off a single
+    // quote violates Google's review-snippet policy.
     softwareRequirements:
-      "Linux on X11, or a Wayland layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma 6)",
-    featureList: FEATURE_LIST,
+      "Linux on X11 (including Deepin 25 DDE, verified on Deepin 25 Community build1), or a Wayland layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma 6)",
+    featureList: dict.featureList,
     screenshot: `${SITE_URL}/og.png`,
     image: `${SITE_URL}/og.png`,
     license: LICENSE_URL,
@@ -43,19 +59,18 @@ export function JsonLd({
     codeRepository: GITHUB_URL,
     sameAs: [GITHUB_URL],
     programmingLanguage: ["Rust"],
-    keywords:
-      "live wallpaper linux, video wallpaper linux, animated wallpaper ubuntu, wallpaper engine alternative linux, hidamari alternative, live wallpaper wayland, hyprland live wallpaper, kde plasma live wallpaper",
+    keywords: dict.meta.keywords.join(", "),
   };
 
   /**
    * One VideoObject per demo in <VideoShowcase />. Google needs name,
    * description, thumbnailUrl, and uploadDate at minimum; embedUrl is what
-   * makes the result eligible for the video carousel. @id lets the
-   * SoftwareApplication point at these rather than restating them.
+   * makes the result eligible for the video carousel. The videos themselves
+   * are in English, so inLanguage stays "en" regardless of the page locale.
    */
   const videos = VIDEOS.map((video) => ({
     "@type": "VideoObject",
-    "@id": `${SITE_URL}/#video-${video.id}`,
+    "@id": `${pageUrl}#video-${video.id}`,
     name: video.title,
     description: video.description,
     thumbnailUrl: [posterUrl(video.id)],
@@ -69,7 +84,7 @@ export function JsonLd({
     isFamilyFriendly: true,
     author: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
     publisher: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
-    about: { "@type": "SoftwareApplication", name: "Fresco", url: SITE_URL },
+    about: { "@type": "SoftwareApplication", name: "Fresco", url: pageUrl },
   }));
 
   software.video = videos.map((video) => ({ "@id": video["@id"] }));
@@ -90,8 +105,8 @@ export function JsonLd({
       {
         "@type": "WebSite",
         name: "Fresco",
-        url: SITE_URL,
-        inLanguage: "en",
+        url: pageUrl,
+        inLanguage: lang,
       },
       {
         "@type": "Person",
@@ -99,9 +114,11 @@ export function JsonLd({
         url: AUTHOR.portfolio,
         sameAs: [AUTHOR.portfolio, AUTHOR.github],
       },
+      // The competitor deep-dives exist in English only.
       {
         "@type": "ItemList",
         name: "Fresco alternative comparisons",
+        inLanguage: "en",
         itemListElement: ALTERNATIVES.map((alt, i) => ({
           "@type": "ListItem",
           position: i + 1,
@@ -111,7 +128,9 @@ export function JsonLd({
       },
       {
         "@type": "FAQPage",
-        mainEntity: FAQ.map(({ q, a }) => ({
+        "@id": `${pageUrl}#faq`,
+        inLanguage: lang,
+        mainEntity: dict.faq.items.map(({ q, a }) => ({
           "@type": "Question",
           name: q,
           acceptedAnswer: { "@type": "Answer", text: a },

@@ -18,8 +18,10 @@
 //! # Blocking I/O — read this before calling anything
 //!
 //! **Every function here that can touch the network blocks the calling
-//! thread**, for up to [`HTTP_TOTAL_TIMEOUT`]. That is [`fetch`] and
-//! [`fetch_cached`]. The daemon loop drives the wallpaper, the overlay clock
+//! thread**, for up to [`HTTP_TOTAL_TIMEOUT`] per request and
+//! [`MAX_ARTIST_ATTEMPTS`] requests. That is [`fetch`], [`fetch_outcome`],
+//! [`fetch_cached`] and [`fetch_cached_outcome`]. The daemon loop drives the
+//! wallpaper, the overlay clock
 //! and Smart Sleep; blocking it for even one second is a visible stall. Call
 //! these from a worker thread (`std::thread::spawn`) and hand the result back
 //! over a channel. [`cached`] alone is a cheap local read and may be called
@@ -105,9 +107,9 @@ const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longer than the artwork fetcher's, on purpose: LRCLIB's docs warn that a
 /// signature it has never seen sends *it* to external sources first, so a cold
 /// miss is legitimately slow. Still bounded, because this runs on a worker
-/// thread that a track change wants back. Note that [`fetch`] may make two
-/// requests (see its Retries section), so its true ceiling is twice this plus
-/// the inter-request pause.
+/// thread that a track change wants back. Note that [`fetch`] may make up to
+/// [`MAX_ARTIST_ATTEMPTS`] requests (see [`fetch_outcome`]'s Retries section),
+/// so its true ceiling is that many times this, plus the pauses between them.
 pub const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How long a cached `.lrc` body stays valid: 30 days.
@@ -200,38 +202,111 @@ pub fn query_from(np: &crate::mpris::NowPlaying) -> Option<Query> {
     })
 }
 
+/// Hard ceiling on `/api/get` requests for a single lookup, **including** the
+/// first attempt with the full artist string.
+///
+/// LRCLIB is a free service run by one person; its documentation asks clients
+/// to identify themselves, to space requests out, and to honour `Retry-After`.
+/// So "one request per credited artist" is not an option: film soundtracks and
+/// compilations routinely credit six or eight people, and a track change would
+/// turn into an eight-request burst against somebody else's server.
+///
+/// Four is the smallest cap that resolves the case it was sized against — a
+/// Bengali film track published by a browser as one string,
+/// `"Indraadip Dasgupta, Prasen, Arijit Singh, Anweshaa Dutta Gupta"`, whose
+/// LRCLIB record is filed under the *third* credited name. Three would stop one
+/// short of it. Going higher buys very little: credit lists put the performer
+/// near the front, and past the first few names what remains is lyricists,
+/// composers and featured guests that essentially no record is filed under —
+/// near-certain misses paid for in requests to a free service.
+///
+/// The worst case is bounded and paid at most once per track per
+/// [`MISS_TTL`]: four requests, spaced by [`INTER_REQUEST_PAUSE`], and only
+/// ever on a cache miss. Single-artist tracks — the common case — still make
+/// exactly one.
+///
+/// Public for the same reason [`HTTP_TOTAL_TIMEOUT`] is: together they are the
+/// worst-case blocking time of a lookup, and a caller sizing a worker or a
+/// cancellation window should be able to read it rather than guess.
+pub const MAX_ARTIST_ATTEMPTS: usize = 4;
+
+/// Pause between consecutive requests within one lookup.
+///
+/// LRCLIB asks clients to space requests by 200–500 ms rather than pipelining
+/// them. This is the only place Fresco sends more than one request in a row.
+pub const INTER_REQUEST_PAUSE: Duration = Duration::from_millis(350);
+
+/// Strip a trailing feature credit from one artist name, normalising whitespace.
+///
+/// `"Alpha feat. Beta"` becomes `"Alpha"`. Returns an empty string when nothing
+/// survives, which the caller drops rather than sending as a query.
+fn strip_feature_credits(name: &str) -> String {
+    // Feature separators as they actually appear in MPRIS metadata.
+    let head = ["feat.", "ft.", " & ", " x ", " with "].iter().fold(
+        name.trim().to_string(),
+        |acc, sep| {
+            // `to_ascii_lowercase` and not `to_lowercase`: the separators are
+            // all ASCII, and full Unicode lowercasing can *change the byte
+            // length* (U+0130 becomes two chars), so an index taken from the
+            // folded string can land mid-character in the original and panic
+            // the slice. ASCII folding is byte-for-byte stable.
+            match acc.to_ascii_lowercase().find(sep) {
+                Some(i) => acc[..i].trim().to_string(),
+                None => acc,
+            }
+        },
+    );
+    collapse_ws(&head)
+}
+
 impl Query {
-    /// The artist string to try after the full one fails, or `None` when there
-    /// is only one artist and a retry would be an identical request.
+    /// Artist strings to try, most specific first, capped at
+    /// [`MAX_ARTIST_ATTEMPTS`].
     ///
-    /// Streaming players publish every credited artist, so a Spotify track
-    /// arrives as `"A, B, C"` while LRCLIB's record was contributed from a tag
-    /// that says `"A"`. That single difference is the most common reason a
-    /// track that *is* in the database comes back empty.
-    fn primary_artist(&self) -> Option<String> {
-        // Feature separators as they actually appear in MPRIS metadata.
-        let head = self
-            .artist
-            .split([',', ';'])
-            .next()
-            .map(str::trim)
-            .unwrap_or_default();
-        let head =
-            ["feat.", "ft.", " & ", " x ", " with "]
-                .iter()
-                .fold(head.to_string(), |acc, sep| {
-                    // `to_ascii_lowercase` and not `to_lowercase`: the separators
-                    // are all ASCII, and full Unicode lowercasing can *change the
-                    // byte length* (U+0130 becomes two chars), so an index taken
-                    // from the folded string can land mid-character in the original
-                    // and panic the slice. ASCII folding is byte-for-byte stable.
-                    match acc.to_ascii_lowercase().find(sep) {
-                        Some(i) => acc[..i].trim().to_string(),
-                        None => acc,
-                    }
-                });
-        let head = collapse_ws(&head);
-        (!head.is_empty() && head != self.artist).then_some(head)
+    /// Streaming players and browsers publish *every* credited artist, so a
+    /// track arrives as `"A, B, C"` while the LRCLIB record was contributed
+    /// from a tag that says just one of those names. That mismatch is the most
+    /// common reason a track that *is* in the database comes back empty.
+    ///
+    /// The order is deliberate:
+    ///
+    /// 1. **The full string as published.** Unchanged from what the player
+    ///    said, and correct for the overwhelmingly common single-artist track —
+    ///    which therefore yields exactly one candidate and makes exactly one
+    ///    request. It is also the most specific query available, so trying it
+    ///    first is what stops a broad name from matching the wrong record.
+    /// 2. **Each individually credited artist, in published order**, split on
+    ///    `,` and `;` with feature credits (`feat.`, `ft.`, `&`, `x`, `with`)
+    ///    stripped. Published order is used rather than any cleverness about
+    ///    which name "looks like" the performer: guessing wrong costs the same
+    ///    request as guessing right, and the metadata carries no field that
+    ///    says which credit is the recording artist.
+    ///
+    /// Blank candidates are dropped and duplicates are skipped, so no request
+    /// is ever repeated verbatim. An empty artist yields no candidates at all
+    /// and therefore no request: `artist_name=` matches nothing and is junk
+    /// traffic.
+    fn artist_candidates(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let full = collapse_ws(&self.artist);
+        if !full.is_empty() {
+            out.push(full);
+        }
+        for piece in self.artist.split([',', ';']) {
+            if out.len() >= MAX_ARTIST_ATTEMPTS {
+                break;
+            }
+            let name = strip_feature_credits(piece);
+            // ASCII-case-insensitive for the same reason the separator scan is:
+            // it is a comparison over untrusted Unicode that must never be able
+            // to surprise us, and two candidates differing only in case would
+            // be two requests for one answer.
+            if name.is_empty() || out.iter().any(|c| c.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            out.push(name);
+        }
+        out
     }
 }
 
@@ -248,40 +323,94 @@ fn collapse_ws(s: &str) -> String {
 // Response parsing
 // ---------------------------------------------------------------------------
 
-/// Extract the **synced** `.lrc` body from an LRCLIB `/api/get` response body.
+/// What a lookup actually established about a track.
 ///
-/// Pure: takes text, returns text. No HTTP, so every branch below is unit
+/// `Option<String>` cannot express the difference between the two ways a
+/// lookup ends without usable words, and they are *different facts*:
+///
+/// - the track is not in LRCLIB at all, versus
+/// - the track **is** in LRCLIB but the record carries no timings.
+///
+/// Both leave the timed overlay with nothing to draw, so both are `None` to
+/// [`fetch`] and [`fetch_cached`], whose signatures are unchanged. But they
+/// deserve different words on screen: "no synced lyrics for this track" is a
+/// finished answer the user can act on (LRCLIB accepts contributions), whereas
+/// silence looks like a bug in Fresco. Callers that want to say so should use
+/// [`fetch_cached_outcome`] and match on this.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// Synced `.lrc` text, ready for `crate::lyrics::parse_lrc`.
+    Synced(String),
+    /// A record exists, but there is nothing timed to display: it carries only
+    /// `plainLyrics`, or it is flagged `instrumental`. Suggested phrasing is
+    /// "no synced lyrics for this track", which is true of both — as opposed
+    /// to "not found", which would be false.
+    NoTimings,
+    /// No record matched this signature. Suggested phrasing is "lyrics not
+    /// found".
+    NotFound,
+}
+
+impl Outcome {
+    /// The synced `.lrc` text, discarding *why* there was none.
+    ///
+    /// This is the adapter the `Option`-returning entry points are built from.
+    #[must_use]
+    pub fn into_synced(self) -> Option<String> {
+        match self {
+            Outcome::Synced(lrc) => Some(lrc),
+            Outcome::NoTimings | Outcome::NotFound => None,
+        }
+    }
+}
+
+/// Classify an LRCLIB `/api/get` response body.
+///
+/// Pure: takes text, returns a verdict. No HTTP, so every branch below is unit
 /// testable without a network.
 ///
-/// - `Ok(Some(lrc))` — the record has non-blank `syncedLyrics`.
-/// - `Ok(None)` — a clean "nothing usable here": the record is marked
-///   `instrumental`, or it carries only `plainLyrics`, or the body is a
-///   `TrackNotFound` error object. **Unsynced text is deliberately discarded**
-///   — the widget is a timed overlay driven by `.lrc` timestamps, and a static
-///   wall of text pinned over the wallpaper for the whole song is worse than
-///   showing nothing.
+/// - [`Outcome::Synced`] — the record has non-blank `syncedLyrics`.
+/// - [`Outcome::NoTimings`] — the record exists but is marked `instrumental`,
+///   or carries only `plainLyrics`. **Unsynced text is deliberately
+///   discarded** — the widget is a timed overlay driven by `.lrc` timestamps,
+///   and a static wall of text pinned over the wallpaper for the whole song is
+///   worse than showing nothing.
+/// - [`Outcome::NotFound`] — the body is a `TrackNotFound` (or other) error
+///   object, or valid JSON of a shape with no record in it.
 /// - `Err` — the body is not JSON at all (truncated response, captive portal
-///   login page, proxy error page). Distinct from `Ok(None)` on purpose: a
+///   login page, proxy error page). Distinct from a clean verdict on purpose: a
 ///   clean miss earns a negative cache entry, garbage must not, or one flaky
 ///   minute would silence a track for [`MISS_TTL`].
-pub(crate) fn parse_response(body: &str) -> Result<Option<String>> {
+pub(crate) fn parse_outcome(body: &str) -> Result<Outcome> {
     let v: serde_json::Value =
         serde_json::from_str(body).context("LRCLIB response was not valid JSON")?;
 
     // Error objects are JSON too and carry `code`/`name`, e.g. TrackNotFound.
     // Treat any of them as "nothing found" rather than reading fields off them.
     if v.get("code").is_some() && v.get("syncedLyrics").is_none() {
-        return Ok(None);
+        return Ok(Outcome::NotFound);
     }
     if v.get("instrumental").and_then(serde_json::Value::as_bool) == Some(true) {
-        return Ok(None);
+        return Ok(Outcome::NoTimings);
     }
-    let synced = v.get("syncedLyrics").and_then(serde_json::Value::as_str);
-    match synced {
-        // JSON `null` and `""` both mean "we have no synced version", and both
-        // occur in real responses alongside a populated `plainLyrics`.
-        Some(s) if !s.trim().is_empty() => Ok(Some(s.to_string())),
-        _ => Ok(None),
+    // JSON `null` and `""` both mean "we have no synced version", and both
+    // occur in real responses alongside a populated `plainLyrics`.
+    if let Some(s) = v.get("syncedLyrics").and_then(serde_json::Value::as_str) {
+        if !s.trim().is_empty() {
+            return Ok(Outcome::Synced(s.to_string()));
+        }
+    }
+    // A record we can see (it has an `id`, or lyric fields at all) but with no
+    // timings is "found, nothing timed". Anything else — `{}`, `[]`, `null`, a
+    // bare string — is not a record and must not be reported as one.
+    let looks_like_a_record = v.get("id").is_some()
+        || v.get("plainLyrics").is_some()
+        || v.get("syncedLyrics").is_some()
+        || v.get("instrumental").is_some();
+    if looks_like_a_record {
+        Ok(Outcome::NoTimings)
+    } else {
+        Ok(Outcome::NotFound)
     }
 }
 
@@ -376,10 +505,21 @@ pub fn cache_path(q: &Query) -> PathBuf {
 enum Record {
     /// Fresh `.lrc` text.
     Hit(String),
-    /// Fresh "this track has no synced lyrics" marker.
+    /// Fresh "LRCLIB has this track, but with no timings" marker.
+    NoTimings,
+    /// Fresh "LRCLIB does not have this track" marker.
     Miss,
     /// Absent, unreadable, malformed, or past its TTL — all mean "ask again".
     Stale,
+}
+
+/// The verdict half of a cache record, borrowed from whatever the caller
+/// already owns so that writing a hit does not copy the whole `.lrc` body.
+#[derive(Debug, Clone, Copy)]
+enum Verdict<'a> {
+    Hit(&'a str),
+    NoTimings,
+    Miss,
 }
 
 /// Whether a record written at `written_at` is still fresh at `now`.
@@ -403,11 +543,18 @@ fn now_secs() -> u64 {
 /// Serialise a record. One file per track holds both the verdict and its age:
 /// a header line, then the payload verbatim.
 ///
-/// Header: `fresco-lrc-cache/1 <unix-seconds> <HIT|MISS>`.
-fn encode(now: u64, hit: Option<&str>) -> String {
-    match hit {
-        Some(lrc) => format!("{CACHE_MAGIC} {now} HIT\n{lrc}"),
-        None => format!("{CACHE_MAGIC} {now} MISS\n"),
+/// Header: `fresco-lrc-cache/1 <unix-seconds> <HIT|PLAIN|MISS>`.
+///
+/// `PLAIN` was added after the format was in the field, and deliberately did
+/// **not** bump [`CACHE_MAGIC`]: [`decode`] already answers `Stale` to any
+/// verdict token it does not recognise, so an older build reading a newer
+/// cache simply refetches that one track. Bumping the magic would have thrown
+/// away every user's whole cache to add one token.
+fn encode(now: u64, verdict: Verdict<'_>) -> String {
+    match verdict {
+        Verdict::Hit(lrc) => format!("{CACHE_MAGIC} {now} HIT\n{lrc}"),
+        Verdict::NoTimings => format!("{CACHE_MAGIC} {now} PLAIN\n"),
+        Verdict::Miss => format!("{CACHE_MAGIC} {now} MISS\n"),
     }
 }
 
@@ -429,6 +576,10 @@ fn decode(raw: &str, now: u64) -> Record {
         Some("HIT") if is_fresh(written_at, now, HIT_TTL) && !body.trim().is_empty() => {
             Record::Hit(body.to_string())
         }
+        // Both negatives expire on `MISS_TTL`, and for the same reason: a
+        // record with no timings today may be revised to carry them tomorrow,
+        // exactly as an absent track may be contributed tomorrow.
+        Some("PLAIN") if is_fresh(written_at, now, MISS_TTL) => Record::NoTimings,
         Some("MISS") if is_fresh(written_at, now, MISS_TTL) => Record::Miss,
         _ => Record::Stale,
     }
@@ -451,7 +602,7 @@ fn lookup(q: &Query) -> Record {
 pub fn cached(q: &Query) -> Option<String> {
     match lookup(q) {
         Record::Hit(lrc) => Some(lrc),
-        Record::Miss | Record::Stale => None,
+        Record::NoTimings | Record::Miss | Record::Stale => None,
     }
 }
 
@@ -462,16 +613,24 @@ pub fn cached(q: &Query) -> Option<String> {
 /// the cache is disposable — but errors are returned rather than swallowed so
 /// a caller can log a genuinely broken cache directory once.
 pub fn store(q: &Query, lrc: &str) -> Result<()> {
-    write_record(q, encode(now_secs(), Some(lrc)))
+    write_record(q, encode(now_secs(), Verdict::Hit(lrc)))
 }
 
-/// Record that LRCLIB has no synced lyrics for `q`, for [`MISS_TTL`].
+/// Record that LRCLIB does not have `q` at all, for [`MISS_TTL`].
 ///
 /// Separate from [`store`] because the two have very different expiry, and
 /// because an empty-string "hit" would be indistinguishable from a corrupt
 /// record on read.
 pub fn store_miss(q: &Query) -> Result<()> {
-    write_record(q, encode(now_secs(), None))
+    write_record(q, encode(now_secs(), Verdict::Miss))
+}
+
+/// Record that LRCLIB has `q` but with no timings, for [`MISS_TTL`].
+///
+/// Distinct from [`store_miss`] so that a replay can still tell the user *why*
+/// the overlay is empty without asking the service again.
+pub fn store_no_timings(q: &Query) -> Result<()> {
+    write_record(q, encode(now_secs(), Verdict::NoTimings))
 }
 
 fn write_record(q: &Query, content: String) -> Result<()> {
@@ -565,18 +724,60 @@ fn retry_after_secs(header: Option<&str>) -> u64 {
 /// Does **not** consult or populate the cache; [`fetch_cached`] does that. Kept
 /// separate so a "refresh lyrics" action can force a real request.
 ///
+/// See [`fetch_outcome`], which this wraps, for the retry sequence and its
+/// bounds.
+pub fn fetch(q: &Query) -> Result<Option<String>> {
+    fetch_outcome(q).map(Outcome::into_synced)
+}
+
+/// [`fetch`], keeping the difference between "no timings" and "not in the
+/// database". **Blocks. Worker thread only.**
+///
 /// # Retries
 ///
-/// At most two requests, and only in one specific case: when the first attempt
-/// with the full artist string comes back empty and the track credits several
-/// artists, it retries with the primary artist alone. Streaming metadata says
-/// `"A, B, C"` where the contributed LRCLIB record says `"A"`, and that single
-/// mismatch is the most common false miss. The second request is preceded by a
-/// deliberate pause, per LRCLIB's request-throttling guidance.
-pub fn fetch(q: &Query) -> Result<Option<String>> {
-    // Honour a previously received `Retry-After` before opening a socket. Their
-    // docs are explicit that ignoring it risks a ban, and a ban would break the
-    // feature for every Fresco user, not just this one.
+/// One request per candidate artist string (see `Query::artist_candidates`),
+/// in order, stopping at
+/// the first [`Outcome::Synced`] — so a single-artist track makes exactly one
+/// request, and no track makes more than [`MAX_ARTIST_ATTEMPTS`] however many
+/// artists it credits. Consecutive requests are spaced by
+/// [`INTER_REQUEST_PAUSE`], per LRCLIB's throttling guidance.
+///
+/// An [`Outcome::NoTimings`] does **not** stop the sequence: it leaves the
+/// overlay just as empty as a miss does, while a *different* LRCLIB record for
+/// the same song — filed under one of the other credited artists — may well
+/// carry timings. It is remembered as the answer to return if nothing better
+/// turns up, and costs no requests beyond the cap that already bounds the
+/// sequence.
+///
+/// A transport error aborts the whole sequence immediately rather than
+/// continuing: if the network or the service is unwell, three more requests are
+/// not going to help it.
+pub fn fetch_outcome(q: &Query) -> Result<Outcome> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(HTTP_CONNECT_TIMEOUT)
+        .timeout_read(HTTP_READ_TIMEOUT)
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .user_agent(USER_AGENT)
+        .build();
+    resolve(q, INTER_REQUEST_PAUSE, |artist| {
+        request_once(&agent, q, artist)
+    })
+}
+
+/// The candidate sequence itself, with the transport injected.
+///
+/// Split out from [`fetch_outcome`] so the ordering, the cap, the deduplication
+/// and the rate-limit short-circuit are all testable without a network, and so
+/// the tests can pass a zero `pause` instead of sleeping for real.
+fn resolve<F>(q: &Query, pause: Duration, mut send: F) -> Result<Outcome>
+where
+    F: FnMut(&str) -> Result<Outcome>,
+{
+    // Honour a previously received `Retry-After` before opening a socket, and
+    // before *any* candidate — being told to wait applies to the lookup, not to
+    // one artist spelling of it. Their docs are explicit that ignoring it risks
+    // a ban, and a ban would break the feature for every Fresco user, not just
+    // this one.
     if let Some(until) = backoff_until() {
         let now = now_secs();
         if backoff_active(until, now) {
@@ -587,27 +788,28 @@ pub fn fetch(q: &Query) -> Result<Option<String>> {
         }
     }
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(HTTP_CONNECT_TIMEOUT)
-        .timeout_read(HTTP_READ_TIMEOUT)
-        .timeout(HTTP_TOTAL_TIMEOUT)
-        .user_agent(USER_AGENT)
-        .build();
-
-    if let Some(lrc) = request_once(&agent, q, &q.artist)? {
-        return Ok(Some(lrc));
+    let mut best = Outcome::NotFound;
+    for (i, artist) in q.artist_candidates().iter().enumerate() {
+        if i > 0 && !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
+        match send(artist)? {
+            Outcome::Synced(lrc) => return Ok(Outcome::Synced(lrc)),
+            // Keep the *first* such answer: candidates run most-specific first,
+            // so an earlier one is the better description of this track.
+            Outcome::NoTimings => {
+                if best == Outcome::NotFound {
+                    best = Outcome::NoTimings;
+                }
+            }
+            Outcome::NotFound => {}
+        }
     }
-    let Some(primary) = q.primary_artist() else {
-        return Ok(None);
-    };
-    // LRCLIB asks clients to space requests out by 200–500 ms rather than
-    // pipelining them. This is the only place Fresco sends two in a row.
-    std::thread::sleep(Duration::from_millis(350));
-    request_once(&agent, q, &primary)
+    Ok(best)
 }
 
 /// One `/api/get` round trip with an explicit artist string.
-fn request_once(agent: &ureq::Agent, q: &Query, artist: &str) -> Result<Option<String>> {
+fn request_once(agent: &ureq::Agent, q: &Query, artist: &str) -> Result<Outcome> {
     // `.query()` percent-encodes, which matters: titles contain `&`, `#`, `+`
     // and every kind of Unicode.
     let mut req = agent
@@ -624,11 +826,11 @@ fn request_once(agent: &ureq::Agent, q: &Query, artist: &str) -> Result<Option<S
     match req.call() {
         Ok(resp) => {
             let body = resp.into_string().context("reading LRCLIB response body")?;
-            parse_response(&body)
+            parse_outcome(&body)
         }
         // A 404 is the documented "no such track" answer and is the single most
         // common outcome. It is not an error.
-        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(ureq::Error::Status(404, _)) => Ok(Outcome::NotFound),
         Err(ureq::Error::Status(429, resp)) => {
             let wait = retry_after_secs(resp.header("Retry-After"));
             set_backoff(wait);
@@ -654,15 +856,37 @@ fn request_once(agent: &ureq::Agent, q: &Query, artist: &str) -> Result<Option<S
 /// returned regardless, and the only cost of an unwritable cache directory is
 /// that the next play fetches again.
 pub fn fetch_cached(q: &Query) -> Result<Option<String>> {
+    fetch_cached_outcome(q).map(Outcome::into_synced)
+}
+
+/// [`fetch_cached`], keeping the difference between "no timings" and "not in
+/// the database" so the widget can say which. **Blocks on a cache miss.**
+///
+/// Exactly **one** cache record is written per lookup, whatever the outcome and
+/// however many artist candidates were tried on the way to it — the record is
+/// keyed on the track, not on the artist spelling that happened to answer, so a
+/// replay short-circuits the entire sequence rather than repeating it.
+pub fn fetch_cached_outcome(q: &Query) -> Result<Outcome> {
+    cached_outcome_with(q, fetch_outcome)
+}
+
+/// [`fetch_cached_outcome`] with the fetch injected, so the cache-writing
+/// policy is testable without a network.
+fn cached_outcome_with<F>(q: &Query, fetch: F) -> Result<Outcome>
+where
+    F: FnOnce(&Query) -> Result<Outcome>,
+{
     match lookup(q) {
-        Record::Hit(lrc) => return Ok(Some(lrc)),
-        Record::Miss => return Ok(None),
+        Record::Hit(lrc) => return Ok(Outcome::Synced(lrc)),
+        Record::NoTimings => return Ok(Outcome::NoTimings),
+        Record::Miss => return Ok(Outcome::NotFound),
         Record::Stale => {}
     }
     let fetched = fetch(q)?;
     let written = match &fetched {
-        Some(lrc) => store(q, lrc),
-        None => store_miss(q),
+        Outcome::Synced(lrc) => store(q, lrc),
+        Outcome::NoTimings => store_no_timings(q),
+        Outcome::NotFound => store_miss(q),
     };
     if let Err(e) = written {
         log::debug!("could not cache lyrics for {:?}: {e:#}", q.title);
@@ -695,6 +919,14 @@ mod tests {
             status: PlaybackStatus::Playing,
             ..NowPlaying::default()
         }
+    }
+
+    /// The `Option`-shaped view of a response body: what a caller that only
+    /// wants drawable text sees. [`parse_outcome`] is the real function; this
+    /// keeps the assertions that predate [`Outcome`] reading as they did, and
+    /// pins the mapping between the two.
+    fn parse_response(body: &str) -> Result<Option<String>> {
+        parse_outcome(body).map(Outcome::into_synced)
     }
 
     fn q(title: &str, artist: &str, album: Option<&str>, duration_s: Option<u32>) -> Query {
@@ -824,29 +1056,140 @@ mod tests {
         );
     }
 
+    // -- artist candidates -----------------------------------------------
+
     #[test]
-    fn multi_artist_joins_and_offers_a_primary_fallback() {
+    fn multi_artist_joins_and_offers_each_credit_as_a_fallback() {
         let got = query_from(&np("T", &["A", "B", "C"], "", None)).unwrap();
         assert_eq!(got.artist, "A, B, C");
-        assert_eq!(got.primary_artist().as_deref(), Some("A"));
+        assert_eq!(got.artist_candidates(), ["A, B, C", "A", "B", "C"]);
+    }
 
-        // A single artist must not produce a second, identical request.
-        assert_eq!(q("T", "Solo", None, None).primary_artist(), None);
-        // Feature credits are stripped the same way.
+    #[test]
+    fn a_single_artist_is_exactly_one_candidate() {
+        // Regression: the common case must not gain a second request. Every
+        // shape that reduces to one name belongs here.
+        for artist in ["Solo", "  Solo  ", "Solo\t", " Solo\n"] {
+            assert_eq!(
+                q("T", artist, None, None).artist_candidates(),
+                ["Solo"],
+                "artist: {artist:?}"
+            );
+        }
+        // A multi-word name is one artist, not several: no separator, no split.
         assert_eq!(
-            q("T", "Alpha feat. Beta", None, None)
-                .primary_artist()
-                .as_deref(),
-            Some("Alpha")
+            q("T", "Anweshaa Dutta Gupta", None, None).artist_candidates(),
+            ["Anweshaa Dutta Gupta"]
+        );
+        // The separators that need surrounding spaces must not fire mid-word.
+        assert_eq!(
+            q("T", "Maxwell", None, None).artist_candidates(),
+            ["Maxwell"]
         );
         assert_eq!(
-            q("T", "Alpha & Beta", None, None)
-                .primary_artist()
-                .as_deref(),
-            Some("Alpha")
+            q("T", "Withers", None, None).artist_candidates(),
+            ["Withers"]
         );
-        // Nothing left after stripping means no retry, not an empty query.
-        assert_eq!(q("T", "feat. Beta", None, None).primary_artist(), None);
+    }
+
+    #[test]
+    fn feature_credits_are_stripped_from_every_candidate() {
+        assert_eq!(
+            q("T", "Alpha feat. Beta", None, None).artist_candidates(),
+            ["Alpha feat. Beta", "Alpha"]
+        );
+        assert_eq!(
+            q("T", "Alpha ft. Beta", None, None).artist_candidates(),
+            ["Alpha ft. Beta", "Alpha"]
+        );
+        assert_eq!(
+            q("T", "Alpha & Beta", None, None).artist_candidates(),
+            ["Alpha & Beta", "Alpha"]
+        );
+        assert_eq!(
+            q("T", "Alpha x Beta", None, None).artist_candidates(),
+            ["Alpha x Beta", "Alpha"]
+        );
+        assert_eq!(
+            q("T", "Alpha with Beta", None, None).artist_candidates(),
+            ["Alpha with Beta", "Alpha"]
+        );
+        // Stripping applies per credit, not just to the first one.
+        assert_eq!(
+            q("T", "Alpha feat. X, Beta feat. Y", None, None).artist_candidates(),
+            ["Alpha feat. X, Beta feat. Y", "Alpha", "Beta"]
+        );
+        // Nothing left after stripping means no candidate, not an empty query
+        // — `artist_name=` matches nothing and is junk traffic.
+        assert_eq!(
+            q("T", "feat. Beta", None, None).artist_candidates(),
+            ["feat. Beta"]
+        );
+        // And an artist that is *only* a separator yields nothing to ask about.
+        assert!(q("T", "", None, None).artist_candidates().is_empty());
+        assert!(q("T", "   ", None, None).artist_candidates().is_empty());
+    }
+
+    #[test]
+    fn duplicate_credits_are_never_requested_twice() {
+        // Players do publish the same name twice (a remix credited to the
+        // artist and the artist's alias, an array with a repeat). Each spelling
+        // must cost at most one request.
+        assert_eq!(
+            q("T", "Alpha, Alpha, Beta", None, None).artist_candidates(),
+            ["Alpha, Alpha, Beta", "Alpha", "Beta"]
+        );
+        // Case alone is not a different query.
+        assert_eq!(
+            q("T", "Alpha, ALPHA, alpha", None, None).artist_candidates(),
+            ["Alpha, ALPHA, alpha", "Alpha"]
+        );
+        // Nor is the full string worth repeating as its own credit.
+        assert_eq!(
+            q("T", "Alpha", None, None).artist_candidates(),
+            ["Alpha"],
+            "the full string must not be re-sent as a credit"
+        );
+    }
+
+    #[test]
+    fn the_attempt_cap_bounds_a_long_credit_list() {
+        // A free service must not absorb one request per credited name.
+        let many = "A1, A2, A3, A4, A5, A6, A7, A8";
+        let got = q("T", many, None, None).artist_candidates();
+        assert_eq!(got.len(), MAX_ARTIST_ATTEMPTS);
+        assert_eq!(got, [many, "A1", "A2", "A3"]);
+
+        // Semicolons are a credit separator too, and count against the cap.
+        let semis = q("T", "B1; B2; B3; B4; B5", None, None).artist_candidates();
+        assert_eq!(semis.len(), MAX_ARTIST_ATTEMPTS);
+    }
+
+    /// The reported failure, verbatim: a Bengali film track whose LRCLIB record
+    /// is filed under the *third* credited name. The full string 404s and the
+    /// old "first credit only" retry asked for "Indraadip Dasgupta", which also
+    /// misses — so a track that is in the database was reported as absent.
+    #[test]
+    fn the_reported_four_artist_track_reaches_the_matching_name() {
+        let np = np(
+            "Bhalolaage Tomake",
+            &["Indraadip Dasgupta, Prasen, Arijit Singh, Anweshaa Dutta Gupta"],
+            "Tomake Chai (Original Motion Picture Soundtrack)",
+            None,
+        );
+        let got = query_from(&np).unwrap().artist_candidates();
+        assert_eq!(
+            got,
+            [
+                "Indraadip Dasgupta, Prasen, Arijit Singh, Anweshaa Dutta Gupta",
+                "Indraadip Dasgupta",
+                "Prasen",
+                "Arijit Singh",
+            ]
+        );
+        // The whole point: the name that answers is reached, and within the cap.
+        assert!(got.iter().any(|c| c == "Arijit Singh"));
+        assert!(got.len() <= MAX_ARTIST_ATTEMPTS);
     }
 
     // -- parse_response --------------------------------------------------
@@ -894,6 +1237,42 @@ mod tests {
         let blank = r#"{"id":2,"instrumental":false,"plainLyrics":"x","syncedLyrics":"  \n "}"#;
         for body in [missing, null, empty, blank] {
             assert_eq!(parse_response(body).unwrap(), None, "body: {body}");
+            // …but it is still a *record*, and that is a different fact from
+            // "not in the database". This is what lets the widget say so.
+            assert_eq!(
+                parse_outcome(body).unwrap(),
+                Outcome::NoTimings,
+                "body: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn found_without_timings_is_distinguishable_from_not_found() {
+        let plain = r#"{"id":6569086,"trackName":"Bhalolaage Tomake",
+                        "instrumental":false,"plainLyrics":"placeholder line",
+                        "syncedLyrics":null}"#;
+        let absent = r#"{"code":404,"name":"TrackNotFound",
+                         "message":"Failed to find specified track"}"#;
+        assert_eq!(parse_outcome(plain).unwrap(), Outcome::NoTimings);
+        assert_eq!(parse_outcome(absent).unwrap(), Outcome::NotFound);
+        // Both are still "nothing to draw" to the `Option`-shaped callers, so
+        // no existing behaviour changed.
+        assert_eq!(parse_response(plain).unwrap(), None);
+        assert_eq!(parse_response(absent).unwrap(), None);
+
+        // An instrumental is a record too: "no synced lyrics for this track" is
+        // true of it, "not found" would not be.
+        let instrumental = r#"{"id":3,"instrumental":true,"plainLyrics":null}"#;
+        assert_eq!(parse_outcome(instrumental).unwrap(), Outcome::NoTimings);
+
+        // Shapes with no record in them must not claim one was found.
+        for body in ["{}", "[]", "null", r#""a string""#, "42"] {
+            assert_eq!(
+                parse_outcome(body).unwrap(),
+                Outcome::NotFound,
+                "body: {body}"
+            );
         }
     }
 
@@ -1041,14 +1420,19 @@ mod tests {
         // database today, a hit is a fact about a released recording.
         assert!(MISS_TTL < HIT_TTL);
         let base = 1_700_000_000;
-        let hit = encode(base, Some("[00:01.00] placeholder"));
-        let miss = encode(base, None);
+        let hit = encode(base, Verdict::Hit("[00:01.00] placeholder"));
+        let miss = encode(base, Verdict::Miss);
+        let plain = encode(base, Verdict::NoTimings);
 
         let day = 24 * 60 * 60;
         assert!(matches!(decode(&hit, base + day + 1), Record::Hit(_)));
         assert_eq!(decode(&miss, base + day + 1), Record::Stale);
         assert_eq!(decode(&miss, base + day - 1), Record::Miss);
         assert_eq!(decode(&hit, base + 31 * day), Record::Stale);
+        // "Found, but no timings" is a negative too: a record can be revised to
+        // carry timings, so it expires with the misses rather than the hits.
+        assert_eq!(decode(&plain, base + day - 1), Record::NoTimings);
+        assert_eq!(decode(&plain, base + day + 1), Record::Stale);
     }
 
     #[test]
@@ -1075,11 +1459,21 @@ mod tests {
         // `.lrc` bodies contain newlines, blank lines and a trailing newline;
         // the header must be the only line the decoder consumes.
         let lrc = "[00:01.00] placeholder one\n\n[00:09.50] placeholder two\n";
-        match decode(&encode(now, Some(lrc)), now) {
+        match decode(&encode(now, Verdict::Hit(lrc)), now) {
             Record::Hit(got) => assert_eq!(got, lrc),
             other => panic!("expected a hit, got {other:?}"),
         }
-        assert_eq!(decode(&encode(now, None), now), Record::Miss);
+        assert_eq!(decode(&encode(now, Verdict::Miss), now), Record::Miss);
+        assert_eq!(
+            decode(&encode(now, Verdict::NoTimings), now),
+            Record::NoTimings
+        );
+        // The three verdicts must not be confusable on read.
+        assert_ne!(
+            encode(now, Verdict::Miss),
+            encode(now, Verdict::NoTimings),
+            "a miss and a timings-less record share one on-disk form"
+        );
     }
 
     // -- cache round-trip (temp dir) -------------------------------------
@@ -1141,6 +1535,232 @@ mod tests {
         let started = std::time::Instant::now();
         assert_eq!(fetch_cached(&track).unwrap().as_deref(), Some(lrc));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_fresh_timings_less_record_short_circuits_the_network() {
+        let _tmp = TempCache::new("plain");
+        let track = q("Bhalolaage Tomake", "Arijit Singh", None, Some(300));
+        store_no_timings(&track).unwrap();
+        let started = std::time::Instant::now();
+        // The distinction survives a replay, so the widget can still say
+        // *why* it is empty without asking the service again.
+        assert_eq!(fetch_cached_outcome(&track).unwrap(), Outcome::NoTimings);
+        assert_eq!(fetch_cached(&track).unwrap(), None);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "fetch_cached hit the network despite a fresh record"
+        );
+    }
+
+    // -- the candidate sequence (no network) -----------------------------
+
+    /// Runs `resolve` with a recording transport and no inter-request pause,
+    /// returning the artist strings that were actually requested.
+    fn attempts_for(
+        query: &Query,
+        mut answer: impl FnMut(&str) -> Outcome,
+    ) -> (Vec<String>, Outcome) {
+        let mut tried = Vec::new();
+        let outcome = resolve(query, Duration::ZERO, |artist| {
+            tried.push(artist.to_string());
+            Ok(answer(artist))
+        })
+        .expect("no transport failure was injected");
+        (tried, outcome)
+    }
+
+    #[test]
+    fn a_single_artist_track_makes_exactly_one_request() {
+        let _tmp = TempCache::new("one-request");
+        let (tried, outcome) = attempts_for(&q("T", "Solo", None, None), |_| Outcome::NotFound);
+        assert_eq!(tried, ["Solo"], "a solo artist earned a second request");
+        assert_eq!(outcome, Outcome::NotFound);
+
+        // And it stops at the first hit rather than confirming it.
+        let (tried, outcome) = attempts_for(&q("T", "Solo", None, None), |_| {
+            Outcome::Synced("[00:01.00] x".into())
+        });
+        assert_eq!(tried.len(), 1);
+        assert_eq!(outcome, Outcome::Synced("[00:01.00] x".into()));
+    }
+
+    #[test]
+    fn the_sequence_stops_at_the_first_synced_hit() {
+        let _tmp = TempCache::new("stops");
+        let track = q("T", "A, B, C", None, None);
+        let (tried, outcome) = attempts_for(&track, |artist| {
+            if artist == "B" {
+                Outcome::Synced("[00:01.00] x".into())
+            } else {
+                Outcome::NotFound
+            }
+        });
+        assert_eq!(tried, ["A, B, C", "A", "B"], "did not stop at the hit");
+        assert!(matches!(outcome, Outcome::Synced(_)));
+    }
+
+    #[test]
+    fn the_reported_track_resolves_on_the_third_credited_name() {
+        let _tmp = TempCache::new("bengali");
+        // Exactly what the live service answers: 404 for the full string and
+        // for the first two credits, and a plain-lyrics record for the third.
+        let track = q(
+            "Bhalolaage Tomake",
+            "Indraadip Dasgupta, Prasen, Arijit Singh, Anweshaa Dutta Gupta",
+            Some("Tomake Chai (Original Motion Picture Soundtrack)"),
+            None,
+        );
+        let (tried, outcome) = attempts_for(&track, |artist| {
+            if artist == "Arijit Singh" {
+                Outcome::NoTimings
+            } else {
+                Outcome::NotFound
+            }
+        });
+        assert!(tried.contains(&"Arijit Singh".to_string()));
+        assert!(tried.len() <= MAX_ARTIST_ATTEMPTS);
+        // Before the fix this was indistinguishable from "not in the database".
+        assert_eq!(outcome, Outcome::NoTimings);
+    }
+
+    #[test]
+    fn no_track_exceeds_the_attempt_cap() {
+        let _tmp = TempCache::new("cap");
+        for artist in [
+            "A1, A2, A3, A4, A5, A6, A7, A8",
+            "A1; A2; A3; A4; A5; A6",
+            "A1 feat. B, A2 feat. C, A3 feat. D, A4, A5",
+        ] {
+            let (tried, _) = attempts_for(&q("T", artist, None, None), |_| Outcome::NotFound);
+            assert!(
+                tried.len() <= MAX_ARTIST_ATTEMPTS,
+                "{} requests for {artist:?}",
+                tried.len()
+            );
+        }
+    }
+
+    #[test]
+    fn no_artist_string_is_requested_twice() {
+        let _tmp = TempCache::new("dedupe");
+        let (tried, _) = attempts_for(&q("T", "Alpha, Alpha, ALPHA, Beta", None, None), |_| {
+            Outcome::NotFound
+        });
+        let mut unique = tried.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), tried.len(), "repeated a request: {tried:?}");
+    }
+
+    #[test]
+    fn a_later_synced_record_beats_an_earlier_timings_less_one() {
+        let _tmp = TempCache::new("upgrade");
+        // A plain-lyrics record leaves the overlay just as empty as a miss, so
+        // the sequence keeps going — within the cap — and returns the timed
+        // record it finds under another credited name.
+        let (tried, outcome) =
+            attempts_for(&q("T", "A, B, C", None, None), |artist| match artist {
+                "A" => Outcome::NoTimings,
+                "C" => Outcome::Synced("[00:02.00] x".into()),
+                _ => Outcome::NotFound,
+            });
+        assert_eq!(tried, ["A, B, C", "A", "B", "C"]);
+        assert!(matches!(outcome, Outcome::Synced(_)));
+
+        // With nothing better anywhere, the timings-less answer is what the
+        // caller gets — not a bare "not found".
+        let (_, outcome) = attempts_for(&q("T", "A, B, C", None, None), |artist| {
+            if artist == "B" {
+                Outcome::NoTimings
+            } else {
+                Outcome::NotFound
+            }
+        });
+        assert_eq!(outcome, Outcome::NoTimings);
+    }
+
+    #[test]
+    fn a_transport_failure_aborts_the_whole_sequence() {
+        let _tmp = TempCache::new("transport");
+        let mut tried = 0;
+        let got = resolve(&q("T", "A, B, C", None, None), Duration::ZERO, |_| {
+            tried += 1;
+            anyhow::bail!("connection reset")
+        });
+        assert!(got.is_err());
+        assert_eq!(tried, 1, "kept hammering a service that is failing");
+    }
+
+    #[test]
+    fn an_active_backoff_short_circuits_every_candidate() {
+        let _tmp = TempCache::new("backoff-seq");
+        std::fs::create_dir_all(cache_dir()).unwrap();
+        std::fs::write(backoff_path(), (now_secs() + 120).to_string()).unwrap();
+        let mut tried = 0;
+        let got = resolve(&q("T", "A, B, C, D, E", None, None), Duration::ZERO, |_| {
+            tried += 1;
+            Ok(Outcome::NotFound)
+        });
+        assert!(got.is_err(), "ignored a Retry-After we were given");
+        assert_eq!(tried, 0, "sent {tried} request(s) while rate limited");
+    }
+
+    #[test]
+    fn a_miss_across_every_candidate_writes_one_negative_record() {
+        let _tmp = TempCache::new("one-negative");
+        let track = q("T", "A1, A2, A3, A4, A5", Some("Album"), Some(200));
+
+        let mut requests = 0;
+        let outcome = cached_outcome_with(&track, |query| {
+            resolve(query, Duration::ZERO, |_| {
+                requests += 1;
+                Ok(Outcome::NotFound)
+            })
+        })
+        .unwrap();
+        assert_eq!(outcome, Outcome::NotFound);
+        assert!(requests > 1, "the sequence did not actually run");
+
+        // One record for the track, not one per artist candidate: the cache is
+        // keyed on the track, so a replay skips the entire sequence.
+        let records: Vec<_> = std::fs::read_dir(cache_dir())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".lrccache"))
+            .collect();
+        assert_eq!(records.len(), 1, "wrote {records:?}");
+        assert!(matches!(lookup(&track), Record::Miss));
+
+        let mut replayed = false;
+        let outcome = cached_outcome_with(&track, |_| {
+            replayed = true;
+            Ok(Outcome::NotFound)
+        })
+        .unwrap();
+        assert!(!replayed, "a replay repeated the whole candidate sequence");
+        assert_eq!(outcome, Outcome::NotFound);
+    }
+
+    #[test]
+    fn a_timings_less_result_is_cached_as_itself() {
+        let _tmp = TempCache::new("cache-plain");
+        let track = q("T", "A, B", None, None);
+        let outcome = cached_outcome_with(&track, |query| {
+            resolve(query, Duration::ZERO, |artist| {
+                Ok(if artist == "B" {
+                    Outcome::NoTimings
+                } else {
+                    Outcome::NotFound
+                })
+            })
+        })
+        .unwrap();
+        assert_eq!(outcome, Outcome::NoTimings);
+        // Not flattened into a plain miss on the way to disk.
+        assert!(matches!(lookup(&track), Record::NoTimings));
+        assert_eq!(fetch_cached_outcome(&track).unwrap(), Outcome::NoTimings);
     }
 
     #[test]
@@ -1226,7 +1846,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_artist_never_panics_on_unicode() {
+    fn artist_candidates_never_panic_on_unicode() {
         // Regression guard. The separator scan folds case before searching, and
         // full Unicode lowercasing can change a string's byte length (U+0130
         // LATIN CAPITAL I WITH DOT ABOVE folds to two chars), which would make
@@ -1240,10 +1860,23 @@ mod tests {
             "\u{202e}esrever\u{202c} feat. X",
             "\u{feff}\u{feff}",
             "\u{130}",
+            // The same shapes again as one credit among several, since every
+            // credit now goes through the same scan, not just the first.
+            "Safe, \u{130}stanbul feat. Guest, \u{130}",
+            "\u{130}; \u{130}\u{130} & X; \u{fdfa} with Y",
         ] {
-            // The result is unspecified; not panicking is the whole assertion.
-            let _ = q("T", artist, None, None).primary_artist();
+            let candidates = q("T", artist, None, None).artist_candidates();
+            // The exact result is unspecified; not panicking is the assertion,
+            // plus the invariants that hold for every input.
+            assert!(candidates.len() <= MAX_ARTIST_ATTEMPTS);
+            assert!(candidates.iter().all(|c| !c.trim().is_empty()));
         }
+        // U+0130 lowercases to two chars; a truncation bug here would surface
+        // as a panic or as a mangled candidate, not as a wrong lookup.
+        assert_eq!(
+            q("T", "\u{130}stanbul feat. Guest", None, None).artist_candidates(),
+            ["\u{130}stanbul feat. Guest", "\u{130}stanbul"]
+        );
     }
 
     // -- live network (opt-in only) --------------------------------------
@@ -1279,5 +1912,29 @@ mod tests {
             Some(1),
         );
         assert_eq!(fetch(&track).expect("transport failure"), None);
+    }
+
+    /// The reported failure, end to end against the live service. Before the
+    /// candidate list this answered `NotFound`, because only the full string
+    /// and the first credit were ever tried and neither matches.
+    #[test]
+    #[ignore = "hits the live LRCLIB service"]
+    fn live_lrclib_finds_the_reported_bengali_track() {
+        let _tmp = TempCache::new("live-bengali");
+        let track = query_from(&np(
+            "Bhalolaage Tomake",
+            &["Indraadip Dasgupta, Prasen, Arijit Singh, Anweshaa Dutta Gupta"],
+            "Tomake Chai (Original Motion Picture Soundtrack)",
+            None,
+        ))
+        .unwrap();
+        // Not asserted as exactly `NoTimings`: the record (id 6569086) carries
+        // only plain lyrics today, but LRCLIB takes contributions and a synced
+        // version landing tomorrow must not turn into a red build.
+        assert_ne!(
+            fetch_outcome(&track).expect("transport failure"),
+            Outcome::NotFound,
+            "the track is in LRCLIB under its third credited artist"
+        );
     }
 }

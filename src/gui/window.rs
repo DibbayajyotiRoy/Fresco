@@ -18,7 +18,7 @@ use crate::{
         LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition, Visualizer,
         VisualizerStyleCfg, Widgets,
     },
-    APP_ID,
+    t, tf, APP_ID,
 };
 
 pub struct FrescoApplication {
@@ -226,9 +226,16 @@ fn build_ui(app: &adw::Application) {
         });
         app.add_action(&open_feedback);
     }
-    if !state.borrow().config.telemetry_prompted {
+    if !state.borrow().config.telemetry_prompted
+        || state.borrow().config.telemetry_consent_version < crate::telemetry::CONSENT_VERSION
+    {
         // Consent before anything else — telemetry stays fully off until the
-        // user answers (telemetry::enabled() checks telemetry_prompted).
+        // user answers (telemetry::tier() returns Unanswered until then).
+        //
+        // The version check re-asks installs that answered under older terms.
+        // It is not a nag: declining used to mean total silence and now means
+        // an identifier-free country ping, so the previous answer was given to
+        // a different question and cannot be carried over.
         let win_c = window.clone();
         let state_c = state.clone();
         glib::idle_add_local_once(move || show_telemetry_consent_dialog(&win_c, state_c));
@@ -236,6 +243,10 @@ fn build_ui(app: &adw::Application) {
         let win_fb = window.clone();
         let state_fb = state.clone();
         glib::idle_add_local_once(move || show_feedback_dialog(&win_fb, state_fb));
+    } else if crate::support::has_thread() {
+        // A reply that arrived while Fresco was closed. Checked before the
+        // tour because someone mid-conversation has already seen the tour.
+        check_support_replies(&window, state.clone());
     } else if !state.borrow().config.tour_shown {
         // First launch: show the feature tour once, so right-click menus,
         // double-click editing, and the link importer don't go undiscovered.
@@ -291,7 +302,7 @@ fn build_ui(app: &adw::Application) {
                 .filter(|p| library::is_video(p) || library::is_image(p))
                 .collect();
             if paths.is_empty() {
-                show_toast(&state_d, "Drop video or image files to add them");
+                show_toast(&state_d, t!("Drop video or image files to add them"));
                 return false;
             }
             add_media_paths(&state_d, &stack_d, paths, None);
@@ -311,7 +322,7 @@ fn capability_banner_text(cap: crate::capability::Capability) -> Option<&'static
     match cap {
         Capability::X11 | Capability::WaylandLayerShell => None,
         Capability::WaylandGnomeStatic => Some(
-            "On GNOME Wayland, wallpapers are shown as a static frame. For live playback, use an X11 session or a layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma).",
+            t!("On GNOME Wayland, wallpapers are shown as a static frame. For live playback, use an X11 session or a layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma)."),
         ),
     }
 }
@@ -383,7 +394,7 @@ fn build_library_view(
     let menu_btn = gtk4::MenuButton::new();
     menu_btn.set_icon_name("open-menu-symbolic");
     menu_btn.add_css_class("flat");
-    menu_btn.set_tooltip_text(Some("Menu"));
+    menu_btn.set_tooltip_text(Some(t!("Menu")));
     menu_btn.set_popover(Some(&build_menu_popover(window, state.clone())));
     header.pack_end(&menu_btn);
     root.append(&header);
@@ -403,7 +414,7 @@ fn build_library_view(
     // Side margins are set by apply_layout_bucket (tighter in compact mode).
     let search = gtk4::SearchEntry::new();
     search.add_css_class("wp-search");
-    search.set_placeholder_text(Some("Search wallpapers…"));
+    search.set_placeholder_text(Some(t!("Search wallpapers…")));
     search.set_margin_top(8);
     search.set_margin_bottom(2);
     // Cap the entry at a readable width instead of stretching edge-to-edge.
@@ -443,7 +454,7 @@ fn build_library_view(
     content.set_margin_bottom(8);
 
     // Recent row.
-    let recent_label = overline("Recent");
+    let recent_label = overline(t!("Recent"));
     recent_label.set_margin_top(10);
     recent_label.set_margin_bottom(6);
     content.append(&recent_label);
@@ -467,14 +478,14 @@ fn build_library_view(
     // ways in — add files or browse the catalog.
     let welcome = adw::StatusPage::new();
     welcome.set_icon_name(Some("video-display-symbolic"));
-    welcome.set_title("Drop videos or images here");
-    welcome.set_description(Some(
-        "Drag files onto the window, or add a video, GIF, image, or folder of images",
-    ));
+    welcome.set_title(t!("Drop videos or images here"));
+    welcome.set_description(Some(t!(
+        "Drag files onto the window, or add a video, GIF, image, or folder of images"
+    )));
     welcome.set_vexpand(true);
     let welcome_actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
     welcome_actions.set_halign(gtk4::Align::Center);
-    let welcome_btn = gtk4::Button::with_label("Add wallpapers");
+    let welcome_btn = gtk4::Button::with_label(t!("Add wallpapers"));
     welcome_btn.add_css_class("suggested-action");
     welcome_btn.add_css_class("pill");
     welcome_btn.add_css_class("welcome-cta");
@@ -487,7 +498,7 @@ fn build_library_view(
         });
     }
     welcome_actions.append(&welcome_btn);
-    let welcome_browse = gtk4::Button::with_label("Browse catalog");
+    let welcome_browse = gtk4::Button::with_label(t!("Browse catalog"));
     welcome_browse.add_css_class("pill");
     welcome_browse.add_css_class("welcome-cta");
     {
@@ -529,8 +540,11 @@ fn build_library_view(
     footer.append(&spacer);
 
     let add_folder_btn = gtk4::Button::new();
-    add_folder_btn.set_child(Some(&button_content("folder-new-symbolic", "Add folder")));
-    add_folder_btn.set_tooltip_text(Some("Create an image slideshow from a folder"));
+    add_folder_btn.set_child(Some(&button_content(
+        "folder-new-symbolic",
+        t!("Add folder"),
+    )));
+    add_folder_btn.set_tooltip_text(Some(t!("Create an image slideshow from a folder")));
     {
         let state2 = state.clone();
         let stack2 = stack.clone();
@@ -548,9 +562,9 @@ fn build_library_view(
     // already have in their clipboard.
     let add_link_btn = gtk4::Button::new();
     add_link_btn.set_child(Some(&pinterest_button_content()));
-    add_link_btn.set_tooltip_text(Some(
-        "Paste a Pinterest or direct media link to set as wallpaper",
-    ));
+    add_link_btn.set_tooltip_text(Some(t!(
+        "Paste a Pinterest or direct media link to set as wallpaper"
+    )));
     {
         let state2 = state.clone();
         let win2 = window.clone();
@@ -562,7 +576,7 @@ fn build_library_view(
     footer.append(&add_link_btn);
 
     let add_btn = gtk4::Button::new();
-    add_btn.set_child(Some(&button_content("list-add-symbolic", "Add")));
+    add_btn.set_child(Some(&button_content("list-add-symbolic", t!("Add"))));
     add_btn.add_css_class("suggested-action");
     {
         let state2 = state.clone();
@@ -576,8 +590,11 @@ fn build_library_view(
 
     // Select-mode toggle: sits with the add actions but reads as a mode switch.
     let select_btn = gtk4::Button::new();
-    select_btn.set_child(Some(&button_content("object-select-symbolic", "Select")));
-    select_btn.set_tooltip_text(Some("Select several wallpapers to remove at once"));
+    select_btn.set_child(Some(&button_content(
+        "object-select-symbolic",
+        t!("Select"),
+    )));
+    select_btn.set_tooltip_text(Some(t!("Select several wallpapers to remove at once")));
     {
         let state2 = state.clone();
         select_btn.connect_clicked(move |_| enter_selection(&state2, None));
@@ -600,10 +617,10 @@ fn build_library_view(
     sel_spacer.set_hexpand(true);
     sel_bar.append(&sel_spacer);
 
-    let sel_all_btn = gtk4::Button::with_label("Select all");
+    let sel_all_btn = gtk4::Button::with_label(t!("Select all"));
     sel_bar.append(&sel_all_btn);
 
-    let sel_cancel = gtk4::Button::with_label("Cancel");
+    let sel_cancel = gtk4::Button::with_label(t!("Cancel"));
     {
         let state2 = state.clone();
         sel_cancel.connect_clicked(move |_| exit_selection(&state2));
@@ -633,17 +650,17 @@ fn build_library_view(
                     footer.set_visible(false);
                     sel_bar.set_visible(true);
                     sel_count.set_text(&match n {
-                        0 => "Select wallpapers to remove".to_string(),
-                        1 => "1 selected".to_string(),
-                        n => format!("{n} selected"),
+                        0 => t!("Select wallpapers to remove").to_string(),
+                        1 => t!("1 selected").to_string(),
+                        n => tf!("{count} selected", "count" => n.to_string()),
                     });
                     sel_remove.set_sensitive(n > 0);
                     sel_remove.set_child(Some(&button_content(
                         "user-trash-symbolic",
                         &if n > 1 {
-                            format!("Remove {n}")
+                            tf!("Remove {count}", "count" => n.to_string())
                         } else {
-                            "Remove".to_string()
+                            t!("Remove").to_string()
                         },
                     )));
                 }
@@ -668,13 +685,15 @@ fn build_library_view(
                 add_folder_btn.set_icon_name("folder-new-symbolic");
                 add_btn.set_icon_name("list-add-symbolic");
             } else {
-                add_folder_btn
-                    .set_child(Some(&button_content("folder-new-symbolic", "Add folder")));
-                add_btn.set_child(Some(&button_content("list-add-symbolic", "Add")));
+                add_folder_btn.set_child(Some(&button_content(
+                    "folder-new-symbolic",
+                    t!("Add folder"),
+                )));
+                add_btn.set_child(Some(&button_content("list-add-symbolic", t!("Add"))));
             }
         }
     };
-    add_btn.set_tooltip_text(Some("Add a wallpaper"));
+    add_btn.set_tooltip_text(Some(t!("Add a wallpaper")));
 
     // ── Live-updating sectioned library ──
     let home_query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -729,9 +748,9 @@ fn build_library_view(
             search.set_visible(n > 0);
             count_label.set_visible(n > 0);
             count_label.set_text(&if n == 1 {
-                "1 wallpaper".to_string()
+                t!("1 wallpaper").to_string()
             } else {
-                format!("{n} wallpapers")
+                tf!("{count} wallpapers", "count" => n.to_string())
             });
             let q = home_query.borrow();
             populate_library(
@@ -846,15 +865,15 @@ fn build_menu_popover(
     popover_box.set_width_request(300);
 
     // ── Appearance ──
-    popover_box.append(&overline("Appearance"));
+    popover_box.append(&overline(t!("Appearance")));
 
     let seg = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     seg.add_css_class("linked");
     seg.add_css_class("seg");
     seg.set_homogeneous(true);
-    let b_sys = gtk4::ToggleButton::with_label("System");
-    let b_light = gtk4::ToggleButton::with_label("Light");
-    let b_dark = gtk4::ToggleButton::with_label("Dark");
+    let b_sys = gtk4::ToggleButton::with_label(t!("System"));
+    let b_light = gtk4::ToggleButton::with_label(t!("Light"));
+    let b_dark = gtk4::ToggleButton::with_label(t!("Dark"));
     b_light.set_group(Some(&b_sys));
     b_dark.set_group(Some(&b_sys));
     match state.borrow().config.theme_mode {
@@ -889,7 +908,7 @@ fn build_menu_popover(
     seg.append(&b_dark);
     popover_box.append(&seg);
 
-    popover_box.append(&overline("Accent"));
+    popover_box.append(&overline(t!("Accent")));
 
     let dot_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     dot_row.set_margin_top(2);
@@ -935,13 +954,16 @@ fn build_menu_popover(
     }
     popover_box.append(&dot_row);
 
+    popover_box.append(&overline(t!("Language")));
+    popover_box.append(&build_language_row(state.clone()));
+
     // Separator margins come from the .fresco-menu CSS.
     popover_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
     // ── Behavior ──
-    popover_box.append(&overline("Behavior"));
+    popover_box.append(&overline(t!("Behavior")));
     popover_box.append(&switch_row(
-        "Restore on login",
+        t!("Restore on login"),
         state.borrow().config.autostart,
         {
             let state2 = state.clone();
@@ -960,7 +982,7 @@ fn build_menu_popover(
         },
     ));
     popover_box.append(&switch_row(
-        "Pause on battery",
+        t!("Pause on battery"),
         state.borrow().config.pause_on_battery,
         {
             let state2 = state.clone();
@@ -976,7 +998,7 @@ fn build_menu_popover(
     // which deletes it); users kept hunting for this switch.
     if state.borrow().config.schedule.is_some() {
         popover_box.append(&switch_row(
-            "Day/night schedule",
+            t!("Day/night schedule"),
             !state.borrow().config.schedule_paused,
             {
                 let state2 = state.clone();
@@ -992,8 +1014,11 @@ fn build_menu_popover(
             },
         ));
     }
+    // Off here means the country-only tier, not silence — the same trade the
+    // consent dialog spells out. config.toml is the way to opt out entirely
+    // (see telemetry::opt_out_completely), and TERMS.md documents it.
     popover_box.append(&switch_row(
-        "Share anonymous usage statistics",
+        t!("Share anonymous usage statistics"),
         state.borrow().config.telemetry,
         {
             let state2 = state.clone();
@@ -1005,7 +1030,7 @@ fn build_menu_popover(
         },
     ));
     let bridge_row = switch_row(
-        "Browser new-tab wallpaper (local)",
+        t!("Browser new-tab wallpaper (local)"),
         state.borrow().config.browser_bridge,
         {
             let state2 = state.clone();
@@ -1024,13 +1049,13 @@ fn build_menu_popover(
         },
     );
     bridge_row.set_tooltip_text(Some(
-        "Lets the Fresco browser extension show your wallpaper on new tabs. Local-only (127.0.0.1).",
+        t!("Lets the Fresco browser extension show your wallpaper on new tabs. Local-only (127.0.0.1)."),
     ));
     popover_box.append(&bridge_row);
 
     popover_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
-    let advanced_btn = menu_item("Advanced…");
+    let advanced_btn = menu_item(t!("Advanced…"));
     {
         let state_adv = state.clone();
         let win_adv = window.clone();
@@ -1040,7 +1065,7 @@ fn build_menu_popover(
     }
     popover_box.append(&advanced_btn);
 
-    let browse_btn = menu_item("Browse wallpapers…");
+    let browse_btn = menu_item(t!("Browse wallpapers…"));
     {
         let state_b = state.clone();
         let win_b = window.clone();
@@ -1050,7 +1075,7 @@ fn build_menu_popover(
     }
     popover_box.append(&browse_btn);
 
-    let url_btn = menu_item("Add from URL…");
+    let url_btn = menu_item(t!("Add from URL…"));
     {
         let state_url = state.clone();
         let win_url = window.clone();
@@ -1060,7 +1085,7 @@ fn build_menu_popover(
     }
     popover_box.append(&url_btn);
 
-    let update_btn = menu_item("Check for updates");
+    let update_btn = menu_item(t!("Check for updates"));
     {
         let state_upd = state.clone();
         let win_upd = window.clone();
@@ -1073,12 +1098,13 @@ fn build_menu_popover(
     // ── Help & feedback ──
     // A user-initiated path: the feedback dialog otherwise auto-prompts only once
     // (after a week), so without this a user can neither send feedback nor reach
-    // support. "Send feedback" reuses the anonymous one-way dialog (→ dashboard);
-    // "Report a problem" opens the issue tracker (the two-way support channel).
+    // support. "Send feedback" is the anonymous one-way rating (→ dashboard);
+    // "Message the maintainer" is the anonymous two-way thread; "Report a
+    // problem" opens the issue tracker, which is public and needs an account.
     popover_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    popover_box.append(&overline("Help & feedback"));
+    popover_box.append(&overline(t!("Help & feedback")));
 
-    let tour_btn = menu_item("What can Fresco do?");
+    let tour_btn = menu_item(t!("What can Fresco do?"));
     {
         let state_t = state.clone();
         let win_t = window.clone();
@@ -1088,7 +1114,7 @@ fn build_menu_popover(
     }
     popover_box.append(&tour_btn);
 
-    let feedback_btn = menu_item("Send feedback…");
+    let feedback_btn = menu_item(t!("Send feedback…"));
     {
         let state_fb = state.clone();
         let win_fb = window.clone();
@@ -1098,16 +1124,35 @@ fn build_menu_popover(
     }
     popover_box.append(&feedback_btn);
 
-    let help_btn = menu_item("Report a problem…");
-    help_btn.set_tooltip_text(Some("Opens the Fresco issue tracker in your browser"));
+    // Sits above the issue tracker on purpose: it is the lower-effort route
+    // for someone who just wants help, and it needs no GitHub account.
+    let support_btn = menu_item(if crate::support::has_thread() {
+        t!("Your conversation…")
+    } else {
+        t!("Message the maintainer…")
+    });
+    support_btn.set_tooltip_text(Some(t!(
+        "Anonymous, both ways. No account, no email address."
+    )));
+    {
+        let state_s = state.clone();
+        let win_s = window.clone();
+        support_btn.connect_clicked(move |_| {
+            show_support_dialog(&win_s, state_s.clone());
+        });
+    }
+    popover_box.append(&support_btn);
+
+    let help_btn = menu_item(t!("Report a problem…"));
+    help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     help_btn.connect_clicked(|_| {
         let _ = std::process::Command::new("xdg-open")
-            .arg("https://github.com/DibbayajyotiRoy/fresco/issues")
+            .arg(ISSUES_URL)
             .spawn();
     });
     popover_box.append(&help_btn);
 
-    let about_btn = menu_item("About");
+    let about_btn = menu_item(t!("About"));
     {
         let win_about = window.clone();
         about_btn.connect_clicked(move |_| {
@@ -1193,7 +1238,7 @@ fn populate_library(
             .collect();
         if !favs.is_empty() {
             sections_box.append(&build_section(
-                "Favorites",
+                t!("Favorites"),
                 first_section,
                 &favs,
                 &cfg,
@@ -1413,7 +1458,7 @@ fn build_library_card(
     {
         let meta_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
         if entry.favorite {
-            let heart = gtk4::Label::new(Some("\u{2665}"));
+            let heart = gtk4::Label::new(Some(t!("♥")));
             heart.add_css_class("wp-fav-glyph");
             meta_row.append(&heart);
         }
@@ -1440,7 +1485,7 @@ fn build_library_card(
     badge.add_css_class("wp-badge");
     badge_row.append(&badge);
     if entry.is_4k() {
-        let q = gtk4::Label::new(Some("4K"));
+        let q = gtk4::Label::new(Some(t!("4K")));
         q.add_css_class("wp-badge");
         q.add_css_class("quality");
         badge_row.append(&q);
@@ -1449,7 +1494,7 @@ fn build_library_card(
 
     // Active pill (top-right).
     if active {
-        let pill = gtk4::Label::new(Some("ACTIVE"));
+        let pill = gtk4::Label::new(Some(t!("ACTIVE")));
         pill.add_css_class("wp-active-pill");
         pill.set_halign(gtk4::Align::End);
         pill.set_valign(gtk4::Align::Start);
@@ -1458,12 +1503,12 @@ fn build_library_card(
 
     // Missing-source warning.
     if entry.broken {
-        let warn = gtk4::Label::new(Some("MISSING"));
+        let warn = gtk4::Label::new(Some(t!("MISSING")));
         warn.add_css_class("wp-badge");
         warn.add_css_class("warning");
         warn.set_halign(gtk4::Align::Start);
         warn.set_valign(gtk4::Align::End);
-        warn.set_tooltip_text(entry.error.as_deref().or(Some("Source file not found")));
+        warn.set_tooltip_text(entry.error.as_deref().or(Some(t!("Source file not found"))));
         overlay.add_overlay(&warn);
         overlay.set_opacity(0.65);
     }
@@ -1474,7 +1519,7 @@ fn build_library_card(
         s.selection.as_ref().map(|set| set.contains(&entry.id))
     };
     if let Some(ticked) = selecting {
-        let check = gtk4::Label::new(Some(if ticked { "\u{2713}" } else { "" }));
+        let check = gtk4::Label::new(Some(if ticked { t!("✓") } else { "" }));
         check.add_css_class("wp-check");
         if ticked {
             check.add_css_class("on");
@@ -1511,9 +1556,9 @@ fn build_library_card(
     fav.add_css_class("circular");
     if entry.favorite {
         fav.add_css_class("fav-on");
-        fav.set_tooltip_text(Some("Unfavorite"));
+        fav.set_tooltip_text(Some(t!("Unfavorite")));
     } else {
-        fav.set_tooltip_text(Some("Favorite"));
+        fav.set_tooltip_text(Some(t!("Favorite")));
     }
     {
         let state_f = state.clone();
@@ -1524,7 +1569,7 @@ fn build_library_card(
     let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
     edit.add_css_class("wp-edit");
     edit.add_css_class("circular");
-    edit.set_tooltip_text(Some("Edit & crop"));
+    edit.set_tooltip_text(Some(t!("Edit & crop")));
     {
         let state_e = state.clone();
         let stack_e = stack.clone();
@@ -1538,7 +1583,7 @@ fn build_library_card(
     let more = gtk4::Button::from_icon_name("view-more-symbolic");
     more.add_css_class("wp-edit");
     more.add_css_class("circular");
-    more.set_tooltip_text(Some("More actions"));
+    more.set_tooltip_text(Some(t!("More actions")));
     {
         let state_m = state.clone();
         let stack_m = stack.clone();
@@ -1628,9 +1673,9 @@ const CATEGORY_ORDER: [Category; 3] = [Category::Images, Category::Videos, Categ
 
 fn category_label(c: Category) -> &'static str {
     match c {
-        Category::Images => "Images",
-        Category::Videos => "Videos",
-        Category::Gifs => "GIFs",
+        Category::Images => t!("Images"),
+        Category::Videos => t!("Videos"),
+        Category::Gifs => t!("GIFs"),
     }
 }
 
@@ -1695,7 +1740,7 @@ fn show_card_menu(
         b
     };
 
-    let set = item("Set as wallpaper");
+    let set = item(t!("Set as wallpaper"));
     {
         let s = state.clone();
         let p = pop.clone();
@@ -1717,14 +1762,14 @@ fn show_card_menu(
             .unwrap_or(false)
     };
     if is_active {
-        let stop = item("Stop wallpaper");
+        let stop = item(t!("Stop wallpaper"));
         let s = state.clone();
         let p = pop.clone();
         stop.connect_clicked(move |_| {
             stop_wallpaper(&s);
             show_toast(
                 &s,
-                "Wallpaper stopped — desktop reverted to its own background",
+                t!("Wallpaper stopped — desktop reverted to its own background"),
             );
             let refresh = s.borrow().refresh.clone();
             if let Some(r) = refresh {
@@ -1740,7 +1785,12 @@ fn show_card_menu(
     let displays = connected_monitors();
     if displays.len() >= 2 {
         for m in &displays {
-            let label = format!("Set on {} ({}×{})", m.connector, m.width, m.height);
+            let label = tf!(
+                "Set on {display} ({width}×{height})",
+                "display" => m.connector,
+                "width" => m.width.to_string(),
+                "height" => m.height.to_string()
+            );
             let btn = item(&label);
             let s = state.clone();
             let p = pop.clone();
@@ -1753,7 +1803,7 @@ fn show_card_menu(
         }
     }
     if !state.borrow().config.monitors.is_empty() {
-        let clear = item("Show default on all displays");
+        let clear = item(t!("Show default on all displays"));
         let s = state.clone();
         let p = pop.clone();
         clear.connect_clicked(move |_| {
@@ -1765,7 +1815,7 @@ fn show_card_menu(
 
     // Browser-only wallpaper (webbridge): shown in the extension's new tabs
     // instead of mirroring the desktop.
-    let browser = item("Set as browser wallpaper");
+    let browser = item(t!("Set as browser wallpaper"));
     {
         let s = state.clone();
         let p = pop.clone();
@@ -1776,7 +1826,7 @@ fn show_card_menu(
     }
     menu.append(&browser);
     if state.borrow().config.browser_wallpaper.is_some() {
-        let clear_b = item("Clear browser wallpaper");
+        let clear_b = item(t!("Clear browser wallpaper"));
         let s = state.clone();
         let p = pop.clone();
         clear_b.connect_clicked(move |_| {
@@ -1785,7 +1835,7 @@ fn show_card_menu(
                 st.config.browser_wallpaper = None;
                 st.config.save().ok();
             }
-            show_toast(&s, "Browser wallpaper cleared — mirroring the desktop");
+            show_toast(&s, t!("Browser wallpaper cleared — mirroring the desktop"));
             p.popdown();
         });
         menu.append(&clear_b);
@@ -1797,7 +1847,11 @@ fn show_card_menu(
         .get(idx)
         .map(|e| e.favorite)
         .unwrap_or(false);
-    let fav = item(if is_fav { "Unfavorite" } else { "Favorite" });
+    let fav = item(if is_fav {
+        t!("Unfavorite")
+    } else {
+        t!("Favorite")
+    });
     {
         let s = state.clone();
         let p = pop.clone();
@@ -1808,7 +1862,7 @@ fn show_card_menu(
     }
     menu.append(&fav);
 
-    let edit = item("Edit / Crop…");
+    let edit = item(t!("Edit / Crop…"));
     {
         let s = state.clone();
         let st = stack.clone();
@@ -1821,7 +1875,7 @@ fn show_card_menu(
     }
     menu.append(&edit);
 
-    let rename = item("Rename…");
+    let rename = item(t!("Rename…"));
     {
         let s = state.clone();
         let p = pop.clone();
@@ -1840,7 +1894,7 @@ fn show_card_menu(
         .map(|e| e.broken)
         .unwrap_or(false)
     {
-        let relink = item("Relink…");
+        let relink = item(t!("Relink…"));
         {
             let s = state.clone();
             let p = pop.clone();
@@ -1861,7 +1915,7 @@ fn show_card_menu(
     menu.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
     // Gateway into multi-select, pre-ticked with the card you right-clicked.
-    let select = item("Select…");
+    let select = item(t!("Select…"));
     {
         let s = state.clone();
         let p = pop.clone();
@@ -1873,7 +1927,7 @@ fn show_card_menu(
     }
     menu.append(&select);
 
-    let remove = item("Remove from library");
+    let remove = item(t!("Remove from library"));
     remove.add_css_class("destructive-action");
     {
         let s = state.clone();
@@ -1906,9 +1960,9 @@ fn toggle_favorite(state: &Rc<RefCell<AppState>>, idx: usize) {
     show_toast(
         state,
         if now_fav {
-            "Added to Favorites"
+            t!("Added to Favorites")
         } else {
-            "Removed from Favorites"
+            t!("Removed from Favorites")
         },
     );
     let refresh = state.borrow().refresh.clone();
@@ -2026,9 +2080,9 @@ fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     show_toast(
         &state,
         if was_active {
-            "Removed — desktop reverted to its own wallpaper"
+            t!("Removed — desktop reverted to its own wallpaper")
         } else {
-            "Removed from library"
+            t!("Removed from library")
         },
     );
     let refresh = state.borrow().refresh.clone();
@@ -2142,10 +2196,13 @@ fn remove_entries_by_ids(state: Rc<RefCell<AppState>>, ids: &std::collections::H
         stop_wallpaper(&state);
     }
     let msg = match (removed, had_active) {
-        (1, true) => "Removed — desktop reverted to its own wallpaper".to_string(),
-        (1, false) => "Removed from library".to_string(),
-        (n, true) => format!("Removed {n} wallpapers — desktop reverted to its own wallpaper"),
-        (n, false) => format!("Removed {n} wallpapers"),
+        (1, true) => t!("Removed — desktop reverted to its own wallpaper").to_string(),
+        (1, false) => t!("Removed from library").to_string(),
+        (n, true) => tf!(
+            "Removed {count} wallpapers — desktop reverted to its own wallpaper",
+            "count" => n.to_string()
+        ),
+        (n, false) => tf!("Removed {count} wallpapers", "count" => n.to_string()),
     };
     show_toast(&state, &msg);
     refresh_selection(&state);
@@ -2167,7 +2224,7 @@ fn confirm_remove_selected(
             .any(|e| ids.contains(&e.id) && entry_is_active(e, &s.config))
     };
 
-    let (dialog, content) = glass_dialog(window, "Remove wallpapers", 400, -1);
+    let (dialog, content) = glass_dialog(window, t!("Remove wallpapers"), 400, -1);
     let body = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     body.set_margin_top(4);
     body.set_margin_bottom(16);
@@ -2175,9 +2232,9 @@ fn confirm_remove_selected(
     body.set_margin_end(20);
 
     let heading = gtk4::Label::new(Some(&if n == 1 {
-        "Remove 1 wallpaper?".to_string()
+        t!("Remove 1 wallpaper?").to_string()
     } else {
-        format!("Remove {n} wallpapers?")
+        tf!("Remove {count} wallpapers?", "count" => n.to_string())
     }));
     heading.add_css_class("dialog-heading");
     heading.set_xalign(0.0);
@@ -2185,9 +2242,9 @@ fn confirm_remove_selected(
     body.append(&heading);
 
     let sub = gtk4::Label::new(Some(if active_hit {
-        "They leave your Fresco library and the desktop reverts to its own wallpaper. The source files on disk are kept."
+        t!("They leave your Fresco library and the desktop reverts to its own wallpaper. The source files on disk are kept.")
     } else {
-        "They leave your Fresco library. The source files on disk are kept."
+        t!("They leave your Fresco library. The source files on disk are kept.")
     }));
     sub.add_css_class("dialog-sub");
     sub.set_xalign(0.0);
@@ -2197,13 +2254,17 @@ fn confirm_remove_selected(
     let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     actions.set_halign(gtk4::Align::End);
     actions.set_margin_top(8);
-    let cancel = gtk4::Button::with_label("Cancel");
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
     {
         let d = dialog.clone();
         cancel.connect_clicked(move |_| d.close());
     }
     actions.append(&cancel);
-    let confirm = gtk4::Button::with_label(if n == 1 { "Remove" } else { "Remove all" });
+    let confirm = gtk4::Button::with_label(if n == 1 {
+        t!("Remove")
+    } else {
+        t!("Remove all")
+    });
     confirm.add_css_class("destructive-action");
     {
         let d = dialog.clone();
@@ -2313,9 +2374,19 @@ fn apply_entry_on_monitor(state: Rc<RefCell<AppState>>, idx: usize, connector: &
         r.is_ok()
     };
     if ok {
-        show_toast(&state, &format!("“{name}” set on {connector}"));
+        show_toast(
+            &state,
+            &tf!(
+                "“{name}” set on {display}",
+                "name" => name,
+                "display" => connector
+            ),
+        );
     } else {
-        show_toast(&state, "Couldn’t start the wallpaper. Run frescod --check");
+        show_toast(
+            &state,
+            t!("Couldn’t start the wallpaper. Run frescod --check"),
+        );
     }
     let refresh = state.borrow().refresh.clone();
     if let Some(r) = refresh {
@@ -2344,9 +2415,9 @@ fn set_browser_wallpaper(state: Rc<RefCell<AppState>>, idx: usize) {
         s.config.browser_bridge
     };
     let msg = if bridge_on {
-        "Browser new-tab wallpaper set".to_string()
+        t!("Browser new-tab wallpaper set").to_string()
     } else {
-        "Browser new-tab wallpaper set — enable Browser new-tab in Settings".to_string()
+        t!("Browser new-tab wallpaper set — enable Browser new-tab in Settings").to_string()
     };
     show_toast(&state, &msg);
 }
@@ -2362,7 +2433,7 @@ fn clear_overrides_and_apply(state: Rc<RefCell<AppState>>) {
         daemon_ctl::ensure_daemon_and_apply(&s.config).is_ok()
     };
     if ok {
-        show_toast(&state, "Default wallpaper on all displays");
+        show_toast(&state, t!("Default wallpaper on all displays"));
     }
     let refresh = state.borrow().refresh.clone();
     if let Some(r) = refresh {
@@ -2401,10 +2472,13 @@ pub(crate) fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
             "wallpaper_set",
             serde_json::json!({ "kind": format!("{kind:?}").to_lowercase() }),
         );
-        show_toast(&state, &format!("“{name}” set as wallpaper"));
+        show_toast(&state, &tf!("“{name}” set as wallpaper", "name" => name));
         maybe_star_nudge(&state);
     } else {
-        show_toast(&state, "Couldn’t start the wallpaper. Run frescod --check");
+        show_toast(
+            &state,
+            t!("Couldn’t start the wallpaper. Run frescod --check"),
+        );
     }
     let refresh = state.borrow().refresh.clone();
     if let Some(r) = refresh {
@@ -2436,9 +2510,10 @@ fn maybe_star_nudge(state: &Rc<RefCell<AppState>>) {
         return;
     }
     let toast = adw::Toast::new(
-        "Enjoying Fresco? A GitHub star helps other Linux users find it — and your feedback shapes what's next. Already starred? Just ignore this.",
+        "Enjoying Fresco? A star on GitHub helps other Linux users find it. \
+         Already starred? Feel free to ignore this.",
     );
-    toast.set_button_label(Some("Star on GitHub"));
+    toast.set_button_label(Some(t!("Star on GitHub")));
     toast.set_timeout(0); // sticky until acted on or dismissed
                           // This libadwaita binding predates connect_button_clicked; wire the raw
                           // "button-clicked" signal instead.
@@ -2458,11 +2533,11 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let header = adw::HeaderBar::new();
-    let title_widget = adw::WindowTitle::new("Edit wallpaper", "");
+    let title_widget = adw::WindowTitle::new(t!("Edit wallpaper"), "");
     header.set_title_widget(Some(&title_widget));
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
     back.add_css_class("flat");
-    back.set_tooltip_text(Some("Back to library"));
+    back.set_tooltip_text(Some(t!("Back to library")));
     {
         let stack2 = stack.clone();
         back.connect_clicked(move |_| {
@@ -2519,13 +2594,13 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     preview_pane.append(&crop_frame);
     preview_pane.append(&tp_frame);
 
-    let reset_crop = gtk4::Button::with_label("Reset crop");
+    let reset_crop = gtk4::Button::with_label(t!("Reset crop"));
     reset_crop.add_css_class("flat");
     {
         let ce = crop_editor.clone();
         reset_crop.connect_clicked(move |_| ce.reset());
     }
-    let rotate_btn = gtk4::Button::with_label("Rotate 90°");
+    let rotate_btn = gtk4::Button::with_label(t!("Rotate 90°"));
     rotate_btn.add_css_class("flat");
     {
         let ce = crop_editor.clone();
@@ -2543,15 +2618,17 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     prefs.set_margin_top(14);
 
     let fit_row = adw::ComboRow::new();
-    fit_row.set_title("Fit");
-    fit_row.set_subtitle("How the media fills the screen");
+    fit_row.set_title(t!("Fit"));
+    fit_row.set_subtitle(t!("How the media fills the screen"));
     fit_row.set_model(Some(&gtk4::StringList::new(&[
-        "Cover", "Contain", "Stretch",
+        t!("Cover"),
+        t!("Contain"),
+        t!("Stretch"),
     ])));
     prefs.add(&fit_row);
 
     let mute_row = adw::ActionRow::new();
-    mute_row.set_title("Muted");
+    mute_row.set_title(t!("Muted"));
     let mute_sw = gtk4::Switch::new();
     mute_sw.set_active(true);
     mute_sw.set_valign(gtk4::Align::Center);
@@ -2560,7 +2637,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     prefs.add(&mute_row);
 
     let vol_row = adw::ActionRow::new();
-    vol_row.set_title("Volume");
+    vol_row.set_title(t!("Volume"));
     let vol_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 100.0, 5.0);
     vol_scale.set_value(50.0);
     vol_scale.set_hexpand(true);
@@ -2573,35 +2650,39 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     // global level from Settings; an explicit level overrides it for just this
     // wallpaper — e.g. keep one showpiece clip on Full.
     let power_row = adw::ComboRow::new();
-    power_row.set_title("Power saving");
-    power_row.set_subtitle("Default follows Settings; overrides it for this wallpaper");
-    power_row.set_model(Some(&gtk4::StringList::new(&POWER_EDIT_LABELS)));
+    power_row.set_title(t!("Power saving"));
+    power_row.set_subtitle(t!(
+        "Default follows Settings; overrides it for this wallpaper"
+    ));
+    power_row.set_model(Some(&gtk4::StringList::new(
+        &POWER_EDIT_LABELS.map(|l| t!(l)),
+    )));
     prefs.add(&power_row);
 
     // Slideshow cadence (shown only for slideshows; see the on-enter handler).
     let interval_row = adw::ComboRow::new();
-    interval_row.set_title("Interval");
-    interval_row.set_subtitle("How often the slideshow advances");
+    interval_row.set_title(t!("Interval"));
+    interval_row.set_subtitle(t!("How often the slideshow advances"));
     interval_row.set_model(Some(&gtk4::StringList::new(&[
-        "5 seconds",
-        "15 seconds",
-        "30 seconds",
-        "1 minute",
-        "5 minutes",
-        "10 minutes",
+        t!("5 seconds"),
+        t!("15 seconds"),
+        t!("30 seconds"),
+        t!("1 minute"),
+        t!("5 minutes"),
+        t!("10 minutes"),
     ])));
     interval_row.set_selected(2);
     prefs.add(&interval_row);
 
     // Slideshow transition effect (shown only for slideshows).
     let transition_row = adw::ComboRow::new();
-    transition_row.set_title("Transition");
-    transition_row.set_subtitle("Effect when the image changes");
+    transition_row.set_title(t!("Transition"));
+    transition_row.set_subtitle(t!("Effect when the image changes"));
     transition_row.set_model(Some(&gtk4::StringList::new(&[
-        "None",
-        "Crossfade",
-        "Fade to black",
-        "Ken Burns",
+        t!("None"),
+        t!("Crossfade"),
+        t!("Fade to black"),
+        t!("Ken Burns"),
     ])));
     transition_row.set_selected(1);
     prefs.add(&transition_row);
@@ -2609,7 +2690,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     controls.append(&prefs);
 
     // Set Wallpaper button.
-    let set_btn = gtk4::Button::with_label("Set as wallpaper");
+    let set_btn = gtk4::Button::with_label(t!("Set as wallpaper"));
     set_btn.add_css_class("suggested-action");
     set_btn.add_css_class("pill");
     set_btn.add_css_class("set-btn");
@@ -2683,13 +2764,16 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 log::info!("Wallpaper set; close this window, it keeps playing");
                 show_toast(
                     &state_set,
-                    &format!("“{name}” set. Close the window; it keeps playing"),
+                    &tf!(
+                        "“{name}” set. Close the window; it keeps playing",
+                        "name" => name
+                    ),
                 );
                 stack_set.set_visible_child_name("library");
             } else {
                 show_toast(
                     &state_set,
-                    "Couldn’t start the wallpaper. Run frescod --check",
+                    t!("Couldn’t start the wallpaper. Run frescod --check"),
                 );
             }
         });
@@ -2836,16 +2920,16 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_title(Some("Advanced"));
+    dialog.set_title(Some(t!("Advanced")));
 
     let page = adw::PreferencesPage::new();
     let group = adw::PreferencesGroup::new();
-    group.set_title("Video quality");
+    group.set_title(t!("Video quality"));
 
     let scale_row = adw::ComboRow::new();
-    scale_row.set_title("Scaling quality");
-    scale_row.set_subtitle("Balanced: low CPU  |  High: Lanczos resampling");
-    scale_row.set_model(Some(&gtk4::StringList::new(&["Balanced", "High"])));
+    scale_row.set_title(t!("Scaling quality"));
+    scale_row.set_subtitle(t!("Balanced: low CPU  |  High: Lanczos resampling"));
+    scale_row.set_model(Some(&gtk4::StringList::new(&[t!("Balanced"), t!("High")])));
     let current = u32::from(matches!(state.borrow().config.scaling, Scaling::High));
     scale_row.set_selected(current);
     {
@@ -2866,9 +2950,9 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     // Power saving: cheaper GPU scaling (see config::video_scalers) to cut
     // render load on weak hardware — a softer image for less power/heat.
     let power_row = adw::ComboRow::new();
-    power_row.set_title("Power saving");
-    power_row.set_subtitle("Reduced saves most of the GPU cost; Full is sharpest");
-    power_row.set_model(Some(&gtk4::StringList::new(&POWER_LABELS)));
+    power_row.set_title(t!("Power saving"));
+    power_row.set_subtitle(t!("Reduced saves most of the GPU cost; Full is sharpest"));
+    power_row.set_model(Some(&gtk4::StringList::new(&POWER_LABELS.map(|l| t!(l)))));
     power_row.set_selected(power_index(state.borrow().config.power_saving));
     {
         let state = state.clone();
@@ -2897,10 +2981,10 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
 /// the daynight mode; times/solar stay config-file features (docs/SCRIPTING.md).
 fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let group = adw::PreferencesGroup::new();
-    group.set_title("Day &amp; night wallpaper");
-    group.set_description(Some(
-        "Automatically switch between two wallpapers on a schedule.",
-    ));
+    group.set_title(t!("Day &amp; night wallpaper"));
+    group.set_description(Some(t!(
+        "Automatically switch between two wallpapers on a schedule."
+    )));
 
     // Candidate entries: playable single-media items from the library.
     let candidates: Vec<(usize, String)> = state
@@ -2914,14 +2998,17 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
     let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
 
     let enable = adw::ComboRow::new();
-    enable.set_title("Schedule");
-    enable.set_model(Some(&gtk4::StringList::new(&["Off", "Day / night"])));
+    enable.set_title(t!("Schedule"));
+    enable.set_model(Some(&gtk4::StringList::new(&[
+        t!("Off"),
+        t!("Day / night"),
+    ])));
 
     let day_row = adw::ComboRow::new();
-    day_row.set_title("Day wallpaper");
+    day_row.set_title(t!("Day wallpaper"));
     day_row.set_model(Some(&gtk4::StringList::new(&names)));
     let night_row = adw::ComboRow::new();
-    night_row.set_title("Night wallpaper");
+    night_row.set_title(t!("Night wallpaper"));
     night_row.set_model(Some(&gtk4::StringList::new(&names)));
 
     let time_entry = |placeholder: &str| {
@@ -2934,10 +3021,10 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
     let day_time = time_entry("07:00");
     let night_time = time_entry("19:00");
     let day_time_row = adw::ActionRow::new();
-    day_time_row.set_title("Day starts");
+    day_time_row.set_title(t!("Day starts"));
     day_time_row.add_suffix(&day_time);
     let night_time_row = adw::ActionRow::new();
-    night_time_row.set_title("Night starts");
+    night_time_row.set_title(t!("Night starts"));
     night_time_row.add_suffix(&night_time);
 
     // Populate from the current config.
@@ -3097,9 +3184,14 @@ fn table_index<T: Copy + PartialEq>(table: &[(T, &str)], value: T) -> u32 {
     table.iter().position(|(v, _)| *v == value).unwrap_or(0) as u32
 }
 
-/// The label column of a table, ready for [`gtk4::StringList`].
-fn table_labels<'a, T>(table: &[(T, &'a str)]) -> Vec<&'a str> {
-    table.iter().map(|(_, label)| *label).collect()
+/// The label column of a table, translated and ready for [`gtk4::StringList`].
+///
+/// Translation happens here rather than in each table's definition because the
+/// tables are `const` data and the catalog is resolved at runtime — a `t!()`
+/// inside a `const` would not compile. Every caller feeds the result straight
+/// into a dropdown, so this is the single choke point for all of them.
+fn table_labels<T>(table: &[(T, &'static str)]) -> Vec<&'static str> {
+    table.iter().map(|(_, label)| t!(*label)).collect()
 }
 
 /// The lyric settings currently in force — the defaults when `config.widgets`
@@ -3291,13 +3383,13 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let cur = lyrics_settings(&state);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Lyrics");
-    group.set_description(Some(
-        "Show the current line of the song that is playing on top of your wallpaper.",
-    ));
+    group.set_title(t!("Lyrics"));
+    group.set_description(Some(t!(
+        "Show the current line of the song that is playing on top of your wallpaper."
+    )));
 
     let enable = adw::ActionRow::new();
-    enable.set_title("Show song lyrics");
+    enable.set_title(t!("Show song lyrics"));
     enable.set_subtitle(
         "Reads .lrc files saved beside your music. Needs a media player that reports \
          what it is playing over MPRIS.",
@@ -3309,21 +3401,23 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     enable.set_activatable_widget(Some(&enable_switch));
 
     let style_row = adw::ComboRow::new();
-    style_row.set_title("Style");
-    style_row.set_subtitle("Minimal is one quiet line; Subtitle outlines the text for busy video");
+    style_row.set_title(t!("Style"));
+    style_row.set_subtitle(t!(
+        "Minimal is one quiet line; Subtitle outlines the text for busy video"
+    ));
     style_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_STYLES))));
     style_row.set_selected(table_index(&LYRIC_STYLES, cur.style));
 
     let anchor_row = adw::ComboRow::new();
-    anchor_row.set_title("Position");
-    anchor_row.set_subtitle("Where the line sits on the screen");
+    anchor_row.set_title(t!("Position"));
+    anchor_row.set_subtitle(t!("Where the line sits on the screen"));
     anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
     anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
 
     let size_row = lyric_spin_row(
         &state,
-        "Text size",
-        "In points. Larger text reads from further away and wraps sooner.",
+        t!("Text size"),
+        t!("In points. Larger text reads from further away and wraps sooner."),
         (12.0, 96.0, 1.0),
         f64::from(cur.font_size_pt),
         |l, v| l.font_size_pt = v.max(0) as u32,
@@ -3331,8 +3425,8 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let margin_row = lyric_spin_row(
         &state,
-        "Margin",
-        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        t!("Margin"),
+        t!("Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner."),
         (0.0, 300.0, 1.0),
         f64::from(cur.margin_px),
         |l, v| l.margin_px = v.max(0) as u32,
@@ -3340,7 +3434,7 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let offset_row = lyric_spin_row(
         &state,
-        "Sync offset",
+        t!("Sync offset"),
         "Milliseconds added to every timestamp. .lrc files are hand-timed, so lines can \
          run early or late; a positive value shows each line later.",
         (-5000.0, 5000.0, 50.0),
@@ -3355,8 +3449,8 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let (colour_row, colour_btn) = {
         let state = state.clone();
         widget_colour_row(
-            "Lyric colour",
-            LYRIC_COLOUR_HINT,
+            t!("Lyric colour"),
+            t!(LYRIC_COLOUR_HINT),
             cur.colour.as_deref().unwrap_or(LYRIC_PRESET_COLOUR),
             move |hex| edit_lyrics(&state, |l| l.colour = Some(hex.clone())),
         )
@@ -3367,7 +3461,7 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let colour_clear = gtk4::Button::from_icon_name("edit-clear-symbolic");
     colour_clear.add_css_class("flat");
     colour_clear.set_valign(gtk4::Align::Center);
-    colour_clear.set_tooltip_text(Some("Use the colour the style picks"));
+    colour_clear.set_tooltip_text(Some(t!("Use the colour the style picks")));
     colour_clear.set_visible(cur.colour.is_some());
     colour_row.add_prefix(&colour_clear);
     {
@@ -3377,7 +3471,7 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         colour_clear.connect_clicked(move |btn| {
             edit_lyrics(&state, |l| l.colour = None);
             btn.set_visible(false);
-            colour_row.set_subtitle(LYRIC_COLOUR_HINT);
+            colour_row.set_subtitle(t!(LYRIC_COLOUR_HINT));
             colour_btn.set_rgba(&hex_to_rgba(LYRIC_PRESET_COLOUR));
         });
     }
@@ -3386,7 +3480,7 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         let colour_row = colour_row.clone();
         colour_btn.connect_rgba_notify(move |_| {
             colour_clear.set_visible(true);
-            colour_row.set_subtitle("Used while “Follow accent colour” is off.");
+            colour_row.set_subtitle(t!("Used while “Follow accent colour” is off."));
         });
     }
 
@@ -3394,8 +3488,8 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         let state = state.clone();
         let colour_row = colour_row.clone();
         widget_switch_row(
-            "Follow accent colour",
-            "Tint the lyric with the app accent instead of the colour below.",
+            t!("Follow accent colour"),
+            t!("Tint the lyric with the app accent instead of the colour below."),
             cur.accent_follow,
             move |on| {
                 edit_lyrics(&state, |l| l.accent_follow = on);
@@ -3408,8 +3502,8 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let next_row = lyric_switch_row(
         &state,
-        "Show next line",
-        "Also show the upcoming line, dimmed. Covers twice as much of the desktop.",
+        t!("Show next line"),
+        t!("Also show the upcoming line, dimmed. Covers twice as much of the desktop."),
         cur.show_next_line,
         |l, on| l.show_next_line = on,
     );
@@ -3418,7 +3512,7 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     // else to put on the wallpaper alongside the lyric itself.
     let track_info_row = lyric_switch_row(
         &state,
-        "Show track title and artist",
+        t!("Show track title and artist"),
         "Adds the song title and artist above the lyric line. Stays on screen between \
          songs, where the lyric line does not.",
         cur.show_track_info,
@@ -3427,13 +3521,13 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     // ── Lyrics folder ──
     let folder_row = adw::ActionRow::new();
-    folder_row.set_title("Lyrics folder");
-    let choose_btn = gtk4::Button::with_label("Choose\u{2026}");
+    folder_row.set_title(t!("Lyrics folder"));
+    let choose_btn = gtk4::Button::with_label(t!("Choose…"));
     choose_btn.set_valign(gtk4::Align::Center);
     let clear_btn = gtk4::Button::from_icon_name("edit-clear-symbolic");
     clear_btn.add_css_class("flat");
     clear_btn.set_valign(gtk4::Align::Center);
-    clear_btn.set_tooltip_text(Some("Use only .lrc files beside the music"));
+    clear_btn.set_tooltip_text(Some(t!("Use only .lrc files beside the music")));
     folder_row.add_suffix(&clear_btn);
     folder_row.add_suffix(&choose_btn);
 
@@ -3449,7 +3543,7 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
                 clear_btn.set_visible(true);
             }
             None => {
-                folder_row.set_subtitle(LYRIC_FOLDER_HINT);
+                folder_row.set_subtitle(t!(LYRIC_FOLDER_HINT));
                 clear_btn.set_visible(false);
             }
         })
@@ -3465,11 +3559,11 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
             // argument through every preferences helper.
             let parent = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
             let chooser = gtk4::FileChooserNative::new(
-                Some("Choose Lyrics Folder"),
+                Some(t!("Choose Lyrics Folder")),
                 parent.as_ref(),
                 FileChooserAction::SelectFolder,
-                Some("Select"),
-                Some("Cancel"),
+                Some(t!("Select")),
+                Some(t!("Cancel")),
             );
             let state_cb = state.clone();
             let show_folder = show_folder.clone();
@@ -3640,13 +3734,13 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let cur = clock_settings(&state);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Clock");
-    group.set_description(Some(
-        "Show the time on top of your wallpaper, behind your windows.",
-    ));
+    group.set_title(t!("Clock"));
+    group.set_description(Some(t!(
+        "Show the time on top of your wallpaper, behind your windows."
+    )));
 
     let enable = adw::ActionRow::new();
-    enable.set_title("Show a clock");
+    enable.set_title(t!("Show a clock"));
     enable.set_subtitle(
         "Draws the current time on top of the wallpaper. Needs nothing playing and no \
          internet connection.",
@@ -3658,25 +3752,25 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     enable.set_activatable_widget(Some(&enable_switch));
 
     let theme_row = adw::ComboRow::new();
-    theme_row.set_title("Theme");
-    theme_row.set_subtitle(
-        "Digital reads at a glance; Wordy spells the time out, like \"half past ten\"",
-    );
+    theme_row.set_title(t!("Theme"));
+    theme_row.set_subtitle(t!(
+        "Digital reads at a glance; Wordy spells the time out, like \"half past ten\""
+    ));
     theme_row.set_model(Some(&gtk4::StringList::new(&table_labels(&CLOCK_THEMES))));
     theme_row.set_selected(table_index(&CLOCK_THEMES, cur.theme));
 
     // The same nine anchors, with the same names, as the lyric overlay: one
     // placement vocabulary for every widget.
     let anchor_row = adw::ComboRow::new();
-    anchor_row.set_title("Position");
-    anchor_row.set_subtitle("Where the clock sits on the screen");
+    anchor_row.set_title(t!("Position"));
+    anchor_row.set_subtitle(t!("Where the clock sits on the screen"));
     anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
     anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
 
     let size_row = clock_spin_row(
         &state,
-        "Text size",
-        "In points at 1080p, and scaled with the screen. Each theme sizes itself around it.",
+        t!("Text size"),
+        t!("In points at 1080p, and scaled with the screen. Each theme sizes itself around it."),
         (12.0, 200.0, 1.0),
         f64::from(cur.font_size_pt),
         |c, v| c.font_size_pt = v.max(0) as u32,
@@ -3684,8 +3778,8 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let margin_row = clock_spin_row(
         &state,
-        "Margin",
-        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        t!("Margin"),
+        t!("Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner."),
         (0.0, 300.0, 1.0),
         f64::from(cur.margin_px),
         |c, v| c.margin_px = v.max(0) as u32,
@@ -3693,7 +3787,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let hour_row = clock_switch_row(
         &state,
-        "24-hour time",
+        t!("24-hour time"),
         "Show 13:00 rather than 1:00 PM. Fixed width, so a clock in a corner does not \
          shift as the hour changes.",
         cur.use_24h,
@@ -3702,7 +3796,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let date_row = clock_switch_row(
         &state,
-        "Show date",
+        t!("Show date"),
         "Adds the date under the time. Minimal never shows one and Stacked always does, \
          whatever this says.",
         cur.show_date,
@@ -3711,7 +3805,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let seconds_row = clock_switch_row(
         &state,
-        "Show seconds",
+        t!("Show seconds"),
         "Uses more power: the clock is redrawn every second instead of once a minute. \
          Wordy ignores it.",
         cur.show_seconds,
@@ -3720,8 +3814,8 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let accent_row = clock_switch_row(
         &state,
-        "Follow accent colour",
-        "Draw the clock in the app accent colour instead of plain white.",
+        t!("Follow accent colour"),
+        t!("Draw the clock in the app accent colour instead of plain white."),
         cur.accent_follow,
         |c, on| c.accent_follow = on,
     );
@@ -3871,13 +3965,13 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
     let cur = visualizer_settings(&state);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Audio visualiser");
-    group.set_description(Some(
-        "Show a moving spectrum of whatever is playing on top of your wallpaper.",
-    ));
+    group.set_title(t!("Audio visualiser"));
+    group.set_description(Some(t!(
+        "Show a moving spectrum of whatever is playing on top of your wallpaper."
+    )));
 
     let enable = adw::ActionRow::new();
-    enable.set_title("Show audio visualiser");
+    enable.set_title(t!("Show audio visualiser"));
     enable.set_subtitle(
         "Listens to your computer's audio output so the bars can react to the music. \
          Needs PipeWire or PulseAudio. Uses more power than the other widgets, because \
@@ -3890,21 +3984,23 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
     enable.set_activatable_widget(Some(&enable_switch));
 
     let style_row = adw::ComboRow::new();
-    style_row.set_title("Style");
-    style_row.set_subtitle("Bars is the classic spectrum; Ring lays the same bars out in a circle");
+    style_row.set_title(t!("Style"));
+    style_row.set_subtitle(t!(
+        "Bars is the classic spectrum; Ring lays the same bars out in a circle"
+    ));
     style_row.set_model(Some(&gtk4::StringList::new(&table_labels(&VISUAL_STYLES))));
     style_row.set_selected(table_index(&VISUAL_STYLES, cur.style));
 
     // The same nine anchors, with the same names, as every other widget.
     let anchor_row = adw::ComboRow::new();
-    anchor_row.set_title("Position");
-    anchor_row.set_subtitle("Where the visualiser sits on the screen");
+    anchor_row.set_title(t!("Position"));
+    anchor_row.set_subtitle(t!("Where the visualiser sits on the screen"));
     anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
     anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
 
     let width_row = visualizer_spin_row(
         &state,
-        "Width",
+        t!("Width"),
         "Percentage of the screen width the visualiser spans. Stays right when the \
          resolution changes.",
         (5.0, 100.0, 5.0),
@@ -3914,8 +4010,8 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
 
     let height_row = visualizer_spin_row(
         &state,
-        "Height",
-        "How tall the bars can grow, in pixels at 1080p and scaled with the screen.",
+        t!("Height"),
+        t!("How tall the bars can grow, in pixels at 1080p and scaled with the screen."),
         (16.0, 600.0, 8.0),
         f64::from(cur.height_px),
         |v, n| v.height_px = n.max(0) as u32,
@@ -3923,8 +4019,8 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
 
     let margin_row = visualizer_spin_row(
         &state,
-        "Margin",
-        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        t!("Margin"),
+        t!("Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner."),
         (0.0, 300.0, 1.0),
         f64::from(cur.margin_px),
         |v, n| v.margin_px = n.max(0) as u32,
@@ -3932,7 +4028,7 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
 
     let bands_row = visualizer_spin_row(
         &state,
-        "Bands",
+        t!("Bands"),
         "How many bars the sound is split into. Past a couple of hundred they are \
          thinner than the gaps between them and read as noise.",
         (4.0, 192.0, 1.0),
@@ -3942,8 +4038,8 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
 
     let rounded_row = visualizer_switch_row(
         &state,
-        "Rounded shapes",
-        "Round the bar caps, dots and wave. Off gives the same layout with hard edges.",
+        t!("Rounded shapes"),
+        t!("Round the bar caps, dots and wave. Off gives the same layout with hard edges."),
         cur.rounded,
         |v, on| v.rounded = on,
     );
@@ -3954,7 +4050,7 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
     // accent switch overrides the first colour, and the blend mode decides
     // whether the second colour means anything at all.
     let gradient_row = adw::ComboRow::new();
-    gradient_row.set_title("Colour blend");
+    gradient_row.set_title(t!("Colour blend"));
     gradient_row.set_subtitle(
         "Rainbow sweeps the whole spectrum and needs no colours of its own. \
          Blending steps the colour along the bars — the wave style is a single \
@@ -3968,8 +4064,8 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
     let (colour_row, _) = {
         let state = state.clone();
         widget_colour_row(
-            "Colour",
-            "The colour of the bars, or the near end of a blend.",
+            t!("Colour"),
+            t!("The colour of the bars, or the near end of a blend."),
             &cur.colour,
             move |hex| edit_visualizer(&state, |v| v.colour = hex.clone()),
         )
@@ -3977,8 +4073,8 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
     let (colour_end_row, _) = {
         let state = state.clone();
         widget_colour_row(
-            "Blend to",
-            "The far end of the blend — the colour the last bar is drawn in.",
+            t!("Blend to"),
+            t!("The far end of the blend — the colour the last bar is drawn in."),
             &cur.colour_end,
             move |hex| edit_visualizer(&state, |v| v.colour_end = hex.clone()),
         )
@@ -4008,8 +4104,8 @@ fn add_visualizer_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
         let sync_colours = sync_colours.clone();
         let accent_on = accent_on.clone();
         widget_switch_row(
-            "Follow accent colour",
-            "Draw the spectrum in the app accent colour instead of the colour below.",
+            t!("Follow accent colour"),
+            t!("Draw the spectrum in the app accent colour instead of the colour below."),
             cur.accent_follow,
             move |on| {
                 accent_on.set(on);
@@ -4144,7 +4240,7 @@ fn show_audio_consent_dialog(
             .as_ref(),
     );
     dialog.set_modal(true);
-    dialog.set_title(Some("Let the visualiser listen?"));
+    dialog.set_title(Some(t!("Let the visualiser listen?")));
     dialog.set_default_size(460, -1);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     content.append(&adw::HeaderBar::new());
@@ -4173,8 +4269,8 @@ fn show_audio_consent_dialog(
     let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     buttons.set_halign(gtk4::Align::End);
     buttons.set_margin_top(6);
-    let cancel = gtk4::Button::with_label("Cancel");
-    let accept = gtk4::Button::with_label("Enable visualiser");
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    let accept = gtk4::Button::with_label(t!("Enable visualiser"));
     accept.add_css_class("suggested-action");
     buttons.append(&cancel);
     buttons.append(&accept);
@@ -4281,13 +4377,13 @@ fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let cur = disc_settings(&state);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Album art");
-    group.set_description(Some(
-        "Show the cover of the song that is playing as a record on top of your wallpaper.",
-    ));
+    group.set_title(t!("Album art"));
+    group.set_description(Some(t!(
+        "Show the cover of the song that is playing as a record on top of your wallpaper."
+    )));
 
     let enable = adw::ActionRow::new();
-    enable.set_title("Show album art");
+    enable.set_title(t!("Show album art"));
     enable.set_subtitle(
         "Shows the current track's cover art. Needs a media player that reports what it \
          is playing over MPRIS; nothing is drawn while nothing is playing.",
@@ -4300,15 +4396,15 @@ fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     // The same nine anchors, with the same names, as every other widget.
     let anchor_row = adw::ComboRow::new();
-    anchor_row.set_title("Position");
-    anchor_row.set_subtitle("Where the record sits on the screen");
+    anchor_row.set_title(t!("Position"));
+    anchor_row.set_subtitle(t!("Where the record sits on the screen"));
     anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
     anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
 
     let size_row = disc_spin_row(
         &state,
-        "Size",
-        "Diameter in pixels at 1080p, and scaled with the screen.",
+        t!("Size"),
+        t!("Diameter in pixels at 1080p, and scaled with the screen."),
         (48.0, 800.0, 8.0),
         f64::from(cur.size_px),
         |d, v| d.size_px = v.max(1) as u32,
@@ -4316,8 +4412,8 @@ fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let margin_row = disc_spin_row(
         &state,
-        "Margin",
-        "Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner.",
+        t!("Margin"),
+        t!("Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner."),
         (0.0, 300.0, 1.0),
         f64::from(cur.margin_px),
         |d, v| d.margin_px = v.max(0) as u32,
@@ -4325,7 +4421,7 @@ fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let spin_row = disc_switch_row(
         &state,
-        "Spin while playing",
+        t!("Spin while playing"),
         "Turns the record at 33\u{2153} rpm, and stops when the track is paused. Uses more \
          power: a still cover is drawn once per song, a turning one continuously.",
         cur.spin,
@@ -4334,8 +4430,8 @@ fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 
     let opacity_row = disc_spin_row(
         &state,
-        "Opacity",
-        "0 is invisible, 255 is solid. Lower it to let the wallpaper through.",
+        t!("Opacity"),
+        t!("0 is invisible, 255 is solid. Lower it to let the wallpaper through."),
         (0.0, 255.0, 5.0),
         f64::from(cur.opacity),
         |d, v| d.opacity = v.clamp(0, 255) as u8,
@@ -4391,7 +4487,7 @@ fn add_disc_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
     const MAX_BYTES: u64 = 1_000_000_000; // refuse >1 GB outright
 
-    let (dialog, content) = glass_dialog(window, "Add from URL", 420, -1);
+    let (dialog, content) = glass_dialog(window, t!("Add from URL"), 420, -1);
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
     inner.set_margin_start(20);
     inner.set_margin_end(20);
@@ -4401,9 +4497,9 @@ fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<A
     entry.set_placeholder_text(Some("https://example.com/wallpaper.mp4"));
     inner.append(&entry);
 
-    let hint = gtk4::Label::new(Some(
-        "Direct video or image links only (.mp4, .webm, .gif, .png, …).",
-    ));
+    let hint = gtk4::Label::new(Some(t!(
+        "Direct video or image links only (.mp4, .webm, .gif, .png, …)."
+    )));
     hint.add_css_class("dim");
     hint.set_wrap(true);
     hint.set_xalign(0.0);
@@ -4415,8 +4511,8 @@ fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<A
 
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     row.set_halign(gtk4::Align::End);
-    let cancel_btn = gtk4::Button::with_label("Cancel");
-    let add_btn = gtk4::Button::with_label("Download");
+    let cancel_btn = gtk4::Button::with_label(t!("Cancel"));
+    let add_btn = gtk4::Button::with_label(t!("Download"));
     add_btn.add_css_class("suggested-action");
     row.append(&cancel_btn);
     row.append(&add_btn);
@@ -4443,7 +4539,7 @@ fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<A
         add_btn.connect_clicked(move |btn| {
             let url = entry_w.text().trim().to_string();
             if crate::download::media_filename(&url).is_none() {
-                hint.set_text("That doesn\u{2019}t look like a direct media link.");
+                hint.set_text(t!("That doesn’t look like a direct media link."));
                 return;
             }
             btn.set_sensitive(false);
@@ -4498,7 +4594,10 @@ fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<A
                             }
                             show_toast(
                                 &state,
-                                &format!("\u{201c}{name}\u{201d} added to the library"),
+                                &tf!(
+                                    "“{name}” added to the library",
+                                    "name" => name
+                                ),
                             );
                             let refresh = state.borrow().refresh.clone();
                             if let Some(r) = refresh {
@@ -4526,7 +4625,7 @@ fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<A
 // ─── About dialog ─────────────────────────────────────────────────────────────
 
 fn show_about_dialog(window: &adw::ApplicationWindow) {
-    let (dialog, content) = glass_dialog(window, "About Fresco", 360, -1);
+    let (dialog, content) = glass_dialog(window, t!("About Fresco"), 360, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
     inner.set_margin_start(24);
@@ -4539,14 +4638,14 @@ fn show_about_dialog(window: &adw::ApplicationWindow) {
     heading.add_css_class("dialog-heading");
     inner.append(&heading);
 
-    let version = gtk4::Label::new(Some(&format!(
-        "Version {}",
-        crate::update::current_version()
+    let version = gtk4::Label::new(Some(&tf!(
+        "Version {version}",
+        "version" => crate::update::current_version()
     )));
     version.add_css_class("dim");
     inner.append(&version);
 
-    let desc = gtk4::Label::new(Some("Live wallpapers for Linux."));
+    let desc = gtk4::Label::new(Some(t!("Live wallpapers for Linux.")));
     desc.add_css_class("dialog-sub");
     desc.set_wrap(true);
     desc.set_justify(gtk4::Justification::Center);
@@ -4584,11 +4683,11 @@ fn open_file_picker(
     editing_idx: Option<usize>,
 ) {
     let chooser = gtk4::FileChooserNative::new(
-        Some("Choose Wallpaper"),
+        Some(t!("Choose Wallpaper")),
         Some(window),
         FileChooserAction::Open,
-        Some("Open"),
-        Some("Cancel"),
+        Some(t!("Open")),
+        Some(t!("Cancel")),
     );
     chooser.set_select_multiple(true);
 
@@ -4599,9 +4698,9 @@ fn open_file_picker(
         .chain(IMAGE_PATTERNS.iter())
         .copied()
         .collect();
-    chooser.add_filter(&media_filter("All supported", &all_pat));
-    chooser.add_filter(&media_filter("Video files", &VIDEO_PATTERNS));
-    chooser.add_filter(&media_filter("Image files", &IMAGE_PATTERNS));
+    chooser.add_filter(&media_filter(t!("All supported"), &all_pat));
+    chooser.add_filter(&media_filter(t!("Video files"), &VIDEO_PATTERNS));
+    chooser.add_filter(&media_filter(t!("Image files"), &IMAGE_PATTERNS));
 
     let state_cb = state.clone();
     chooser.connect_response(move |ch, resp| {
@@ -4689,11 +4788,11 @@ fn open_folder_picker(
     stack: gtk4::Stack,
 ) {
     let chooser = gtk4::FileChooserNative::new(
-        Some("Choose Slideshow Folder"),
+        Some(t!("Choose Slideshow Folder")),
         Some(window),
         FileChooserAction::SelectFolder,
-        Some("Select"),
-        Some("Cancel"),
+        Some(t!("Select")),
+        Some(t!("Cancel")),
     );
     let state_cb = state.clone();
     chooser.connect_response(move |ch, resp| {
@@ -4734,11 +4833,11 @@ fn relink_entry(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, i
 
     if use_folder {
         let chooser = gtk4::FileChooserNative::new(
-            Some("Relink Slideshow Folder"),
+            Some(t!("Relink Slideshow Folder")),
             Some(window),
             FileChooserAction::SelectFolder,
-            Some("Select"),
-            Some("Cancel"),
+            Some(t!("Select")),
+            Some(t!("Cancel")),
         );
         let state_cb = state.clone();
         chooser.connect_response(move |ch, resp| {
@@ -4757,21 +4856,21 @@ fn relink_entry(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, i
     }
 
     let chooser = gtk4::FileChooserNative::new(
-        Some("Relink Source"),
+        Some(t!("Relink Source")),
         Some(window),
         FileChooserAction::Open,
-        Some("Open"),
-        Some("Cancel"),
+        Some(t!("Open")),
+        Some(t!("Cancel")),
     );
     chooser.set_select_multiple(matches!(kind, Kind::Playlist | Kind::Slideshow));
     // Same kind-appropriate restriction as the Add flow, so a broken Video
     // entry can't be "fixed" by pointing it at a non-media file.
     match kind {
         Kind::Video | Kind::Playlist => {
-            chooser.add_filter(&media_filter("Video files", &VIDEO_PATTERNS));
+            chooser.add_filter(&media_filter(t!("Video files"), &VIDEO_PATTERNS));
         }
         Kind::Image | Kind::Slideshow => {
-            chooser.add_filter(&media_filter("Image files", &IMAGE_PATTERNS));
+            chooser.add_filter(&media_filter(t!("Image files"), &IMAGE_PATTERNS));
         }
     }
     let state_cb = state.clone();
@@ -4820,7 +4919,7 @@ fn finish_relink(state: &Rc<RefCell<AppState>>, idx: usize, apply: impl FnOnce(&
         e.check_health();
         save_entries(&s.entries).ok();
     }
-    show_toast(state, "Relinked");
+    show_toast(state, t!("Relinked"));
     let refresh = state.borrow().refresh.clone();
     if let Some(r) = refresh {
         r();
@@ -4853,7 +4952,18 @@ pub(crate) fn glass_dialog(
 
 /// Uppercase section label styled as an overline (see theme.rs `.overline`).
 fn overline(text: &str) -> gtk4::Label {
-    let l = gtk4::Label::new(Some(&text.to_uppercase()));
+    // Upper-casing is the overline's whole visual signature in English, and a
+    // no-op in scripts without case — but `to_uppercase` on mixed text would
+    // shout the Latin fragments inside an otherwise Chinese heading. Apply it
+    // only when the label is entirely caseless-or-uppercasable Latin, and leave
+    // everything else to the `.overline` CSS (size, tracking, colour), which
+    // carries the style on its own.
+    let display = if text.chars().any(|c| c.is_alphabetic() && !c.is_ascii()) {
+        text.to_string()
+    } else {
+        text.to_uppercase()
+    };
+    let l = gtk4::Label::new(Some(&display));
     l.add_css_class("overline");
     l.set_xalign(0.0);
     l.set_halign(gtk4::Align::Start);
@@ -4879,7 +4989,7 @@ fn pinterest_button_content() -> gtk4::Widget {
 
     let Some(texture) = texture else {
         log::debug!("no SVG loader for the Pinterest glyph; using a generic link icon");
-        return button_content("insert-link-symbolic", "From link").upcast();
+        return button_content("insert-link-symbolic", t!("From link")).upcast();
     };
 
     // Hand-built rather than adw::ButtonContent: that widget only takes a
@@ -4888,7 +4998,7 @@ fn pinterest_button_content() -> gtk4::Widget {
     let image = gtk4::Image::from_paintable(Some(&texture));
     image.set_pixel_size(16);
     content.append(&image);
-    content.append(&gtk4::Label::new(Some("From Pinterest")));
+    content.append(&gtk4::Label::new(Some(t!("From Pinterest"))));
     content.upcast()
 }
 
@@ -4930,6 +5040,68 @@ fn switch_row<F: Fn(bool) + 'static>(label: &str, active: bool, on_toggle: F) ->
     sw.connect_active_notify(move |sw| on_toggle(sw.is_active()));
     hbox.append(&lbl);
     hbox.append(&sw);
+    hbox
+}
+
+/// Language picker for the menu popover.
+///
+/// A dropdown rather than the segmented control the theme switcher uses: that
+/// pattern only reads well at three *short* labels, and language names are
+/// endonyms of unpredictable width — the list is meant to grow.
+///
+/// The change takes effect on restart, and the row says so. Fresco resolves
+/// every translated string to a `&'static str` that lives for the process
+/// lifetime (see [`crate::i18n`]), so a live swap would have to rebuild every
+/// widget in the window; a toast that names the requirement is more honest than
+/// a partial retranslation, and matches how GNOME's own language switch
+/// behaves.
+fn build_language_row(state: Rc<RefCell<AppState>>) -> gtk4::Box {
+    use crate::i18n::Language;
+
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    hbox.add_css_class("menu-row");
+    hbox.set_margin_start(4);
+    hbox.set_margin_end(4);
+
+    let names: Vec<&str> = Language::ALL.iter().map(|l| l.display_name()).collect();
+    let model = gtk4::StringList::new(&names);
+    let dropdown = gtk4::DropDown::new(Some(model), None::<gtk4::Expression>);
+    dropdown.set_hexpand(true);
+    dropdown.set_valign(gtk4::Align::Center);
+
+    let current = state.borrow().config.language;
+    let selected = Language::ALL
+        .iter()
+        .position(|l| *l == current)
+        .unwrap_or(0);
+    dropdown.set_selected(selected as u32);
+
+    {
+        let state2 = state.clone();
+        // Guard the initial `set_selected` above: DropDown emits the notify on
+        // programmatic selection too, and firing a "restart to apply" toast
+        // while the menu is merely being built would be nonsense.
+        let armed = Cell::new(false);
+        dropdown.connect_selected_notify(move |dd| {
+            let Some(lang) = Language::ALL.get(dd.selected() as usize).copied() else {
+                return;
+            };
+            if !armed.replace(true) && lang == current {
+                return;
+            }
+            {
+                let mut s = state2.borrow_mut();
+                if s.config.language == lang {
+                    return;
+                }
+                s.config.language = lang;
+                s.config.save().ok();
+            }
+            show_toast(&state2, t!("Restart Fresco to apply the new language"));
+        });
+    }
+
+    hbox.append(&dropdown);
     hbox
 }
 
@@ -4997,10 +5169,10 @@ fn display_name(name: &str, kind: Kind) -> String {
     let ident: String = n.chars().filter(|c| *c != '-' && *c != '_').collect();
     if ident.chars().count() >= 16 && ident.chars().all(|c| c.is_ascii_hexdigit()) {
         let label = match kind {
-            Kind::Video => "Video",
-            Kind::Image => "Image",
-            Kind::Playlist => "Playlist",
-            Kind::Slideshow => "Slideshow",
+            Kind::Video => t!("Video"),
+            Kind::Image => t!("Image"),
+            Kind::Playlist => t!("Playlist"),
+            Kind::Slideshow => t!("Slideshow"),
         };
         let suffix: String = ident
             .chars()
@@ -5057,12 +5229,12 @@ fn kind_badge(kind: Kind) -> &'static str {
 
 fn accent_name(accent: Accent) -> &'static str {
     match accent {
-        Accent::Blue => "Blue",
-        Accent::Teal => "Teal",
-        Accent::Green => "Green",
-        Accent::Amber => "Amber",
-        Accent::Coral => "Coral",
-        Accent::Graphite => "Graphite",
+        Accent::Blue => t!("Blue"),
+        Accent::Teal => t!("Teal"),
+        Accent::Green => t!("Green"),
+        Accent::Amber => t!("Amber"),
+        Accent::Coral => t!("Coral"),
+        Accent::Graphite => t!("Graphite"),
     }
 }
 
@@ -5170,20 +5342,45 @@ fn run_startup_checks(window: &adw::ApplicationWindow, state: Rc<RefCell<AppStat
     super::updates::check_for_updates(window, state, false);
 }
 
-fn submit_feedback_async(rating: i8, comment: &gtk4::Entry, state: &Rc<RefCell<AppState>>) {
+/// Submit a rating, and — when `allow_reply` — open a support thread so the
+/// maintainer can actually answer.
+///
+/// The thread is what turns "does not work, wallpaper is just black" from an
+/// unactionable row into a conversation. Both calls run on one background
+/// thread and in this order: the feedback row is the thing that must not be
+/// lost, so a failure to open the thread never costs the rating.
+fn submit_feedback_async(
+    rating: i8,
+    comment: &gtk4::Entry,
+    allow_reply: bool,
+    state: &Rc<RefCell<AppState>>,
+) {
     let text = comment.text().to_string();
     let note = if text.trim().is_empty() {
         None
     } else {
-        Some(text)
+        Some(text.clone())
     };
     std::thread::spawn(move || {
-        crate::supabase::submit_feedback(rating, note).ok();
+        let ticket = allow_reply.then(crate::support::ticket_for_reply).flatten();
+        crate::supabase::submit_feedback(rating, note, ticket).ok();
+        if allow_reply {
+            let env = crate::telemetry::env_summary();
+            crate::support::open_from_feedback(rating, &text, Some(&env)).ok();
+        }
     });
-    state
-        .borrow()
-        .toast
-        .add_toast(adw::Toast::new("Thanks for the feedback!"));
+    // A 👎 deserves an apology, not a cheer. The same toast for both reads as
+    // tone-deaf to someone whose wallpaper just isn't working.
+    let message = if rating < 0 {
+        if allow_reply {
+            t!("Thanks for telling us. We'll look into it and reply in the app.")
+        } else {
+            t!("Thanks for telling us. We'll look into it.")
+        }
+    } else {
+        t!("Thanks, that means a lot!")
+    };
+    state.borrow().toast.add_toast(adw::Toast::new(message));
 }
 
 // ─── Command palette (Ctrl+K) ─────────────────────────────────────────────────
@@ -5203,7 +5400,7 @@ fn show_command_palette(
     state: Rc<RefCell<AppState>>,
     stack: gtk4::Stack,
 ) {
-    let (dialog, content) = glass_dialog(window, "Commands", 560, 440);
+    let (dialog, content) = glass_dialog(window, t!("Commands"), 560, 440);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
     inner.set_margin_start(16);
@@ -5212,7 +5409,7 @@ fn show_command_palette(
 
     let entry = gtk4::Entry::new();
     entry.add_css_class("palette-entry");
-    entry.set_placeholder_text(Some("Type a command or wallpaper name…"));
+    entry.set_placeholder_text(Some(t!("Type a command or wallpaper name…")));
     inner.append(&entry);
 
     let list = gtk4::ListBox::new();
@@ -5224,7 +5421,7 @@ fn show_command_palette(
     scroll.set_child(Some(&list));
     inner.append(&scroll);
 
-    let hint = gtk4::Label::new(Some("↑↓ navigate · Enter run · Esc close"));
+    let hint = gtk4::Label::new(Some(t!("↑↓ navigate · Enter run · Esc close")));
     hint.add_css_class("palette-hint");
     hint.set_xalign(0.0);
     inner.append(&hint);
@@ -5241,7 +5438,7 @@ fn show_command_palette(
             let pretty = display_name(&e.name, e.kind);
             let s = state.clone();
             cmds.push(PaletteCmd {
-                label: format!("Set: {pretty}"),
+                label: tf!("Set: {name}", "name" => pretty),
                 hay: format!("{} {}", pretty.to_lowercase(), e.name.to_lowercase()),
                 run: Rc::new(move || apply_entry_by_idx(s.clone(), idx)),
             });
@@ -5257,7 +5454,7 @@ fn show_command_palette(
     {
         let s = state.clone();
         add_cmd(
-            "Random wallpaper",
+            t!("Random wallpaper"),
             Rc::new(move || {
                 let candidates: Vec<usize> = s
                     .borrow()
@@ -5282,49 +5479,49 @@ fn show_command_palette(
     {
         let (w, s) = (window.clone(), state.clone());
         add_cmd(
-            "Browse catalog",
+            t!("Browse catalog"),
             Rc::new(move || super::gallery::show_gallery_window(&w, s.clone())),
         );
     }
     {
         let (w, s, st) = (window.clone(), state.clone(), stack.clone());
         add_cmd(
-            "Add from link",
+            t!("Add from link"),
             Rc::new(move || super::add_link::show_add_link_dialog(&w, s.clone(), st.clone())),
         );
     }
     {
         let (w, s, st) = (window.clone(), state.clone(), stack.clone());
         add_cmd(
-            "Add files",
+            t!("Add files"),
             Rc::new(move || open_file_picker(&w, s.clone(), st.clone(), None)),
         );
     }
     {
         let (w, s) = (window.clone(), state.clone());
         add_cmd(
-            "Advanced settings",
+            t!("Advanced settings"),
             Rc::new(move || show_advanced_dialog(&w, s.clone())),
         );
     }
     {
         let (w, s) = (window.clone(), state.clone());
         add_cmd(
-            "Send feedback",
+            t!("Send feedback"),
             Rc::new(move || show_feedback_dialog(&w, s.clone())),
         );
     }
     {
         let (w, s) = (window.clone(), state.clone());
         add_cmd(
-            "What can Fresco do?",
+            t!("What can Fresco do?"),
             Rc::new(move || show_tour_dialog(&w, s.clone())),
         );
     }
     {
         let (w, s) = (window.clone(), state.clone());
         add_cmd(
-            "What\u{2019}s new in Fresco",
+            t!("What’s new in Fresco"),
             Rc::new(move || show_onboarding_dialog(&w, s.clone())),
         );
     }
@@ -5425,12 +5622,19 @@ fn show_command_palette(
     entry.grab_focus();
 }
 
-/// One-time telemetry consent — asked before anything is ever sent (the
-/// telemetry layer is a no-op until this is answered). Both choices carry
-/// equal visual weight: consent that's honest converts better than consent
-/// that's tricked.
+/// Telemetry consent — asked before anything is ever sent (the telemetry layer
+/// is a no-op until this is answered). Both choices carry equal visual weight:
+/// consent that's honest converts better than consent that's tricked.
+///
+/// Declining is not total silence, and this dialog says so in as many words
+/// rather than burying it. That sentence is the whole reason the two-button
+/// shape is defensible: a user who declines and is still counted has been told
+/// exactly what is still counted (their country, and nothing that identifies
+/// them), before they choose. Removing or softening it would turn an honest
+/// trade-off into a dark pattern — if this text changes, bump
+/// [`crate::telemetry::CONSENT_VERSION`] and update TERMS.md to match.
 fn show_telemetry_consent_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
-    let (dialog, content) = glass_dialog(window, "Help improve Fresco?", 460, -1);
+    let (dialog, content) = glass_dialog(window, t!("Help improve Fresco?"), 500, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     inner.set_margin_start(24);
@@ -5438,22 +5642,38 @@ fn show_telemetry_consent_dialog(window: &adw::ApplicationWindow, state: Rc<RefC
     inner.set_margin_top(8);
     inner.set_margin_bottom(22);
 
-    let body = gtk4::Label::new(Some(
-        "Share anonymous usage statistics to help make Fresco better?\n\n\
-         What's shared: a random install id, app version, distro name, \
-         desktop, feature-usage counts, and error kinds.\n\
-         Never shared: personal data, file names, or your wallpapers.\n\n\
-         You can change this anytime in Settings.",
-    ));
+    // One paragraph per `t!` on purpose: a single wall of text would be one
+    // enormous translation unit that goes stale the moment a comma moves, and
+    // the i18n msgid extractor cannot reconstruct a backslash-continued
+    // literal anyway (see `source_msgids` in i18n.rs).
+    let paragraphs = [
+        t!("Fresco is free: no ads, no accounts, nothing to sell. These numbers exist for one reason, which is to know which distros and desktops people actually run, so that the one you use keeps working."),
+        t!("Either way, Fresco counts you once a day: a random install id (not tied to you, your hardware, or your name), your country, and the app version. That is how many people use Fresco and where, which decides what gets tested."),
+        t!("Accept all adds the detail: your distro, desktop, session type, video backend, monitor count, which features you use, error kinds, and the time of each check-in."),
+        t!("Decline optional and none of that detail is sent, and your check-in is recorded as a date rather than a time."),
+        t!("Never collected, either way: personal data, file names, your wallpapers, or your IP address."),
+        t!("Accepting all also accepts the terms of use. You can change your answer anytime in Settings."),
+    ];
+    let body = gtk4::Label::new(Some(&paragraphs.join("\n\n")));
     body.set_wrap(true);
     body.set_xalign(0.0);
     inner.append(&body);
 
+    // Accepting all is also acceptance of the terms, so the terms have to be
+    // reachable from the dialog that says so, not just from the README.
+    let terms = gtk4::LinkButton::with_label(
+        "https://github.com/DibbayajyotiRoy/fresco/blob/main/TERMS.md",
+        t!("Read the full terms of use"),
+    );
+    terms.set_halign(gtk4::Align::Start);
+    terms.set_margin_start(0);
+    inner.append(&terms);
+
     let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     buttons.set_halign(gtk4::Align::End);
     buttons.set_margin_top(6);
-    let decline = gtk4::Button::with_label("No thanks");
-    let accept = gtk4::Button::with_label("Share anonymously");
+    let decline = gtk4::Button::with_label(t!("Decline optional"));
+    let accept = gtk4::Button::with_label(t!("Accept all"));
     accept.add_css_class("suggested-action");
     buttons.append(&decline);
     buttons.append(&accept);
@@ -5466,6 +5686,9 @@ fn show_telemetry_consent_dialog(window: &adw::ApplicationWindow, state: Rc<RefC
             let mut s = state.borrow_mut();
             s.config.telemetry = yes;
             s.config.telemetry_prompted = true;
+            // Stamp which terms this answer was given under, so a future
+            // change to what is collected re-asks instead of assuming.
+            s.config.telemetry_consent_version = crate::telemetry::CONSENT_VERSION;
             s.config.save().ok();
             drop(s);
             dialog.close();
@@ -5595,7 +5818,7 @@ fn onboarding_row(title: &str, body: &str) -> gtk4::Box {
 fn onboarding_page(step: &OnboardingStep, lead: &str, rows: &[(&str, &str)]) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-    let heading = gtk4::Label::new(Some(step.heading));
+    let heading = gtk4::Label::new(Some(t!(step.heading)));
     heading.add_css_class("dialog-heading");
     heading.set_wrap(true);
     heading.set_xalign(0.0);
@@ -5701,7 +5924,7 @@ fn run_link_step(
 ) {
     let url = ui.entry.text().trim().to_string();
     if !url.starts_with("http") {
-        ui.error.set_text("That doesn\u{2019}t look like a link.");
+        ui.error.set_text(t!("That doesn’t look like a link."));
         ui.error.set_visible(true);
         return;
     }
@@ -5715,7 +5938,7 @@ fn run_link_step(
     ui.entry.set_sensitive(false);
     primary.set_sensitive(false);
     ui.error.set_visible(false);
-    ui.status.set_text("Resolving link\u{2026}");
+    ui.status.set_text(t!("Resolving link…"));
     ui.status.add_css_class("shimmer");
     ui.status.set_visible(true);
     ui.progress.set_visible(true);
@@ -5814,7 +6037,7 @@ fn run_link_step(
             pulsing.set(false);
             done.set(true);
             ui.status.remove_css_class("shimmer");
-            ui.status.set_text("Set as your wallpaper.");
+            ui.status.set_text(t!("Set as your wallpaper."));
             ui.progress.set_visible(false);
             primary.set_sensitive(true);
             render();
@@ -5833,7 +6056,7 @@ fn run_link_step(
 
         while let Ok(msg) = rx.recv().await {
             match msg {
-                Msg::Downloading => ui.status.set_text("Downloading\u{2026}"),
+                Msg::Downloading => ui.status.set_text(t!("Downloading…")),
                 Msg::Progress(f) => {
                     pulsing.set(false);
                     ui.progress.set_fraction(f.clamp(0.0, 1.0));
@@ -5903,7 +6126,7 @@ pub(crate) fn show_onboarding_dialog(
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
 ) {
-    let (dialog, content) = glass_dialog(window, "What\u{2019}s new in Fresco", 520, -1);
+    let (dialog, content) = glass_dialog(window, t!("What’s new in Fresco"), 520, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     inner.set_margin_start(24);
@@ -5911,7 +6134,11 @@ pub(crate) fn show_onboarding_dialog(
     inner.set_margin_top(4);
     inner.set_margin_bottom(22);
 
-    let indicator = overline(&format!("Step 1 of {}", ONBOARDING_STEPS.len()));
+    let indicator = overline(&tf!(
+        "Step {current} of {total}",
+        "current" => "1",
+        "total" => ONBOARDING_STEPS.len().to_string()
+    ));
     inner.append(&indicator);
 
     let pages = gtk4::Stack::new();
@@ -5935,7 +6162,7 @@ pub(crate) fn show_onboarding_dialog(
     };
     link_ui
         .entry
-        .set_placeholder_text(Some("Paste a Pinterest or direct video/image link"));
+        .set_placeholder_text(Some(t!("Paste a Pinterest or direct video/image link")));
     // Pre-filled, not merely suggested: pressing the button uses this pin,
     // typing replaces it. The clipboard is left alone — unlike "Add from link",
     // this dialog opens on its own, before the user has copied anything.
@@ -5959,15 +6186,15 @@ pub(crate) fn show_onboarding_dialog(
     link_page.append(&link_ui.progress);
 
     link_page.append(&onboarding_row(
-        "Where this lives afterwards",
+        t!("Where this lives afterwards"),
         "The From Pinterest button in the bar at the bottom of the window, or \
          Ctrl+K \u{2192} \u{201c}Add from link\u{201d}.",
     ));
 
-    let demo = gtk4::Button::with_label("Watch the demo");
+    let demo = gtk4::Button::with_label(t!("Watch the demo"));
     demo.add_css_class("flat");
     demo.set_halign(gtk4::Align::Start);
-    demo.set_tooltip_text(Some("Opens the walkthrough video in your browser"));
+    demo.set_tooltip_text(Some(t!("Opens the walkthrough video in your browser")));
     demo.connect_clicked(|_| {
         // Counts intent only: once the browser has it, Fresco can't tell
         // whether it was watched. Judge the video by whether add_from_link
@@ -5993,20 +6220,20 @@ pub(crate) fn show_onboarding_dialog(
          where to find them.",
         &[
             (
-                "Lyrics",
+                t!("Lyrics"),
                 "The current line of the song that is playing. It reads .lrc \
                  files saved beside your music, and needs a media player that \
                  reports what it is playing over MPRIS. Style, position, text \
                  size and a sync offset are all adjustable.",
             ),
             (
-                "Clock",
+                t!("Clock"),
                 "The time, in one of five themes — Digital, Minimal, Segment, \
                  Stacked and Wordy — with position, text size, 24-hour time, \
                  date and seconds.",
             ),
             (
-                "Where the settings are",
+                t!("Where the settings are"),
                 "Open the app menu (Ctrl+,), choose Advanced…, and scroll to \
                  the Lyrics and Clock groups. Both start switched off.",
             ),
@@ -6017,9 +6244,9 @@ pub(crate) fn show_onboarding_dialog(
     // ── Footer ───────────────────────────────────────────────────────────────
     let footer = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     footer.set_margin_top(4);
-    let skip = gtk4::Button::with_label("Skip");
+    let skip = gtk4::Button::with_label(t!("Skip"));
     skip.add_css_class("flat");
-    skip.set_tooltip_text(Some("Go to the next step without doing anything"));
+    skip.set_tooltip_text(Some(t!("Go to the next step without doing anything")));
     let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     let primary = gtk4::Button::with_label(ONBOARDING_STEPS[0].primary);
@@ -6050,8 +6277,14 @@ pub(crate) fn show_onboarding_dialog(
             let i = step.get();
             let current = &ONBOARDING_STEPS[i];
             pages.set_visible_child_name(current.id);
-            indicator
-                .set_label(&format!("Step {} of {}", i + 1, ONBOARDING_STEPS.len()).to_uppercase());
+            indicator.set_label(
+                &tf!(
+                    "Step {current} of {total}",
+                    "current" => (i + 1).to_string(),
+                    "total" => ONBOARDING_STEPS.len().to_string()
+                )
+                .to_uppercase(),
+            );
             // Skip means "advance without acting". The last step has nothing to
             // advance to and its primary button is already the no-op finish, so
             // showing both would be two buttons doing the same thing.
@@ -6060,8 +6293,8 @@ pub(crate) fn show_onboarding_dialog(
             // action and becomes the way forward — nobody should be left
             // staring at a button that repeats work they already did.
             primary.set_label(match current.primary_done {
-                Some(label) if link_done.get() => label,
-                _ => current.primary,
+                Some(label) if link_done.get() => t!(label),
+                _ => t!(current.primary),
             });
         })
     };
@@ -6160,7 +6393,7 @@ pub(crate) fn show_tour_dialog(window: &adw::ApplicationWindow, state: Rc<RefCel
             s.config.save().ok();
         }
     }
-    let (dialog, content) = glass_dialog(window, "What can Fresco do?", 520, 560);
+    let (dialog, content) = glass_dialog(window, t!("What can Fresco do?"), 520, 560);
 
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_vexpand(true);
@@ -6173,36 +6406,36 @@ pub(crate) fn show_tour_dialog(window: &adw::ApplicationWindow, state: Rc<RefCel
 
     let rows: &[(&str, &str)] = &[
         (
-            "Set anything",
-            "Videos, GIFs, images, slideshows, and playlists — click a card to set it.",
+            t!("Set anything"),
+            t!("Videos, GIFs, images, slideshows, and playlists — click a card to set it."),
         ),
         (
-            "Add from a link",
-            "The link button imports a Pinterest pin or any direct video/image URL — no downloads needed.",
+            t!("Add from a link"),
+            t!("The link button imports a Pinterest pin or any direct video/image URL — no downloads needed."),
         ),
         (
-            "Preview, rotate & crop",
-            "Double-click any card (or use its Edit button) to adjust before setting.",
+            t!("Preview, rotate & crop"),
+            t!("Double-click any card (or use its Edit button) to adjust before setting."),
         ),
         (
-            "Per-monitor wallpapers",
-            "Right-click a card → “Set on <display>” for different wallpapers per screen.",
+            t!("Per-monitor wallpapers"),
+            t!("Right-click a card → “Set on <display>” for different wallpapers per screen."),
         ),
         (
-            "Day & night schedules",
-            "Two wallpapers on a timer — under Advanced in the menu.",
+            t!("Day & night schedules"),
+            t!("Two wallpapers on a timer — under Advanced in the menu."),
         ),
         (
-            "Wallpaper catalog",
-            "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.",
+            t!("Wallpaper catalog"),
+            t!("Menu → “Browse wallpapers…” for curated, licensed picks in two clicks."),
         ),
         (
-            "Hover to preview",
-            "Hover a video card and it plays silently in place.",
+            t!("Hover to preview"),
+            t!("Hover a video card and it plays silently in place."),
         ),
         (
-            "Keyboard shortcuts",
-            "Ctrl+K command palette · Ctrl+F search · Ctrl+, menu · Ctrl+Q quit.",
+            t!("Keyboard shortcuts"),
+            t!("Ctrl+K command palette · Ctrl+F search · Ctrl+, menu · Ctrl+Q quit."),
         ),
     ];
     for (title, body) in rows {
@@ -6231,7 +6464,7 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
         s.config.save().ok();
     }
 
-    let (dialog, content) = glass_dialog(window, "Feedback", 420, -1);
+    let (dialog, content) = glass_dialog(window, t!("Feedback"), 420, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
     inner.set_margin_start(24);
@@ -6239,35 +6472,58 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     inner.set_margin_top(8);
     inner.set_margin_bottom(22);
 
-    let heading = gtk4::Label::new(Some("Enjoying Fresco?"));
+    let heading = gtk4::Label::new(Some(t!("Enjoying Fresco?")));
     heading.add_css_class("dialog-heading");
     heading.set_xalign(0.0);
     inner.append(&heading);
 
-    let prompt = gtk4::Label::new(Some(
-        "Your rating is anonymous. An optional note helps shape what comes next.",
-    ));
+    let prompt = gtk4::Label::new(Some(t!(
+        "Your rating is anonymous. A quick note helps us know what to work on next."
+    )));
     prompt.add_css_class("dialog-sub");
     prompt.set_wrap(true);
     prompt.set_xalign(0.0);
     inner.append(&prompt);
 
     let comment = gtk4::Entry::new();
-    comment.set_placeholder_text(Some("Anything we should know? (optional)"));
+    comment.set_placeholder_text(Some(t!("Anything we should know? (optional)")));
     comment.set_margin_top(4);
     inner.append(&comment);
 
+    // The reason a 👎 used to be unactionable: there was nobody to ask what
+    // broke. Ticking this attaches the anonymous support ticket to the row and
+    // opens a thread, so the maintainer can answer inside the app. Default on,
+    // because someone reporting a problem usually wants it solved — and off is
+    // one click away, with the consequence spelled out rather than implied.
+    let allow_reply =
+        gtk4::CheckButton::with_label(t!("Let the maintainer reply (stays anonymous)"));
+    allow_reply.set_active(true);
+    allow_reply.set_margin_top(2);
+    inner.append(&allow_reply);
+
+    let reply_note = gtk4::Label::new(Some(t!(
+        "They see your message and your setup, never who you are. Untick to send the rating with no way to reach you."
+    )));
+    reply_note.add_css_class("dialog-sub");
+    reply_note.set_wrap(true);
+    reply_note.set_xalign(0.0);
+    reply_note.set_margin_start(26);
+    inner.append(&reply_note);
+
     let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     buttons.set_margin_top(6);
-    let later = gtk4::Button::with_label("Not now");
+    let later = gtk4::Button::with_label(t!("Not now"));
     later.add_css_class("flat");
     let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     let down = gtk4::Button::new();
-    down.set_child(Some(&button_content("face-sad-symbolic", "Not great")));
+    down.set_child(Some(&button_content("face-sad-symbolic", t!("Not great"))));
     down.add_css_class("feedback-btn");
     let up = gtk4::Button::new();
-    up.set_child(Some(&button_content("face-laugh-symbolic", "Loving it")));
+    up.set_child(Some(&button_content(
+        "face-laugh-symbolic",
+        t!("Loving it"),
+    )));
     up.add_css_class("feedback-btn");
     up.add_css_class("suggested-action");
     buttons.append(&later);
@@ -6282,8 +6538,9 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
         let comment = comment.clone();
         let state = state.clone();
         let d = dialog.clone();
+        let allow = allow_reply.clone();
         up.connect_clicked(move |_| {
-            submit_feedback_async(1, &comment, &state);
+            submit_feedback_async(1, &comment, allow.is_active(), &state);
             d.close();
         });
     }
@@ -6291,8 +6548,91 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
         let comment = comment.clone();
         let state = state.clone();
         let d = dialog.clone();
+        let win = window.clone();
+        let allow = allow_reply.clone();
         down.connect_clicked(move |_| {
-            submit_feedback_async(-1, &comment, &state);
+            let note = comment.text().to_string();
+            let replyable = allow.is_active();
+            submit_feedback_async(-1, &comment, replyable, &state);
+            d.close();
+            // With a reply channel open, the in-app thread IS the two-way
+            // channel and needs no GitHub account, so pushing them to the
+            // issue tracker on top of it would be asking twice for the same
+            // thing. Only offer the issue when they declined the reply, which
+            // is the case this prompt was written for.
+            if !replyable {
+                show_issue_prompt(&win, &note);
+            }
+        });
+    }
+    {
+        let d = dialog.clone();
+        later.connect_clicked(move |_| d.close());
+    }
+
+    dialog.present();
+}
+
+const ISSUES_URL: &str = "https://github.com/DibbayajyotiRoy/fresco/issues";
+const NEW_ISSUE_URL: &str = "https://github.com/DibbayajyotiRoy/fresco/issues/new";
+
+/// Follow-up shown right after a 👎, offering to open a pre-filled GitHub issue.
+///
+/// Feedback is submitted anonymously (no install id, no address), so the row we
+/// receive is a dead end: we cannot ask which compositor, which wallpaper, or
+/// what the log said. This dialog is the hand-off from "we heard you" to "we can
+/// actually fix it" — declining costs the user nothing, the 👎 is already sent.
+fn show_issue_prompt(window: &adw::ApplicationWindow, note: &str) {
+    let (dialog, content) = glass_dialog(window, t!("Report a problem"), 420, -1);
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
+    inner.set_margin_start(24);
+    inner.set_margin_end(24);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(22);
+
+    let heading = gtk4::Label::new(Some(t!("Sorry about that")));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    inner.append(&heading);
+
+    let body = gtk4::Label::new(Some(
+        "Thanks for telling us. Your rating is anonymous, though, so we can't \
+         write back or ask what went wrong. If you have a minute, opening an \
+         issue gives us enough to actually dig in. Your note and system info \
+         are already filled in.",
+    ));
+    body.add_css_class("dialog-sub");
+    body.set_wrap(true);
+    body.set_xalign(0.0);
+    inner.append(&body);
+
+    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    buttons.set_margin_top(6);
+    let later = gtk4::Button::with_label(t!("Not now"));
+    later.add_css_class("flat");
+    let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    let open = gtk4::Button::with_label(t!("Tell us more"));
+    open.set_tooltip_text(Some(t!(
+        "Opens a pre-filled report on GitHub in your browser"
+    )));
+    open.add_css_class("suggested-action");
+    buttons.append(&later);
+    buttons.append(&spacer);
+    buttons.append(&open);
+    inner.append(&buttons);
+
+    content.append(&inner);
+
+    {
+        let d = dialog.clone();
+        let note = note.to_string();
+        open.connect_clicked(move |_| {
+            let _ = gio::AppInfo::launch_default_for_uri(
+                &issue_url(&note),
+                None::<&gio::AppLaunchContext>,
+            );
             d.close();
         });
     }
@@ -6304,10 +6644,284 @@ fn show_feedback_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     dialog.present();
 }
 
+/// GitHub "new issue" URL pre-filled with the user's note and their environment.
+///
+/// The environment block is the whole point: without it a report says only "it
+/// failed", since the feedback table's `os` column is a compile-time constant.
+fn issue_url(note: &str) -> String {
+    let note = note.trim();
+    // The title is what we triage from, so lead with the user's own words;
+    // `chars` (not bytes) so a truncation can't split a multi-byte character.
+    let title = if note.is_empty() {
+        "Bug report".to_string()
+    } else {
+        let first = note.lines().next().unwrap_or(note).trim();
+        let short: String = first.chars().take(70).collect();
+        if short.chars().count() < first.chars().count() {
+            format!("{short}…")
+        } else {
+            short
+        }
+    };
+
+    let mut body = String::from("**What happened**\n\n");
+    if note.is_empty() {
+        body.push_str("<!-- Describe the problem here. -->\n");
+    } else {
+        body.push_str(note);
+        body.push('\n');
+    }
+    body.push_str("\n**Steps to reproduce**\n\n1. \n2. \n\n**Environment**\n\n");
+    body.push_str(&crate::telemetry::env_summary());
+    body.push_str(
+        "\n\n**Diagnostics**\n\n\
+         <!-- Thanks for taking the time to report this. If you can, paste the \
+         output of these two commands below. It usually tells us the cause \
+         right away:\n\
+         \n\
+         fresco doctor\n\
+         fresco logs 200\n\
+         -->\n",
+    );
+
+    // Escape every reserved character: the note is arbitrary user text and
+    // rides in a query value.
+    let esc = |s: &str| glib::Uri::escape_string(s, None, false).to_string();
+    format!(
+        "{NEW_ISSUE_URL}?labels=bug&title={}&body={}",
+        esc(&title),
+        esc(&body)
+    )
+}
+
 /// A release-availability announcement ("Fresco vX.Y.Z is available") duplicates
 /// the in-app update banner (see `updates.rs`, driven by GitHub releases), so we
 /// don't ALSO surface it as a bottom toast. Genuine announcements (other titles)
 /// still toast normally.
+/// Anonymous conversation with the maintainer.
+///
+/// Deliberately not a support portal: no account, no email, no ticket number to
+/// quote. The user writes, the maintainer answers, and neither learns who the
+/// other is — the thread is addressed by a random ticket held only by this
+/// install (see [`crate::support`]).
+///
+/// Messages load in the background; the dialog opens immediately with a
+/// spinner rather than blocking the UI thread on a network round trip.
+fn show_support_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    let (dialog, content) = glass_dialog(window, t!("Message the maintainer"), 520, 560);
+
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    inner.set_margin_start(20);
+    inner.set_margin_end(20);
+    inner.set_margin_top(8);
+    inner.set_margin_bottom(18);
+    inner.set_vexpand(true);
+
+    let prompt = gtk4::Label::new(Some(t!(
+        "Write to the person who makes Fresco. This is anonymous in both directions: they never learn who you are, only what you tell them."
+    )));
+    prompt.add_css_class("dialog-sub");
+    prompt.set_wrap(true);
+    prompt.set_xalign(0.0);
+    inner.append(&prompt);
+
+    // Transcript, in a scroller that grows with the dialog.
+    let thread_box = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    thread_box.set_margin_top(4);
+    thread_box.set_margin_bottom(4);
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroller.set_vexpand(true);
+    scroller.set_child(Some(&thread_box));
+    inner.append(&scroller);
+
+    let status = gtk4::Label::new(Some(t!("Loading…")));
+    status.add_css_class("dialog-sub");
+    status.set_xalign(0.0);
+    thread_box.append(&status);
+
+    // Composer.
+    let entry = gtk4::TextView::new();
+    entry.set_wrap_mode(gtk4::WrapMode::WordChar);
+    entry.set_top_margin(8);
+    entry.set_bottom_margin(8);
+    entry.set_left_margin(8);
+    entry.set_right_margin(8);
+    let entry_frame = gtk4::ScrolledWindow::new();
+    entry_frame.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    entry_frame.set_min_content_height(72);
+    entry_frame.set_max_content_height(140);
+    entry_frame.add_css_class("frame");
+    entry_frame.set_child(Some(&entry));
+    inner.append(&entry_frame);
+
+    // Attaching the environment is a choice, and the exact text is shown
+    // beneath the checkbox so "what am I sending" is never a guess.
+    let env_text = crate::telemetry::env_summary();
+    let attach = gtk4::CheckButton::with_label(t!("Attach my setup (helps diagnose)"));
+    attach.set_active(true);
+    inner.append(&attach);
+
+    let env_preview = gtk4::Label::new(Some(&env_text));
+    env_preview.add_css_class("dialog-sub");
+    env_preview.set_xalign(0.0);
+    env_preview.set_wrap(true);
+    env_preview.set_margin_start(26);
+    inner.append(&env_preview);
+    {
+        let env_preview = env_preview.clone();
+        attach.connect_toggled(move |c| env_preview.set_visible(c.is_active()));
+    }
+
+    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    buttons.set_margin_top(4);
+    let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    let close = gtk4::Button::with_label(t!("Close"));
+    close.add_css_class("flat");
+    let send = gtk4::Button::with_label(t!("Send"));
+    send.add_css_class("suggested-action");
+    buttons.append(&close);
+    buttons.append(&spacer);
+    buttons.append(&send);
+    inner.append(&buttons);
+
+    /// One message bubble, aligned by who sent it.
+    fn bubble(message: &crate::support::Message) -> gtk4::Box {
+        let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        let who = gtk4::Label::new(Some(if message.is_maintainer() {
+            t!("Fresco maintainer")
+        } else {
+            t!("You")
+        }));
+        who.add_css_class("overline");
+        let body = gtk4::Label::new(Some(&message.body));
+        body.set_wrap(true);
+        body.set_xalign(0.0);
+        body.set_selectable(true);
+        if message.is_maintainer() {
+            who.set_xalign(0.0);
+            body.add_css_class("dialog-heading");
+        } else {
+            who.set_xalign(0.0);
+            body.add_css_class("dialog-sub");
+        }
+        row.append(&who);
+        row.append(&body);
+        row
+    }
+
+    // Load the transcript off the UI thread.
+    let refresh = {
+        let thread_box = thread_box.clone();
+        let scroller = scroller.clone();
+        move || {
+            let (tx, rx) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send_blocking(crate::support::poll().unwrap_or_default());
+            });
+            let thread_box = thread_box.clone();
+            let scroller = scroller.clone();
+            glib::spawn_future_local(async move {
+                let Ok(messages) = rx.recv().await else {
+                    return;
+                };
+                while let Some(child) = thread_box.first_child() {
+                    thread_box.remove(&child);
+                }
+                if messages.is_empty() {
+                    let empty = gtk4::Label::new(Some(t!(
+                        "No messages yet. Whatever you send starts a thread only you and the maintainer can see."
+                    )));
+                    empty.add_css_class("dialog-sub");
+                    empty.set_wrap(true);
+                    empty.set_xalign(0.0);
+                    thread_box.append(&empty);
+                } else {
+                    for m in &messages {
+                        thread_box.append(&bubble(m));
+                    }
+                    // Everything on screen counts as seen, so the launch check
+                    // stops announcing a reply the user has now read.
+                    crate::support::set_seen_count(messages.len());
+                    crate::support::mark_read();
+                }
+                // Pin to the newest message.
+                glib::idle_add_local_once(move || {
+                    let adj = scroller.vadjustment();
+                    adj.set_value(adj.upper() - adj.page_size());
+                });
+            });
+        }
+    };
+    refresh();
+
+    {
+        let entry = entry.clone();
+        let attach = attach.clone();
+        let send_btn = send.clone();
+        let refresh = refresh.clone();
+        send.connect_clicked(move |_| {
+            let buffer = entry.buffer();
+            let (start, end) = buffer.bounds();
+            let body = buffer.text(&start, &end, false).trim().to_string();
+            if body.is_empty() {
+                return;
+            }
+            // Clear and disable immediately: a second click before the POST
+            // returns would send the message twice.
+            buffer.set_text("");
+            send_btn.set_sensitive(false);
+            let env = attach.is_active().then(crate::telemetry::env_summary);
+
+            let (tx, rx) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send_blocking(crate::support::send(&body, env.as_deref()).is_ok());
+            });
+            let send_btn = send_btn.clone();
+            let refresh = refresh.clone();
+            glib::spawn_future_local(async move {
+                let ok = rx.recv().await.unwrap_or(false);
+                send_btn.set_sensitive(true);
+                if !ok {
+                    log::debug!("support send failed");
+                }
+                refresh();
+            });
+        });
+    }
+
+    {
+        let dialog = dialog.clone();
+        close.connect_clicked(move |_| dialog.close());
+    }
+
+    let _ = &state;
+    content.append(&inner);
+    dialog.present();
+    entry.grab_focus();
+}
+
+/// On launch, tell the user if the maintainer wrote back while Fresco was
+/// closed. Silent when there is no thread or no new message — this must never
+/// become a reason to open a dialog at people.
+fn check_support_replies(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    if !crate::support::has_thread() {
+        return;
+    }
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(crate::support::unread_replies());
+    });
+    let window = window.clone();
+    glib::spawn_future_local(async move {
+        if rx.recv().await.unwrap_or(0) == 0 {
+            return;
+        }
+        show_support_dialog(&window, state);
+    });
+}
+
 fn is_release_announcement(title: &str) -> bool {
     let t = title.to_ascii_lowercase();
     t.contains("fresco") && t.contains("is available")
@@ -6357,7 +6971,7 @@ fn show_notification(
     window.add_action(&action);
 
     let toast = adw::Toast::new(&notif.title);
-    toast.set_button_label(Some("Details"));
+    toast.set_button_label(Some(t!("Details")));
     toast.set_action_name(Some("win.fresco-notif-details"));
     toast.set_timeout(0);
     state.borrow().toast.add_toast(toast);
@@ -6379,7 +6993,7 @@ fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supab
     inner.append(&body);
 
     if let Some(url) = notif.url.clone() {
-        let open = gtk4::Button::with_label("Open link");
+        let open = gtk4::Button::with_label(t!("Open link"));
         open.add_css_class("suggested-action");
         open.set_halign(gtk4::Align::Start);
         let d = dialog.clone();
@@ -6409,6 +7023,49 @@ mod tests {
             "New wallpapers added to the catalog"
         ));
         assert!(!is_release_announcement("Scheduled maintenance tonight"));
+    }
+
+    /// The 👎 note is arbitrary user text pasted into a URL query value. A raw
+    /// `&` or `#` would truncate the body at GitHub's end, silently dropping
+    /// exactly the environment block this feature exists to deliver.
+    #[test]
+    fn issue_url_escapes_the_note_and_carries_the_environment() {
+        let url = issue_url("black & broken #1 on 100% zoom");
+        assert!(url.starts_with(NEW_ISSUE_URL));
+        // Everything after the first two separators must be escaped: the only
+        // bare `&` is the one joining `title=` to `body=`.
+        assert_eq!(url.matches('&').count(), 2, "note's `&` must be escaped");
+        assert!(!url.contains('#'), "a bare `#` would cut the body off");
+        assert!(
+            url.contains("Fresco%3A"),
+            "environment block must be present"
+        );
+    }
+
+    /// An empty note must still produce a usable report — the environment block
+    /// alone is worth more than the anonymous feedback row it follows.
+    #[test]
+    fn issue_url_handles_an_empty_note() {
+        let url = issue_url("   ");
+        assert!(url.contains("title=Bug%20report"));
+        assert!(url.contains("Fresco%3A"));
+    }
+
+    /// Titles are truncated to 70 chars. Doing that by byte would panic on a
+    /// multi-byte boundary — feedback arrives in every language.
+    #[test]
+    fn issue_title_truncates_on_character_boundaries() {
+        let note = "。".repeat(200); // 3 bytes per char
+        let url = issue_url(&note);
+        assert!(url.contains("title="));
+        // Only the first line is used, and it is capped well under the input.
+        let title_len = issue_url("x".repeat(200).as_str())
+            .split("title=")
+            .nth(1)
+            .and_then(|s| s.split('&').next())
+            .map(|s| s.chars().filter(|c| *c == 'x').count())
+            .unwrap();
+        assert_eq!(title_len, 70);
     }
 
     /// Batch remove is keyed by id precisely so it stays correct when indices

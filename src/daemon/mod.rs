@@ -1418,6 +1418,7 @@ pub fn run() -> Result<()> {
     notifier::spawn();
     // Periodic "send feedback" nudge (config-gated; stops after one submission).
     notifier::spawn_feedback_reminder();
+    notifier::spawn_support_watcher();
 
     // Self-heal the login-restore entry: if the user wants the wallpaper restored
     // on login (and hasn't stopped it), make sure the autostart entry actually
@@ -2000,6 +2001,10 @@ struct WlOutput {
     /// monitor slept, or a DisplayPort link dropped). Nothing can render to a
     /// display that isn't there, so failures against it must not count.
     absent: bool,
+    /// Parked because the wallpaper has nothing playable behind it (empty or
+    /// unreadable slideshow folder, media that moved). Latched so the reason is
+    /// logged once rather than on every supervise tick.
+    no_media: bool,
     /// Why the last renderer went down ("dead"/"frozen") and, if respawning also
     /// failed, its content-free [`SpawnFail`] code — reported with `renderer_giveup`
     /// so a warning in the field says what actually broke.
@@ -2036,10 +2041,36 @@ impl WlOutput {
             last_pos: None,
             audio_heal: AudioHeal::new(),
             absent: false,
+            no_media: false,
             last_down: "never_started",
             last_spawn_fail: None,
             generation: 0,
         }
+    }
+
+    /// The file a spawn would open: for a slideshow the first image (later ones
+    /// arrive via `loadfile replace`), otherwise the configured media.
+    ///
+    /// Only a file that is actually **there** counts. A slideshow folder that is
+    /// empty, unreadable, or holds nothing we recognise as an image resolves to
+    /// nothing at all — and so does media that has since been deleted or that
+    /// lives on a mount which is currently away.
+    fn playable_file(&self) -> Option<PathBuf> {
+        let candidates: Vec<PathBuf> = if self.wallpaper.kind == Kind::Slideshow {
+            self.wallpaper
+                .slideshow
+                .as_ref()
+                .map(slideshow_images)
+                .unwrap_or_default()
+        } else {
+            self.wallpaper
+                .effective_path()
+                .map(|p| p.to_path_buf())
+                .into_iter()
+                .chain(self.wallpaper.paths.iter().cloned())
+                .collect()
+        };
+        candidates.into_iter().find(|p| p.exists())
     }
 
     /// (Re)spawn the mpvpaper for this output. `paused` applies the current pause
@@ -2055,22 +2086,10 @@ impl WlOutput {
         self.stall_strikes = 0;
         self.last_pos = None;
         self.audio_heal = AudioHeal::new();
-        // The initial file mpvpaper opens: for a slideshow it's the first image
-        // (subsequent ones arrive via loadfile-replace); otherwise the media.
-        let file = if self.wallpaper.kind == Kind::Slideshow {
-            self.wallpaper
-                .slideshow
-                .as_ref()
-                .and_then(|s| slideshow_images(s).into_iter().next())
-        } else {
-            self.wallpaper
-                .effective_path()
-                .map(|p| p.to_path_buf())
-                .or_else(|| self.wallpaper.paths.first().cloned())
-        };
-        let Some(file) = file else {
+        let Some(file) = self.playable_file() else {
             log::error!("[{}] no playable file configured", self.connector);
             self.error = Some(format!("{}: no playable file configured", self.connector));
+            self.last_spawn_fail = Some("no_file");
             self.player = None;
             return;
         };
@@ -2291,7 +2310,35 @@ impl WlOutput {
             self.restarts = 0;
             self.static_fallback = false;
             self.error = None;
+            // Spawn on the next tick (2s), so a returning display does exactly
+            // one thing per tick and the restored state is observable.
+            return;
         }
+        if self.playable_file().is_none() {
+            // Nothing to open — an empty or unreadable slideshow folder, media
+            // that was deleted, a mount that is away. No respawn can fix a
+            // configuration problem, and counting these as renderer failures
+            // spends the budget in ten seconds and then tells the user
+            // "renderer failed 5×", which hides the actual cause. Say what is
+            // wrong and wait: as soon as a file is there again the normal
+            // restart path below picks it up, with a full budget.
+            if !self.no_media {
+                log::error!(
+                    "[{}] nothing to play (no readable media configured); waiting",
+                    self.connector
+                );
+                self.no_media = true;
+                self.error = Some(format!(
+                    "{}: nothing to play — the wallpaper's file or slideshow folder is empty, missing, or unreadable",
+                    self.connector
+                ));
+            }
+            drop(self.player.take());
+            self.slideshow = None;
+            self.animating = false;
+            return;
+        }
+        self.no_media = false;
         if self.restarts < max {
             self.restarts += 1;
             log::warn!(
@@ -2531,6 +2578,23 @@ pub fn check() {
         println!("VA-API (vainfo) : {Y}not installed{X} (apt install intel-media-va-driver mesa-va-drivers)");
     }
 
+    // The widget helpers. Both fail as *silence* — a widget that is enabled in
+    // the config and never draws — so the only place a user can find out is a
+    // diagnostic like this one. Yellow, not red: a desktop running no widgets
+    // is entirely healthy without either.
+    if which("gdbus") {
+        println!("MPRIS (gdbus)   : {G}available{X}");
+    } else {
+        println!("MPRIS (gdbus)   : {Y}not installed{X} (apt install libglib2.0-bin — lyrics, album art and the track-synced clock need it)");
+    }
+    match (which("pw-cat"), which("parec")) {
+        (true, _) => println!("Audio capture   : {G}pw-cat{X}"),
+        (false, true) => println!("Audio capture   : {G}parec{X}"),
+        (false, false) => println!(
+            "Audio capture   : {Y}not installed{X} (apt install pipewire-bin or pulseaudio-utils — needed by the audio visualiser widget)"
+        ),
+    }
+
     match Config::load() {
         Ok(c) => println!("Config          : {G}valid{X} (enabled={})", c.enabled),
         Err(e) => println!("Config          : {R}invalid{X} ({e})"),
@@ -2743,13 +2807,46 @@ mod tests {
         assert_eq!(stall_step(Some(12.5), Some(13.0), strikes, || true), 0);
     }
 
+    /// A wallpaper with nothing behind it — an empty or unreadable slideshow
+    /// folder, media that was deleted — is a configuration problem. Respawning
+    /// cannot fix it, and counting the attempts as renderer failures spends the
+    /// whole budget in ten seconds and then reports "renderer failed 5×",
+    /// burying the real cause. Telemetry showed installs doing exactly that
+    /// within ~10s of setting a slideshow.
+    #[test]
+    fn nothing_to_play_is_not_a_renderer_failure() {
+        use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
+        const MAX: u32 = 5;
+        let mut o = super::WlOutput::new(
+            "DP-1".into(),
+            Wallpaper {
+                kind: Kind::Slideshow, // no folder, no paths → nothing resolves
+                ..Default::default()
+            },
+            Scaling::Balanced,
+            PowerSaving::Full,
+        );
+
+        for _ in 0..MAX * 3 {
+            o.supervise(false, MAX, true);
+        }
+        assert!(o.no_media, "the output must park on a media problem");
+        assert_eq!(o.restarts, 0, "and never spend a restart on one");
+        assert!(!o.static_fallback, "nor reach the give-up fallback");
+        let err = o.error.clone().unwrap_or_default();
+        assert!(
+            err.contains("nothing to play"),
+            "the status must name the real cause, got: {err}"
+        );
+    }
+
     /// A display that goes away — monitor asleep, DisplayPort link dropped — must
     /// not spend the restart budget: nothing can render to a connector the
     /// compositor no longer advertises, and those failures used to outlive the
     /// display's return as a permanent give-up on that output.
     ///
-    /// Hermetic: the wallpaper has no playable file, so `respawn` bails before
-    /// it executes anything — the counter logic is all that runs.
+    /// Hermetic: parking and recovery both return before any spawn, and the
+    /// exhausted budget is staged directly rather than by failing five times.
     #[test]
     fn a_vanished_display_does_not_burn_the_restart_budget() {
         use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
@@ -2772,23 +2869,14 @@ mod tests {
         assert_eq!(o.restarts, 0, "and must not count as a renderer failure");
         assert!(!o.static_fallback, "nor reach the give-up fallback");
 
-        // Back: retried from a clean slate.
-        o.supervise(false, MAX, true);
-        assert!(!o.absent);
-        assert_eq!(o.restarts, 1, "the display's return retries the renderer");
-
-        // A renderer that keeps failing while its display is present still
-        // counts — the anti-flap cap is intact.
-        for _ in 1..MAX {
-            o.supervise(false, MAX, true);
-        }
-        assert_eq!(o.restarts, MAX, "real failures still exhaust the budget");
-
-        // ...but a display that vanishes at that moment and returns starts over
-        // instead of giving up on an output that is now perfectly fine.
+        // Now stage an output that had already exhausted its budget and given
+        // up — the state a sleeping monitor used to leave behind for good.
+        o.restarts = MAX + 1;
+        o.static_fallback = true;
         o.supervise(false, MAX, false);
         o.supervise(false, MAX, true);
-        assert_eq!(o.restarts, 1);
+        assert!(!o.absent, "the display's return unparks the output");
+        assert_eq!(o.restarts, 0, "with a full budget");
         assert!(
             !o.static_fallback,
             "a give-up must never survive the display's return"

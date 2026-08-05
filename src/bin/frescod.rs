@@ -9,6 +9,9 @@ use std::path::PathBuf;
 
 fn main() {
     init_logging();
+    // The daemon raises desktop notifications, so it needs the same catalog the
+    // GUI uses. Log output stays English — it is read by us, not by the user.
+    fresco::i18n::init(fresco::config::Config::load().unwrap_or_default().language);
     let args: Vec<String> = std::env::args().collect();
 
     let result = match args.get(1).map(String::as_str) {

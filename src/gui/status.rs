@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4::{glib, glib::ControlFlow};
 
 use crate::ipc::{self, Request, StatusReply};
+use crate::{t, tf};
 
 /// How often to poll the daemon while the window is open. A live status
 /// surface doesn't need sub-second freshness, and this keeps the background
@@ -45,7 +46,7 @@ pub fn build_status_pill() -> gtk4::Widget {
     overline.set_xalign(0.0);
     overline.set_visible(false);
     text_col.append(&overline);
-    let label = gtk4::Label::new(Some("Not running"));
+    let label = gtk4::Label::new(Some(t!("Not running")));
     label.add_css_class("pill-name");
     label.set_xalign(0.0);
     label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -60,7 +61,7 @@ pub fn build_status_pill() -> gtk4::Widget {
 
     let toggle = gtk4::Button::from_icon_name("media-playback-pause-symbolic");
     toggle.add_css_class("flat");
-    toggle.set_tooltip_text(Some("Pause"));
+    toggle.set_tooltip_text(Some(t!("Pause")));
     toggle.set_visible(false);
     pill.append(&toggle);
 
@@ -146,7 +147,7 @@ fn apply_off(w: &PillWidgets) {
     w.dot.remove_css_class("dot-warn");
     w.dot.add_css_class("dot-off");
     w.overline.set_visible(false);
-    w.label.set_label("Not running");
+    w.label.set_label(t!("Not running"));
     w.hwdec.set_visible(false);
     w.toggle.set_visible(false);
     w.pill.set_tooltip_text(None);
@@ -167,10 +168,16 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
 
     // Presentation-only restyle: overline state + prettified name in the pill,
     // CPU% relegated to the tooltip (with any daemon error).
-    w.overline
-        .set_label(if status.paused { "PAUSED" } else { "PLAYING" });
+    w.overline.set_label(if status.paused {
+        t!("PAUSED")
+    } else {
+        t!("PLAYING")
+    });
     w.overline.set_visible(true);
-    let name = status.wallpaper.as_deref().unwrap_or("Wallpaper active");
+    let name = status
+        .wallpaper
+        .as_deref()
+        .unwrap_or(t!("Wallpaper active"));
     w.label.set_label(&pretty_status_name(name));
 
     match status.hwdec.as_deref() {
@@ -184,13 +191,13 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
     w.toggle.set_visible(true);
     if status.paused {
         w.toggle.set_icon_name("media-playback-start-symbolic");
-        w.toggle.set_tooltip_text(Some("Resume"));
+        w.toggle.set_tooltip_text(Some(t!("Resume")));
     } else {
         w.toggle.set_icon_name("media-playback-pause-symbolic");
-        w.toggle.set_tooltip_text(Some("Pause"));
+        w.toggle.set_tooltip_text(Some(t!("Pause")));
     }
 
-    let mut tip = format!("CPU {:.0}%", status.cpu_percent);
+    let mut tip = tf!("CPU {percent}%", "percent" => format!("{:.0}", status.cpu_percent));
     if let Some(err) = status.error.as_deref() {
         tip.push('\n');
         tip.push_str(err);

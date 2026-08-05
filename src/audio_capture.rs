@@ -125,14 +125,48 @@ fn have(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// True when a PipeWire native socket is reachable, i.e. `pw-cat` has a server
+/// to talk to.
+///
+/// Being on `PATH` is not the same as being able to connect, and the gap is not
+/// hypothetical: inside the Flatpak sandbox the runtime *always* ships `pw-cat`,
+/// while the PipeWire socket is only there if the manifest shared it. Without
+/// this check `detect_tool` would pick `pw-cat` on a PulseAudio-only box, watch
+/// it fail, and never reach the `parec` that would have worked — the preference
+/// order would cost us the fallback it exists to have.
+///
+/// Unknown means "keep the documented preference": if `XDG_RUNTIME_DIR` is not
+/// set there is nothing to inspect, and guessing "no PipeWire" would demote
+/// `pw-cat` on systems where it is the right answer.
+fn pipewire_socket_present() -> bool {
+    let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") else {
+        return true;
+    };
+    // `PIPEWIRE_REMOTE` names a non-default socket when set; `pipewire-0` is
+    // the default every ordinary session uses. `exists()` (not `is_file()`,
+    // which `have` uses) — this is a unix socket, not a regular file.
+    let name = std::env::var("PIPEWIRE_REMOTE").unwrap_or_default();
+    let name = name.trim();
+    let name = if name.is_empty() { "pipewire-0" } else { name };
+    std::path::Path::new(&dir).join(name).exists()
+}
+
+/// True when `tool` is both installed and able to reach a server.
+fn usable(tool: CaptureTool) -> bool {
+    have(tool.binary()) && (tool != CaptureTool::PwCat || pipewire_socket_present())
+}
+
 /// The capture tool to use, or `None` when neither is installed — in which case
 /// the caller should disable the widget with a clear message rather than let the
 /// visualiser fail mysteriously.
 ///
-/// `pw-cat` is preferred: it is the modern stack and it works on PipeWire-only
-/// systems that never installed the Pulse compatibility tools. `parec` covers
-/// plain PulseAudio (and PipeWire boxes where only `pulseaudio-utils` is
-/// present). `FRESCO_AUDIO_TOOL=pw-cat|parec` forces one, mirroring
+/// `pw-cat` is preferred **when a PipeWire socket is actually reachable** (see
+/// `pipewire_socket_present`): it is the modern stack and it works on
+/// PipeWire-only systems that never installed the Pulse compatibility tools.
+/// `parec` covers plain PulseAudio (and PipeWire boxes where only
+/// `pulseaudio-utils` is present). `FRESCO_AUDIO_TOOL=pw-cat|parec` forces one
+/// — an explicit override skips the socket test, so it stays a real escape
+/// hatch — mirroring
 /// `FRESCO_DDE_MODE`; an override naming a tool that is not installed is ignored
 /// rather than obeyed into a guaranteed failure.
 pub fn detect_tool() -> Option<CaptureTool> {
@@ -148,7 +182,7 @@ pub fn detect_tool() -> Option<CaptureTool> {
     }
     [CaptureTool::PwCat, CaptureTool::Parec]
         .into_iter()
-        .find(|t| have(t.binary()))
+        .find(|&t| usable(t))
 }
 
 /// Run a command and return its stdout when it exits successfully.
@@ -1142,9 +1176,26 @@ mod tests {
         // Whatever this machine has (or has not), neither call may panic.
         match detect_tool() {
             Some(tool) => assert!(have(tool.binary()), "detected a tool that is not on PATH"),
-            None => assert!(!have("pw-cat") && !have("parec")),
+            // `None` means nothing *usable* — which is a weaker claim than
+            // "nothing installed", because `pw-cat` on a box with no PipeWire
+            // socket is deliberately not selected (see `usable`).
+            None => assert!(!usable(CaptureTool::PwCat) && !usable(CaptureTool::Parec)),
         }
         assert!(!have("fresco-no-such-binary-xyz"));
+    }
+
+    /// `usable` may only ever be a *narrowing* of `have` — it must never claim
+    /// a tool that is not installed, whatever this machine's sockets look like.
+    #[test]
+    fn usable_never_exceeds_what_is_installed() {
+        for tool in [CaptureTool::PwCat, CaptureTool::Parec] {
+            assert!(
+                !usable(tool) || have(tool.binary()),
+                "{tool} reported usable but is not on PATH"
+            );
+        }
+        // `parec` talks to PulseAudio, so the PipeWire socket must not gate it.
+        assert_eq!(usable(CaptureTool::Parec), have("parec"));
     }
 
     /// Must answer on any machine — with or without pactl, with or without a

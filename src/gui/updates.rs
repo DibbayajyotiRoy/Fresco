@@ -5,6 +5,7 @@ use gtk4::{gio, glib, prelude::*};
 use libadwaita as adw;
 
 use super::window::{glass_dialog, show_toast, AppState};
+use crate::{t, tf};
 
 // ─── "What's new" on-update notice ────────────────────────────────────────────
 
@@ -61,16 +62,19 @@ pub(crate) fn build_update_banner(
     let icon = gtk4::Image::from_icon_name("software-update-available-symbolic");
     bar.append(&icon);
 
-    let label = gtk4::Label::new(Some(&format!("Fresco updated to {current}")));
+    let label = gtk4::Label::new(Some(&tf!(
+        "Fresco updated to {version}",
+        "version" => current
+    )));
     label.set_hexpand(true);
     label.set_xalign(0.0);
 
-    let details = gtk4::Button::with_label("See what's new");
+    let details = gtk4::Button::with_label(t!("See what's new"));
     details.add_css_class("suggested-action");
 
     let close = gtk4::Button::from_icon_name("window-close-symbolic");
     close.add_css_class("flat");
-    close.set_tooltip_text(Some("Dismiss"));
+    close.set_tooltip_text(Some(t!("Dismiss")));
 
     bar.append(&label);
     bar.append(&details);
@@ -99,7 +103,7 @@ pub(crate) fn build_update_banner(
                 Some(notes) => show_changelog_modal(&win, &version, notes),
                 None => {
                     let _ = gio::AppInfo::launch_default_for_uri(
-                        RELEASES_URL,
+                        releases_url(),
                         None::<&gio::AppLaunchContext>,
                     );
                 }
@@ -196,7 +200,12 @@ fn pango_inline(raw: &str) -> String {
 /// Modal showing the changelog notes for `version`, rendered as styled widgets
 /// rather than raw markdown text.
 pub(crate) fn show_changelog_modal(window: &adw::ApplicationWindow, version: &str, notes: &str) {
-    let (dialog, content) = glass_dialog(window, &format!("What's new in {version}"), 660, 680);
+    let (dialog, content) = glass_dialog(
+        window,
+        &tf!("What's new in {version}", "version" => version),
+        660,
+        680,
+    );
 
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_vexpand(true);
@@ -209,7 +218,7 @@ pub(crate) fn show_changelog_modal(window: &adw::ApplicationWindow, version: &st
     list.set_margin_bottom(28);
 
     // Prominent version title at the top of the notes.
-    let title = gtk4::Label::new(Some(&format!("Version {version}")));
+    let title = gtk4::Label::new(Some(&tf!("Version {version}", "version" => version)));
     title.add_css_class("changelog-title");
     title.set_xalign(0.0);
     title.set_margin_bottom(2);
@@ -263,10 +272,19 @@ pub(crate) fn show_changelog_modal(window: &adw::ApplicationWindow, version: &st
 /// Skip a background check if the last one was within this long ago.
 const UPDATE_CHECK_INTERVAL_S: u64 = 24 * 60 * 60;
 
-/// One-liner shown when auto-install isn't supported (Flatpak / no apt-get).
-const INSTALL_ONELINER: &str =
-    "curl -fsSL https://github.com/DibbayajyotiRoy/fresco/releases/latest/download/install.sh | bash";
-const RELEASES_URL: &str = "https://github.com/DibbayajyotiRoy/fresco/releases/latest";
+/// One-liner shown when auto-install isn't supported (Flatpak / no apt-get),
+/// and the releases page behind "Open releases page".
+///
+/// Both follow the host this copy was installed from — see [`crate::update::Origin`].
+/// Handing a mainland-China user a github.com link they cannot reach is the
+/// same bug as never offering them an update at all.
+fn install_oneliner() -> &'static str {
+    crate::update::Origin::current().install_command()
+}
+
+fn releases_url() -> &'static str {
+    crate::update::Origin::current().releases_page()
+}
 
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -333,7 +351,7 @@ pub(crate) fn check_for_updates(
                 if force {
                     show_toast(
                         &state,
-                        "Couldn't check for updates — check your connection.",
+                        t!("Couldn't check for updates — check your connection."),
                     );
                 }
                 return;
@@ -343,7 +361,10 @@ pub(crate) fn check_for_updates(
         let current = crate::update::current_version();
         if !crate::update::is_newer(&latest.version, current) {
             if force {
-                show_toast(&state, &format!("You're on the latest version ({current})"));
+                show_toast(
+                    &state,
+                    &tf!("You're on the latest version ({version})", "version" => current),
+                );
             }
             return;
         }
@@ -380,21 +401,24 @@ fn show_update_banner(
     let icon = gtk4::Image::from_icon_name("software-update-available-symbolic");
     bar.append(&icon);
 
-    let label = gtk4::Label::new(Some(&format!("Fresco {} is available", latest.version)));
+    let label = gtk4::Label::new(Some(&tf!(
+        "Fresco {version} is available",
+        "version" => latest.version
+    )));
     label.set_hexpand(true);
     label.set_xalign(0.0);
     bar.append(&label);
 
-    let whats_new = gtk4::Button::with_label("What's new");
+    let whats_new = gtk4::Button::with_label(t!("What's new"));
     bar.append(&whats_new);
 
-    let update_now = gtk4::Button::with_label("Update now");
+    let update_now = gtk4::Button::with_label(t!("Update now"));
     update_now.add_css_class("suggested-action");
     bar.append(&update_now);
 
     let later = gtk4::Button::from_icon_name("window-close-symbolic");
     later.add_css_class("flat");
-    later.set_tooltip_text(Some("Later"));
+    later.set_tooltip_text(Some(t!("Later")));
     bar.append(&later);
 
     {
@@ -444,7 +468,12 @@ fn show_update_banner(
 /// restarts itself after a short countdown so the new version applies without
 /// the user having to quit manually.
 fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
-    let (dialog, content) = glass_dialog(window, &format!("Updating to {version}"), 440, -1);
+    let (dialog, content) = glass_dialog(
+        window,
+        &tf!("Updating to {version}", "version" => version),
+        440,
+        -1,
+    );
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     inner.set_margin_start(28);
@@ -452,7 +481,7 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
     inner.set_margin_top(10);
     inner.set_margin_bottom(24);
 
-    let status = gtk4::Label::new(Some("Preparing…"));
+    let status = gtk4::Label::new(Some(t!("Preparing…")));
     status.add_css_class("shimmer");
     status.set_xalign(0.0);
     inner.append(&status);
@@ -462,7 +491,7 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
     bar.set_hexpand(true);
     inner.append(&bar);
 
-    let detail = gtk4::Label::new(Some("Contacting the release server"));
+    let detail = gtk4::Label::new(Some(t!("Contacting the release server")));
     detail.add_css_class("dialog-sub");
     detail.set_xalign(0.0);
     inner.append(&detail);
@@ -510,12 +539,12 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
             match progress {
                 UpdateProgress::Live(Progress::Stage(stage)) => match stage.as_str() {
                     "downloading" => {
-                        status.set_label("Downloading update…");
-                        detail.set_label("Fetching the new version");
+                        status.set_label(t!("Downloading update…"));
+                        detail.set_label(t!("Fetching the new version"));
                     }
                     "installing" => {
-                        status.set_label("Installing…");
-                        detail.set_label("Applying the update — almost there");
+                        status.set_label(t!("Installing…"));
+                        detail.set_label(t!("Applying the update — almost there"));
                         pulsing.set(true);
                         let bar = bar.clone();
                         let pulsing = pulsing.clone();
@@ -529,7 +558,7 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
                         });
                     }
                     "done" => {
-                        status.set_label("Finishing…");
+                        status.set_label(t!("Finishing…"));
                     }
                     _ => {}
                 },
@@ -537,7 +566,7 @@ fn show_install_dialog(window: &adw::ApplicationWindow, version: String) {
                     // A real percentage arrived: switch from pulse to determinate.
                     pulsing.set(false);
                     bar.set_fraction(f64::from(pct) / 100.0);
-                    detail.set_label(&format!("{pct}%"));
+                    detail.set_label(&tf!("{percent}%", "percent" => pct.to_string()));
                 }
                 UpdateProgress::Done(outcome) => {
                     pulsing.set(false);
@@ -581,7 +610,8 @@ fn finish_install_dialog(
             let dialog = dialog.clone();
             let version = version.to_string();
             replace_dialog_body(content, move |inner| {
-                let heading = gtk4::Label::new(Some(&format!("Updated to {version}")));
+                let heading =
+                    gtk4::Label::new(Some(&tf!("Updated to {version}", "version" => version)));
                 heading.add_css_class("dialog-heading");
                 heading.set_wrap(true);
                 heading.set_xalign(0.0);
@@ -590,7 +620,10 @@ fn finish_install_dialog(
                 // Auto-restart with a visible, cancellable countdown: users
                 // shouldn't have to know a restart is needed — we do it for
                 // them, but leave a moment to opt out.
-                let sub = gtk4::Label::new(Some("Restarting in 3 s to finish the update…"));
+                let sub = gtk4::Label::new(Some(&tf!(
+                    "Restarting in {seconds} s to finish the update…",
+                    "seconds" => "3"
+                )));
                 sub.add_css_class("dialog-sub");
                 sub.set_xalign(0.0);
                 inner.append(&sub);
@@ -598,9 +631,9 @@ fn finish_install_dialog(
                 let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                 buttons.set_margin_top(6);
                 buttons.set_halign(gtk4::Align::End);
-                let later = gtk4::Button::with_label("Not now");
+                let later = gtk4::Button::with_label(t!("Not now"));
                 later.add_css_class("flat");
-                let restart = gtk4::Button::with_label("Restart now");
+                let restart = gtk4::Button::with_label(t!("Restart now"));
                 restart.add_css_class("suggested-action");
                 buttons.append(&later);
                 buttons.append(&restart);
@@ -625,7 +658,10 @@ fn finish_install_dialog(
                             relaunch_app(&win);
                             glib::ControlFlow::Break
                         } else {
-                            sub.set_label(&format!("Restarting in {left} s to finish the update…"));
+                            sub.set_label(&tf!(
+                                "Restarting in {seconds} s to finish the update…",
+                                "seconds" => left.to_string()
+                            ));
                             glib::ControlFlow::Continue
                         }
                     });
@@ -636,7 +672,7 @@ fn finish_install_dialog(
                     let sub = sub.clone();
                     later.connect_clicked(move |_| {
                         cancelled.set(true);
-                        sub.set_label("The new version applies the next time you open Fresco.");
+                        sub.set_label(t!("The new version applies the next time you open Fresco."));
                         d.close();
                     });
                 }
@@ -653,7 +689,7 @@ fn finish_install_dialog(
         }
         crate::update::UpdateOutcome::AlreadyUpToDate => {
             replace_dialog_body(content, |inner| {
-                let heading = gtk4::Label::new(Some("You're already on the latest version"));
+                let heading = gtk4::Label::new(Some(t!("You're already on the latest version")));
                 heading.add_css_class("dialog-heading");
                 heading.set_wrap(true);
                 inner.append(&heading);
@@ -661,7 +697,7 @@ fn finish_install_dialog(
                 let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                 buttons.set_margin_top(6);
                 buttons.set_halign(gtk4::Align::End);
-                let close = gtk4::Button::with_label("Close");
+                let close = gtk4::Button::with_label(t!("Close"));
                 close.add_css_class("flat");
                 buttons.append(&close);
                 inner.append(&buttons);
@@ -677,7 +713,7 @@ fn finish_install_dialog(
         crate::update::UpdateOutcome::Failed(msg) => {
             log::warn!("update install failed: {msg}");
             replace_dialog_body(content, |inner| {
-                let heading = gtk4::Label::new(Some("Update failed"));
+                let heading = gtk4::Label::new(Some(t!("Update failed")));
                 heading.add_css_class("dialog-heading");
                 inner.append(&heading);
 
@@ -690,7 +726,7 @@ fn finish_install_dialog(
                 let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                 buttons.set_margin_top(6);
                 buttons.set_halign(gtk4::Align::End);
-                let close = gtk4::Button::with_label("Close");
+                let close = gtk4::Button::with_label(t!("Close"));
                 close.add_css_class("flat");
                 buttons.append(&close);
                 inner.append(&buttons);
@@ -766,7 +802,7 @@ fn relaunch_app(window: &adw::ApplicationWindow) {
 /// Fallback shown when auto-install isn't supported here (Flatpak sandbox, or
 /// no apt-get): a copyable one-liner plus a link to the releases page.
 fn show_unsupported_dialog(window: &adw::ApplicationWindow) {
-    let (dialog, content) = glass_dialog(window, "Update manually", 460, -1);
+    let (dialog, content) = glass_dialog(window, t!("Update manually"), 460, -1);
 
     let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 14);
     inner.set_margin_start(24);
@@ -774,19 +810,19 @@ fn show_unsupported_dialog(window: &adw::ApplicationWindow) {
     inner.set_margin_top(8);
     inner.set_margin_bottom(22);
 
-    let body = gtk4::Label::new(Some(
-        "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:",
-    ));
+    let body = gtk4::Label::new(Some(t!(
+        "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:"
+    )));
     body.set_wrap(true);
     body.set_xalign(0.0);
     inner.append(&body);
 
     let copy_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     let entry = gtk4::Entry::new();
-    entry.set_text(INSTALL_ONELINER);
+    entry.set_text(install_oneliner());
     entry.set_editable(false);
     entry.set_hexpand(true);
-    let copy_btn = gtk4::Button::with_label("Copy");
+    let copy_btn = gtk4::Button::with_label(t!("Copy"));
     {
         let entry = entry.clone();
         copy_btn.connect_clicked(move |_| {
@@ -799,7 +835,7 @@ fn show_unsupported_dialog(window: &adw::ApplicationWindow) {
     copy_row.append(&copy_btn);
     inner.append(&copy_row);
 
-    let releases_link = gtk4::LinkButton::with_label(RELEASES_URL, "Open releases page");
+    let releases_link = gtk4::LinkButton::with_label(releases_url(), t!("Open releases page"));
     releases_link.set_halign(gtk4::Align::Start);
     inner.append(&releases_link);
 

@@ -28,6 +28,11 @@ FRESCO_SOURCE="${FRESCO_SOURCE:-installer}"
 mkdir -p "$HOME/.config/fresco" 2>/dev/null || true
 printf '%s' "$FRESCO_SOURCE" > "$HOME/.config/fresco/install-source" 2>/dev/null || true
 
+# Record which HOST this copy came from, so the in-app updater keeps using it.
+# Separate from install-source above: that is a campaign tag for telemetry, this
+# decides where updates are fetched from. Read by update::Origin::current().
+printf '%s' "${FRESCO_ORIGIN:-github}" > "$HOME/.config/fresco/install-origin" 2>/dev/null || true
+
 # 1. Check OS family
 if ! command -v apt-get >/dev/null 2>&1; then
   fail "Fresco requires a Debian/Ubuntu-based distro (apt-get not found)"
@@ -44,17 +49,43 @@ else
   ok "X11 session: $SESSION"
 fi
 
-# 3. Fetch latest .deb URL from GitHub Releases API
-info "Fetching latest release from GitHub…"
-API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+# 3. Fetch latest .deb URL from the release API of whichever host we're using.
+#
+# FRESCO_ORIGIN=gitee installs from the Gitee mirror, for users in mainland
+# China who cannot reliably reach GitHub. The choice is RECORDED (below) so the
+# in-app updater keeps talking to the same host — an install that can't update
+# is worse than no mirror at all.
+FRESCO_ORIGIN="${FRESCO_ORIGIN:-github}"
+case "$FRESCO_ORIGIN" in
+  github)
+    API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+    RELEASES_PAGE="https://github.com/${REPO}/releases"
+    ORIGIN_LABEL="GitHub"
+    ;;
+  gitee)
+    API_URL="https://gitee.com/api/v5/repos/${GITEE_REPO:-dibbayajyoti/fresco}/releases/latest"
+    RELEASES_PAGE="https://gitee.com/${GITEE_REPO:-dibbayajyoti/fresco}/releases"
+    ORIGIN_LABEL="Gitee"
+    ;;
+  *)
+    fail "Unknown FRESCO_ORIGIN='$FRESCO_ORIGIN' (expected 'github' or 'gitee')"
+    ;;
+esac
+
+info "Fetching latest release from ${ORIGIN_LABEL}…"
+
+# Both hosts return a "browser_download_url" field, but GitHub pretty-prints its
+# JSON and Gitee minifies it. The old `sed 's/.*"browser_download_url": "\(.*\)".*/\1/'`
+# depended on the pretty-printed spacing AND was greedy, so it only ever worked
+# by accident on one host. Match the whole key/value pair instead, tolerating any
+# whitespace and no whitespace, then take just the quoted URL.
 DEB_URL=$(curl -fsSL "$API_URL" \
-  | grep '"browser_download_url"' \
-  | grep '\.deb"' \
+  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"' \
   | head -1 \
-  | sed 's/.*"browser_download_url": "\(.*\)".*/\1/')
+  | grep -o 'https\?://[^"]*\.deb')
 
 if [[ -z "$DEB_URL" ]]; then
-  fail "Could not find a .deb in the latest release. Check https://github.com/${REPO}/releases"
+  fail "Could not find a .deb in the latest release. Check ${RELEASES_PAGE}"
 fi
 ok "Found package: $(basename "$DEB_URL")"
 

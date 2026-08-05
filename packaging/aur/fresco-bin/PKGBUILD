@@ -14,12 +14,17 @@ url="https://github.com/DibbayajyotiRoy/fresco"
 license=('GPL-3.0-or-later')
 provides=('fresco')
 conflicts=('fresco')
-depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer')
+# glib2 owns /usr/bin/gdbus and /usr/bin/gsettings — see the fresco PKGBUILD.
+depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'glib2')
 optdepends=(
   'libva-intel-driver: VA-API hardware decode on Intel GPUs'
   'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
   'gst-plugins-good: hover-to-play previews in the library'
   'gst-libav: hover-to-play previews in the library'
+  'pipewire: system-audio capture for the audio visualiser widget (pw-cat)'
+  'libpulse: system-audio capture fallback for the audio visualiser (parec)'
+  'ffmpeg: rotated thumbnails and library media metadata (ffprobe)'
+  'xdg-utils: opening help and tutorial links in your browser'
 )
 source=("$url/releases/download/v$pkgver/fresco_${pkgver}-1_amd64.deb")
 sha256sums=('SKIP')  # pin per release: curl -L <asset-url> | sha256sum

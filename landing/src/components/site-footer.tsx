@@ -2,13 +2,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { SoundToggle } from "@/components/sound-toggle";
 import { GITHUB_URL, LICENSE_URL } from "@/lib/site";
+import type { Dictionary } from "@/lib/i18n";
 
-const FOOTER_LINKS = [
-  { href: GITHUB_URL, label: "GitHub" },
-  { href: LICENSE_URL, label: "License" },
-];
+export function SiteFooter({ dict }: { dict: Dictionary }) {
+  const links = [
+    { href: GITHUB_URL, label: dict.footer.github },
+    { href: LICENSE_URL, label: dict.footer.license },
+  ];
 
-export function SiteFooter() {
   return (
     <footer id="site-footer" className="border-t border-hairline py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 px-5 sm:flex-row">
@@ -21,11 +22,11 @@ export function SiteFooter() {
             className="rounded-[5px]"
           />
           <span className="font-serif text-lg text-ink">Fresco</span>
-          <span className="instrument-label ml-2">rust + gtk4 + mpv</span>
+          <span className="instrument-label ml-2">{dict.footer.tagline}</span>
         </div>
 
         <nav className="flex items-center gap-6">
-          {FOOTER_LINKS.map((link) => (
+          {links.map((link) => (
             <Link
               key={link.label}
               href={link.href}
@@ -36,7 +37,7 @@ export function SiteFooter() {
               {link.label}
             </Link>
           ))}
-          <SoundToggle />
+          <SoundToggle label={dict.footer.sound} />
         </nav>
 
         <p className="font-mono text-meta tracking-wide text-ink-faint">

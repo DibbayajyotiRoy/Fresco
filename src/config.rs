@@ -1137,6 +1137,14 @@ pub struct Config {
     /// Light/dark preference (System follows the desktop).
     #[serde(default)]
     pub theme_mode: ThemeMode,
+    /// UI language (System follows `LC_ALL`/`LC_MESSAGES`/`LANG`).
+    ///
+    /// A sibling of [`Config::theme_mode`], and explicit for the same reason it
+    /// is: the desktop's own setting is the right default but the wrong
+    /// mandate. Running an English locale while wanting a Chinese UI is a
+    /// common, deliberate setup, so the inference needs an override.
+    #[serde(default)]
+    pub language: crate::i18n::Language,
     /// UI accent color.
     #[serde(default)]
     pub accent: Accent,
@@ -1155,15 +1163,29 @@ pub struct Config {
     /// user submits once). Set false in config.toml to silence it.
     #[serde(default = "default_true")]
     pub feedback_reminders: bool,
-    /// Anonymous usage telemetry (daily ping, feature counts, error kinds).
-    /// Opt-out via the Settings switch or config.toml.
+    /// Full anonymous usage telemetry (daily ping with a random install id,
+    /// feature counts, error kinds). Opt-out via the Settings switch or
+    /// config.toml. False does NOT mean total silence: see
+    /// [`Config::telemetry_consent_version`].
     #[serde(default = "default_true")]
     pub telemetry: bool,
-    /// Whether the one-time telemetry consent dialog was answered. Nothing is
-    /// ever sent before this is true — consent-first, like a cookie banner
-    /// but honest (no dark patterns, both buttons equal weight).
+    /// Whether the telemetry consent dialog was answered. Nothing is ever sent
+    /// before this is true — consent-first, like a cookie banner but honest
+    /// (no dark patterns, both buttons equal weight).
     #[serde(default)]
     pub telemetry_prompted: bool,
+    /// Which revision of the consent terms the answer above was given under.
+    ///
+    /// This exists because declining is no longer total silence: since
+    /// revision 1, declining the optional statistics still sends a daily
+    /// country-only ping that carries no identifier of any kind (see
+    /// [`crate::telemetry::anonymous_ping`]). Someone who declined under
+    /// revision 0 agreed to something different, so re-asking them once is the
+    /// only honest way to change what declining means. Bump
+    /// [`crate::telemetry::CONSENT_VERSION`] whenever the terms change again,
+    /// and every install below it is asked exactly once more.
+    #[serde(default)]
+    pub telemetry_consent_version: u32,
     /// Whether the user has agreed, in the one-time dialog, to let the audio
     /// visualiser listen to the computer's sound output.
     ///
@@ -1264,6 +1286,7 @@ impl Default for Config {
             framerate: 0,
             dde_mode: DdeMode::default(),
             theme_mode: ThemeMode::default(),
+            language: crate::i18n::Language::default(),
             accent: Accent::default(),
             wallpaper: Wallpaper::default(),
             last_seen_version: String::new(),
@@ -1272,6 +1295,7 @@ impl Default for Config {
             feedback_reminders: true,
             telemetry: true,
             telemetry_prompted: false,
+            telemetry_consent_version: 0,
             audio_capture_consented: false,
             browser_bridge: false,
             browser_wallpaper: None,

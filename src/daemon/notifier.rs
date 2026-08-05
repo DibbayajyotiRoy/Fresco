@@ -27,6 +27,8 @@ use serde::Deserialize;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
 
+use crate::t;
+
 /// Project host + publishable (anon) key — same as the GUI client. Safe to ship:
 /// Row-Level Security (supabase/schema.sql) is what protects the data, letting
 /// the anon role read only published notifications.
@@ -37,7 +39,10 @@ const ANON_KEY: &str = "sb_publishable_eWKJzAuME5rstSxGyCBoHA_8hrTwkQM";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Where to send users when we can't install for them (e.g. Flatpak).
-const RELEASES_URL: &str = "https://github.com/DibbayajyotiRoy/fresco/releases/latest";
+/// Follows the host this copy was installed from — see [`crate::update::Origin`].
+fn releases_url() -> &'static str {
+    crate::update::Origin::current().releases_page()
+}
 
 /// Send a Phoenix heartbeat a little more often than the server's idle timeout.
 const HEARTBEAT: Duration = Duration::from_secs(25);
@@ -224,7 +229,17 @@ enum Click {
     Update,
     /// Launch the Fresco GUI (the feedback dialog lives in its menu).
     OpenApp,
+    /// Launch the GUI plainly. No flag is needed to land on the conversation:
+    /// the window's launch check opens the support dialog by itself whenever
+    /// there are unread replies, so this deliberately adds no CLI surface.
+    OpenSupport,
 }
+
+/// How often to check whether the maintainer has replied to this user's
+/// support thread. Long on purpose: a reply is a human writing back, so
+/// minutes of latency cost nothing, and this must never look like polling
+/// telemetry to someone watching their network.
+const SUPPORT_POLL: Duration = Duration::from_secs(30 * 60);
 
 /// How often to nudge for feedback, and how often the loop wakes to check.
 const FEEDBACK_REMINDER_INTERVAL: u64 = 5 * 60 * 60; // seconds
@@ -238,6 +253,56 @@ pub fn spawn_feedback_reminder() {
         .name("fresco-feedback-nudge".into())
         .spawn(feedback_reminder_loop)
         .ok();
+}
+
+/// Watch this install's support thread for a maintainer reply, and raise a
+/// desktop notification when one lands.
+///
+/// Only runs at all once the user has written to the maintainer: no thread
+/// means no ticket file, and the loop exits immediately rather than polling for
+/// something that cannot exist. Nothing here depends on the telemetry consent
+/// tier, because a support thread is not telemetry — the user opened it
+/// deliberately and is waiting for an answer.
+pub fn spawn_support_watcher() {
+    std::thread::Builder::new()
+        .name("fresco-support-watch".into())
+        .spawn(support_watch_loop)
+        .ok();
+}
+
+fn support_watch_loop() {
+    let mut announced = crate::support::seen_count();
+    loop {
+        std::thread::sleep(SUPPORT_POLL);
+        if !crate::support::has_thread() {
+            continue;
+        }
+        let Ok(messages) = crate::support::poll() else {
+            continue;
+        };
+        // Compare against the GUI's seen count too: if the user read the reply
+        // in the app between polls, there is nothing to announce.
+        let seen = crate::support::seen_count().max(announced);
+        if messages.len() <= seen {
+            announced = seen;
+            continue;
+        }
+        // Only a maintainer reply is worth interrupting someone for; the
+        // user's own messages also grow the thread.
+        let Some(last) = messages.last() else {
+            continue;
+        };
+        if !last.is_maintainer() {
+            announced = messages.len();
+            continue;
+        }
+        announced = messages.len();
+        notify(
+            t!("The Fresco maintainer replied"),
+            &last.body,
+            Some((t!("Open"), Click::OpenSupport)),
+        );
+    }
 }
 
 fn feedback_reminder_loop() {
@@ -266,10 +331,12 @@ fn feedback_reminder_loop() {
         if due {
             write_epoch(&path, epoch_now());
             notify(
-                "Enjoying Fresco?",
-                "Tell us what's working and what isn't — it takes ten seconds \
-                 and shapes the next release.",
-                Some(("Send feedback", Click::OpenApp)),
+                t!("Enjoying Fresco?"),
+                t!(
+                    "Tell us what's working and what isn't — it takes ten seconds \
+                 and shapes the next release."
+                ),
+                Some((t!("Send feedback"), Click::OpenApp)),
             );
         }
     }
@@ -305,17 +372,22 @@ fn reminder_state_path() -> PathBuf {
 /// forwarded to a running instance over D-Bus, so this works whether the app
 /// is open or not.
 fn open_app() {
+    launch_gui(&["--feedback"]);
+}
+
+/// Start the GUI, handling the Flatpak indirection. Extra args are forwarded to
+/// a running instance over D-Bus, so this works whether the app is open or not.
+fn launch_gui(args: &[&str]) {
     let result = if crate::is_flatpak() {
-        std::process::Command::new("flatpak")
-            .args(["run", "io.github.dibbayajyotiroy.Fresco", "--feedback"])
-            .spawn()
+        let mut cmd = std::process::Command::new("flatpak");
+        cmd.args(["run", "io.github.dibbayajyotiroy.Fresco"]);
+        cmd.args(args);
+        cmd.spawn()
     } else {
-        std::process::Command::new("fresco")
-            .arg("--feedback")
-            .spawn()
+        std::process::Command::new("fresco").args(args).spawn()
     };
     if let Err(e) = result {
-        log::warn!("feedback reminder: launching the GUI failed: {e}");
+        log::warn!("notifier: launching the GUI failed: {e}");
     }
 }
 
@@ -333,13 +405,13 @@ fn handle(n: &Notification) {
             }
         }
         if crate::is_flatpak() {
-            let url = n.url.clone().unwrap_or_else(|| RELEASES_URL.to_string());
-            notify(&n.title, &n.body, Some(("Open", Click::OpenUrl(url))));
+            let url = n.url.clone().unwrap_or_else(|| releases_url().to_string());
+            notify(&n.title, &n.body, Some((t!("Open"), Click::OpenUrl(url))));
         } else {
-            notify(&n.title, &n.body, Some(("Update now", Click::Update)));
+            notify(&n.title, &n.body, Some((t!("Update now"), Click::Update)));
         }
     } else if let Some(url) = n.url.clone() {
-        notify(&n.title, &n.body, Some(("Open", Click::OpenUrl(url))));
+        notify(&n.title, &n.body, Some((t!("Open"), Click::OpenUrl(url))));
     } else {
         notify(&n.title, &n.body, None);
     }
@@ -375,6 +447,7 @@ fn notify(title: &str, body: &str, action: Option<(&str, Click)>) {
                                 Click::OpenUrl(url) => open_url(&url),
                                 Click::Update => run_updater(),
                                 Click::OpenApp => open_app(),
+                                Click::OpenSupport => launch_gui(&[]),
                             }
                         }
                     });
@@ -398,7 +471,7 @@ fn open_url(url: &str) {
 fn run_updater() {
     let Some(script) = crate::update::updater_script() else {
         log::warn!("notifier: updater script not found; opening releases page");
-        open_url(RELEASES_URL);
+        open_url(releases_url());
         return;
     };
     log::info!(
@@ -408,8 +481,8 @@ fn run_updater() {
     match crate::update::run_updater_blocking() {
         crate::update::UpdateOutcome::Success => {
             notify(
-                "Fresco updated",
-                "The latest version was installed. Restart Fresco to apply it.",
+                t!("Fresco updated"),
+                t!("The latest version was installed. Restart Fresco to apply it."),
                 None,
             );
         }
@@ -418,7 +491,7 @@ fn run_updater() {
         }
         crate::update::UpdateOutcome::Unsupported => {
             log::warn!("notifier: unsupported install for auto-update; opening releases page");
-            open_url(RELEASES_URL);
+            open_url(releases_url());
         }
         crate::update::UpdateOutcome::Failed(e) => log::warn!("notifier: {e}"),
     }

@@ -1,0 +1,171 @@
+name: (draft) Mirror release to Gitee
+
+# ⚠️ DRAFT — NOT WIRED INTO THE RELEASE PIPELINE.
+#
+# `workflow_dispatch` only: this cannot fire on a push, a tag, or a merge, so it
+# can never accidentally run as part of a release. It is here to be tried by hand
+# against an existing release before anyone promotes it.
+#
+# What it does: takes an already-published GitHub release, downloads the assets
+# `_release.yml` attached to it (the .deb and install.sh), and re-uploads them to
+# the matching release on a Gitee mirror repo — because Gitee's repo-mirror
+# feature syncs branches, tags and commits ONLY, not releases or their
+# attachments.
+#
+# Prerequisites (see docs/CHINA_DISTRIBUTION.md §5):
+#   secrets.GITEE_TOKEN — a Gitee private access token with repo scope
+#   vars.GITEE_REPO     — the mirror repo as "<owner>/<repo>", e.g. "someone/fresco"
+# Without GITEE_TOKEN the run exits 0 with a message rather than failing.
+#
+# To promote this to the real pipeline:
+#   1. change `on:` to `workflow_call:` with the same inputs,
+#   2. rename the file `_gitee-mirror.yml` (the `_` prefix is this repo's
+#      convention for reusable workflows), and
+#   3. add a `mirror-cn` job to publish.yml that `needs: [version, release]`.
+# Deliberately NOT part of _release.yml's build-deb job: a Gitee outage must
+# never be able to fail a GitHub release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to mirror, e.g. v1.1.36
+        required: true
+        type: string
+      target_commitish:
+        description: >-
+          Branch or commit SHA Gitee should create the tag at, if the mirror has
+          not synced the tag yet. Ignored when the tag already exists on Gitee.
+        required: false
+        type: string
+        default: main
+      dry_run:
+        description: Resolve everything and print the plan, but upload nothing.
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check configuration
+        id: cfg
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          if [ -z "${GITEE_TOKEN}" ]; then
+            echo "::notice::GITEE_TOKEN is not set — nothing to do. See docs/CHINA_DISTRIBUTION.md."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${GITEE_REPO}" ]; then
+            echo "::error::GITEE_TOKEN is set but the GITEE_REPO variable is not (expected \"<owner>/<repo>\")."
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Download the GitHub release assets
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          mkdir -p dist
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir dist
+          echo "Assets to mirror:"
+          ls -l dist
+
+      # Gitee's OpenAPI v5 is documented at https://gitee.com/api/v5/swagger.
+      # Endpoints used here (verified against gitee.com/api/v5/swagger_doc.json):
+      #   GET  /v5/repos/{owner}/{repo}/releases/tags/{tag}   ?access_token=
+      #   POST /v5/repos/{owner}/{repo}/releases              formData: access_token,
+      #        tag_name, name, body, target_commitish, prerelease   (all but
+      #        prerelease required)
+      #   POST /v5/repos/{owner}/{repo}/releases/{id}/attach_files
+      #        multipart, field name literally `file`
+      - name: Create or reuse the Gitee release
+        if: steps.cfg.outputs.configured == 'true'
+        id: rel
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ inputs.target_commitish }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          API="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+
+          # Does a release for this tag already exist on Gitee?
+          existing=$(curl -sS --fail-with-body \
+            "${API}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)
+          id=$(printf '%s' "$existing" | jq -r 'if type=="object" then (.id // empty) else empty end')
+
+          if [ -n "$id" ]; then
+            echo "Reusing existing Gitee release $id for ${TAG}."
+          else
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "[dry-run] would POST ${API}/releases  tag_name=${TAG} target_commitish=${TARGET}"
+              echo "id=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            body="Mirror of https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+            created=$(curl -sS --fail-with-body -X POST "${API}/releases" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "tag_name=${TAG}" \
+              -F "name=${TAG}" \
+              -F "body=${body}" \
+              -F "target_commitish=${TARGET}" \
+              -F "prerelease=false")
+            id=$(printf '%s' "$created" | jq -r '.id // empty')
+            if [ -z "$id" ]; then
+              echo "::error::could not create the Gitee release. Response: ${created}"
+              exit 1
+            fi
+            echo "Created Gitee release $id for ${TAG}."
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the assets to Gitee
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+          RELEASE_ID: ${{ steps.rel.outputs.id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          API="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "[dry-run] would upload to release id '${RELEASE_ID:-<new>}':"
+            ls -1 dist
+            exit 0
+          fi
+
+          # Free-tier Gitee quota: 100 MB per attachment, 1 GB total per repo.
+          # Fresco's .deb is ~3.5 MB, so this is a sanity check, not a real limit.
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            size=$(stat -c %s "$f")
+            if [ "$size" -gt 104857600 ]; then
+              echo "::error::$(basename "$f") is ${size} bytes — over Gitee's 100 MB per-attachment limit."
+              exit 1
+            fi
+            echo "Uploading $(basename "$f") (${size} bytes)…"
+            resp=$(curl -sS --fail-with-body -X POST \
+              "${API}/releases/${RELEASE_ID}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@${f}")
+            url=$(printf '%s' "$resp" | jq -r '.browser_download_url // empty')
+            if [ -z "$url" ]; then
+              echo "::error::upload of $(basename "$f") did not return a download URL. Response: ${resp}"
+              exit 1
+            fi
+            echo "  → ${url}"
+          done

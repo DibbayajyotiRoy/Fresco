@@ -19,7 +19,7 @@
 
 ## What is Fresco?
 
-Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs, images, slideshows, and video playlists as your animated desktop wallpaper through a GTK4 GUI — no terminal required. Playback is hardware-accelerated through mpv (VA-API / NVDEC), so an animated wallpaper costs near-zero CPU. It installs as a `.deb` and restores your wallpaper on login.
+Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs, images, slideshows, and video playlists as your animated desktop wallpaper through a GTK4 GUI — no terminal required. Playback is hardware-accelerated through mpv (VA-API / NVDEC), so decoding runs on the GPU and CPU usage stays near idle — see [Performance](#performance-and-battery-life) for what that costs at the wall. It installs as a `.deb` and restores your wallpaper on login.
 
 ## Quick facts
 
@@ -29,10 +29,11 @@ Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs
 | **Works on** | X11 and Wayland layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6, Deepin DDE) |
 | **Distros** | Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin 25 |
 | **Media formats** | mp4, webm, mkv, avi, mov, GIF, jpg/png/webp, slideshows, playlists |
+| **Desktop widgets** | Synced lyrics, clock, audio visualiser, album-art disc — drawn into the wallpaper, all off by default |
 | **Price** | Free — GPL-3.0-or-later, no ads, no account |
 | **Built with** | Rust, GTK4 / libadwaita, libmpv |
 | **Install** | `.deb` package or one-line script |
-| **Latest version** | 1.1.35 |
+| **Latest version** | 1.1.37 |
 
 ## Install
 
@@ -63,11 +64,11 @@ The wallpaper keeps playing after the window closes and comes back automatically
 
 - **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image slideshow, multi-video playlist
 - **Add from a link** — paste a Pinterest pin or any direct video/image URL; Fresco downloads it and opens the crop editor
-- **Hardware decode** — GPU video decoding (VA-API / NVDEC) keeps CPU usage near zero
+- **Hardware decode** — GPU video decoding (VA-API / NVDEC) keeps CPU usage near idle by moving the work to the video engine, where it is measurably cheaper (not free — see [Performance](#performance-and-battery-life))
 - **Power saving** — cheaper GPU scaling for laptops; measured to roughly halve GPU power (see [Performance](#performance-and-battery-life))
 - **Multi-monitor** — a different wallpaper per display, with synced playback for the same video across monitors
 - **Day & night schedules** — swap wallpapers on a timer, arbitrary time slots, or sunrise/sunset
-- **Wallpaper widgets** — synced song lyrics and a themed clock drawn onto the wallpaper itself; both off by default (see [FAQ](#can-i-show-song-lyrics-or-a-clock-on-my-wallpaper))
+- **Desktop widgets** — synced song lyrics, a themed clock, an audio visualiser, and a turning album-art disc, drawn into the wallpaper itself so nothing floats over your windows; all off by default (see [FAQ](#can-i-show-song-lyrics-on-my-linux-desktop))
 - **Batch management** — select several wallpapers at once and remove them in one step
 - **Built-in catalog** — browse curated, properly licensed wallpapers in-app
 - **Command palette** — Ctrl+K to set any wallpaper or reach any feature from the keyboard
@@ -81,14 +82,20 @@ The wallpaper keeps playing after the window closes and comes back automatically
 | Environment | Live wallpaper | Notes |
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, MATE, …) | ✅ | Embedded renderer |
-| Deepin 25 (DDE, X11) | ✅ | Automatic DDE adaptation |
+| Deepin 25 (DDE, X11) | ✅ | Automatic DDE adaptation — community-verified on Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | KDE Plasma 6 (Wayland) | ✅ | layer-shell |
-| GNOME on Wayland | ⚠️ | Static-frame fallback — Mutter exposes no live wallpaper surface |
+| GNOME on Wayland | ⚠️ | Static-frame fallback — Mutter exposes no live wallpaper surface, so no widgets either |
 
 Every environment above is exercised headlessly in CI on each release.
+
+> "Easy to use with a clean interface — one of the few live wallpaper apps properly adapted for Deepin 25, installable via .deb and running smoothly with hardware-accelerated playback."
+>
+> — 柒玖 (deepin forum) / 柒仈玖 (GitHub), tested on Deepin 25 Community build1, X11 session, Intel Alder Lake-N [Intel Graphics]
+
+Deepin 25 ships X11 as its default session, and that is the session Fresco is verified on there. Deepin's own Wayland compositor, [Treeland](https://github.com/linuxdeepin/treeland), is still under development, so Fresco makes no claim about Deepin on Wayland yet.
 
 ## Fresco vs other live wallpaper options
 
@@ -107,7 +114,7 @@ Fresco bundles `mpvpaper` as its Wayland renderer, so it builds on that project 
 
 ## Performance and battery life
 
-A contributor measured package power with `turbostat` on an Intel N150 (Deepin 25, VA-API, two runs per level) while a video wallpaper played:
+柒玖 (deepin forum) / 柒仈玖 (GitHub) measured package power with `turbostat` on an Intel N150 (Deepin 25, VA-API, two runs per level) while a video wallpaper played:
 
 | Video | Power saving | GPU power | Total package power |
 |---|---|---|---|
@@ -118,6 +125,15 @@ A contributor measured package power with `turbostat` on an Intel N150 (Deepin 2
 | 4K 60fps | Minimum | 0.99 W (−65%) | 4.97 W (−37%) |
 
 Power saving reduces per-frame GPU scaling cost. No frames are dropped and hardware decoding is untouched, so playback stays smooth — the trade-off is image sharpness, not motion. Reduced is the default; Minimum is worth choosing for 4K sources.
+
+**How to read these numbers.** Hardware decoding does not make a live wallpaper free — it moves the work from the CPU to the video engine, where it is cheaper, not absent. "Low CPU usage" on its own is a weak claim, because the alternative being compared against is software decoding, which is far worse; the honest measure is whole-system draw, which is why the table reports **total package power** and not just GPU power.
+
+Two caveats on the figures above, so they are not read as more than they are:
+
+- They are **total package power while a wallpaper is playing**, not the marginal cost of the wallpaper. No idle baseline was recorded on the same machine, so the difference between these numbers and an idle desktop is not established here. The percentages compare power-saving *levels* against each other, which is what they are valid for.
+- They are one machine (Intel N150, Alder Lake-N, VA-API, Deepin 25, two runs per level). Discrete GPUs, NVDEC, and other drivers will differ.
+
+A live wallpaper always costs more than a static one. Power saving, fullscreen auto-pause and pause-on-battery exist to bound that cost, not to pretend it is zero.
 
 ## FAQ
 
@@ -131,7 +147,9 @@ Install Fresco, open it, click **Add**, pick your video, and click **Set**. The 
 
 ### Do live wallpapers use a lot of CPU or battery?
 
-Not with hardware decoding. Fresco decodes video on the GPU (VA-API / NVDEC), keeping CPU usage near zero. On an Intel N150, a 1080p wallpaper drew 0.63 W of GPU power at the default Power saving level. Fresco also pauses automatically when a window goes fullscreen, and can pause on battery.
+CPU, no. Battery, some — a live wallpaper is never free.
+
+Fresco decodes video on the GPU (VA-API / NVDEC), so CPU usage stays near idle. That moves the cost to the video engine rather than removing it. Measured on an Intel N150 at the default Power saving level, a 1080p wallpaper drew 0.63 W of GPU power with total package power at 4.03 W while playing (see [Performance](#performance-and-battery-life) for how to read that, including what it does *not* say). Fullscreen auto-pause and pause-on-battery exist to keep that cost off your battery when it would matter most.
 
 ### Does Fresco work on Wayland?
 
@@ -149,24 +167,57 @@ Yes. Fresco supports per-display wallpapers, and when the same video is used acr
 
 Yes — animated GIFs, static images, image slideshows with transitions (crossfade, fade, slide, Ken Burns), and multi-video playlists, in addition to video files.
 
-### Can I show song lyrics or a clock on my wallpaper?
+### Can I show song lyrics on my Linux desktop?
 
-Yes. Fresco can draw **time-synced lyrics** and a **themed clock** onto the
-wallpaper. Both are **off by default** — open the app menu (Ctrl+,), choose **Advanced…**,
-and scroll to the **Lyrics** and **Clock** groups.
-The lyrics widget follows whatever is playing on your system and shows the
-current line in time with the music (with the next line dimmed underneath, if
-you want it); the clock has five themes and needs no music and no network.
-Both offer a nine-point placement grid, a size and margin, and accent tinting,
-and both appear on every display unless you name a single connector in the
-`[widgets]` block of `config.toml`.
+Yes. Fresco draws **time-synced lyrics** onto your wallpaper, following whatever
+is playing on your system over MPRIS — browsers, music apps, video players. It
+offers four presets (Minimal, Karaoke, Subtitle, Card), a nine-point placement
+grid, a sync-offset slider, an optional dimmed next line, and optional track
+title and artist.
 
-Widgets are drawn into the wallpaper itself, so they never sit above your
-windows and never intercept a click. They are **not available on GNOME under
-Wayland**, which has no live wallpaper surface for Fresco to draw into (the same
-reason it falls back to a static frame). Lyrics and the clock are the two
-widgets available today; an audio visualiser and a spinning album-art disc are
-in progress and not shipped yet.
+Lyrics are one of four widgets, all **off by default**. Turn them on from the
+app menu (Ctrl+,) → **Advanced…**:
+
+| Widget | What you get |
+|---|---|
+| **Lyrics** | The current line, in time with the music |
+| **Clock** | Six themes — Digital, Minimal, Segment, Stacked, Wordy, and Card (a translucent panel with a drawn analog face). 12- or 24-hour, optional date. Seconds are off by default because they cost 60× the repaints |
+| **Audio visualiser** | Five styles — Bars, Mirror, Wave, Dots, Ring — with a colour picker, a two-colour blend, or rainbow |
+| **Album art** | The current track's cover on a turning record; it stops turning when playback pauses |
+
+Widgets are painted into the wallpaper through mpv's OSD layer rather than into
+a window of their own, so they never sit above your windows, never intercept a
+click, and behave identically on X11 and on every layer-shell compositor. With
+music playing and all four widgets on, the measured cost was **0.8% of one CPU
+core** — nearly all of it the audio capture, since nothing repaints unless its
+content changed.
+
+Widgets appear on **every display** by default. To keep them on one, add
+`monitor = "DP-1"` to the `[widgets]` block of `config.toml` (there is no GUI
+control for this yet). They are **not available on GNOME under Wayland**, which
+has no live wallpaper surface for Fresco to draw into — the same reason
+wallpapers fall back to a static frame there.
+
+### Does Linux have desktop widgets like Conky?
+
+Yes, and Fresco adds four that need no panel, no extension, and no support from
+your desktop: a clock, synced lyrics, an audio visualiser, and a turning
+album-art disc. Because they are painted into the wallpaper instead of a
+window, they work on desktops that have no widget layer of their own — COSMIC,
+Hyprland and Sway included. Unlike Conky, Fresco has **no system-monitor
+widgets** (no CPU, RAM, temperature or network readouts), so it sits alongside
+Conky as a music-and-time companion rather than replacing it. GNOME on Wayland
+is the one place it can't run.
+
+### Can I get a music visualiser on my desktop background?
+
+Yes. Fresco's audio visualiser reacts to whatever your system is playing, in one
+of five styles — Bars, Mirror, Wave, Dots, or Ring — with a colour picker, a
+two-colour blend, or rainbow. It is off by default and asks for consent the
+first time you enable it, because it has to listen to your audio output; the
+consent is also enforced on config load, so editing `config.toml` by hand can't
+switch it on behind your back. Pair it with the album-art widget for a turning
+record of the current track's cover.
 
 ### Which music players work with the lyrics widget?
 
@@ -229,9 +280,32 @@ theme. Being tracked in [docs/AUDIT.md](docs/AUDIT.md#deepin-launcher-hot-refres
 
 Click **Select** in the footer (or right-click a wallpaper and choose **Select…**), tick the ones you want, and click **Remove**. **Select all** respects the current search, so you can search first and then clear a whole batch. Removing a wallpaper takes it out of your Fresco library — the source file on disk is kept.
 
-## Privacy
+## Privacy & terms of use
 
-Fresco can send anonymous usage statistics, but **nothing is sent until you opt in** — a one-time consent dialog asks on first launch, and the choice can be changed anytime in Settings. No personal data, file names, or wallpaper content is ever collected. Details in the [changelog privacy notes](CHANGELOG.md#privacy).
+**Nothing is sent until you answer.** A consent dialog asks once on first launch, and the choice can be changed anytime in Settings.
+
+Either way, once a day, Fresco records that one install was active, in which country, on which version. That is the headcount. What the dialog asks about is the **detail**:
+
+| You choose | What Fresco sends |
+| --- | --- |
+| **Accept all** | The headcount, plus distro, desktop, session type, video backend, monitor count, which features you use, error kinds, city and region, and the exact time of each check-in. |
+| **Decline optional** | The headcount only: a random install id (never derived from your hardware or name), country, app version, packaging. Your check-in is stored as a **date, not a time**. |
+
+**City and the exact time of use are optional** — sent only if you accept all, never sent if you decline. Coordinates are never collected at any level: the geolocation endpoint drops latitude and longitude rather than returning them.
+
+These numbers exist to decide which distros and desktops get tested before a release, and where downloads need a mirror. They are never sold, shared, or used for advertising, and there is no analytics vendor involved.
+
+**Never collected, either way:** personal data, file names, your wallpapers, your IP address, audio, keystrokes, or clipboard contents. The country is resolved from your IP by Cloudflare at the network edge, so only a two-letter code ever reaches this project. (Text you deliberately write and press send on — a feedback comment, or a message to the maintainer below — is a message you chose to send, not collection.)
+
+To send nothing at all, set `telemetry = false` and `telemetry_prompted = false` in `~/.config/fresco/config.toml`.
+
+### Talk to the maintainer, anonymously
+
+**Menu → Message the maintainer** opens a private two-way thread with the person who makes Fresco. No account, no email address, no GitHub login. It is anonymous in both directions: you never learn who they are beyond "the maintainer", and they never learn who you are — only your messages and, if you leave the box ticked, the setup summary shown in the dialog.
+
+The thread is keyed by a random ticket generated separately from telemetry and stored in a different file, so a conversation can never be joined to a usage profile. It works exactly the same whether you accepted all or declined optional. Nothing exists until you send a first message.
+
+📄 **[Full terms of use and privacy policy →](TERMS.md)** — every field, in a table, with nothing omitted. Every line that sends anything lives in [`src/telemetry.rs`](src/telemetry.rs), so you can check rather than trust.
 
 ## Contributing & feedback
 
@@ -243,4 +317,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland). A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, and Deepin. Last updated: 2026-07-29.</sub>
+<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, and Deepin, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Last updated: 2026-07-31.</sub>

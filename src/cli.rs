@@ -118,6 +118,29 @@ fn doctor() -> i32 {
             }
         }
     }
+    // Widget helpers. Both are `warn`, never `problems`: a desktop with no
+    // widgets enabled is perfectly healthy without either, so a red ✗ (and a
+    // non-zero exit) would be crying wolf. They are listed at all because the
+    // failure they cause is silence — a widget that is on in the config and
+    // simply never draws — and a diagnostic that cannot explain that is not
+    // doing its job. See src/daemon/widgets.rs for the matching runtime logs.
+    if which("gdbus") {
+        check("Now-playing widgets (gdbus)", true, "", &mut problems);
+    } else {
+        warn(
+            "Now-playing widgets (gdbus)",
+            "lyrics / album art / track-synced clock need gdbus — install libglib2.0-bin",
+        );
+    }
+    if which("pw-cat") || which("parec") {
+        check("Audio visualiser (pw-cat/parec)", true, "", &mut problems);
+    } else {
+        warn(
+            "Audio visualiser (pw-cat/parec)",
+            "install pipewire-bin or pulseaudio-utils to enable the visualiser widget",
+        );
+    }
+
     let configured = Config::load()
         .map(|c| {
             c.enabled && (c.wallpaper.effective_path().is_some() || !c.wallpaper.paths.is_empty())

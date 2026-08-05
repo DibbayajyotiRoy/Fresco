@@ -173,12 +173,41 @@ fn save_original_once() {
     std::fs::write(&sf, format!("{light}\n{dark}\n")).ok();
 }
 
+/// Whether the GNOME background schema can be driven at all.
+///
+/// Two very different failures land here and must not read the same. A
+/// `gsettings` that runs and says "no such schema" is simply not a GNOME
+/// desktop — the documented no-op, and silent. A `gsettings` that will not
+/// *spawn* is a missing package, and on GNOME Wayland that is the whole
+/// wallpaper: the static frame this module paints is the only backend Mutter
+/// allows, so a user who silently gets no wallpaper has nothing to go on. Name
+/// the binary and the package once, at `warn`, rather than returning `false`
+/// the way a KDE session does.
 fn gnome_available() -> bool {
-    Command::new("gsettings")
+    match Command::new("gsettings")
         .args(["get", SCHEMA, "picture-uri"])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    {
+        Ok(out) => out.status.success(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Once per daemon, not once per apply: a rotating slideshow calls
+            // this on every change, and the fix does not get truer by repetition.
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                log::warn!(
+                    "overview: `gsettings` is not installed — install libglib2.0-bin \
+                     (Debian/Ubuntu), glib2 (Arch/Fedora) or glib2-tools (openSUSE); \
+                     without it Fresco cannot set the GNOME desktop background, which \
+                     is the only wallpaper surface available on GNOME Wayland"
+                );
+            });
+            false
+        }
+        Err(e) => {
+            log::debug!("overview: gsettings failed to run: {e}");
+            false
+        }
+    }
 }
 
 fn gget(key: &str) -> String {

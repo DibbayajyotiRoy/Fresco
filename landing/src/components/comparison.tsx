@@ -2,8 +2,17 @@ import Link from "next/link";
 import { ArrowUpRight, Check, X } from "lucide-react";
 import { COMPARISON, type CompareCell } from "@/lib/content";
 import { ALTERNATIVES } from "@/lib/alternatives";
+import type { Dictionary } from "@/lib/i18n";
 
-function Cell({ value, highlight }: { value: CompareCell; highlight: boolean }) {
+function Cell({
+  value,
+  highlight,
+  dict,
+}: {
+  value: CompareCell;
+  highlight: boolean;
+  dict: Dictionary;
+}) {
   const base = highlight ? "bg-accent/[0.06]" : "";
   if (value === true) {
     return (
@@ -12,7 +21,7 @@ function Cell({ value, highlight }: { value: CompareCell; highlight: boolean }) 
           className={`mx-auto size-4 ${highlight ? "text-accent" : "text-ink"}`}
           aria-hidden
         />
-        <span className="sr-only">Yes</span>
+        <span className="sr-only">{dict.compare.yes}</span>
       </td>
     );
   }
@@ -20,7 +29,7 @@ function Cell({ value, highlight }: { value: CompareCell; highlight: boolean }) 
     return (
       <td className={`border-l border-hairline px-4 py-2.5 text-center ${base}`}>
         <X className="mx-auto size-4 text-ink-faint" aria-hidden />
-        <span className="sr-only">No</span>
+        <span className="sr-only">{dict.compare.no}</span>
       </td>
     );
   }
@@ -28,12 +37,12 @@ function Cell({ value, highlight }: { value: CompareCell; highlight: boolean }) 
     <td
       className={`border-l border-hairline px-4 py-2.5 text-center text-sm text-ink-subtle ${base}`}
     >
-      {value}
+      {dict.compare.cells[value]}
     </td>
   );
 }
 
-export function Comparison() {
+export function Comparison({ dict }: { dict: Dictionary }) {
   const scores = COMPARISON.tools.map((_, i) =>
     COMPARISON.rows.reduce((s, r) => s + (r.values[i] === true ? 1 : 0), 0),
   );
@@ -43,19 +52,13 @@ export function Comparison() {
     <section id="compare" className="hidden border-b border-hairline py-20 sm:block sm:py-28">
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <p className="instrument-label">compare</p>
+          <p className="instrument-label">{dict.compare.kicker}</p>
           <h2 className="mt-3 font-serif text-display-sm text-ink">
-            Fresco vs the Linux wallpaper field.
+            {dict.compare.title}
           </h2>
-          <p className="mt-4 text-pretty text-ink-subtle">
-            Fresco is the only actively maintained Linux live-wallpaper app in
-            this table that combines a GUI, hardware decoding, X11 and Wayland
-            support, and a built-in catalog, free. Here is the full comparison
-            with Hidamari, Komorebi, mpvpaper, and Wallpaper Engine.
-          </p>
+          <p className="mt-4 text-pretty text-ink-subtle">{dict.compare.lead}</p>
           <p className="mt-2 font-mono text-meta uppercase tracking-widest text-ink-faint">
-            compare · {COMPARISON.tools.length} tools · {COMPARISON.rows.length}{" "}
-            capabilities
+            {dict.compare.meter(COMPARISON.tools.length, COMPARISON.rows.length)}
           </p>
         </div>
 
@@ -88,7 +91,7 @@ export function Comparison() {
                   scope="col"
                   className="instrument-label px-4 py-3 text-left font-semibold"
                 >
-                  Feature
+                  {dict.compare.thFeature}
                 </th>
                 {COMPARISON.tools.map((tool, i) => (
                   <th
@@ -106,17 +109,17 @@ export function Comparison() {
             <tbody>
               {COMPARISON.rows.map((row) => (
                 <tr
-                  key={row.label}
+                  key={row.id}
                   className="border-b border-hairline last:border-0 even:bg-raised/50"
                 >
                   <th
                     scope="row"
                     className="px-4 py-2.5 text-left text-sm font-normal text-ink-muted"
                   >
-                    {row.label}
+                    {dict.compare.rows[row.id]}
                   </th>
                   {row.values.map((value, i) => (
-                    <Cell key={i} value={value} highlight={i === 0} />
+                    <Cell key={i} value={value} highlight={i === 0} dict={dict} />
                   ))}
                 </tr>
               ))}
@@ -125,18 +128,21 @@ export function Comparison() {
         </div>
 
         <p className="mt-4 font-mono text-meta tracking-wide text-ink-faint">
-          {COMPARISON.note}
+          {dict.compare.note}
         </p>
 
+        {/* The competitor deep-dives are English-only, so they always link to
+            the unprefixed URL rather than into the current locale. */}
         <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-3 text-sm">
-          <span className="text-ink-subtle">Compare in detail:</span>
+          <span className="text-ink-subtle">{dict.compare.detailLabel}</span>
           {ALTERNATIVES.map((alt) => (
             <Link
               key={alt.slug}
               href={`/alternatives/${alt.slug}`}
+              hrefLang="en"
               className="inline-flex items-center gap-1 rounded-sm border border-hairline bg-surface px-2.5 py-1 text-sm font-medium text-ink-muted transition-colors hover:border-hairline-strong hover:text-ink"
             >
-              Fresco vs {alt.tool}
+              {dict.compare.vs(alt.tool)}
               <ArrowUpRight className="size-3.5" aria-hidden />
             </Link>
           ))}

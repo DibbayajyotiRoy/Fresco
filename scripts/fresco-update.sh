@@ -14,7 +14,25 @@
 set -euo pipefail
 
 REPO="${FRESCO_REPO:-DibbayajyotiRoy/fresco}"
-API="https://api.github.com/repos/${REPO}/releases/latest"
+
+# Which host to fetch from. Passed as `--origin <github|gitee>` by the caller
+# rather than read from the environment or the user's config: this script runs
+# under pkexec as root, so it has root's $HOME and a sanitised environment and
+# can see neither. Defaults to github when invoked by hand.
+ORIGIN="github"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --origin) ORIGIN="${2:-github}"; shift 2 ;;
+    --origin=*) ORIGIN="${1#*=}"; shift ;;
+    *) echo "fresco-update: unknown argument '$1'" >&2; exit 1 ;;
+  esac
+done
+
+case "$ORIGIN" in
+  github) API="https://api.github.com/repos/${REPO}/releases/latest" ;;
+  gitee)  API="https://gitee.com/api/v5/repos/${FRESCO_GITEE_REPO:-dibbayajyoti/fresco}/releases/latest" ;;
+  *) echo "fresco-update: unknown origin '$ORIGIN'" >&2; exit 1 ;;
+esac
 
 # Unsupported installs first: a Flatpak sandbox can't apt-install, and a
 # non-Debian system has no apt-get to install with.
@@ -27,17 +45,19 @@ if ! command -v apt-get >/dev/null 2>&1; then
   exit 3
 fi
 
-echo "fresco-update: querying latest release of ${REPO}…"
+echo "fresco-update: querying latest release of ${REPO} from ${ORIGIN}…"
 RELEASE_JSON=$(curl -fsSL "$API")
+# GitHub pretty-prints its JSON; Gitee minifies it. Match the whole key/value
+# pair with optional whitespace instead of assuming `": "`, and avoid the greedy
+# `.*` that made the old expression swallow everything up to the last quote.
 LATEST_TAG=$(printf '%s' "$RELEASE_JSON" \
-  | grep '"tag_name"' \
+  | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
   | head -1 \
-  | sed 's/.*"tag_name": *"\(.*\)".*/\1/')
+  | sed 's/.*"\([^"]*\)"$/\1/')
 DEB_URL=$(printf '%s' "$RELEASE_JSON" \
-  | grep '"browser_download_url"' \
-  | grep '\.deb"' \
+  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"' \
   | head -1 \
-  | sed 's/.*"browser_download_url": "\(.*\)".*/\1/')
+  | grep -o 'https\?://[^"]*\.deb')
 
 if [ -z "${DEB_URL}" ]; then
   echo "fresco-update: no .deb found in the latest release" >&2

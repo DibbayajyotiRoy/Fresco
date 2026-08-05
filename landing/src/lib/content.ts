@@ -1,139 +1,13 @@
 /**
- * Shared marketing content reused by both the UI components and the JSON-LD
- * structured data, so on-page copy and machine-readable data never drift.
+ * Language-independent marketing data: the shape of the comparison matrix,
+ * the tested distros, the supported formats, the field report, the author.
  *
- * Copy rules: answer-first (for AI answer engines), fact-dense, NO em-dashes.
- * Keep in sync with ../../../CHANGELOG.md and ../../../README.md.
+ * All prose moved to src/lib/i18n/dictionaries/*. What stays here is either
+ * structural (which cell is a yes, which is a no) or a proper noun that must
+ * read identically in every language (distro names, file extensions, the
+ * verbatim testimonial). Row and cell IDs below are the join keys into
+ * `dict.compare.rows` / `dict.compare.cells`.
  */
-
-/** Q&A written from real user phrasings (AskUbuntu, Mint forums, Reddit, HN). */
-export const FAQ: { q: string; a: string }[] = [
-  {
-    q: "Is there a Wallpaper Engine for Linux?",
-    a: "Yes. Fresco is a free, open-source live-wallpaper app for Linux that works like Wallpaper Engine: pick a video, GIF, or image and set it as your animated desktop background. It is GUI-first and needs no Steam or Proton.",
-  },
-  {
-    q: "How do I set a video as my wallpaper on Ubuntu or Pop!_OS?",
-    a: "Install the Fresco .deb, open it from your app menu, click Add, choose your video, optionally crop or rotate it, then click Set as Wallpaper. Close the app and the video keeps playing as your desktop background.",
-  },
-  {
-    q: "Will a video wallpaper drain my CPU or battery?",
-    a: "No. Fresco decodes video on the GPU through mpv (VA-API and NVDEC), so CPU usage stays near zero and memory sits around 120 to 150 MB. It can pause automatically while you are on battery, and it auto-pauses on any monitor that has a fullscreen window.",
-  },
-  {
-    q: "Does Fresco work on Wayland and the COSMIC desktop?",
-    a: "Yes. Fresco runs animated wallpapers on Wayland layer-shell compositors through a bundled, supervised mpvpaper backend: COSMIC (Pop!_OS 24.04), Hyprland, Sway, KDE Plasma 6, and other wlroots compositors. Since v1.1.1 it ships two mpvpaper builds and probes at runtime, so it works on both libmpv1 and libmpv2 distributions. On X11 it works on any desktop.",
-  },
-  {
-    q: "Does Fresco work on GNOME?",
-    a: "On GNOME with an X11 session, yes, full live wallpapers. On GNOME with Wayland, Mutter does not expose a live wallpaper surface, so Fresco falls back to showing a static frame of your chosen wallpaper instead of pretending to animate.",
-  },
-  {
-    q: "Can a video wallpaper play sound?",
-    a: "Yes. Each wallpaper remembers its own mute state and volume, so you can unmute one specific video and the choice sticks every time it is set. Wallpapers start muted by default.",
-  },
-  {
-    q: "Can I crop or rotate a wallpaper?",
-    a: "Yes. The editor has a drag-to-crop frame and a 90-degree rotate, so you can pick the exact region or turn a sideways phone video upright. Both are applied on the GPU and remembered per wallpaper.",
-  },
-  {
-    q: "Will the wallpaper stay after I reboot?",
-    a: "Yes. Fresco adds an autostart entry that restores your live wallpaper automatically on login, and self-heals the entry if it is missing. You can turn this off in settings.",
-  },
-  {
-    q: "What media formats are supported?",
-    a: "Looping video (mp4, webm, mkv, avi, mov), animated GIFs, static images (jpg, png, webp), a folder of images as a slideshow with crossfade, fade, slide, or Ken Burns transitions, and multi-video playlists.",
-  },
-  {
-    q: "Does it support multiple monitors?",
-    a: "Yes. You can set a different wallpaper on each display, and Fresco pauses the wallpaper per output when a window there goes fullscreen. Monitor hotplug is live on X11; on Wayland a newly plugged display picks up on the next apply (automatic hotplug lands with the v1.0 engine).",
-  },
-  {
-    q: "How is Fresco different from Wallpaper Engine?",
-    a: "Wallpaper Engine is a paid, Windows-first product that only runs on Linux through Steam Play and Proton. Fresco is free, open source (GPL-3.0), and native to Linux: no Steam, no Proton, no compatibility layer. Instead of the Steam Workshop it has a built-in catalog of curated, licensed wallpapers, and it supports X11 and Wayland layer-shell compositors directly.",
-  },
-  {
-    q: "How is Fresco different from Hidamari, Komorebi, and mpvpaper?",
-    a: "Fresco is GUI-first, hardware-accelerated, and handles video, GIF, image, slideshow, and playlist wallpapers in one app, on both X11 and Wayland. It is actively maintained, unlike Komorebi, and needs no command line, unlike mpvpaper.",
-  },
-  {
-    q: "Where do I find live wallpapers for Linux?",
-    a: "Inside Fresco itself. The built-in catalog (menu, then Browse wallpapers) offers curated, properly licensed video wallpapers you can set in two clicks, with the license and author shown on every item. You can also paste a direct video or image URL, or add your own files.",
-  },
-  {
-    q: "Can my wallpaper change automatically between day and night?",
-    a: "Yes. Open the menu, choose Advanced, then Day & night wallpaper: pick two wallpapers and switch times, and the daemon swaps them automatically with no restart. Arbitrary time slots and sunrise or sunset switching (with manual coordinates) are available through config.toml.",
-  },
-  {
-    q: "How do I set a different wallpaper on each monitor?",
-    a: "Right-click any wallpaper in the library and choose Set on a specific display. Each connected monitor is listed with its resolution. Choosing Show default on all displays clears the per-monitor overrides.",
-  },
-  {
-    q: "Is Fresco free?",
-    a: "Yes. Fresco is completely free and open source under the GPL-3.0 license. There is no paid tier.",
-  },
-];
-
-/** Install steps, shown in the How-it-works section. */
-export const INSTALL_STEPS: { name: string; text: string }[] = [
-  {
-    name: "Download Fresco",
-    text: "Download the latest .deb package from the Fresco releases page, or run the one-line install script.",
-  },
-  {
-    name: "Install it",
-    text: "Double-click the .deb to install it, or run sudo apt install ./fresco_*.deb in a terminal.",
-  },
-  {
-    name: "Set your wallpaper",
-    text: "Open Fresco, click Add, pick a video or image, optionally crop it, and click Set as Wallpaper.",
-  },
-];
-
-/** Highlights from the 1.0 release, for the What's New section. */
-export const WHATS_NEW: { icon: string; title: string; body: string }[] = [
-  {
-    icon: "catalog",
-    title: "Built-in wallpaper catalog",
-    body: "Browse curated, licensed wallpapers in-app and set one in two clicks. License and author on every card.",
-  },
-  {
-    icon: "displays",
-    title: "Per-display wallpapers",
-    body: "Right-click a wallpaper and set it on one specific monitor. Each display can run its own.",
-  },
-  {
-    icon: "schedule",
-    title: "Day and night schedules",
-    body: "Two wallpapers, two switch times. The daemon swaps them automatically, no restart needed.",
-  },
-  {
-    icon: "quality",
-    title: "Measured picture quality",
-    body: "Sharper 8K to 4K downscaling, zero banding, pixel-exact HiDPI. Verified by an in-tree fidelity harness.",
-  },
-];
-
-/** Feature names, used for the SoftwareApplication featureList in JSON-LD. */
-export const FEATURE_LIST = [
-  "Built-in catalog of curated, licensed wallpapers",
-  "Video, GIF, image, slideshow, and playlist wallpapers",
-  "Add wallpapers from a direct URL",
-  "Day and night wallpaper schedules (plus time slots and solar via config)",
-  "Per-display wallpapers from the GUI",
-  "Automatic audio recovery when the sound server starts late",
-  "Scriptable JSON control socket",
-  "Hardware-accelerated playback (VA-API, NVDEC)",
-  "Works on X11 and Wayland layer-shell compositors",
-  "Drag-to-crop and 90-degree rotate editor",
-  "Per-wallpaper sound and volume",
-  "Slideshow transitions (crossfade, fade, slide, Ken Burns)",
-  "Wallpaper library with search",
-  "Different wallpaper per monitor",
-  "Pause on battery and auto-pause on fullscreen",
-  "Restores automatically on login",
-  "Themes and accent colors",
-];
 
 export const FORMATS = [
   "mp4",
@@ -160,34 +34,68 @@ export const DISTROS = [
 ];
 
 /**
- * Competitor comparison. Cells: true (yes), false (no), or a short qualifier.
- * Sourced from README.md. Komorebi is unmaintained; Wallpaper Engine is a
- * paid, Windows-first product.
+ * Competitor comparison. Cells: true (yes), false (no), or a qualifier ID
+ * resolved through `dict.compare.cells`. Sourced from README.md. Komorebi is
+ * unmaintained; Wallpaper Engine is a paid, Windows-first product.
  */
-export type CompareCell = boolean | string;
+export type CompareCellId = "partial" | "manual" | "compositorOff" | "cropOnly" | "workshop";
+export type CompareCell = boolean | CompareCellId;
+
+export type CompareRowId =
+  | "gui"
+  | "x11"
+  | "wayland"
+  | "hwDecode"
+  | "cropRotate"
+  | "playlists"
+  | "slideshow"
+  | "library"
+  | "catalog"
+  | "perDisplay"
+  | "schedules"
+  | "maintained"
+  | "foss";
+
 export const COMPARISON: {
   tools: string[];
-  note: string;
-  rows: { label: string; values: CompareCell[] }[];
+  rows: { id: CompareRowId; values: CompareCell[] }[];
 } = {
   tools: ["Fresco", "Hidamari", "Komorebi", "mpvpaper", "Wallpaper Engine"],
-  note: "Wallpaper Engine is a paid, Windows-first product. Komorebi is no longer maintained.",
   rows: [
-    { label: "GUI app, no terminal", values: [true, true, true, false, true] },
-    { label: "Works on X11", values: [true, true, true, false, "Compositor off"] },
-    { label: "Works on Wayland (layer-shell)", values: [true, "Partial", false, true, false] },
-    { label: "Hardware decode, low CPU", values: [true, "Partial", "Partial", true, true] },
-    { label: "Drag-to-crop and rotate", values: [true, false, false, false, "Crop only"] },
-    { label: "Playlists", values: [true, false, false, "Manual", true] },
-    { label: "Image slideshow", values: [true, false, false, false, true] },
-    { label: "Wallpaper library", values: [true, false, false, false, true] },
-    { label: "Built-in wallpaper catalog", values: [true, false, false, false, "Workshop"] },
-    { label: "Per-display wallpapers (GUI)", values: [true, false, false, "Manual", true] },
-    { label: "Day and night schedules", values: [true, false, false, false, "Partial"] },
-    { label: "Actively maintained", values: [true, true, false, true, true] },
-    { label: "Free and open source", values: [true, true, true, true, false] },
+    { id: "gui", values: [true, true, true, false, true] },
+    { id: "x11", values: [true, true, true, false, "compositorOff"] },
+    { id: "wayland", values: [true, "partial", false, true, false] },
+    { id: "hwDecode", values: [true, "partial", "partial", true, true] },
+    { id: "cropRotate", values: [true, false, false, false, "cropOnly"] },
+    { id: "playlists", values: [true, false, false, "manual", true] },
+    { id: "slideshow", values: [true, false, false, false, true] },
+    { id: "library", values: [true, false, false, false, true] },
+    { id: "catalog", values: [true, false, false, false, "workshop"] },
+    { id: "perDisplay", values: [true, false, false, "manual", true] },
+    { id: "schedules", values: [true, false, false, false, "partial"] },
+    { id: "maintained", values: [true, true, false, true, true] },
+    { id: "foss", values: [true, true, true, true, false] },
   ],
 };
+
+/**
+ * A single community field report, quoted with the reviewer's written
+ * permission. Verbatim: do not paraphrase, trim, or TRANSLATE the quote. It
+ * renders in English on every locale, with only the surrounding labels and
+ * the reviewer's role localised. Deliberately not emitted as schema.org
+ * Review / AggregateRating markup: one named quote is a testimonial, and
+ * review rich-result markup off a single quote is a policy violation.
+ */
+export const TESTIMONIAL = {
+  quote:
+    "Easy to use with a clean interface — one of the few live wallpaper apps properly adapted for Deepin 25, installable via .deb and running smoothly with hardware-accelerated playback.",
+  author: "柒玖 (deepin forum) / 柒仈玖 (GitHub)",
+  environment: [
+    { id: "session", value: "X11" },
+    { id: "os", value: "Deepin 25 Community Edition, build1" },
+    { id: "gpu", value: "Intel Alder Lake-N [Intel Graphics]" },
+  ],
+} as const;
 
 /** Author / maintainer, used in JSON-LD trust signals. */
 export const AUTHOR = {

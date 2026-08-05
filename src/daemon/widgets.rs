@@ -601,6 +601,30 @@ fn lock(shared: &Shared) -> std::sync::MutexGuard<'_, WorkerState> {
     shared.state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Say once, when an MPRIS-driven widget turns on, that the tool every MPRIS
+/// query needs is missing.
+///
+/// Same contract as [`open_capture`]'s warning, and for the same reason: with
+/// no `gdbus`, [`mpris::list_players`] returns empty forever, so the lyrics,
+/// album-art disc and track-synced widgets are enabled in the config and then
+/// simply never draw. That is indistinguishable from "nothing is playing" — the
+/// difference between a bug report and a one-line fix is naming the binary and
+/// the package that ships it.
+///
+/// Logged at `warn` and only from [`Worker::start`] (once per enable, not per
+/// tick): [`mpris::gdbus_call`] deliberately stays at `debug` because it fails
+/// routinely whenever a player exits mid-poll.
+fn warn_if_no_gdbus() {
+    if mpris::gdbus_available() {
+        return;
+    }
+    log::warn!(
+        "widgets: a now-playing widget (lyrics / album art / track-synced clock) is enabled but \
+         `gdbus` is not installed — install libglib2.0-bin (Debian/Ubuntu), glib2 (Arch/Fedora) \
+         or glib2-tools (openSUSE); these widgets stay blank until then"
+    );
+}
+
 /// Owns the now-playing thread and joins it on drop.
 struct Worker {
     shared: Arc<Shared>,
@@ -612,6 +636,7 @@ impl Worker {
     /// round trip; until then the engine sees [`Snapshot::idle`], which renders
     /// as "no lyrics" rather than as stale ones.
     fn start(folder: Option<PathBuf>, art_size: Option<u32>) -> Self {
+        warn_if_no_gdbus();
         let shared = Arc::new(Shared {
             state: Mutex::new(WorkerState {
                 stop: false,

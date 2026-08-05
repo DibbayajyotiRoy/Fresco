@@ -49,7 +49,14 @@ function warmConnections() {
   }
 }
 
-export function LiteYouTube({ video }: { video: Video }) {
+export function LiteYouTube({
+  video,
+  playLabel,
+}: {
+  video: Video;
+  /** Already interpolated with the (verbatim, English) YouTube title. */
+  playLabel: string;
+}) {
   const [playing, setPlaying] = useState(false);
   const [poster, setPoster] = useState(() => posterUrl(video.id));
 
@@ -70,7 +77,7 @@ export function LiteYouTube({ video }: { video: Video }) {
         <>
           <Image
             src={poster}
-            alt={`Thumbnail for the video "${video.title}"`}
+            alt={playLabel}
             fill
             loading="lazy"
             sizes="(min-width: 1024px) 592px, (min-width: 640px) 90vw, 100vw"
@@ -92,7 +99,7 @@ export function LiteYouTube({ video }: { video: Video }) {
             onClick={play}
             onPointerEnter={warmConnections}
             onFocus={warmConnections}
-            aria-label={`Play video: ${video.title}`}
+            aria-label={playLabel}
             className="group/play absolute inset-0 flex cursor-pointer items-center justify-center focus-visible:outline-2"
           >
             <span

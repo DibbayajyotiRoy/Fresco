@@ -4,8 +4,12 @@
 <component type="desktop-application">
   <id>io.github.dibbayajyotiroy.Fresco</id>
 
+  <!-- The name is the brand and is not translated. Everything a store page
+       actually renders as prose has a zh_CN sibling; the release notes below
+       stay English, which AppStream handles by falling back per-element. -->
   <name>Fresco</name>
   <summary>Set videos and images as live wallpapers</summary>
+  <summary xml:lang="zh_CN">将视频和图片设为动态壁纸</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
@@ -16,24 +20,46 @@
       your desktop wallpaper. Pick media in a simple app, click Set, then close
       the app — the wallpaper keeps playing and is restored on login.
     </p>
+    <p xml:lang="zh_CN">
+      Fresco 可将视频、GIF、图片、幻灯片和视频播放列表设为桌面壁纸。在应用中
+      选择媒体文件，点击「设置」后即可关闭应用——壁纸会继续播放，并在登录后
+      自动恢复。
+    </p>
     <p>Features:</p>
+    <p xml:lang="zh_CN">功能：</p>
     <ul>
       <li>Looping video, animated GIF, static image, image slideshow, and video playlist wallpapers</li>
+      <li xml:lang="zh_CN">循环视频、动态 GIF、静态图片、图片幻灯片和视频播放列表壁纸</li>
       <li>Hardware-accelerated playback (VA-API / NVDEC) for low CPU usage without quality loss</li>
+      <li xml:lang="zh_CN">硬件加速播放（VA-API / NVDEC），CPU 占用极低且不损失画质</li>
       <li>A drag-to-crop and 90-degree rotate editor to frame exactly the region you want</li>
+      <li xml:lang="zh_CN">支持拖拽裁剪和 90 度旋转的编辑器，精确取景</li>
       <li>Per-wallpaper sound and volume, plus slideshow transitions (crossfade, fade, slide, Ken Burns)</li>
+      <li xml:lang="zh_CN">逐张壁纸独立设置声音与音量，以及幻灯片转场效果（交叉淡入、淡入淡出、滑动、缓慢推移）</li>
       <li>A wallpaper library with thumbnails, a recently-used row, and search</li>
+      <li xml:lang="zh_CN">带缩略图、最近使用和搜索的壁纸库</li>
       <li>Pause / resume, pause-on-battery, and auto-pause when a window goes fullscreen</li>
+      <li xml:lang="zh_CN">暂停/继续、使用电池时暂停，以及窗口全屏时自动暂停</li>
       <li>Multi-monitor support with per-display wallpapers and synced video playback</li>
+      <li xml:lang="zh_CN">多显示器支持，可为每个显示器单独设置壁纸并同步播放视频</li>
       <li>Add from a link: paste a Pinterest pin or a direct video/image URL</li>
+      <li xml:lang="zh_CN">从链接添加：粘贴 Pinterest 图钉或视频/图片的直接链接</li>
       <li>Day and night wallpaper schedules</li>
+      <li xml:lang="zh_CN">日间与夜间壁纸定时切换</li>
       <li>A curated in-app wallpaper catalog</li>
+      <li xml:lang="zh_CN">应用内精选壁纸库</li>
       <li>A command palette (Ctrl+K) for fast keyboard-driven control</li>
+      <li xml:lang="zh_CN">命令面板（Ctrl+K），键盘快速操作</li>
     </ul>
     <p>
       Fresco runs on X11 and on Wayland layer-shell compositors (COSMIC,
       Hyprland, Sway, KDE Plasma 6); GNOME on Wayland uses a static-frame
       fallback.
+    </p>
+    <p xml:lang="zh_CN">
+      Fresco 可运行于 X11，以及支持 layer-shell 的 Wayland 合成器（COSMIC、
+      Hyprland、Sway、KDE Plasma 6）；GNOME on Wayland 使用静态帧回退方案。
+      在深度操作系统 Deepin 25 上，Fresco 运行于默认的 X11 会话。
     </p>
   </description>
 
@@ -43,6 +69,7 @@
     <screenshot type="default">
       <image>https://raw.githubusercontent.com/DibbayajyotiRoy/fresco/main/data/screenshots/gallery.png</image>
       <caption>The wallpaper library</caption>
+      <caption xml:lang="zh_CN">壁纸库</caption>
     </screenshot>
   </screenshots>
 
@@ -62,6 +89,11 @@
   </branding>
 
   <releases>
+    <release version="1.1.37" date="2026-08-04">
+      <description>
+        <p>Talk to the maintainer from inside Fresco. A private, two-way thread with no account and no email address, anonymous in both directions, so a problem can be worked through instead of ending at a rating nobody can follow up on. Bad feedback can now be replied to as well, if you allow it when you send it. Usage statistics are also clearer: everyone is asked again, because what the two answers mean has changed — both now count one anonymous install and its country, while the detail (your distro, desktop, city, and the exact time of use) is what accepting all adds. Full terms are in TERMS.md.</p>
+      </description>
+    </release>
     <release version="1.1.36" date="2026-07-30">
       <description>
         <p>Widgets on your wallpaper. Synced song lyrics that follow whatever is playing, a clock with six themes including a translucent glass card with an analog face, an audio visualiser that draws the music, and a spinning album-art disc. All are off until you turn them on, none repaint unless what they show has changed, and the visualiser asks before it listens to your audio. Also a new app icon, and fixes for lyrics not following an automatic track change and for widgets appearing on only one display.</p>

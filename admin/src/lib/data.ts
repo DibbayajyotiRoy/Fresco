@@ -3,6 +3,7 @@ import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type {
   CatalogItem,
+  DailyCountry,
   Feedback,
   Issue,
   Notification,
@@ -10,6 +11,8 @@ import type {
   Repo,
   FeatureEvent,
   Install,
+  SupportMessage,
+  SupportThread,
   TelemetryError,
   TelemetryEvent,
 } from "@/lib/types";
@@ -42,7 +45,7 @@ export async function getFeedback(): Promise<DataResult<Feedback[]>> {
 
   const { data, error } = await supabase
     .from("feedback")
-    .select("id, created_at, rating, comment, app_version, os")
+    .select("id, created_at, rating, comment, app_version, os, ticket")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -253,7 +256,7 @@ export async function getInstalls(): Promise<DataResult<Install[]>> {
   const { data, error } = await supabase
     .from("installs")
     .select(
-      "install_id, version, distro, compositor, session, backend, decode, source, channel, monitor_count, first_seen, last_seen"
+      "install_id, version, distro, compositor, session, backend, decode, source, channel, country, city, region, minimal, monitor_count, first_seen, last_seen"
     )
     .order("last_seen", { ascending: false })
     .limit(10000);
@@ -359,4 +362,99 @@ export async function getCatalogItems(): Promise<DataResult<CatalogItem[]>> {
   }
 
   return { ok: true, data: (data ?? []) as CatalogItem[] };
+}
+
+/**
+ * Fetch the country-only cohort's daily tallies since `sinceIso` (a date).
+ *
+ * Returns an empty list rather than an error when the table does not exist
+ * yet: this ships ahead of the schema migration, and a dashboard that 500s
+ * because one panel is early is worse than a panel that says "no data".
+ */
+export async function getDailyCountrySince(
+  sinceDate: string
+): Promise<DataResult<DailyCountry[]>> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const { data, error } = await supabase
+    .from("daily_country")
+    .select("day, country, version, channel, pings")
+    .gte("day", sinceDate)
+    .order("day", { ascending: false })
+    .limit(10000);
+
+  if (error) {
+    // 42P01 = undefined_table: the migration has not been run yet.
+    if (error.code === "42P01") {
+      return { ok: true, data: [] };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: (data ?? []) as DailyCountry[] };
+}
+
+/**
+ * Every support thread, most recently active first, with its messages.
+ *
+ * Two queries rather than a join: the message list per thread is small, and
+ * fetching them flat keeps the shape obvious. Returns empty rather than an
+ * error when the tables do not exist yet, so this page works before the schema
+ * migration is applied.
+ */
+export async function getSupportThreads(): Promise<
+  DataResult<{ thread: SupportThread; messages: SupportMessage[] }[]>
+> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { ok: false, error: SUPABASE_MISSING };
+  }
+
+  const threadsRes = await supabase
+    .from("support_threads")
+    .select(
+      "ticket, created_at, last_at, env, app_version, status, unread_for_maintainer, unread_for_user, origin, rating"
+    )
+    .order("last_at", { ascending: false })
+    .limit(500);
+
+  if (threadsRes.error) {
+    if (threadsRes.error.code === "42P01") return { ok: true, data: [] };
+    return { ok: false, error: threadsRes.error.message };
+  }
+
+  const threads = (threadsRes.data ?? []) as SupportThread[];
+  if (threads.length === 0) return { ok: true, data: [] };
+
+  const messagesRes = await supabase
+    .from("support_messages")
+    .select("id, ticket, sender, body, created_at")
+    .in(
+      "ticket",
+      threads.map((t) => t.ticket)
+    )
+    .order("created_at", { ascending: true })
+    .limit(5000);
+
+  if (messagesRes.error) {
+    return { ok: false, error: messagesRes.error.message };
+  }
+
+  const byTicket = new Map<string, SupportMessage[]>();
+  for (const m of (messagesRes.data ?? []) as SupportMessage[]) {
+    const list = byTicket.get(m.ticket) ?? [];
+    list.push(m);
+    byTicket.set(m.ticket, list);
+  }
+
+  return {
+    ok: true,
+    data: threads.map((thread) => ({
+      thread,
+      messages: byTicket.get(thread.ticket) ?? [],
+    })),
+  };
 }

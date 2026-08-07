@@ -11,12 +11,15 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-      <h1 className="font-serif text-2xl tracking-tight text-stone-900">
+      <h1 className="font-serif text-2xl tracking-tight text-stone-900 text-balance">
         {title}
       </h1>
       <div className="flex items-baseline gap-3">
         {meta ? (
-          <span className="font-mono text-meta tracking-wide text-stone-400 uppercase tabular-nums">
+          // stone-500, matching PanelHeader: the house rule is that an
+          // instrument meta line sits exactly one step below a stone-900
+          // title. At 11px uppercase mono, stone-400 was a step too far.
+          <span className="font-mono text-meta tracking-wide text-stone-500 uppercase tabular-nums">
             {meta}
           </span>
         ) : null}

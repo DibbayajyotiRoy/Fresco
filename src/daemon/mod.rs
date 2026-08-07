@@ -359,6 +359,10 @@ pub struct Daemon {
     dde_mode: dde::Mode,
     /// True once the one-time DDE render self-check has run (it blocks ~1s).
     dde_self_checked: bool,
+    /// Restack mode only: lets the desktop icons stay up for a few seconds
+    /// after the user clicks the desktop, instead of burying them again on the
+    /// next stacking pass.
+    dde_peek: dde::IconPeek,
     /// On-wallpaper widgets (lyrics, clock). Owns its own worker thread and
     /// hands back only overlays whose content actually changed, so an idle
     /// desktop costs nothing (see docs/WIDGETS_ROADMAP.md "Power model").
@@ -395,6 +399,7 @@ impl Daemon {
             heals: 0,
             dde_mode: dde::Mode::Inactive,
             dde_self_checked: false,
+            dde_peek: dde::IconPeek::default(),
             widgets,
         })
     }
@@ -763,11 +768,19 @@ impl Daemon {
     /// lowering back to the bottom; in DDE restack mode our windows must be
     /// RAISED instead — lowering there would drop the wallpaper straight back
     /// under dde-shell's desktop window a couple of seconds after it appeared.
-    fn reassert_stacking(&self) {
+    ///
+    /// The DDE raise is not unconditional: when the user clicks the desktop,
+    /// DDE's window comes up above ours and the icons become usable, so the
+    /// raise waits out `dde_icon_peek_secs` before taking the stack back (see
+    /// [`dde::IconPeek`]).
+    fn reassert_stacking(&mut self) {
         if self.dde_mode == dde::Mode::Restack {
             let windows: Vec<x11rb::protocol::xproto::Window> =
                 self.renderers.iter().map(|r| r.window.window).collect();
-            dde::restack_above_dde_desktop(&self.conn, &windows);
+            let root = self.screen().root;
+            let peek = dde::icon_peek(self.config.dde_icon_peek_secs);
+            self.dde_peek
+                .tick(&self.conn, &self.atoms, root, &windows, peek);
             return;
         }
         for r in &self.renderers {

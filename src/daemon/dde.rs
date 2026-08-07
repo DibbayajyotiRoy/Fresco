@@ -14,12 +14,19 @@
 //!  * What works: create our windows as [`WindowKind::DdeRaised`] and raise
 //!    them with a sibling-less `ConfigureWindow(Above)`.
 //!
-//! So on Deepin 25 the raise ("restack") is the only working strategy. The DBus
-//! transparency path is kept for the explicit `transparent` preference — it
-//! still serves older DDE (dde-desktop on Deepin 20/23), and it is the only
-//! option when no dde-shell desktop window exists at all — and it persists the
-//! user's original wallpaper to the fresco state dir so it can be restored on
-//! shutdown, or on a later startup after a crash.
+//! So on Deepin 25 the raise ("restack") is the only working strategy — and
+//! because DDE paints its wallpaper and its icons into that one opaque window,
+//! a raise that shows the video necessarily hides the icons. There is no
+//! stacking position that shows both. What the raise can do is get out of the
+//! way when the icons are actually being used: clicking the desktop makes KWin
+//! raise DDE's window above ours, and [`IconPeek`] leaves it there for a few
+//! seconds instead of burying it on the next stacking pass.
+//!
+//! The DBus transparency path is kept for the explicit `transparent`
+//! preference — it still serves older DDE (dde-desktop on Deepin 20/23), and it
+//! is the only option when no dde-shell desktop window exists at all — and it
+//! persists the user's original wallpaper to the fresco state dir so it can be
+//! restored on shutdown, or on a later startup after a crash.
 //!
 //! No DBus crate: we shell out to `gdbus` (ships with glib on Deepin) and
 //! parse its output leniently.
@@ -28,6 +35,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use x11rb::connection::Connection;
@@ -69,7 +77,8 @@ pub enum Mode {
     Inactive,
     /// DDE's wallpaper was made transparent over DBus; ours shows through.
     DBus,
-    /// Our windows are raised above dde-shell's desktop window (icons hidden).
+    /// Our windows are raised above dde-shell's desktop window (icons hidden
+    /// until the desktop is clicked — see [`IconPeek`]).
     Restack,
 }
 
@@ -325,8 +334,9 @@ pub fn apply<C: Connection>(
         restore();
         return if restack_above_dde_desktop(conn, windows) {
             log::warn!(
-                "DDE: raising wallpaper above dde-shell's desktop window — \
-                 desktop icons may be hidden in this mode"
+                "DDE: raising wallpaper above dde-shell's desktop window — desktop \
+                 icons are hidden while it plays; clicking the desktop brings them \
+                 back for `dde_icon_peek_secs` seconds"
             );
             Mode::Restack
         } else {
@@ -475,9 +485,206 @@ pub fn restack_above_dde_desktop<C: Connection>(conn: &C, windows: &[Window]) ->
     ok
 }
 
-/// The client window whose WM_CLASS is "dde-shell"/"desktop", from
-/// `_NET_CLIENT_LIST_STACKING`.
-fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Option<Window> {
+/// Parse a `FRESCO_DDE_ICON_PEEK` value (whole seconds). `None` = no override.
+fn parse_peek_secs(s: &str) -> Option<u32> {
+    s.trim().parse::<u32>().ok()
+}
+
+/// The effective peek window: `FRESCO_DDE_ICON_PEEK` (seconds) overrides the
+/// `dde_icon_peek_secs` config key. Zero means never yield — the wallpaper
+/// re-covers the icons on the next stacking pass, which is what 1.1.37 did.
+/// Called on every stacking pass (~2s), so the env override is announced once.
+static PEEK_ENV_LOGGED: AtomicBool = AtomicBool::new(false);
+
+pub fn icon_peek(config_secs: u32) -> Duration {
+    let secs = match std::env::var("FRESCO_DDE_ICON_PEEK") {
+        Ok(v) => {
+            let first = !PEEK_ENV_LOGGED.swap(true, Ordering::Relaxed);
+            match parse_peek_secs(&v) {
+                Some(s) => {
+                    if first {
+                        log::info!("DDE: FRESCO_DDE_ICON_PEEK={v} overrides config ({s}s)");
+                    }
+                    s
+                }
+                None => {
+                    if first {
+                        log::warn!(
+                            "DDE: ignoring invalid FRESCO_DDE_ICON_PEEK={v:?} (want whole seconds)"
+                        );
+                    }
+                    config_secs
+                }
+            }
+        }
+        Err(_) => config_secs,
+    };
+    Duration::from_secs(u64::from(secs))
+}
+
+/// What a periodic stacking pass should do in [`Mode::Restack`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeekAction {
+    /// Put the wallpaper back on top of DDE's desktop window.
+    Raise,
+    /// Leave the stack alone: DDE's desktop — and so the icons — is on top.
+    Yield,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PeekState {
+    /// Wallpaper on top, watching for DDE to raise its desktop.
+    #[default]
+    Idle,
+    /// Icons are showing; stay out of the way until this instant.
+    Peeking(Instant),
+    /// The peek is over and we are raising again. A new peek may only start
+    /// once the raise has visibly taken effect — otherwise the very condition
+    /// that ends a peek (DDE's desktop still above us, because we just yielded
+    /// to it) would immediately start the next one and the wallpaper would
+    /// never come back.
+    Recovering,
+}
+
+/// Restack mode's truce with the desktop icons.
+///
+/// On Deepin 25 DDE paints its wallpaper and its icons into one opaque window,
+/// so a wallpaper that is visible is a wallpaper that covers the icons — there
+/// is no stacking position that shows both. Clicking the desktop makes KWin
+/// raise that window above ours, which is the only moment the icons are usable;
+/// before 1.1.38 the next stacking pass buried them again about two seconds
+/// later, which read as "the icons flash and disappear" (reported on Deepin 25).
+///
+/// So the raise now yields to that click: when DDE's desktop comes up above the
+/// wallpaper we leave it there for [`icon_peek`], then take the stack back.
+/// Interacting with the desktop again starts a new peek.
+#[derive(Debug, Default)]
+pub struct IconPeek {
+    state: PeekState,
+    /// DDE's desktop windows, cached across passes; re-scanned only when none
+    /// of them is in the stacking list any more (DDE restarted).
+    dde_windows: Vec<Window>,
+    /// When the client list was last walked looking for them, so a session with
+    /// no DDE desktop window at all (restack forced by hand) doesn't re-read
+    /// every client's WM_CLASS every couple of seconds.
+    last_scan: Option<Instant>,
+    /// One-time log line, so a ~2s cadence doesn't fill the journal.
+    logged: bool,
+}
+
+/// How long a fruitless search for DDE's desktop window is trusted for.
+const RESCAN_AFTER: Duration = Duration::from_secs(30);
+
+impl IconPeek {
+    /// Pure state transition, so the timing rules are testable without X11.
+    fn step(&mut self, now: Instant, dde_above: bool, peek: Duration) -> PeekAction {
+        if peek.is_zero() {
+            self.state = PeekState::Idle;
+            return PeekAction::Raise;
+        }
+        match self.state {
+            PeekState::Idle => {
+                if dde_above {
+                    self.state = PeekState::Peeking(now + peek);
+                    PeekAction::Yield
+                } else {
+                    PeekAction::Raise
+                }
+            }
+            PeekState::Peeking(until) => {
+                if now < until {
+                    PeekAction::Yield
+                } else {
+                    self.state = PeekState::Recovering;
+                    PeekAction::Raise
+                }
+            }
+            PeekState::Recovering => {
+                if !dde_above {
+                    self.state = PeekState::Idle;
+                }
+                PeekAction::Raise
+            }
+        }
+    }
+
+    /// One periodic stacking pass in [`Mode::Restack`]: raise the wallpaper
+    /// back over DDE's desktop, unless the user is mid-peek at their icons.
+    pub fn tick<C: Connection>(
+        &mut self,
+        conn: &C,
+        atoms: &Atoms,
+        root: Window,
+        windows: &[Window],
+        peek: Duration,
+    ) {
+        if windows.is_empty() {
+            return;
+        }
+        let above = !peek.is_zero() && self.dde_above(conn, atoms, root, windows);
+        let was_idle = self.state == PeekState::Idle;
+        match self.step(Instant::now(), above, peek) {
+            PeekAction::Raise => {
+                restack_above_dde_desktop(conn, windows);
+            }
+            PeekAction::Yield if was_idle => {
+                if self.logged {
+                    log::debug!("DDE: desktop raised; holding the icons visible for {peek:?}");
+                } else {
+                    self.logged = true;
+                    log::info!(
+                        "DDE: desktop raised (icons in use) — holding the wallpaper below it for \
+                         {peek:?}, then taking the stack back. Tune with the `dde_icon_peek_secs` \
+                         config key (0 disables the hold)."
+                    );
+                }
+            }
+            PeekAction::Yield => {}
+        }
+    }
+
+    /// Whether any DDE desktop window currently sits above our wallpaper.
+    fn dde_above<C: Connection>(
+        &mut self,
+        conn: &C,
+        atoms: &Atoms,
+        root: Window,
+        windows: &[Window],
+    ) -> bool {
+        let stack = client_list_stacking(conn, atoms, root);
+        if stack.is_empty() {
+            return false;
+        }
+        if !self.dde_windows.iter().any(|w| stack.contains(w)) {
+            let now = Instant::now();
+            match self.last_scan {
+                Some(t) if now.duration_since(t) < RESCAN_AFTER => return false,
+                _ => {}
+            }
+            self.last_scan = Some(now);
+            self.dde_windows = find_dde_desktop_windows(conn, atoms, root);
+        }
+        dde_above_in_stack(&stack, windows, &self.dde_windows)
+    }
+}
+
+/// True when some DDE desktop window sits above some wallpaper window in
+/// `stack` (bottom-most first).
+///
+/// False whenever either side is absent from the list: an unreadable stack is
+/// not evidence that the icons are in use, and the caller must then keep doing
+/// what it did before — raising.
+fn dde_above_in_stack(stack: &[Window], ours: &[Window], dde: &[Window]) -> bool {
+    let pos = |w: &Window| stack.iter().position(|s| s == w);
+    let Some(lowest_ours) = ours.iter().filter_map(pos).min() else {
+        return false;
+    };
+    dde.iter().filter_map(pos).any(|p| p > lowest_ours)
+}
+
+/// `_NET_CLIENT_LIST_STACKING` on `root`, bottom-most window first. Empty when
+/// the property cannot be read.
+fn client_list_stacking<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Vec<Window> {
     // long_length is in 4-byte units and must stay well clear of the server's
     // overflow guard — u32::MAX makes Xorg reject the request outright, which
     // silently defeated the whole scan. 4096 windows is far past any real
@@ -497,7 +704,7 @@ fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window)
         Ok(r) => r,
         Err(e) => {
             log::warn!("DDE: could not read _NET_CLIENT_LIST_STACKING: {e}");
-            return None;
+            return Vec::new();
         }
     };
     let Some(values) = reply.value32() else {
@@ -505,10 +712,17 @@ fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window)
             "DDE: _NET_CLIENT_LIST_STACKING has unexpected format {}",
             reply.format
         );
-        return None;
+        return Vec::new();
     };
-    let clients: Vec<Window> = values.collect();
+    values.collect()
+}
+
+/// Every client window whose WM_CLASS marks it as DDE's desktop — one per
+/// screen on a multi-monitor session.
+fn find_dde_desktop_windows<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Vec<Window> {
+    let clients = client_list_stacking(conn, atoms, root);
     log::debug!("DDE: scanning {} client windows", clients.len());
+    let mut found = Vec::new();
     for w in clients {
         let Ok(cookie) = conn.get_property(false, w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 1024)
         else {
@@ -521,10 +735,18 @@ fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window)
             String::from_utf8_lossy(&prop.value)
         );
         if wm_class_is_dde_desktop(&prop.value) {
-            return Some(w);
+            found.push(w);
         }
     }
-    None
+    found
+}
+
+/// The lowest-stacked DDE desktop window, or `None` when DDE paints no desktop
+/// window at all (older DDE, or the desktop disabled).
+fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Option<Window> {
+    find_dde_desktop_windows(conn, atoms, root)
+        .into_iter()
+        .next()
 }
 
 /// WM_CLASS is two NUL-terminated strings: instance, class.
@@ -634,6 +856,116 @@ mod tests {
             select_strategy(DdeMode::Auto, false).window_kind(),
             WindowKind::Desktop
         );
+    }
+
+    /// The whole point of the peek: a click that raises DDE's desktop keeps the
+    /// icons up for the configured window, and the wallpaper comes back after.
+    #[test]
+    fn peek_yields_to_a_desktop_raise_then_takes_the_stack_back() {
+        let t0 = Instant::now();
+        let peek = Duration::from_secs(10);
+        let mut p = IconPeek::default();
+
+        // Nobody has touched the desktop: keep the wallpaper on top.
+        assert_eq!(p.step(t0, false, peek), PeekAction::Raise);
+
+        // The user clicks the desktop — DDE's window comes up above ours.
+        assert_eq!(p.step(t0, true, peek), PeekAction::Yield);
+        // ...and stays there for the whole peek, click or no click.
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(2), true, peek),
+            PeekAction::Yield
+        );
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(9), true, peek),
+            PeekAction::Yield
+        );
+
+        // Peek over: raise, and keep raising while DDE's desktop is still on
+        // top — that is exactly the state we ourselves created by yielding, so
+        // it must not be read as a fresh click (which would loop forever).
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(10), true, peek),
+            PeekAction::Raise
+        );
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(12), true, peek),
+            PeekAction::Raise
+        );
+
+        // The raise took effect; we are back to watching.
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(14), false, peek),
+            PeekAction::Raise
+        );
+        assert_eq!(p.state, PeekState::Idle);
+
+        // A second click gets a full peek of its own.
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(16), true, peek),
+            PeekAction::Yield
+        );
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(25), true, peek),
+            PeekAction::Yield
+        );
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(26), true, peek),
+            PeekAction::Raise
+        );
+    }
+
+    /// `dde_icon_peek_secs = 0` restores the pre-1.1.38 behaviour: always raise.
+    #[test]
+    fn zero_peek_never_yields() {
+        let t0 = Instant::now();
+        let mut p = IconPeek::default();
+        for dde_above in [false, true, true, false] {
+            assert_eq!(p.step(t0, dde_above, Duration::ZERO), PeekAction::Raise);
+            assert_eq!(p.state, PeekState::Idle);
+        }
+    }
+
+    /// Turning the peek off mid-peek must not strand the wallpaper below DDE.
+    #[test]
+    fn zero_peek_cancels_a_running_peek() {
+        let t0 = Instant::now();
+        let mut p = IconPeek::default();
+        assert_eq!(p.step(t0, true, Duration::from_secs(10)), PeekAction::Yield);
+        assert_eq!(
+            p.step(t0 + Duration::from_secs(1), true, Duration::ZERO),
+            PeekAction::Raise
+        );
+    }
+
+    #[test]
+    fn peek_seconds_parsing() {
+        assert_eq!(parse_peek_secs("10"), Some(10));
+        assert_eq!(parse_peek_secs(" 30\n"), Some(30));
+        assert_eq!(parse_peek_secs("0"), Some(0));
+        assert_eq!(parse_peek_secs(""), None);
+        assert_eq!(parse_peek_secs("-1"), None);
+        assert_eq!(parse_peek_secs("10s"), None);
+    }
+
+    /// Stacking is read bottom-most first, so a *higher* index is nearer the
+    /// user. Either side missing means "no evidence" — the caller then raises,
+    /// which is what it did before the peek existed.
+    #[test]
+    fn dde_above_detection() {
+        // ours at 1, DDE's desktop at 0: the wallpaper is on top, no peek.
+        assert!(!dde_above_in_stack(&[10, 20], &[20], &[10]));
+        // The user clicked: DDE's desktop is now above the wallpaper.
+        assert!(dde_above_in_stack(&[20, 10], &[20], &[10]));
+        // Multi-monitor: one raised DDE window is enough, and the comparison is
+        // against the lowest wallpaper window.
+        assert!(dde_above_in_stack(&[21, 10, 20, 11], &[20, 21], &[10, 11]));
+        assert!(!dde_above_in_stack(&[10, 11, 20, 21], &[20, 21], &[10, 11]));
+        // Unknown stack, or either side absent from it.
+        assert!(!dde_above_in_stack(&[], &[20], &[10]));
+        assert!(!dde_above_in_stack(&[10, 20], &[], &[10]));
+        assert!(!dde_above_in_stack(&[10, 20], &[20], &[]));
+        assert!(!dde_above_in_stack(&[10, 20], &[99], &[10]));
     }
 
     #[test]

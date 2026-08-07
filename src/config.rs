@@ -1038,6 +1038,16 @@ fn default_true() -> bool {
     true
 }
 
+/// Seconds the wallpaper steps aside once DDE raises its desktop window, so the
+/// icons the user just clicked stay usable. Long enough to read a folder and
+/// double-click something; short enough that a desktop nobody is touching shows
+/// the live wallpaper. See [`Config::dde_icon_peek_secs`].
+pub const DEFAULT_DDE_ICON_PEEK_SECS: u32 = 10;
+
+fn default_dde_icon_peek_secs() -> u32 {
+    DEFAULT_DDE_ICON_PEEK_SECS
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Wallpaper {
     #[serde(default)]
@@ -1134,6 +1144,12 @@ pub struct Config {
     /// Deepin DDE strategy (auto | transparent | restack); see [`DdeMode`].
     #[serde(default)]
     pub dde_mode: DdeMode,
+    /// Seconds the wallpaper stays out of the way after DDE raises its desktop
+    /// window — i.e. how long the desktop icons remain usable once clicked.
+    /// Restack mode only, since that is the only mode where the wallpaper
+    /// covers them at all. 0 = never yield. Env: `FRESCO_DDE_ICON_PEEK`.
+    #[serde(default = "default_dde_icon_peek_secs")]
+    pub dde_icon_peek_secs: u32,
     /// Light/dark preference (System follows the desktop).
     #[serde(default)]
     pub theme_mode: ThemeMode,
@@ -1284,6 +1300,7 @@ impl Default for Config {
             power_saving: PowerSaving::default(),
             framerate: 0,
             dde_mode: DdeMode::default(),
+            dde_icon_peek_secs: default_dde_icon_peek_secs(),
             theme_mode: ThemeMode::default(),
             language: crate::i18n::Language::default(),
             accent: Accent::default(),
@@ -1423,6 +1440,20 @@ mod tests {
         // Absent power_saving key → Reduced: measured to capture nearly all the
         // available GPU saving at 1080p for a barely-visible softening.
         assert_eq!(cfg.power_saving, PowerSaving::Reduced);
+        // A config written before 1.1.38 has no icon-peek key, and must still
+        // get the peek — that is the whole fix for the Deepin icon report.
+        assert_eq!(cfg.dde_icon_peek_secs, DEFAULT_DDE_ICON_PEEK_SECS);
+        assert_ne!(DEFAULT_DDE_ICON_PEEK_SECS, 0);
+    }
+
+    /// An explicit `0` must survive; it is the documented "never yield" escape
+    /// hatch, and a `#[serde(default)]` that swallowed it would be a bug.
+    #[test]
+    fn icon_peek_zero_is_kept() {
+        let cfg: Config = toml::from_str("dde_icon_peek_secs = 0").unwrap();
+        assert_eq!(cfg.dde_icon_peek_secs, 0);
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.dde_icon_peek_secs, 0);
     }
 
     #[test]

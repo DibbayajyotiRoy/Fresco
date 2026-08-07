@@ -34,11 +34,55 @@
   --radius-lg: 8px;
   --radius-xl: 12px;
 
+  /* Easing. The built-in CSS curves are too weak to read as intentional at
+     these durations; these are the only three the dashboard uses.
+     `--ease-exit` is the signature curve and belongs on anything entering. */
+  --ease-exit: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-hover: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Elevation. Two steps only: resting panels sit on a hairline with barely
+     any shadow, lifted surfaces (dialogs, dropdowns) get real depth. Warm,
+     not neutral — a grey shadow on stone paper reads as dirt. */
+  --shadow-panel: 0 1px 2px 0 rgb(28 25 23 / 0.04);
+  --shadow-panel-hover: 0 1px 3px 0 rgb(28 25 23 / 0.07),
+    0 1px 2px -1px rgb(28 25 23 / 0.05);
+  --shadow-lift: 0 10px 32px -8px rgb(28 25 23 / 0.16),
+    0 2px 8px -2px rgb(28 25 23 / 0.08);
+
   /* House keyframes. Signature curve cubic-bezier(0.16, 1, 0.3, 1). */
   --animate-fade-in: fade-in 120ms ease-out both;
   --animate-modal-pop: modal-pop 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-drawer-in: drawer-in 180ms ease-out both;
   --animate-row-flash: row-flash 2.4s ease-out both;
+
+  /* Streamed-in content. Each Suspense boundary resolves when its own query
+     lands, so applying this to a section's resolved markup buys a natural
+     stagger for free — no delays to hand-tune, because the network already
+     spaced them out. Short and small: this fires on every navigation, and
+     anything longer than ~260ms or further than 4px starts to feel like the
+     page is still loading after it has finished. */
+  --animate-section-in: section-in 260ms var(--ease-exit) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+
+  @keyframes section-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
 
   @keyframes fade-in {
     from {
@@ -219,6 +263,68 @@
   }
 }
 
+/* ── Polish layer ───────────────────────────────────────────────────────────
+   Small, shared behaviours that every surface opts into by class, so the
+   dashboard is consistent by construction rather than by each component
+   remembering. Nothing here changes layout. */
+@layer components {
+  /* Pressable. Instant, physical confirmation that the interface heard the
+     click. Kept subtle (0.97) and fast (120ms) — anything slower reads as lag
+     on a control you hit dozens of times an hour. */
+  .press {
+    transition: transform 120ms var(--ease-hover);
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
+
+  /* Resting surface that reacts to the pointer. Hover is gated behind a real
+     pointer: on touch, `:hover` sticks after a tap and leaves a panel looking
+     permanently focused. */
+  .surface {
+    box-shadow: var(--shadow-panel);
+    transition:
+      box-shadow 180ms var(--ease-hover),
+      border-color 180ms var(--ease-hover);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .surface:hover {
+      box-shadow: var(--shadow-panel-hover);
+      border-color: #d6d3d1; /* stone-300 */
+    }
+    html.dark .surface:hover {
+      border-color: #44403c; /* stone-700 */
+    }
+  }
+
+  /* Content that has just streamed in from a Suspense boundary. */
+  .section-in {
+    animation: var(--animate-section-in);
+  }
+
+  /* Skeletons. A directional sweep reads as "work in progress"; a pulse reads
+     as "something is blinking at me". Falls back to the pulse under reduced
+     motion via the global rule at the end of this file. */
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(255 255 255 / 0.65) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+  html.dark .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(255 255 255 / 0.05) 50%,
+      transparent 100%
+    );
+  }
+}
+
 /* ── Dark mode: wholesale remap ─────────────────────────────────────────────
    Components author light-only in explicit stone-* utilities; dark mode is a
    global remap. Explicit `dark:` variants still win where declared (they are
@@ -288,6 +394,9 @@ html.dark .bg-sky-600\/10 {
 html.dark .hover\:bg-stone-100:hover,
 html.dark .hover\:bg-stone-50:hover {
   background-color: #292524 !important;
+}
+html.dark .hover\:border-stone-300:hover {
+  border-color: #44403c !important;
 }
 /* zebra */
 html.dark .odd\:bg-white:nth-child(odd) {

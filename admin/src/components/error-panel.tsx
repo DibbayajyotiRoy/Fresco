@@ -47,12 +47,19 @@ export function ErrorPanel({
   const tone = TONES[classify(message)];
   return (
     <div
-      className={cn("rounded-lg border px-4 py-4", tone.box, className)}
+      // shadow-panel, not `.surface`: this box wants the resting elevation of
+      // a real card, but `.surface`'s hover swaps border-color to stone and
+      // would wash the tone right off the failure.
+      className={cn(
+        "rounded-lg border px-4 py-4 shadow-panel",
+        tone.box,
+        className
+      )}
       role="alert"
     >
       <p
         className={cn(
-          "flex items-center gap-2 font-mono text-meta tracking-widest uppercase",
+          "flex items-center gap-2 font-mono text-meta font-medium tracking-widest uppercase select-none",
           tone.ribbon
         )}
       >

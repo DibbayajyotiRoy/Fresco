@@ -1,683 +1,188 @@
+import { Suspense } from "react";
+
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { EmptyState } from "@/components/empty-state";
-import { ErrorPanel } from "@/components/error-panel";
-import { Notice } from "@/components/notice";
-import { Panel, PanelHeader } from "@/components/panel";
+import { Streamed } from "@/components/streamed";
 import {
-  DataTable,
-  NullCell,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-} from "@/components/data-table";
+  GlobeSkeletonPanel,
+  PanelSkeleton,
+  Skeleton,
+  StatRowSkeleton,
+} from "@/components/skeleton";
+
+import { ActivityMeta, ActivitySection } from "./sections/activity-section";
+import { DownloadsMeta, DownloadsSection } from "./sections/downloads-section";
 import {
-  DistributionList,
-  type DistributionItem,
-} from "@/components/distribution-list";
-import {
-  getEventsSince,
-  getFeatureEventsSince,
-  getInstalls,
-} from "@/lib/data";
-import type { FeatureEvent } from "@/lib/types";
-import { BREAKDOWN_HELP, KNOWN_EVENTS, eventMeta } from "@/lib/events";
-import { formatNumber, formatRelative, truncateId } from "@/lib/format";
+  EnvironmentMeta,
+  EnvironmentSection,
+} from "./sections/environment-section";
+import { UsageHeaderMeta } from "./sections/header-meta";
+import { ReachMeta, ReachSection } from "./sections/reach-section";
+import { StreamingSection } from "./sections/section-shell";
+import { DAY_MS } from "./sections/shared";
+import { WhereMeta, WhereSection } from "./sections/where-section";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/** Placeholder for a section meta, which is always a short mono count. */
+const metaFallback = <Skeleton className="h-2.5 w-32" />;
 
-/** Bucket freeform values into a top-N breakdown with an "Other" rollup. */
-function topDistribution(
-  values: (string | null)[],
-  n = 6
-): DistributionItem[] {
-  const counts = new Map<string, number>();
-  for (const v of values) {
-    const key = v?.trim() || "Unknown";
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  const sorted = [...counts.entries()]
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value);
-
-  if (sorted.length <= n) return sorted;
-  const head = sorted.slice(0, n);
-  const other = sorted.slice(n).reduce((s, i) => s + i.value, 0);
-  return [...head, { label: "Other", value: other }];
-}
-
-const DEPTH_EVENTS = ["add_from_link", "browser_wallpaper_set"] as const;
-
-/** Two-letter code -> display name, for the countries that actually show up.
- *  Anything unmapped renders as its own code, which is still readable. */
-const COUNTRY_NAMES: Record<string, string> = {
-  US: "United States", IN: "India", BR: "Brazil", DE: "Germany",
-  FR: "France", GB: "United Kingdom", RU: "Russia", CN: "China",
-  JP: "Japan", ES: "Spain", IT: "Italy", PL: "Poland", NL: "Netherlands",
-  CA: "Canada", AU: "Australia", MX: "Mexico", ID: "Indonesia",
-  TR: "Turkey", UA: "Ukraine", KR: "South Korea", VN: "Vietnam",
-  AR: "Argentina", SE: "Sweden", CZ: "Czechia", PT: "Portugal",
-  RO: "Romania", BD: "Bangladesh", PK: "Pakistan", PH: "Philippines",
-  NG: "Nigeria", EG: "Egypt", TH: "Thailand", TW: "Taiwan",
-};
-
-/** '??' is the daily_country sentinel for "the edge header did not arrive";
- *  installs.country uses SQL null for the same case. Both read "Unknown". */
-const countryLabel = (code: string | null) => {
-  if (!code || code === "??") return "Unknown";
-  return COUNTRY_NAMES[code] ? `${COUNTRY_NAMES[code]} (${code})` : code;
-};
-
-/** Bucket a freeform prop value, mapping absent/odd values to "unknown". */
-function propBucket(props: Record<string, unknown> | null, key: string): string {
-  const v = props?.[key];
-  return typeof v === "string" && v.trim() ? v : "unknown";
-}
-
-type LinkRow = {
-  source: string;
-  kind: string;
-  outcome: string;
-  c7: number;
-  c30: number;
-};
-
-/** source × kind × outcome counts over 7d/30d for add_from_link. */
-function linkBreakdown(events: FeatureEvent[], cutoff7d: number): LinkRow[] {
-  const rows = new Map<string, LinkRow>();
-  for (const e of events) {
-    if (e.name !== "add_from_link") continue;
-    const source = propBucket(e.props, "source");
-    const kind = propBucket(e.props, "kind");
-    const ok = e.props?.ok;
-    const outcome = ok === true ? "ok" : ok === false ? "failed" : "unknown";
-    const key = `${source}|${kind}|${outcome}`;
-    const row = rows.get(key) ?? { source, kind, outcome, c7: 0, c30: 0 };
-    row.c30 += 1;
-    if (Date.parse(e.created_at) >= cutoff7d) row.c7 += 1;
-    rows.set(key, row);
-  }
-  return [...rows.values()].sort(
-    (a, b) =>
-      b.c30 - a.c30 ||
-      a.source.localeCompare(b.source) ||
-      a.kind.localeCompare(b.kind)
-  );
-}
-
-type DepthSummary = {
-  event: string;
-  installs: number;
-  median: number;
-  max: number;
-};
-
-type TopInstall = {
-  installId: string;
-  event: string;
-  c30: number;
-  lastUsed: string;
-};
-
-/** Per-install depth (30d): distinct installs, median/max events per
- *  using-install, and the heaviest install×event pairs. */
-function installDepth(events: FeatureEvent[]): {
-  summaries: DepthSummary[];
-  top: TopInstall[];
-} {
-  const perPair = new Map<string, TopInstall>();
-  for (const e of events) {
-    if (!e.install_id) continue;
-    const key = `${e.name}|${e.install_id}`;
-    const entry =
-      perPair.get(key) ??
-      ({ installId: e.install_id, event: e.name, c30: 0, lastUsed: e.created_at } as TopInstall);
-    entry.c30 += 1;
-    if (e.created_at > entry.lastUsed) entry.lastUsed = e.created_at;
-    perPair.set(key, entry);
-  }
-
-  const summaries = DEPTH_EVENTS.map((event) => {
-    const counts = [...perPair.values()]
-      .filter((p) => p.event === event)
-      .map((p) => p.c30)
-      .sort((a, b) => a - b);
-    const n = counts.length;
-    const median =
-      n === 0
-        ? 0
-        : n % 2 === 1
-          ? counts[(n - 1) / 2]
-          : (counts[n / 2 - 1] + counts[n / 2]) / 2;
-    return { event, installs: n, median, max: n ? counts[n - 1] : 0 };
-  });
-
-  const top = [...perPair.values()]
-    .sort((a, b) => b.c30 - a.c30 || b.lastUsed.localeCompare(a.lastUsed))
-    .slice(0, 8);
-
-  return { summaries, top };
-}
-
-export default async function UsagePage() {
+/**
+ * Usage — five bands, five Suspense boundaries.
+ *
+ * This component is deliberately synchronous: it awaits nothing, so the
+ * headings, the descriptions and the skeletons are in the HTML on the first
+ * flush and the previous page goes away immediately. Each band then fetches
+ * its own data and streams in when that data lands, in whatever order the
+ * network decides — which matters most for "Downloads vs installs", whose
+ * GitHub call costs about a second on its own and used to hold up the four
+ * KPI cards at the top of the page behind it.
+ *
+ * No band passes data to another. Sections that need the same query just call
+ * it; the data layer dedupes identical calls within a render, so five
+ * `getInstalls()` calls are one query. That is why the clock below is computed
+ * here and handed down: the 30-day cutoff has to be byte-identical in every
+ * section for those calls to look identical.
+ *
+ * No daily_country fetch: that table is the consent-revision-1 tally, and
+ * since revision 2 the essential tier writes a real install row instead. The
+ * rows already in it are historical and are deliberately not mixed into these
+ * counts, which would double-count anyone who spanned both revisions.
+ */
+export default function UsagePage() {
   const now = Date.now();
   const since30d = new Date(now - 30 * DAY_MS).toISOString();
-
-  // No daily_country fetch: that table is the consent-revision-1 tally, and
-  // since revision 2 the essential tier writes a real install row instead. The
-  // rows already in it are historical and are deliberately not mixed into
-  // these counts, which would double-count anyone who spanned both revisions.
-  const [installsRes, eventsRes, depthRes] = await Promise.all([
-    getInstalls(),
-    getEventsSince(since30d),
-    getFeatureEventsSince(since30d, [...DEPTH_EVENTS]),
-  ]);
-
-  const installs = installsRes.ok ? installsRes.data : [];
-  const events = eventsRes.ok ? eventsRes.data : [];
-
-  const activeIn = (days: number) => {
-    const cutoff = now - days * DAY_MS;
-    return installs.filter((i) => Date.parse(i.last_seen) >= cutoff).length;
-  };
-  const activeToday = activeIn(1);
-  const active7d = activeIn(7);
-  const active30d = activeIn(30);
-
-  // ── Cohorts (consent revision 2) ─────────────────────────────────────────
-  // Both tiers now write a real install row keyed by a random install id, so
-  // every window de-duplicates properly and "unique users" is a plain distinct
-  // count — no extrapolation, and no same-day-only caveat.
-  //
-  // The difference is depth, not countability: `minimal` rows carry identity,
-  // country, version and packaging, and nothing describing the machine. The
-  // environment breakdowns below therefore run over full-consent rows only,
-  // because counting a minimal row as "unknown distro" would misreport
-  // not-collected as unknown and silently skew every percentage.
-  const fullInstalls = installs.filter((i) => !i.minimal);
-  const minimalInstalls = installs.filter((i) => i.minimal);
-  const detailShare =
-    installs.length > 0
-      ? Math.round((fullInstalls.length / installs.length) * 100)
-      : null;
-
-  // Country spans both tiers, because both send it.
-  const countryCounts = new Map<string, number>();
-  for (const i of installs) {
-    const k = countryLabel(i.country);
-    countryCounts.set(k, (countryCounts.get(k) ?? 0) + 1);
-  }
-  const countryDist: DistributionItem[] = [...countryCounts.entries()]
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 12);
-  const countryTotal = [...countryCounts.values()].reduce((a, b) => a + b, 0);
-  const countryUnknown = countryCounts.get("Unknown") ?? 0;
-
-  // City is optional-tier only, so the base is full-consent rows and the panel
-  // says so — an essential row has no city because it was never sent, which is
-  // a different thing from a full-consent row whose city did not resolve.
-  const cityDist = topDistribution(
-    fullInstalls.map((i) =>
-      i.city ? (i.region ? `${i.city}, ${i.region}` : i.city) : null
-    ),
-    10
-  );
-
-  const versionDist = topDistribution(fullInstalls.map((i) => i.version));
-  const distroDist = topDistribution(fullInstalls.map((i) => i.distro));
-  const compositorDist = topDistribution(fullInstalls.map((i) => i.compositor));
-  const sessionDist = topDistribution(fullInstalls.map((i) => i.session));
-  const decodeDist = topDistribution(fullInstalls.map((i) => i.decode));
-  const sourceDist = topDistribution(fullInstalls.map((i) => i.source));
-  const channelDist = topDistribution(fullInstalls.map((i) => i.channel));
-
-  const cutoff7d = now - 7 * DAY_MS;
-  const featureCounts = new Map<string, { c7: number; c30: number }>();
-  for (const e of events) {
-    const entry = featureCounts.get(e.name) ?? { c7: 0, c30: 0 };
-    entry.c30 += 1;
-    if (Date.parse(e.created_at) >= cutoff7d) entry.c7 += 1;
-    featureCounts.set(e.name, entry);
-  }
-  // Seed every instrumented event at zero so "never used" is a visible row
-  // rather than a missing one — the difference between "no data" and "nobody
-  // uses this" is the whole point of the panel.
-  for (const name of KNOWN_EVENTS) {
-    if (!featureCounts.has(name)) featureCounts.set(name, { c7: 0, c30: 0 });
-  }
-  const features = [...featureCounts.entries()]
-    .map(([name, c]) => ({ name, ...c }))
-    .sort((a, b) => b.c30 - a.c30 || a.name.localeCompare(b.name));
-
-  const depthEvents = depthRes.ok ? depthRes.data : [];
-  const linkRows = linkBreakdown(depthEvents, cutoff7d);
-  const { summaries, top } = installDepth(depthEvents);
-
-  const breakdowns: { title: string; items: DistributionItem[] }[] = [
-    { title: "Distro", items: distroDist },
-    { title: "Desktop", items: compositorDist },
-    { title: "Session type", items: sessionDist },
-    { title: "Video decode", items: decodeDist },
-    { title: "Download source", items: sourceDist },
-    { title: "Install channel", items: channelDist },
-  ];
-
-  // Events can only be sent by an install, so events with zero recorded
-  // installs is not a real zero — it means the heartbeat write is failing
-  // while the event write succeeds. Surfaced rather than left to be misread
-  // as "nobody is using the app".
-  const installsBroken = installsRes.ok && installs.length === 0 && events.length > 0;
+  const time = { now, since30d };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <PageHeader
         title="Usage"
-        meta={
-          installsRes.ok
-            ? `${formatNumber(installs.length)} installs · ${formatNumber(events.length)} events / 30d`
-            : undefined
+        // The count belongs in `meta`, but that prop is a string and would
+        // hold the title back for two round-trips; `action` takes a node, so
+        // it can hold a boundary instead.
+        action={
+          <Suspense fallback={<Skeleton className="h-2.5 w-44" />}>
+            <UsageHeaderMeta since30d={since30d} />
+          </Suspense>
         }
       />
 
-      {installsBroken ? (
-        <Notice
-          label="install telemetry not recording"
-          title={`${formatNumber(events.length)} events arrived from installs that were never registered.`}
-        >
-          <p>
-            Every metric below that counts installs — active today/7d/30d, total
-            installs, and all six environment breakdowns — reads zero for this
-            reason, not because the app is unused. The client posts{" "}
-            <code className="font-mono text-[0.85em]">source</code> and{" "}
-            <code className="font-mono text-[0.85em]">channel</code> columns that
-            the <code className="font-mono text-[0.85em]">installs</code> table
-            does not have, so PostgREST rejects every heartbeat and the app logs
-            it at debug level. Feature usage is unaffected and is real.
-          </p>
-        </Notice>
-      ) : null}
+      {/* ── How many people ────────────────────────────────────────────── */}
+      <StreamingSection
+        title="Reach"
+        description="A distinct count of install ids in each window — not extrapolated, and not a request count. Both consent tiers register an install id, so nobody is missing from these figures except users who never answered the consent dialog, who send nothing at all."
+        meta={<Suspense fallback={metaFallback}><ReachMeta /></Suspense>}
+      >
+        <Suspense fallback={<StatRowSkeleton count={4} />}>
+          <Streamed>
+            <ReachSection {...time} />
+          </Streamed>
+        </Suspense>
+      </StreamingSection>
 
-      {/* The answer to "how many people use Fresco". A real distinct count in
-          every window since consent revision 2 put the install id in both
-          tiers — nothing here is extrapolated. */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <StatCard
-          label="Unique users 30d"
-          value={!installsRes.ok || installsBroken ? "—" : formatNumber(active30d)}
-          hint={
-            installsBroken
-              ? "not recorded — see above"
-              : "distinct installs seen this month"
-          }
-        />
-        <StatCard
-          label="Unique users total"
-          value={
-            !installsRes.ok || installsBroken ? "—" : formatNumber(installs.length)
-          }
-          hint="distinct installs ever seen"
-        />
-        <StatCard
-          label="Countries"
-          value={
-            countryTotal === 0
-              ? "—"
-              : formatNumber(
-                  countryCounts.size - (countryCounts.has("Unknown") ? 1 : 0)
-                )
-          }
-          hint={
-            countryUnknown > 0
-              ? `${formatNumber(countryUnknown)} unresolved`
-              : "resolved at the edge"
-          }
-        />
-        <StatCard
-          label="Shared full detail"
-          value={detailShare === null ? "—" : `${detailShare}%`}
-          hint={`${formatNumber(minimalInstalls.length)} essential-only`}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <StatCard
-          label="Active today"
-          value={!installsRes.ok || installsBroken ? "—" : formatNumber(activeToday)}
-          hint={
-            !installsRes.ok
-              ? installsRes.error
-              : installsBroken
-                ? "not recorded — see above"
-                : "installs that checked in today"
-          }
-        />
-        <StatCard
-          label="Active 7d"
-          value={!installsRes.ok || installsBroken ? "—" : formatNumber(active7d)}
-          hint={
-            installsBroken
-              ? "not recorded — see above"
-              : "installs that checked in this week"
-          }
-        />
-        <StatCard
-          label="Active 30d"
-          value={!installsRes.ok || installsBroken ? "—" : formatNumber(active30d)}
-          hint={
-            installsBroken
-              ? "not recorded — see above"
-              : "installs that checked in this month"
-          }
-        />
-        <StatCard
-          label="Total installs"
-          value={
-            !installsRes.ok || installsBroken ? "—" : formatNumber(installs.length)
-          }
-          hint={
-            installsBroken
-              ? "not recorded — see above"
-              : "every install ever seen"
-          }
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <Panel className="lg:col-span-3">
-          <PanelHeader
-            title="Country"
-            meta={
-              countryTotal === 0
-                ? "no data"
-                : `${formatNumber(countryTotal)} installs · every tier`
-            }
-          />
-          {countryDist.length === 0 ? (
-            <EmptyState
-              className="py-6"
-              title="No country data yet"
-              description="Countries arrive as clients on 1.1.37+ check in. The edge header is already confirmed working."
-            />
-          ) : (
-            <DistributionList items={countryDist} total={countryTotal} />
-          )}
-        </Panel>
-
-        <Panel>
-          <PanelHeader
-            title="City"
-            meta={`${formatNumber(fullInstalls.length)} full-consent installs`}
-          />
-          {cityDist.length === 0 ? (
-            <EmptyState
-              className="py-6"
-              title="No city data yet"
-              description="City is optional-tier only and arrives from the landing site's /api/geo. Curl that endpoint to confirm this deployment supplies one."
-            />
-          ) : (
-            <DistributionList items={cityDist} total={fullInstalls.length} />
-          )}
-        </Panel>
-
-        <Panel>
-          <PanelHeader title="App version" meta="full-consent installs" />
-          {!installsRes.ok ? (
-            <ErrorPanel
-              title="Couldn't load installs"
-              message={installsRes.error}
-            />
-          ) : versionDist.length === 0 ? (
-            <EmptyState
-              className="py-6"
-              title="No data yet"
-              description="Versions arrive with install telemetry."
-            />
-          ) : (
-            <DistributionList items={versionDist} total={installs.length} />
-          )}
-        </Panel>
-
-        <Panel className="lg:col-span-2">
-          <PanelHeader
-            title="What people are doing"
-            meta="times used · last 30 days"
-          />
-          {!eventsRes.ok ? (
-            <ErrorPanel title="Couldn't load events" message={eventsRes.error} />
-          ) : features.length === 0 ? (
-            <EmptyState
-              title="No events yet"
-              description="Feature events sent by the app will appear here."
-            />
-          ) : (
-            <DataTable>
-              <THead>
-                <TR>
-                  <TH>Action</TH>
-                  <TH className="w-[90px] text-right">Last 7d</TH>
-                  <TH className="w-[90px] text-right">Last 30d</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {features.map((f) => {
-                  const meta = eventMeta(f.name);
-                  return (
-                    <TR key={f.name}>
-                      <TD>
-                        <span className="block truncate text-sm font-medium text-stone-900">
-                          {meta.title}
-                        </span>
-                        {meta.meaning ? (
-                          <span className="mt-0.5 block text-sm leading-snug text-stone-500">
-                            {meta.meaning}
-                          </span>
-                        ) : null}
-                        <span className="mt-0.5 block truncate font-mono text-meta text-stone-400">
-                          {f.name}
-                        </span>
-                      </TD>
-                      <TD
-                        className={`align-top text-right text-sm tabular-nums ${
-                          f.c7 === 0 ? "text-stone-400" : "text-stone-900"
-                        }`}
-                      >
-                        {formatNumber(f.c7)}
-                      </TD>
-                      <TD
-                        className={`align-top text-right text-sm tabular-nums ${
-                          f.c30 === 0 ? "text-stone-400" : "text-stone-900"
-                        }`}
-                      >
-                        {f.c30 === 0 ? "never used" : formatNumber(f.c30)}
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </DataTable>
-          )}
-        </Panel>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {breakdowns.map((b) => (
-          <Panel key={b.title}>
-            <PanelHeader title={b.title} meta="by install" />
-            <p className="mb-2 text-sm leading-snug text-stone-500">
-              {BREAKDOWN_HELP[b.title]}
-            </p>
-            {b.items.length === 0 ? (
-              <EmptyState
-                className="py-6"
-                title={installsBroken ? "Not being recorded" : "No data yet"}
-                description={
-                  installsBroken
-                    ? "Blocked by the install telemetry failure above."
-                    : "Arrives with install telemetry."
-                }
-              />
-            ) : (
-              <DistributionList items={b.items} total={installs.length} />
-            )}
-          </Panel>
-        ))}
-      </div>
-
-      <div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <Panel>
-            <PanelHeader
-              title="Link adds, broken down"
-              meta="where from · what · did it work"
-            />
-            {!depthRes.ok ? (
-              <ErrorPanel
-                title="Couldn't load events"
-                message={depthRes.error}
-              />
-            ) : linkRows.length === 0 ? (
-              <EmptyState
-                title="Nobody has pasted a link yet"
-                description="Not a data problem — the paste-a-link feature has had zero uses in the last 30 days."
-              />
-            ) : (
-              <DataTable>
-                <THead>
-                  <TR>
-                    <TH>Source</TH>
-                    <TH>Kind</TH>
-                    <TH>Outcome</TH>
-                    <TH className="w-[72px] text-right">7d</TH>
-                    <TH className="w-[72px] text-right">30d</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {linkRows.map((r) => (
-                    <TR key={`${r.source}|${r.kind}|${r.outcome}`}>
-                      <TD className="font-mono text-sm text-stone-900">
-                        {r.source}
-                      </TD>
-                      <TD className="font-mono text-sm text-stone-900">
-                        {r.kind === "unknown" ? (
-                          <NullCell />
-                        ) : (
-                          r.kind
-                        )}
-                      </TD>
-                      <TD
-                        className={
-                          r.outcome === "failed"
-                            ? "font-mono text-sm text-stone-500"
-                            : "font-mono text-sm text-stone-900"
-                        }
-                      >
-                        {r.outcome}
-                      </TD>
-                      <TD className="text-right text-sm text-stone-900 tabular-nums">
-                        {formatNumber(r.c7)}
-                      </TD>
-                      <TD className="text-right text-sm text-stone-900 tabular-nums">
-                        {formatNumber(r.c30)}
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </DataTable>
-            )}
-          </Panel>
-
-          <Panel>
-            <PanelHeader
-              title="How heavily each user uses it"
-              meta="uses per person · last 30 days"
-            />
-            {!depthRes.ok ? (
-              <ErrorPanel
-                title="Couldn't load events"
-                message={depthRes.error}
-              />
-            ) : depthEvents.length === 0 ? (
-              <EmptyState
-                title="No feature events yet"
-                description="add_from_link and browser_wallpaper_set events will appear here."
-              />
-            ) : (
-              <div className="space-y-3">
-                <DataTable>
-                  <THead>
-                    <TR>
-                      <TH>Event</TH>
-                      <TH className="w-[90px] text-right">Installs</TH>
-                      <TH className="w-[90px] text-right">Median</TH>
-                      <TH className="w-[90px] text-right">Max</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {summaries.map((s) => (
-                      <TR key={s.event}>
-                        <TD>
-                          <span className="block truncate text-sm text-stone-900">
-                            {eventMeta(s.event).title}
-                          </span>
-                        </TD>
-                        <TD className="text-right text-sm text-stone-900 tabular-nums">
-                          {formatNumber(s.installs)}
-                        </TD>
-                        <TD className="text-right text-sm text-stone-900 tabular-nums">
-                          {s.installs ? formatNumber(s.median) : <NullCell />}
-                        </TD>
-                        <TD className="text-right text-sm text-stone-900 tabular-nums">
-                          {s.installs ? formatNumber(s.max) : <NullCell />}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </DataTable>
-
-                <DataTable>
-                  <THead>
-                    <TR>
-                      <TH className="w-[110px]">Install</TH>
-                      <TH>Event</TH>
-                      <TH className="w-[72px] text-right">30d</TH>
-                      <TH className="w-[110px] text-right">Last used</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {top.map((t) => (
-                      <TR key={`${t.event}|${t.installId}`}>
-                        <TD className="font-mono text-sm text-stone-900">
-                          {truncateId(t.installId)}
-                        </TD>
-                        <TD>
-                          <span className="block truncate text-sm text-stone-900">
-                            {eventMeta(t.event).title}
-                          </span>
-                        </TD>
-                        <TD className="text-right text-sm text-stone-900 tabular-nums">
-                          {formatNumber(t.c30)}
-                        </TD>
-                        <TD className="text-right font-mono text-sm text-stone-500 tabular-nums">
-                          {formatRelative(t.lastUsed)}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </DataTable>
+      {/* ── Where they are ─────────────────────────────────────────────── */}
+      <StreamingSection
+        title="Where"
+        description="Country is resolved server-side from the network edge under both consent tiers, so it cannot be spoofed and nobody is excluded for declining the optional statistics. City is optional-tier only and is client-supplied — fine for a chart, never to be trusted."
+        meta={<Suspense fallback={metaFallback}><WhereMeta /></Suspense>}
+      >
+        <Suspense
+          fallback={
+            <>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+                <div className="lg:col-span-3">
+                  <GlobeSkeletonPanel />
+                </div>
+                <div className="flex flex-col gap-3 lg:col-span-2">
+                  <PanelSkeleton rows={6} />
+                  <PanelSkeleton rows={5} />
+                </div>
               </div>
-            )}
-          </Panel>
-        </div>
-        <p className="mt-1.5 font-mono text-meta text-stone-400">
-          Counts include only users who opted into anonymous statistics.
-        </p>
-      </div>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                <PanelSkeleton rows={6} />
+                <PanelSkeleton rows={4} />
+                <PanelSkeleton rows={2} />
+              </div>
+            </>
+          }
+        >
+          <Streamed>
+            <WhereSection />
+          </Streamed>
+        </Suspense>
+      </StreamingSection>
+
+      {/* ── Downloads vs installs ──────────────────────────────────────── */}
+      <StreamingSection
+        title="Downloads vs installs"
+        description="These two never match, and should not be expected to. GitHub counts asset fetches; telemetry counts machines that checked in. The arithmetic below is the whole reconciliation."
+        meta={<Suspense fallback={metaFallback}><DownloadsMeta /></Suspense>}
+      >
+        <Suspense
+          fallback={
+            <>
+              <StatRowSkeleton count={4} />
+              <PanelSkeleton rows={6} />
+            </>
+          }
+        >
+          <Streamed>
+            <DownloadsSection {...time} />
+          </Streamed>
+        </Suspense>
+      </StreamingSection>
+
+      {/* ── What they do ───────────────────────────────────────────────── */}
+      <StreamingSection
+        title="What people do"
+        description="Feature events, from full-consent installs only. A row reading “never used” is a real zero, not a gap — every instrumented event is listed whether or not it has ever fired."
+        meta={
+          <Suspense fallback={metaFallback}>
+            <ActivityMeta since30d={since30d} />
+          </Suspense>
+        }
+      >
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <PanelSkeleton rows={8} />
+              <div className="flex flex-col gap-3">
+                <PanelSkeleton rows={4} />
+                <PanelSkeleton rows={6} />
+              </div>
+            </div>
+          }
+        >
+          <Streamed>
+            <ActivitySection {...time} />
+          </Streamed>
+        </Suspense>
+      </StreamingSection>
+
+      {/* ── What they run it on ────────────────────────────────────────── */}
+      <StreamingSection
+        title="Environment"
+        description="Full-consent installs only. Percentages are of every install, so these bars deliberately do not sum to 100% — the shortfall is the essential-tier cohort, whose machine details were never collected."
+        meta={<Suspense fallback={metaFallback}><EnvironmentMeta /></Suspense>}
+      >
+        <Suspense
+          fallback={
+            <>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <PanelSkeleton key={i} rows={5} />
+                ))}
+              </div>
+              <Skeleton className="h-2.5 w-full max-w-3xl" />
+            </>
+          }
+        >
+          <Streamed>
+            <EnvironmentSection {...time} />
+          </Streamed>
+        </Suspense>
+      </StreamingSection>
     </div>
   );
 }

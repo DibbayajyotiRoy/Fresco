@@ -12,7 +12,11 @@ const SEVERITY: Record<Severity, { dot: string; text: string }> = {
   critical: { dot: "bg-red-600", text: "text-red-600" },
 };
 
-/** Severity dot + optional 11px uppercase mono label. Status only. */
+/** Severity dot + optional 11px uppercase mono label. Status only.
+ *  Deliberately NOT a pill: `Badge` (a bordered pill) means "which category",
+ *  this means "what state". Keeping the two shapes apart is what lets a table
+ *  row be scanned without reading either of them. They share weight
+ *  (font-medium) and baseline so a cell holding both still looks set. */
 export function SeverityBadge({
   severity,
   label,
@@ -26,12 +30,15 @@ export function SeverityBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 font-mono text-meta tracking-wide uppercase",
+        "inline-flex items-center gap-1.5 font-mono text-meta font-medium tracking-wide whitespace-nowrap uppercase",
         tone.text,
         className
       )}
     >
-      <span className={cn("size-1.5 rounded-full", tone.dot)} aria-hidden />
+      <span
+        className={cn("size-1.5 shrink-0 rounded-full", tone.dot)}
+        aria-hidden
+      />
       {label ?? severity}
     </span>
   );
@@ -62,7 +69,9 @@ function hashTone(label: string): string {
   return BADGE_TONES[Math.abs(h) % BADGE_TONES.length];
 }
 
-/** Categorical pill: colored text + hairline colored border + faint tint. */
+/** Categorical pill: colored text + hairline colored border + faint tint.
+ *  Fixed geometry — 6px corners, 20px tall, never wrapping — so a column of
+ *  them lines up whatever the label says. */
 export function Badge({
   label,
   className,
@@ -73,7 +82,10 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md border px-2 py-0.5 text-meta font-medium",
+        // No overflow-hidden here on purpose: it would move the pill's
+        // baseline to its bottom edge and knock it out of line with the text
+        // beside it in a table cell.
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-meta font-medium whitespace-nowrap",
         hashTone(label),
         className
       )}

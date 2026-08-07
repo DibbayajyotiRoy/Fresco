@@ -1,0 +1,350 @@
+import { EmptyState } from "@/components/empty-state";
+import { ErrorPanel } from "@/components/error-panel";
+import { Panel, PanelHeader } from "@/components/panel";
+import {
+  DataTable,
+  NullCell,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "@/components/data-table";
+import { getEventsSince, getFeatureEventsSince } from "@/lib/data";
+import type { FeatureEvent } from "@/lib/types";
+import { KNOWN_EVENTS, eventMeta } from "@/lib/events";
+import { formatNumber, formatRelative, truncateId } from "@/lib/format";
+import { DAY_MS, type SectionTime } from "./shared";
+
+const DEPTH_EVENTS = ["add_from_link", "browser_wallpaper_set"] as const;
+
+/** Bucket a freeform prop value, mapping absent/odd values to "unknown". */
+function propBucket(props: Record<string, unknown> | null, key: string): string {
+  const v = props?.[key];
+  return typeof v === "string" && v.trim() ? v : "unknown";
+}
+
+type LinkRow = {
+  source: string;
+  kind: string;
+  outcome: string;
+  c7: number;
+  c30: number;
+};
+
+/** source × kind × outcome counts over 7d/30d for add_from_link. */
+function linkBreakdown(events: FeatureEvent[], cutoff7d: number): LinkRow[] {
+  const rows = new Map<string, LinkRow>();
+  for (const e of events) {
+    if (e.name !== "add_from_link") continue;
+    const source = propBucket(e.props, "source");
+    const kind = propBucket(e.props, "kind");
+    const ok = e.props?.ok;
+    const outcome = ok === true ? "ok" : ok === false ? "failed" : "unknown";
+    const key = `${source}|${kind}|${outcome}`;
+    const row = rows.get(key) ?? { source, kind, outcome, c7: 0, c30: 0 };
+    row.c30 += 1;
+    if (Date.parse(e.created_at) >= cutoff7d) row.c7 += 1;
+    rows.set(key, row);
+  }
+  return [...rows.values()].sort(
+    (a, b) =>
+      b.c30 - a.c30 ||
+      a.source.localeCompare(b.source) ||
+      a.kind.localeCompare(b.kind)
+  );
+}
+
+type DepthSummary = {
+  event: string;
+  installs: number;
+  median: number;
+  max: number;
+};
+
+type TopInstall = {
+  installId: string;
+  event: string;
+  c30: number;
+  lastUsed: string;
+};
+
+/** Per-install depth (30d): distinct installs, median/max events per
+ *  using-install, and the heaviest install×event pairs. */
+function installDepth(events: FeatureEvent[]): {
+  summaries: DepthSummary[];
+  top: TopInstall[];
+} {
+  const perPair = new Map<string, TopInstall>();
+  for (const e of events) {
+    if (!e.install_id) continue;
+    const key = `${e.name}|${e.install_id}`;
+    const entry =
+      perPair.get(key) ??
+      ({ installId: e.install_id, event: e.name, c30: 0, lastUsed: e.created_at } as TopInstall);
+    entry.c30 += 1;
+    if (e.created_at > entry.lastUsed) entry.lastUsed = e.created_at;
+    perPair.set(key, entry);
+  }
+
+  const summaries = DEPTH_EVENTS.map((event) => {
+    const counts = [...perPair.values()]
+      .filter((p) => p.event === event)
+      .map((p) => p.c30)
+      .sort((a, b) => a - b);
+    const n = counts.length;
+    const median =
+      n === 0
+        ? 0
+        : n % 2 === 1
+          ? counts[(n - 1) / 2]
+          : (counts[n / 2 - 1] + counts[n / 2]) / 2;
+    return { event, installs: n, median, max: n ? counts[n - 1] : 0 };
+  });
+
+  const top = [...perPair.values()]
+    .sort((a, b) => b.c30 - a.c30 || b.lastUsed.localeCompare(a.lastUsed))
+    .slice(0, 8);
+
+  return { summaries, top };
+}
+
+export async function ActivityMeta({ since30d }: Pick<SectionTime, "since30d">) {
+  const eventsRes = await getEventsSince(since30d);
+  const events = eventsRes.ok ? eventsRes.data : [];
+  return `${formatNumber(events.length)} events / 30d`;
+}
+
+export async function ActivitySection({ now, since30d }: SectionTime) {
+  const [eventsRes, depthRes] = await Promise.all([
+    getEventsSince(since30d),
+    getFeatureEventsSince(since30d, [...DEPTH_EVENTS]),
+  ]);
+
+  const events = eventsRes.ok ? eventsRes.data : [];
+
+  const cutoff7d = now - 7 * DAY_MS;
+  const featureCounts = new Map<string, { c7: number; c30: number }>();
+  for (const e of events) {
+    const entry = featureCounts.get(e.name) ?? { c7: 0, c30: 0 };
+    entry.c30 += 1;
+    if (Date.parse(e.created_at) >= cutoff7d) entry.c7 += 1;
+    featureCounts.set(e.name, entry);
+  }
+  // Seed every instrumented event at zero so "never used" is a visible row
+  // rather than a missing one — the difference between "no data" and "nobody
+  // uses this" is the whole point of the panel.
+  for (const name of KNOWN_EVENTS) {
+    if (!featureCounts.has(name)) featureCounts.set(name, { c7: 0, c30: 0 });
+  }
+  const features = [...featureCounts.entries()]
+    .map(([name, c]) => ({ name, ...c }))
+    .sort((a, b) => b.c30 - a.c30 || a.name.localeCompare(b.name));
+
+  const depthEvents = depthRes.ok ? depthRes.data : [];
+  const linkRows = linkBreakdown(depthEvents, cutoff7d);
+  const { summaries, top } = installDepth(depthEvents);
+
+  return (
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <Panel>
+        <PanelHeader title="Actions" meta="times used · 7d / 30d" />
+        {!eventsRes.ok ? (
+          <ErrorPanel title="Couldn't load events" message={eventsRes.error} />
+        ) : features.length === 0 ? (
+          <EmptyState
+            title="No events yet"
+            description="Feature events sent by the app will appear here."
+          />
+        ) : (
+          <DataTable>
+            <THead>
+              <TR>
+                <TH>Action</TH>
+                <TH className="w-[90px] text-right">Last 7d</TH>
+                <TH className="w-[90px] text-right">Last 30d</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {features.map((f) => {
+                const meta = eventMeta(f.name);
+                return (
+                  <TR key={f.name}>
+                    <TD>
+                      <span className="block truncate text-sm font-medium text-stone-900">
+                        {meta.title}
+                      </span>
+                      {meta.meaning ? (
+                        <span className="mt-0.5 block text-sm leading-snug text-stone-500">
+                          {meta.meaning}
+                        </span>
+                      ) : null}
+                      <span className="mt-0.5 block truncate font-mono text-meta text-stone-400">
+                        {f.name}
+                      </span>
+                    </TD>
+                    <TD
+                      className={`align-top text-right text-sm tabular-nums ${
+                        f.c7 === 0 ? "text-stone-400" : "text-stone-900"
+                      }`}
+                    >
+                      {formatNumber(f.c7)}
+                    </TD>
+                    <TD
+                      className={`align-top text-right text-sm tabular-nums ${
+                        f.c30 === 0 ? "text-stone-400" : "text-stone-900"
+                      }`}
+                    >
+                      {f.c30 === 0 ? "never used" : formatNumber(f.c30)}
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </DataTable>
+        )}
+      </Panel>
+
+      <div className="flex flex-col gap-3">
+        <Panel>
+          <PanelHeader
+            title="Link adds, broken down"
+            meta="where from · what · did it work"
+          />
+          {!depthRes.ok ? (
+            <ErrorPanel
+              title="Couldn't load events"
+              message={depthRes.error}
+            />
+          ) : linkRows.length === 0 ? (
+            <EmptyState
+              title="Nobody has pasted a link yet"
+              description="Not a data problem — the paste-a-link feature has had zero uses in the last 30 days."
+            />
+          ) : (
+            <DataTable>
+              <THead>
+                <TR>
+                  <TH>Source</TH>
+                  <TH>Kind</TH>
+                  <TH>Outcome</TH>
+                  <TH className="w-[72px] text-right">7d</TH>
+                  <TH className="w-[72px] text-right">30d</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {linkRows.map((r) => (
+                  <TR key={`${r.source}|${r.kind}|${r.outcome}`}>
+                    <TD className="font-mono text-sm text-stone-900">
+                      {r.source}
+                    </TD>
+                    <TD className="font-mono text-sm text-stone-900">
+                      {r.kind === "unknown" ? <NullCell /> : r.kind}
+                    </TD>
+                    <TD
+                      className={
+                        r.outcome === "failed"
+                          ? "font-mono text-sm text-stone-500"
+                          : "font-mono text-sm text-stone-900"
+                      }
+                    >
+                      {r.outcome}
+                    </TD>
+                    <TD className="text-right text-sm text-stone-900 tabular-nums">
+                      {formatNumber(r.c7)}
+                    </TD>
+                    <TD className="text-right text-sm text-stone-900 tabular-nums">
+                      {formatNumber(r.c30)}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </DataTable>
+          )}
+        </Panel>
+
+        <Panel>
+          <PanelHeader
+            title="How heavily each user uses it"
+            meta="uses per person · last 30 days"
+          />
+          {!depthRes.ok ? (
+            <ErrorPanel
+              title="Couldn't load events"
+              message={depthRes.error}
+            />
+          ) : depthEvents.length === 0 ? (
+            <EmptyState
+              title="No feature events yet"
+              description="add_from_link and browser_wallpaper_set events will appear here."
+            />
+          ) : (
+            <div className="space-y-3">
+              <DataTable>
+                <THead>
+                  <TR>
+                    <TH>Event</TH>
+                    <TH className="w-[90px] text-right">Installs</TH>
+                    <TH className="w-[90px] text-right">Median</TH>
+                    <TH className="w-[90px] text-right">Max</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {summaries.map((s) => (
+                    <TR key={s.event}>
+                      <TD>
+                        <span className="block truncate text-sm text-stone-900">
+                          {eventMeta(s.event).title}
+                        </span>
+                      </TD>
+                      <TD className="text-right text-sm text-stone-900 tabular-nums">
+                        {formatNumber(s.installs)}
+                      </TD>
+                      <TD className="text-right text-sm text-stone-900 tabular-nums">
+                        {s.installs ? formatNumber(s.median) : <NullCell />}
+                      </TD>
+                      <TD className="text-right text-sm text-stone-900 tabular-nums">
+                        {s.installs ? formatNumber(s.max) : <NullCell />}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </DataTable>
+
+              <DataTable>
+                <THead>
+                  <TR>
+                    <TH className="w-[110px]">Install</TH>
+                    <TH>Event</TH>
+                    <TH className="w-[72px] text-right">30d</TH>
+                    <TH className="w-[110px] text-right">Last used</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {top.map((t) => (
+                    <TR key={`${t.event}|${t.installId}`}>
+                      <TD className="font-mono text-sm text-stone-900">
+                        {truncateId(t.installId)}
+                      </TD>
+                      <TD>
+                        <span className="block truncate text-sm text-stone-900">
+                          {eventMeta(t.event).title}
+                        </span>
+                      </TD>
+                      <TD className="text-right text-sm text-stone-900 tabular-nums">
+                        {formatNumber(t.c30)}
+                      </TD>
+                      <TD className="text-right font-mono text-sm text-stone-500 tabular-nums">
+                        {formatRelative(t.lastUsed)}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </DataTable>
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}

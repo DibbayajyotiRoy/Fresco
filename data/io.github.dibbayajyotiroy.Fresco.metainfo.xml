@@ -89,6 +89,11 @@
   </branding>
 
   <releases>
+    <release version="1.1.38" date="2026-08-07">
+      <description>
+        <p>Fixes reported by Deepin 25 users. On Deepin, clicking the desktop now keeps your icons visible for ten seconds before the wallpaper returns, instead of covering them again after two — Deepin draws its wallpaper and its icons into one window, so this is the layer Fresco can give back. The app window also no longer stops responding after the Language picker is opened, and the app menu no longer sits on top of the pages it opens.</p>
+      </description>
+    </release>
     <release version="1.1.37" date="2026-08-04">
       <description>
         <p>Talk to the maintainer from inside Fresco. A private, two-way thread with no account and no email address, anonymous in both directions, so a problem can be worked through instead of ending at a rating nobody can follow up on. Bad feedback can now be replied to as well, if you allow it when you send it. Usage statistics are also clearer: everyone is asked again, because what the two answers mean has changed — both now count one anonymous install and its country, while the detail (your distro, desktop, city, and the exact time of use) is what accepting all adds. Full terms are in TERMS.md.</p>

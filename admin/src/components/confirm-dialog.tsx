@@ -73,7 +73,10 @@ export function ConfirmDialogHost() {
         role="alertdialog"
         aria-modal="true"
         aria-label={pending.title}
-        className="animate-modal-pop relative w-full max-w-md rounded-xl border border-stone-200 bg-white p-4 shadow-lg"
+        /* Modals are the one surface that stays centre-origin (§5): there is no
+         * trigger to grow out of, and the overlay has already taken the page
+         * away, so anything off-centre reads as a glitch rather than a source. */
+        className="animate-modal-pop relative w-full max-w-md rounded-xl border border-stone-200 bg-white p-4 shadow-lift"
       >
         <p className="font-mono text-meta tracking-widest text-rose-500 uppercase">
           ! destructive action
@@ -89,14 +92,14 @@ export function ConfirmDialogHost() {
             ref={cancelRef}
             type="button"
             onClick={() => close(false)}
-            className="h-7 rounded-md border border-stone-200 bg-white px-2.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100"
+            className="press h-7 rounded-md border border-stone-200 bg-white px-2.5 text-sm font-medium text-stone-700 transition-[color,background-color,border-color,transform] duration-150 ease-hover hover:bg-stone-100"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={() => close(true)}
-            className="h-7 rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-500/20 dark:text-rose-400"
+            className="press h-7 rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 text-sm font-medium text-rose-600 transition-[color,background-color,border-color,transform] duration-150 ease-hover hover:bg-rose-500/20 dark:text-rose-400"
           >
             {pending.confirmLabel ?? "Delete"}
           </button>

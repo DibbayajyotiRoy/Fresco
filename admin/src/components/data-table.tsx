@@ -17,11 +17,18 @@ export function DataTable({
       className={cn(
         // overflow-clip (not hidden) keeps corners tidy without creating a
         // scroll container, so the sticky header can pin to the viewport.
-        "overflow-clip rounded-lg border border-stone-200 bg-white",
+        // shadow-panel (the resting half of `.surface`) puts the grid on the
+        // same plane as every Panel; no hover half, because the rows already
+        // own pointer feedback and a whole table lifting under the cursor
+        // fights with the row highlight.
+        "overflow-clip rounded-lg border border-stone-200 bg-white shadow-panel",
         className
       )}
     >
-      <table className="w-full table-fixed border-collapse text-sm">
+      {/* tabular-nums on the table, not per cell: every column that turns out
+          to hold digits then aligns by construction, instead of depending on
+          each call site remembering. */}
+      <table className="w-full table-fixed border-collapse text-sm tabular-nums">
         {children}
       </table>
     </div>
@@ -42,7 +49,11 @@ export function TH({
   return (
     <th
       className={cn(
-        "border border-t-0 border-stone-200 border-b-stone-300 bg-white px-2.5 py-1.5 text-left font-mono text-meta font-semibold tracking-wide text-stone-400 uppercase first:border-l-0 last:border-r-0",
+        // stone-500, not stone-400: this is a pinned label the eye returns to
+        // on every scroll, and 11px uppercase mono is already fighting for
+        // legibility. select-none stops a drag-select of a column of numbers
+        // from picking up the header word.
+        "border border-t-0 border-stone-200 border-b-stone-300 bg-white px-2.5 py-1.5 text-left font-mono text-meta font-semibold tracking-wide text-stone-500 uppercase select-none first:border-l-0 last:border-r-0",
         className
       )}
     >
@@ -65,7 +76,10 @@ export function TR({
   return (
     <tr
       className={cn(
-        "transition-colors odd:bg-white even:bg-stone-50 hover:bg-stone-100",
+        // 100ms: row highlight is a tracking aid while the eye runs across a
+        // wide row, so it has to land before the eye does. The named curve
+        // keeps it identical to every other hover in the app.
+        "transition-colors duration-100 ease-hover odd:bg-white even:bg-stone-50 hover:bg-stone-100",
         className
       )}
     >
@@ -93,7 +107,17 @@ export function TD({
   );
 }
 
-/** Greyed em-dash null sentinel (§7). */
+/** Greyed em-dash null sentinel (§7). Hidden from assistive tech behind a
+ *  real word: read aloud, a bare em-dash is either silence or "em dash",
+ *  neither of which says "we have no value for this". select-none keeps the
+ *  sentinel out of a copied column. */
 export function NullCell() {
-  return <span className="text-stone-400">—</span>;
+  return (
+    <>
+      <span className="text-stone-400 select-none" aria-hidden>
+        —
+      </span>
+      <span className="sr-only">No value</span>
+    </>
+  );
 }

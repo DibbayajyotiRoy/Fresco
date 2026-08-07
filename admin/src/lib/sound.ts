@@ -94,6 +94,10 @@ const RUN = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
 
 const navRunSynth = synthFromNotes(RUN, 0.08, 0.18, 0.8);
 const tickSynth = synthFromNotes([659.25, 880.0], 0.07, 0.09, 0.5);
+/* Rising A-major triad A5 C#6 E6 — a lift, not a jingle. Shares only one
+ * pitch with the pentatonic run and sits a fifth above the tick, so the three
+ * cues stay tellable apart. 90ms spacing, 160ms notes → 340ms total. */
+const notifySynth = synthFromNotes([880.0, 1108.73, 1318.51], 0.09, 0.16, 0.6);
 
 function fire(synth: SoundSynthesizer) {
   if (!soundEnabled() || reducedMotion()) return;
@@ -108,4 +112,11 @@ export function playNavRun() {
 /** Tab / filter-group switch: short two-note tick. */
 export function playTick() {
   fire(tickSynth);
+}
+
+/** Something arrived while you were looking elsewhere: rising three-note
+ *  figure at 0.6× gain. Fired on an *increase* only — never on load, never
+ *  on every poll — so it stays an event, not a heartbeat. */
+export function playNotify() {
+  fire(notifySynth);
 }

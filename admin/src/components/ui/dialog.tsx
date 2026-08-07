@@ -37,8 +37,12 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
+      /* `duration-*` and `ease-*` feed tw-animate-css through --tw-duration /
+       * --tw-ease, so the house curve applies to the Radix state animations
+       * without hand-writing keyframes. Exit is quicker than enter (§7). The
+       * blur matches ConfirmDialogHost so the app has one modal backdrop. */
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:duration-200 data-[state=open]:ease-exit data-[state=closed]:duration-150 data-[state=closed]:ease-hover fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
         className
       )}
       {...props}
@@ -59,8 +63,15 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        /* Zoom + fade only, never a slide: the centring lives in
+         * translate-x/y[-50%], and tw-animate-css's slide keyframes write the
+         * whole transform, which would tear the dialog off centre for the
+         * length of the animation. Zoom is centre-origin, which is correct for
+         * a modal (§5) — it has no trigger to grow out of. `bg-card` rather
+         * than `bg-background` so the panel is paper-white against the stone-50
+         * page instead of the same colour as it. */
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
+          "bg-card data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=open]:duration-200 data-[state=open]:ease-exit data-[state=closed]:duration-150 data-[state=closed]:ease-hover fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border p-6 shadow-lift sm:max-w-lg",
           className
         )}
         {...props}
@@ -69,7 +80,13 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
-            className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            /* A 24px box at top-3/right-3 puts the 16px glyph exactly where the
+             * bare icon used to sit while giving it a real hit target and a
+             * hover fill. The shadcn `focus:ring-* focus:outline-hidden` combo
+             * is dropped: it fired on mouse `:focus` and, worse, suppressed the
+             * house 2px sky `:focus-visible` outline from globals.css, so this
+             * one control had a different focus signal from everything else. */
+            className="press absolute top-3 right-3 flex size-6 items-center justify-center rounded-md text-stone-400 transition-[color,background-color,transform] duration-150 ease-hover hover:bg-stone-100 hover:text-foreground disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />
             <span className="sr-only">Close</span>

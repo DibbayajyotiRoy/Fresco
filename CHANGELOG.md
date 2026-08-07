@@ -4,6 +4,38 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.38] — 2026-08-07
+
+### Fixed
+- **The window stopped responding after opening the Language picker.** App menu
+  → **Language** used a dropdown, and a dropdown's list is a popover nested
+  inside the menu popover. On X11 that inner popup takes a real seat grab, and
+  closing it by clicking the dropdown a second time — rather than clicking
+  outside it — left the grab behind: the main window painted normally and the
+  wallpaper kept playing, but nothing in the window could be clicked. The
+  picker is now three plain rows in the menu, with a checkmark on the active
+  language, so no second popup is ever opened. Reported on Deepin 25 / DDE /
+  X11 (#5).
+- **The app menu covered the pages it opened.** Picking **Advanced**, **Browse
+  wallpapers**, **About** — anything in the menu that opens a window — left the
+  menu itself sitting on top of that window. A menu is a popup surface, which
+  on X11 means an override-redirect window the window manager will not stack
+  below an ordinary one, so the new page opened underneath it. The menu now
+  closes before it opens anything. Reported on Deepin 25 / DDE / X11 (#6).
+- **Deepin: the desktop icons flashed and vanished again.** Clicking the desktop
+  brought the icons up for about two seconds, then the wallpaper swallowed them.
+  On Deepin 25, DDE paints its wallpaper *and* its icons into one opaque window,
+  so a live wallpaper that is visible at all is one stacked above that window —
+  there is no position that shows both, and Fresco's stacking pass (every ~2s)
+  was taking the top back the instant KWin gave it to the icons. That pass now
+  yields: when DDE's desktop comes up above the wallpaper — which is exactly
+  what clicking the desktop does — the wallpaper stays under it for **10
+  seconds** before returning, and clicking the desktop again buys another ten.
+  Long enough to find a file and open it; short enough that an untouched desktop
+  is still the live wallpaper. Set `dde_icon_peek_secs` in `config.toml` to tune
+  it (`0` restores the old behaviour, and `FRESCO_DDE_ICON_PEEK` overrides it
+  for one run). Reported on Deepin 25 / DDE / X11.
+
 ## [1.1.37] — 2026-08-04
 
 ### Added

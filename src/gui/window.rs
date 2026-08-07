@@ -856,6 +856,11 @@ fn build_menu_popover(
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
 ) -> gtk4::Popover {
+    // Built up front so every item that opens a window can pop it down first —
+    // see `menu_item_opening_window` for why that is not optional on X11.
+    let popover = gtk4::Popover::new();
+    popover.add_css_class("fresco-menu");
+
     let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
     popover_box.set_margin_top(6);
     popover_box.set_margin_bottom(6);
@@ -1055,44 +1060,35 @@ fn build_menu_popover(
 
     popover_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
-    let advanced_btn = menu_item(t!("Advanced…"));
-    {
+    let advanced_btn = menu_item_opening_window(t!("Advanced…"), &popover, {
         let state_adv = state.clone();
         let win_adv = window.clone();
-        advanced_btn.connect_clicked(move |_| {
-            show_advanced_dialog(&win_adv, state_adv.clone());
-        });
-    }
+        move || show_advanced_dialog(&win_adv, state_adv.clone())
+    });
     popover_box.append(&advanced_btn);
 
-    let browse_btn = menu_item(t!("Browse wallpapers…"));
-    {
+    let browse_btn = menu_item_opening_window(t!("Browse wallpapers…"), &popover, {
         let state_b = state.clone();
         let win_b = window.clone();
-        browse_btn.connect_clicked(move |_| {
-            super::gallery::show_gallery_window(&win_b, state_b.clone());
-        });
-    }
+        move || super::gallery::show_gallery_window(&win_b, state_b.clone())
+    });
     popover_box.append(&browse_btn);
 
-    let url_btn = menu_item(t!("Add from URL…"));
-    {
+    let url_btn = menu_item_opening_window(t!("Add from URL…"), &popover, {
         let state_url = state.clone();
         let win_url = window.clone();
-        url_btn.connect_clicked(move |_| {
-            show_add_from_url_dialog(&win_url, state_url.clone());
-        });
-    }
+        move || show_add_from_url_dialog(&win_url, state_url.clone())
+    });
     popover_box.append(&url_btn);
 
-    let update_btn = menu_item(t!("Check for updates"));
-    {
+    // Closes the menu like the rest: an update *is* available often enough that
+    // the result dialog would otherwise open underneath it, and the "you're up
+    // to date" toast is raised on the main window, which the menu overlaps.
+    let update_btn = menu_item_opening_window(t!("Check for updates"), &popover, {
         let state_upd = state.clone();
         let win_upd = window.clone();
-        update_btn.connect_clicked(move |_| {
-            super::updates::check_for_updates(&win_upd, state_upd.clone(), true);
-        });
-    }
+        move || super::updates::check_for_updates(&win_upd, state_upd.clone(), true)
+    });
     popover_box.append(&update_btn);
 
     // ── Help & feedback ──
@@ -1104,65 +1100,56 @@ fn build_menu_popover(
     popover_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
     popover_box.append(&overline(t!("Help & feedback")));
 
-    let tour_btn = menu_item(t!("What can Fresco do?"));
-    {
+    let tour_btn = menu_item_opening_window(t!("What can Fresco do?"), &popover, {
         let state_t = state.clone();
         let win_t = window.clone();
-        tour_btn.connect_clicked(move |_| {
-            show_tour_dialog(&win_t, state_t.clone());
-        });
-    }
+        move || show_tour_dialog(&win_t, state_t.clone())
+    });
     popover_box.append(&tour_btn);
 
-    let feedback_btn = menu_item(t!("Send feedback…"));
-    {
+    let feedback_btn = menu_item_opening_window(t!("Send feedback…"), &popover, {
         let state_fb = state.clone();
         let win_fb = window.clone();
-        feedback_btn.connect_clicked(move |_| {
-            show_feedback_dialog(&win_fb, state_fb.clone());
-        });
-    }
+        move || show_feedback_dialog(&win_fb, state_fb.clone())
+    });
     popover_box.append(&feedback_btn);
 
     // Sits above the issue tracker on purpose: it is the lower-effort route
     // for someone who just wants help, and it needs no GitHub account.
-    let support_btn = menu_item(if crate::support::has_thread() {
-        t!("Your conversation…")
-    } else {
-        t!("Message the maintainer…")
-    });
+    let support_btn = menu_item_opening_window(
+        if crate::support::has_thread() {
+            t!("Your conversation…")
+        } else {
+            t!("Message the maintainer…")
+        },
+        &popover,
+        {
+            let state_s = state.clone();
+            let win_s = window.clone();
+            move || show_support_dialog(&win_s, state_s.clone())
+        },
+    );
     support_btn.set_tooltip_text(Some(t!(
         "Anonymous, both ways. No account, no email address."
     )));
-    {
-        let state_s = state.clone();
-        let win_s = window.clone();
-        support_btn.connect_clicked(move |_| {
-            show_support_dialog(&win_s, state_s.clone());
-        });
-    }
     popover_box.append(&support_btn);
 
-    let help_btn = menu_item(t!("Report a problem…"));
-    help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
-    help_btn.connect_clicked(|_| {
+    // The browser is someone else's toplevel, but it is a toplevel all the
+    // same — it would come up behind a menu we left mapped.
+    let help_btn = menu_item_opening_window(t!("Report a problem…"), &popover, || {
         let _ = std::process::Command::new("xdg-open")
             .arg(ISSUES_URL)
             .spawn();
     });
+    help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
 
-    let about_btn = menu_item(t!("About"));
-    {
+    let about_btn = menu_item_opening_window(t!("About"), &popover, {
         let win_about = window.clone();
-        about_btn.connect_clicked(move |_| {
-            show_about_dialog(&win_about);
-        });
-    }
+        move || show_about_dialog(&win_about)
+    });
     popover_box.append(&about_btn);
 
-    let popover = gtk4::Popover::new();
-    popover.add_css_class("fresco-menu");
     popover.set_child(Some(&popover_box));
     popover
 }
@@ -5025,6 +5012,38 @@ fn menu_item(label: &str) -> gtk4::Button {
     btn
 }
 
+/// A menu item that opens a window, closing the menu on the way.
+///
+/// The popdown is the load-bearing part. A `GtkPopover` is a native surface of
+/// its own, and on X11 that is an override-redirect window — one the window
+/// manager will never stack below an ordinary toplevel, no matter which window
+/// has focus. So a dialog opened while the menu is still up is drawn *behind*
+/// the menu that opened it, and on a compositor that does not dim or clip
+/// popups (Deepin's DDE, for one) it simply looks like the menu ate the page
+/// (issue #6). Wayland has the same stacking rule; there the menu is merely
+/// smaller than the dialog more often, so it hides less of it.
+///
+/// GTK does not do this for us: a `GtkPopover` filled with widgets only
+/// auto-dismisses on an outside click, unlike the menu-model popover a
+/// `GtkMenuButton` builds from a `GMenu`.
+///
+/// `open` runs after the popdown, which in GTK4 hides the surface and drops its
+/// seat grab synchronously — so the new toplevel maps into a clear stack and
+/// can take input immediately.
+fn menu_item_opening_window<F: Fn() + 'static>(
+    label: &str,
+    popover: &gtk4::Popover,
+    open: F,
+) -> gtk4::Button {
+    let btn = menu_item(label);
+    let popover = popover.clone();
+    btn.connect_clicked(move |_| {
+        popover.popdown();
+        open();
+    });
+    btn
+}
+
 /// A label + trailing switch row for the menu popover.
 fn switch_row<F: Fn(bool) + 'static>(label: &str, active: bool, on_toggle: F) -> gtk4::Box {
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -5045,11 +5064,18 @@ fn switch_row<F: Fn(bool) + 'static>(label: &str, active: bool, on_toggle: F) ->
 
 /// Language picker for the menu popover.
 ///
-/// A dropdown rather than the segmented control the theme switcher uses: that
-/// pattern only reads well at three *short* labels, and language names are
-/// endonyms of unpredictable width — the list is meant to grow.
+/// One flat row per language with a checkmark on the active one — deliberately
+/// *not* a `GtkDropDown`. A dropdown reads better as the list grows, but its
+/// list is a popover, and a popover nested inside the menu popover hands GTK a
+/// second popup surface to grab. On X11 that grab is a real seat grab, and
+/// dismissing the inner list by clicking the dropdown again (rather than
+/// clicking outside it) leaves the toplevel with no input: the window paints
+/// and the daemon keeps rendering, but nothing in the main window responds
+/// (issue #5, Deepin 25 / DDE / X11). Rows in the parent popover open no second
+/// surface, so there is nothing to leak. If the list ever outgrows this menu,
+/// move it into its own dialog window — not back into a nested popup.
 ///
-/// The change takes effect on restart, and the row says so. Fresco resolves
+/// The change takes effect on restart, and the toast says so. Fresco resolves
 /// every translated string to a `&'static str` that lives for the process
 /// lifetime (see [`crate::i18n`]), so a live swap would have to rebuild every
 /// widget in the window; a toast that names the requirement is more honest than
@@ -5058,51 +5084,51 @@ fn switch_row<F: Fn(bool) + 'static>(label: &str, active: bool, on_toggle: F) ->
 fn build_language_row(state: Rc<RefCell<AppState>>) -> gtk4::Box {
     use crate::i18n::Language;
 
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    hbox.add_css_class("menu-row");
-    hbox.set_margin_start(4);
-    hbox.set_margin_end(4);
-
-    let names: Vec<&str> = Language::ALL.iter().map(|l| l.display_name()).collect();
-    let model = gtk4::StringList::new(&names);
-    let dropdown = gtk4::DropDown::new(Some(model), None::<gtk4::Expression>);
-    dropdown.set_hexpand(true);
-    dropdown.set_valign(gtk4::Align::Center);
-
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     let current = state.borrow().config.language;
-    let selected = Language::ALL
-        .iter()
-        .position(|l| *l == current)
-        .unwrap_or(0);
-    dropdown.set_selected(selected as u32);
 
-    {
-        let state2 = state.clone();
-        // Guard the initial `set_selected` above: DropDown emits the notify on
-        // programmatic selection too, and firing a "restart to apply" toast
-        // while the menu is merely being built would be nonsense.
-        let armed = Cell::new(false);
-        dropdown.connect_selected_notify(move |dd| {
-            let Some(lang) = Language::ALL.get(dd.selected() as usize).copied() else {
-                return;
-            };
-            if !armed.replace(true) && lang == current {
-                return;
-            }
-            {
-                let mut s = state2.borrow_mut();
-                if s.config.language == lang {
-                    return;
+    // Every row's checkmark, so picking one can clear the others.
+    let checks: Rc<RefCell<Vec<(Language, gtk4::Image)>>> = Rc::new(RefCell::new(Vec::new()));
+
+    for lang in Language::ALL {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        let lbl = gtk4::Label::new(Some(lang.display_name()));
+        lbl.set_xalign(0.0);
+        lbl.set_halign(gtk4::Align::Start);
+        lbl.set_hexpand(true);
+        let check = gtk4::Image::from_icon_name("emblem-ok-symbolic");
+        check.set_visible(lang == current);
+        row.append(&lbl);
+        row.append(&check);
+
+        let btn = gtk4::Button::new();
+        btn.add_css_class("flat");
+        btn.add_css_class("menu-item");
+        btn.set_halign(gtk4::Align::Fill);
+        btn.set_child(Some(&row));
+        {
+            let state2 = state.clone();
+            let checks = checks.clone();
+            btn.connect_clicked(move |_| {
+                {
+                    let mut s = state2.borrow_mut();
+                    if s.config.language == lang {
+                        return;
+                    }
+                    s.config.language = lang;
+                    s.config.save().ok();
                 }
-                s.config.language = lang;
-                s.config.save().ok();
-            }
-            show_toast(&state2, t!("Restart Fresco to apply the new language"));
-        });
+                for (l, img) in checks.borrow().iter() {
+                    img.set_visible(*l == lang);
+                }
+                show_toast(&state2, t!("Restart Fresco to apply the new language"));
+            });
+        }
+        vbox.append(&btn);
+        checks.borrow_mut().push((lang, check));
     }
 
-    hbox.append(&dropdown);
-    hbox
+    vbox
 }
 
 pub(crate) fn show_toast(state: &Rc<RefCell<AppState>>, msg: &str) {

@@ -51,6 +51,14 @@ export type Repo = {
   pushedAt: string | null;
 };
 
+/** One published file on a release, with its own counter. */
+export type ReleaseAsset = {
+  /** Asset filename as published, e.g. "fresco_1.1.37-1_amd64.deb" or
+   *  "install.sh". */
+  name: string;
+  downloads: number;
+};
+
 export type Release = {
   /** Release tag, e.g. "v0.0.3" */
   tag: string;
@@ -60,6 +68,15 @@ export type Release = {
   downloads: number;
   /** ISO publish date, or null for drafts. */
   publishedAt: string | null;
+  /**
+   * Per-file counts behind `downloads`.
+   *
+   * The total alone overstates installs: the one-liner installer fetches
+   * `install.sh` AND then the `.deb` it points at, so a single install can
+   * increment two counters. Keeping the filenames is the only way to say that
+   * out loud instead of quietly presenting the conflated number as users.
+   */
+  assets: ReleaseAsset[];
 };
 
 export type Install = {
@@ -177,4 +194,22 @@ export type SupportMessage = {
   sender: "user" | "maintainer";
   body: string;
   created_at: string;
+};
+
+/**
+ * How much support is waiting on the maintainer, for the nav badge.
+ *
+ * Counted in MESSAGES rather than threads: one person who sent four messages
+ * while waiting is four things to read, and a badge that says "1" for that
+ * undersells the queue. `threads` is kept alongside it so the badge can be
+ * explained ("3 messages across 2 threads") without a second query.
+ */
+export type SupportUnread = {
+  /** Threads with an unanswered user message. */
+  threads: number;
+  /** User messages that arrived after the maintainer's last reply, summed
+   *  across those threads. This is the badge number. */
+  messages: number;
+  /** ISO timestamp of the newest unattended user message, or null. */
+  latestAt: string | null;
 };

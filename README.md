@@ -11,6 +11,8 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
 
+**Used by 130+ people around the world.**
+
 [Website](https://fresco.dibbayajyoti.com) · [Install](#install) · [FAQ](#faq) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
 <img src="data/screenshots/gallery.png" alt="Fresco wallpaper library showing video wallpapers on a Linux desktop" width="800" />
@@ -33,7 +35,8 @@ Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs
 | **Price** | Free — GPL-3.0-or-later, no ads, no account |
 | **Built with** | Rust, GTK4 / libadwaita, libmpv |
 | **Install** | `.deb` package or one-line script |
-| **Latest version** | 1.1.37 |
+| **Users** | 130+ worldwide |
+| **Latest version** | 1.1.38 |
 
 ## Install
 
@@ -74,7 +77,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 - **Command palette** — Ctrl+K to set any wallpaper or reach any feature from the keyboard
 - **Fullscreen auto-pause** — per monitor, including on COSMIC; plus pause-on-battery
 - **Browser new-tab extension** — mirror your wallpaper on every new tab (Chrome/Brave/Edge/Firefox; load unpacked from [`./extension`](extension))
-- **Deepin DDE support** — on Deepin 25, Fresco adapts the DDE desktop automatically so live wallpapers show through with desktop icons intact
+- **Deepin DDE support** — on Deepin 25, Fresco adapts the DDE desktop automatically, and clicking the desktop brings the icons back for ten seconds whenever you need them (see [FAQ](#my-desktop-icons-are-hidden-while-the-wallpaper-plays-on-deepin))
 - **Crop & rotate editor**, per-wallpaper sound/volume, slideshow transitions, and a searchable library
 
 ## Supported environments
@@ -275,6 +278,17 @@ Run `killall dde-shell` (it restarts automatically) or log out and back in, and
 the entry appears permanently. Fresco itself installs correctly — it's listed by
 Deepin's own application manager, and its icon resolves in every installed
 theme. Being tracked in [docs/AUDIT.md](docs/AUDIT.md#deepin-launcher-hot-refresh-open-2026-07-26).
+
+### My desktop icons are hidden while the wallpaper plays on Deepin
+
+Deepin 25 draws its wallpaper and its desktop icons into a single opaque
+window, so a live wallpaper you can see is one stacked above that window —
+there is no layer that sits between them. **Click the desktop and the icons
+come back for ten seconds**, long enough to open what you were after; the
+wallpaper returns after that, and another click buys another ten seconds. To
+change the delay, set `dde_icon_peek_secs` in `~/.config/fresco/config.toml`
+(`0` keeps the wallpaper on top always). Deepin's own wallpaper still shows
+whenever Fresco is off or paused.
 
 ### How do I remove several wallpapers at once?
 

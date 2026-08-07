@@ -16,22 +16,46 @@ export function Notice({
   title,
   children,
   className,
+  tone = "warn",
 }: {
   label: string;
   title: string;
   children?: React.ReactNode;
   className?: string;
+  /**
+   * `warn` = something is broken and a number below is wrong because of it.
+   * `info` = the number below is correct but reads oddly, and the reader
+   * would otherwise mis-diagnose it. Keeping these visually distinct matters:
+   * if an explanation looks like a fault, every explanation gets ignored.
+   */
+  tone?: "warn" | "info";
 }) {
+  const warn = tone === "warn";
   return (
     <div
+      // shadow-panel matches ErrorPanel and Panel: an explanation that sits
+      // flat on the page next to elevated cards reads as debris left behind
+      // by a failed render rather than something we chose to say.
       className={cn(
-        "rounded-lg border border-amber-600/30 bg-amber-600/5 px-4 py-3 dark:bg-amber-600/10",
+        "rounded-lg border px-4 py-3 shadow-panel",
+        warn
+          ? "border-amber-600/30 bg-amber-600/5 dark:bg-amber-600/10"
+          : "border-sky-600/30 bg-sky-600/5 dark:bg-sky-600/10",
         className
       )}
       role="status"
     >
-      <p className="flex items-center gap-2 font-mono text-meta tracking-widest text-amber-600 uppercase">
-        <AnimatedGlyph name="pulse" active={false} staticChar="!" />
+      <p
+        className={cn(
+          "flex items-center gap-2 font-mono text-meta font-medium tracking-widest uppercase select-none",
+          warn ? "text-amber-600" : "text-sky-600"
+        )}
+      >
+        <AnimatedGlyph
+          name="pulse"
+          active={false}
+          staticChar={warn ? "!" : "i"}
+        />
         {label}
       </p>
       <p className="mt-1.5 text-sm font-medium text-stone-900">{title}</p>

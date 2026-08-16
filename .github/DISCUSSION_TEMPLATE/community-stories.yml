@@ -1,0 +1,119 @@
+title: "[User Story] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🌍 Share your Fresco story
+
+        Thanks for using Fresco — hearing how people actually use it is the best part of maintaining it.
+
+        Most of this is a one-line answer, so it should take about two minutes.
+        Only the last question needs real writing.
+
+        > Everything you post here is public, and anything you write may be featured
+        > on the [Fresco website](https://fresco.dibbayajyoti.com) and in this repository.
+        > Skip anything you'd rather not share publicly.
+
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: However you'd like to be credited — a first name or handle is fine.
+      placeholder: "Alex Johnson"
+    validations:
+      required: true
+
+  - type: input
+    id: profession
+    attributes:
+      label: What do you do?
+      description: Your role, field, or what you're studying.
+      placeholder: "Software engineer · Designer · CS student · Homelab hobbyist"
+    validations:
+      required: true
+
+  - type: input
+    id: country
+    attributes:
+      label: Where are you from?
+      description: Country or region — city is fine too if you'd like.
+      placeholder: "Germany"
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution
+      description: Name and version, if you know it.
+      placeholder: "Fedora 42"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: desktop
+    attributes:
+      label: Desktop environment / compositor
+      description: "Not sure? Run `echo $XDG_CURRENT_DESKTOP`. Pick *Other* and mention it in your story if it isn't listed."
+      options:
+        - GNOME
+        - KDE Plasma
+        - COSMIC
+        - Hyprland
+        - Sway
+        - Cinnamon
+        - XFCE
+        - MATE
+        - Budgie
+        - Deepin / DDE
+        - niri
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: use-case
+    attributes:
+      label: How do you use Fresco?
+      description: Tick anything that applies — this helps me decide what to build next.
+      options:
+        - label: Animated wallpapers on my daily-driver desktop
+        - label: Ambient / lo-fi background while I work
+        - label: Setting the mood for gaming or streaming
+        - label: On a multi-monitor setup
+        - label: On a secondary machine, media box, or display screen
+        - label: Something else (I'll describe it below)
+
+  - type: textarea
+    id: story
+    attributes:
+      label: Your Fresco story
+      description: |
+        A few sentences is plenty. If you're not sure where to start, any of these work:
+        • What made you look for a live wallpaper app in the first place?
+        • What does your setup look like now?
+        • What do you like most — or what surprised you?
+      placeholder: "I've been using Fresco for..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot of your setup (optional)
+      description: Drag an image straight into this box. Screenshots make stories a lot more fun to read.
+
+  - type: input
+    id: links
+    attributes:
+      label: GitHub or website (optional)
+      description: If you'd like your story linked back to you.
+      placeholder: "https://github.com/yourusername"
+
+  - type: checkboxes
+    id: permission
+    attributes:
+      label: Permission
+      options:
+        - label: I'm happy for my story and the details above to be featured on the Fresco website and in this repository.
+          required: true

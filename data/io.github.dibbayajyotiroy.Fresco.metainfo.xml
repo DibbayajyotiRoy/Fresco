@@ -89,6 +89,12 @@
   </branding>
 
   <releases>
+    <release version="1.1.39" date="2026-08-20">
+      <description>
+        <p>Organize a large library. Wallpapers can be filed into folders you name yourself — Sci-Fi, Nature, Space, whatever you sort by — and reordered by hand inside each one. A new sort control orders the grid by name, by when you last used a wallpaper, by when you added it, by file size, or by resolution. Adding a batch of files now creates one wallpaper per file instead of fusing them into a single timed playlist, and a folder can be added the same way; re-adding something you already have is detected and skipped rather than quietly duplicated. Playlists and slideshows can finally be edited after they are made, with items added, removed, and reordered. A library with no folders looks exactly as it did before.</p>
+        <p>Fixes a completely black wallpaper on the NVIDIA proprietary driver. The renderer Fresco bundles was a version whose own authors documented it as broken on those drivers; it is now the current release, which fixed it. Fresco also prefers a newer mpvpaper you installed yourself over an older bundled one, and <code>fresco doctor</code> now reports which renderer it picked and how old it is.</p>
+      </description>
+    </release>
     <release version="1.1.38" date="2026-08-07">
       <description>
         <p>Fixes reported by Deepin 25 users. On Deepin, clicking the desktop now keeps your icons visible for ten seconds before the wallpaper returns, instead of covering them again after two — Deepin draws its wallpaper and its icons into one window, so this is the layer Fresco can give back. The app window also no longer stops responding after the Language picker is opened, and the app menu no longer sits on top of the pages it opens.</p>

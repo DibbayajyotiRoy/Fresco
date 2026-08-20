@@ -101,6 +101,14 @@ pub(crate) struct AppState {
     selection: Option<std::collections::HashSet<String>>,
     /// Swaps the footer between its normal actions and the selection bar.
     sync_selection_ui: Option<Rc<dyn Fn()>>,
+    /// User-created folders, loaded from `collections.json`. Kept next to the
+    /// entries (not in `Config`) for the reasons `library::Collection`
+    /// documents: a folder list must not ride on the file the daemon rewrites.
+    pub(crate) collections: Vec<library::Collection>,
+    /// Sticky sort + open-folder preference (`view.json`). Normalised at load
+    /// so a scope pointing at a folder that no longer exists falls back to the
+    /// whole library instead of showing an empty grid with no way out.
+    pub(crate) view: library::LibraryView,
 }
 
 // ─── Main window ─────────────────────────────────────────────────────────────
@@ -147,6 +155,9 @@ fn build_ui(app: &adw::Application) {
         e.check_health();
     }
 
+    let collections = library::load_collections().unwrap_or_default();
+    let view = normalize_view(library::load_view(), &collections);
+
     let toast = adw::ToastOverlay::new();
 
     let state = Rc::new(RefCell::new(AppState {
@@ -159,6 +170,8 @@ fn build_ui(app: &adw::Application) {
         update_banner_slot: None,
         selection: None,
         sync_selection_ui: None,
+        collections,
+        view,
     }));
 
     // Re-apply the palette when the system light/dark resolution flips (System
@@ -287,6 +300,7 @@ fn build_ui(app: &adw::Application) {
     {
         let state_d = state.clone();
         let stack_d = stack.clone();
+        let win_d = window.clone();
         let drop = gtk4::DropTarget::new(
             gtk4::gdk::FileList::static_type(),
             gtk4::gdk::DragAction::COPY,
@@ -305,7 +319,14 @@ fn build_ui(app: &adw::Application) {
                 show_toast(&state_d, t!("Drop video or image files to add them"));
                 return false;
             }
-            add_media_paths(&state_d, &stack_d, paths, None);
+            // Explicit policy, same as the Add button: one file goes straight
+            // in, a batch asks whether it is ten wallpapers or one playlist.
+            // Dropping used to silently fuse a multi-file drop into a playlist.
+            if paths.len() > 1 {
+                show_import_choice_dialog(&win_d, state_d.clone(), stack_d.clone(), paths);
+            } else {
+                add_media_paths(&state_d, &stack_d, paths, None);
+            }
             true
         });
         window.add_controller(drop);
@@ -423,6 +444,14 @@ fn build_library_view(
     search_clamp.set_tightening_threshold(480);
     search_clamp.set_child(Some(&search));
     root.append(&search_clamp);
+
+    // ── Sort + folder bar ──
+    // Two top-level MenuButtons rather than dropdowns or a sidebar: libadwaita
+    // is pinned to 1.1 here, so `AdwOverlaySplitView` (1.4) is not available,
+    // and a `GtkDropDown` inside the header menu is the input-eating trap
+    // documented on `build_language_row`.
+    let (toolbar, sync_toolbar) = build_library_toolbar(window, state.clone());
+    root.append(&toolbar);
 
     // Ctrl+F focuses search, Ctrl+, opens the header menu.
     {
@@ -544,7 +573,9 @@ fn build_library_view(
         "folder-new-symbolic",
         t!("Add folder"),
     )));
-    add_folder_btn.set_tooltip_text(Some(t!("Create an image slideshow from a folder")));
+    add_folder_btn.set_tooltip_text(Some(t!(
+        "Add a folder as a timed slideshow, or as one wallpaper per file"
+    )));
     {
         let state2 = state.clone();
         let stack2 = stack.clone();
@@ -620,6 +651,26 @@ fn build_library_view(
     let sel_all_btn = gtk4::Button::with_label(t!("Select all"));
     sel_bar.append(&sel_all_btn);
 
+    // Bulk filing: the fastest way to build a folder out of a library that
+    // grew before folders existed.
+    let sel_move = gtk4::Button::new();
+    sel_move.set_child(Some(&button_content(
+        "folder-symbolic",
+        t!("Move to folder…"),
+    )));
+    {
+        let state2 = state.clone();
+        let win2 = window.clone();
+        sel_move.connect_clicked(move |_| {
+            let ids: Vec<String> = match state2.borrow().selection.clone() {
+                Some(ids) if !ids.is_empty() => ids.into_iter().collect(),
+                _ => return,
+            };
+            show_move_to_collection_dialog(&win2, state2.clone(), ids);
+        });
+    }
+    sel_bar.append(&sel_move);
+
     let sel_cancel = gtk4::Button::with_label(t!("Cancel"));
     {
         let state2 = state.clone();
@@ -640,6 +691,7 @@ fn build_library_view(
         let sel_bar = sel_bar.clone();
         let sel_count = sel_count.clone();
         let sel_remove = sel_remove.clone();
+        let sel_move = sel_move.clone();
         let sync: Rc<dyn Fn()> = Rc::new(move || {
             let n = {
                 let s = state2.borrow();
@@ -655,6 +707,7 @@ fn build_library_view(
                         n => tf!("{count} selected", "count" => n.to_string()),
                     });
                     sel_remove.set_sensitive(n > 0);
+                    sel_move.set_sensitive(n > 0);
                     sel_remove.set_child(Some(&button_content(
                         "user-trash-symbolic",
                         &if n > 1 {
@@ -706,13 +759,11 @@ fn build_library_view(
             let home_query = home_query.clone();
             move || -> Vec<String> {
                 let q = home_query.borrow().clone();
-                state
-                    .borrow()
-                    .entries
-                    .iter()
-                    .filter(|e| entry_matches_query(e, &q))
-                    .map(|e| e.id.clone())
-                    .collect()
+                // Scope as well as query: ticking cards from a folder the user
+                // is not looking at would aim the next Remove at wallpapers
+                // that are not on screen.
+                let s = state.borrow();
+                scoped_ids(&s.entries, &s.view, &q)
             }
         };
         {
@@ -741,11 +792,15 @@ fn build_library_view(
         let search = search.clone();
         let bucket = bucket.clone();
         let count_label = count_label.clone();
+        let toolbar = toolbar.clone();
+        let sync_toolbar = sync_toolbar.clone();
         Rc::new(move || {
             // Searching an empty library is pointless: hide the field until
             // there's something to search.
             let n = state.borrow().entries.len();
             search.set_visible(n > 0);
+            toolbar.set_visible(n > 0);
+            sync_toolbar();
             count_label.set_visible(n > 0);
             count_label.set_text(&if n == 1 {
                 t!("1 wallpaper").to_string()
@@ -795,6 +850,7 @@ fn build_library_view(
     let margin_widgets = LayoutMarginWidgets {
         root: root.clone(),
         search: search.clone(),
+        toolbar: toolbar.clone(),
         content: content.clone(),
     };
     apply_layout_bucket(&margin_widgets, &condense_footer_buttons, bucket.get());
@@ -819,6 +875,10 @@ fn build_library_view(
 struct LayoutMarginWidgets {
     root: gtk4::Box,
     search: gtk4::SearchEntry,
+    /// The sort/folder bar is a direct child of `root`, so it gets no side
+    /// inset from the content clamp — it has to be margined here or it sits
+    /// flush against the window edge.
+    toolbar: gtk4::Box,
     content: gtk4::Box,
 }
 
@@ -846,6 +906,8 @@ fn apply_layout_bucket(
     };
     widgets.search.set_margin_start(side_margin);
     widgets.search.set_margin_end(side_margin);
+    widgets.toolbar.set_margin_start(side_margin);
+    widgets.toolbar.set_margin_end(side_margin);
     widgets.content.set_margin_start(side_margin);
     widgets.content.set_margin_end(side_margin);
     // Footer inset comes from the .footer-bar / .compact-layout CSS padding.
@@ -1081,6 +1143,13 @@ fn build_menu_popover(
     });
     popover_box.append(&url_btn);
 
+    let folders_btn = menu_item_opening_window(t!("Manage folders…"), &popover, {
+        let state_f = state.clone();
+        let win_f = window.clone();
+        move || show_collections_dialog(&win_f, state_f.clone())
+    });
+    popover_box.append(&folders_btn);
+
     // Closes the menu like the rest: an update *is* available often enough that
     // the result dialog would otherwise open underneath it, and the "you're up
     // to date" toast is raised on the main window, which the menu overlaps.
@@ -1154,6 +1223,408 @@ fn build_menu_popover(
     popover
 }
 
+// ─── Library scope, sorting and sectioning ────────────────────────────────────
+
+/// The [`library::LibraryView::collection`] value that means "only the
+/// wallpapers that are in no folder".
+///
+/// The persisted field is an `Option<String>` whose `None` is already spoken
+/// for — it means *the whole library* — but the uncategorized pool is a third
+/// scope the user has to be able to open: it is where entries land when a
+/// folder is deleted, and it is the only group a folderless library has. A
+/// reserved id costs nothing and cannot collide: real ids are always
+/// `"{pid}-{counter}"`, so no folder can ever be called this.
+const SCOPE_UNCATEGORIZED: &str = "~uncategorized";
+
+/// Drop a saved scope that points at a folder which no longer exists.
+///
+/// Without this, deleting a folder in a second window (or hand-editing
+/// `view.json`) leaves the library showing an empty grid filtered to an id
+/// nothing matches — and the folder button would name a folder that is not in
+/// its own list, so there would be no obvious way back.
+fn normalize_view(
+    mut view: library::LibraryView,
+    collections: &[library::Collection],
+) -> library::LibraryView {
+    if let Some(id) = view.collection.as_deref() {
+        if id != SCOPE_UNCATEGORIZED && !collections.iter().any(|c| c.id == id) {
+            view.collection = None;
+        }
+    }
+    view
+}
+
+/// Is this entry inside the folder the library is currently scoped to?
+fn entry_in_scope(e: &LibraryEntry, view: &library::LibraryView) -> bool {
+    match view.collection.as_deref() {
+        None => true,
+        Some(SCOPE_UNCATEGORIZED) => e.collection.is_none(),
+        Some(id) => e.collection.as_deref() == Some(id),
+    }
+}
+
+/// The open scope's name, for the folder button and the flat grid's heading.
+fn scope_label(view: &library::LibraryView, collections: &[library::Collection]) -> String {
+    match view.collection.as_deref() {
+        None => t!("All wallpapers").to_string(),
+        Some(SCOPE_UNCATEGORIZED) => t!("Uncategorized").to_string(),
+        Some(id) => library::collection_name(collections, id)
+            .unwrap_or(t!("All wallpapers"))
+            .to_string(),
+    }
+}
+
+/// One grid section: a heading, the entry ids under it in display order, and
+/// whether "move earlier / move later" is meaningful there.
+///
+/// This is deliberately a **pure** description of the layout rather than a pile
+/// of widgets: it is the one part of the folder/sort feature that can be unit
+/// tested, since GTK widgets cannot be constructed without a display in this
+/// crate's test harness. `populate_library` does nothing but render it.
+#[derive(Debug, PartialEq)]
+struct SectionPlan {
+    title: String,
+    ids: Vec<String>,
+    /// True only when the section is *exactly one ordering group* shown in
+    /// manual order. [`library::move_entry_up`] swaps an entry with its
+    /// neighbour **within its own collection**, so offering the arrows on a
+    /// section that mixes groups (Favorites) — or one that slices a single
+    /// group by kind (the Images/Videos/GIFs layout) — would move the card
+    /// past a neighbour that is not on screen and look like a no-op.
+    reorderable: bool,
+}
+
+/// Decide how the grid is laid out: which sections exist, in what order, and
+/// which entries are in each.
+///
+/// Four layouts, in priority order:
+///
+/// 1. **Favorites** ride on top of all of them, as they did before folders —
+///    starring something is a stronger statement than filing it.
+/// 2. A **chosen folder** (or a **derived sort**) collapses to one flat grid.
+///    Sorting by "largest file" inside three separate sections tells you the
+///    largest *image* and the largest *video* but never the largest wallpaper,
+///    which is the question the sort was asked; and a folder the user opened
+///    on purpose is already the grouping they wanted.
+/// 3. Manual order with **folders defined** → one section per folder, in the
+///    user's folder order, then everything still loose under "Uncategorized".
+/// 4. Manual order with **no folders** → the pre-1.2 Images / Videos / GIFs
+///    grouping, unchanged. Nobody who never makes a folder sees this feature.
+fn plan_sections(
+    entries: &[LibraryEntry],
+    collections: &[library::Collection],
+    view: &library::LibraryView,
+    query: &str,
+) -> Vec<SectionPlan> {
+    let q = query.to_lowercase();
+    let keep = |e: &LibraryEntry| entry_in_scope(e, view) && entry_matches_query(e, &q);
+    let sorted = |mut v: Vec<&LibraryEntry>| -> Vec<String> {
+        library::sort_entries(&mut v, view.sort);
+        v.into_iter().map(|e| e.id.clone()).collect()
+    };
+
+    let mut out: Vec<SectionPlan> = Vec::new();
+
+    let favs: Vec<&LibraryEntry> = entries.iter().filter(|e| e.favorite && keep(e)).collect();
+    if !favs.is_empty() {
+        out.push(SectionPlan {
+            title: t!("Favorites").to_string(),
+            ids: sorted(favs),
+            reorderable: false,
+        });
+    }
+
+    if view.collection.is_some() || !view.sort.is_manual() {
+        let all: Vec<&LibraryEntry> = entries.iter().filter(|e| keep(e)).collect();
+        if !all.is_empty() {
+            out.push(SectionPlan {
+                title: scope_label(view, collections),
+                // A single scope IS a single group, so the arrows are honest
+                // here — but only while nothing is re-deriving the order.
+                reorderable: view.sort.is_manual() && view.collection.is_some(),
+                ids: sorted(all),
+            });
+        }
+        return out;
+    }
+
+    if collections.is_empty() {
+        for cat in CATEGORY_ORDER {
+            let v: Vec<&LibraryEntry> = entries
+                .iter()
+                .filter(|e| entry_category(e) == cat && keep(e))
+                .collect();
+            if v.is_empty() {
+                continue;
+            }
+            out.push(SectionPlan {
+                title: category_label(cat).to_string(),
+                ids: sorted(v),
+                reorderable: false,
+            });
+        }
+        return out;
+    }
+
+    let mut ordered: Vec<&library::Collection> = collections.iter().collect();
+    ordered.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
+    for c in ordered {
+        let v: Vec<&LibraryEntry> = library::entries_in(entries, &c.id)
+            .into_iter()
+            .filter(|e| keep(e))
+            .collect();
+        if v.is_empty() {
+            continue;
+        }
+        out.push(SectionPlan {
+            title: c.name.clone(),
+            ids: sorted(v),
+            reorderable: true,
+        });
+    }
+    let loose: Vec<&LibraryEntry> = library::uncategorized(entries)
+        .into_iter()
+        .filter(|e| keep(e))
+        .collect();
+    if !loose.is_empty() {
+        out.push(SectionPlan {
+            title: t!("Uncategorized").to_string(),
+            ids: sorted(loose),
+            reorderable: true,
+        });
+    }
+    out
+}
+
+/// The ids the grid is currently showing, honouring **both** the search box and
+/// the open folder.
+///
+/// "Select all" is built on this. Filtering by the query alone would tick cards
+/// that are not on screen, and the very next click would delete wallpapers out
+/// of a folder the user was not even looking at.
+fn scoped_ids(entries: &[LibraryEntry], view: &library::LibraryView, query: &str) -> Vec<String> {
+    let q = query.to_lowercase();
+    entries
+        .iter()
+        .filter(|e| entry_in_scope(e, view) && entry_matches_query(e, &q))
+        .map(|e| e.id.clone())
+        .collect()
+}
+
+/// A vertical list of `.menu-item` rows with a checkmark on the active one —
+/// the same shape as [`build_language_row`], and for the same reason: this is
+/// the popover of a top-level `GtkMenuButton`, so a `GtkDropDown` inside it
+/// would open a *second* popup surface and take a second seat grab (issue #5).
+/// One level of popover is safe; two is what breaks input on X11/DDE.
+fn choice_menu<T: Clone + PartialEq + 'static>(
+    options: Vec<(T, String)>,
+    current: T,
+    pop: &gtk4::Popover,
+    on_pick: impl Fn(T) + 'static,
+) -> gtk4::Box {
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    let on_pick = Rc::new(on_pick);
+    for (value, label) in options {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        let lbl = gtk4::Label::new(Some(&label));
+        lbl.set_xalign(0.0);
+        lbl.set_halign(gtk4::Align::Start);
+        lbl.set_hexpand(true);
+        lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        let check = gtk4::Image::from_icon_name("emblem-ok-symbolic");
+        check.set_visible(value == current);
+        row.append(&lbl);
+        row.append(&check);
+
+        let btn = gtk4::Button::new();
+        btn.add_css_class("flat");
+        btn.add_css_class("menu-item");
+        btn.set_halign(gtk4::Align::Fill);
+        btn.set_child(Some(&row));
+        {
+            let on_pick = on_pick.clone();
+            let pop = pop.clone();
+            btn.connect_clicked(move |_| {
+                // Down before anything else: the pick rebuilds this very list,
+                // and on X11 a popover left mapped over a rebuild is the same
+                // stacking trap `menu_item_opening_window` documents.
+                pop.popdown();
+                on_pick(value.clone());
+            });
+        }
+        vbox.append(&btn);
+    }
+    vbox
+}
+
+/// The sort + folder bar under the search field.
+///
+/// Returns the row and a closure that re-reads the state into it; the closure
+/// is called from `refresh`, so creating, renaming or deleting a folder
+/// anywhere in the app updates this bar without a view switch.
+fn build_library_toolbar(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+) -> (gtk4::Box, Rc<dyn Fn()>) {
+    let bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    bar.set_margin_top(6);
+    bar.set_margin_bottom(2);
+
+    let scope_btn = gtk4::MenuButton::new();
+    scope_btn.add_css_class("flat");
+    scope_btn.set_tooltip_text(Some(t!("Show one folder, or the whole library")));
+    bar.append(&scope_btn);
+
+    let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    bar.append(&spacer);
+
+    let sort_btn = gtk4::MenuButton::new();
+    sort_btn.add_css_class("flat");
+    sort_btn.set_tooltip_text(Some(t!("Change how the wallpapers are ordered")));
+    bar.append(&sort_btn);
+
+    let sync: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let window = window.clone();
+        let scope_btn = scope_btn.clone();
+        let sort_btn = sort_btn.clone();
+        Rc::new(move || {
+            let (collections, view) = {
+                let s = state.borrow();
+                (s.collections.clone(), s.view.clone())
+            };
+
+            // ── Folder scope ──
+            scope_btn.set_child(Some(&button_content(
+                "folder-symbolic",
+                &scope_label(&view, &collections),
+            )));
+            let scope_pop = gtk4::Popover::new();
+            scope_pop.add_css_class("fresco-menu");
+            let scope_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+            scope_box.set_margin_top(6);
+            scope_box.set_margin_bottom(6);
+            scope_box.set_margin_start(6);
+            scope_box.set_margin_end(6);
+            scope_box.set_width_request(240);
+
+            let mut options: Vec<(Option<String>, String)> =
+                vec![(None, t!("All wallpapers").to_string())];
+            let mut ordered: Vec<&library::Collection> = collections.iter().collect();
+            ordered.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
+            for c in &ordered {
+                options.push((Some(c.id.clone()), c.name.clone()));
+            }
+            if !collections.is_empty() {
+                options.push((
+                    Some(SCOPE_UNCATEGORIZED.to_string()),
+                    t!("Uncategorized").to_string(),
+                ));
+            }
+            scope_box.append(&choice_menu(
+                options,
+                view.collection.clone(),
+                &scope_pop,
+                {
+                    let state = state.clone();
+                    move |pick| set_scope(&state, pick)
+                },
+            ));
+
+            scope_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+            scope_box.append(&menu_item_opening_window(
+                t!("Manage folders…"),
+                &scope_pop,
+                {
+                    let state = state.clone();
+                    let window = window.clone();
+                    move || show_collections_dialog(&window, state.clone())
+                },
+            ));
+            scope_pop.set_child(Some(&scope_box));
+            scope_btn.set_popover(Some(&scope_pop));
+
+            // ── Sort ──
+            sort_btn.set_child(Some(&button_content(
+                "view-sort-descending-symbolic",
+                view.sort.label(),
+            )));
+            let sort_pop = gtk4::Popover::new();
+            sort_pop.add_css_class("fresco-menu");
+            let sort_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+            sort_box.set_margin_top(6);
+            sort_box.set_margin_bottom(6);
+            sort_box.set_margin_start(6);
+            sort_box.set_margin_end(6);
+            sort_box.set_width_request(200);
+            sort_box.append(&choice_menu(
+                sort_table()
+                    .into_iter()
+                    .map(|(m, l)| (m, l.to_string()))
+                    .collect(),
+                view.sort,
+                &sort_pop,
+                {
+                    let state = state.clone();
+                    move |mode| set_sort(&state, mode)
+                },
+            ));
+            sort_pop.set_child(Some(&sort_box));
+            sort_btn.set_popover(Some(&sort_pop));
+        })
+    };
+    sync();
+    (bar, sync)
+}
+
+/// Every sort mode paired with its translated label, in menu order.
+///
+/// Built at runtime rather than declared `const` like `LYRIC_STYLES` and
+/// friends because the labels come from [`library::SortMode::label`], which
+/// already resolves them through `t!` — duplicating the literals here would
+/// mean two places to keep in step with the catalog. It still feeds
+/// [`table_index`], so the same "every variant is present exactly once"
+/// guarantee is testable.
+fn sort_table() -> Vec<(library::SortMode, &'static str)> {
+    library::SortMode::ALL
+        .iter()
+        .map(|m| (*m, m.label()))
+        .collect()
+}
+
+/// Persist the chosen sort and redraw.
+fn set_sort(state: &Rc<RefCell<AppState>>, mode: library::SortMode) {
+    {
+        let mut s = state.borrow_mut();
+        if s.view.sort == mode {
+            return;
+        }
+        s.view.sort = mode;
+        library::save_view(&s.view).ok();
+    }
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Persist the open folder and redraw. Leaving select mode on the way is
+/// deliberate: a selection made in one folder must not survive into another,
+/// where "Remove" would be aimed at cards the user can no longer see.
+fn set_scope(state: &Rc<RefCell<AppState>>, collection: Option<String>) {
+    {
+        let mut s = state.borrow_mut();
+        if s.view.collection == collection {
+            return;
+        }
+        s.view.collection = collection;
+        library::save_view(&s.view).ok();
+        s.selection = None;
+    }
+    refresh_selection(state);
+}
+
 // Orchestrates a coherent bundle of library-view widgets; splitting them into a
 // struct would add ceremony without clarifying this single-caller helper.
 #[allow(clippy::too_many_arguments)]
@@ -1215,54 +1686,68 @@ fn populate_library(
         }
     }
 
-    // Favorites first — the wallpapers you starred outrank kind grouping.
-    let mut first_section = true;
-    {
-        let favs: Vec<(usize, &LibraryEntry)> = entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| e.favorite && entry_matches_query(e, &q))
-            .collect();
-        if !favs.is_empty() {
-            sections_box.append(&build_section(
-                t!("Favorites"),
-                first_section,
-                &favs,
-                &cfg,
-                state,
-                stack,
-                bucket,
-            ));
-            first_section = false;
-        }
-    }
+    // Favorites, folders, kinds or one flat grid — `plan_sections` decides;
+    // everything below is pure rendering of that decision.
+    let (collections, view) = {
+        let s = state.borrow();
+        (s.collections.clone(), s.view.clone())
+    };
+    let plans = plan_sections(&entries, &collections, &view, query);
 
-    // One section per non-empty category: Images, Videos, GIFs.
-    for cat in CATEGORY_ORDER {
-        let matches: Vec<(usize, &LibraryEntry)> = entries
+    // Cards still address entries by index (apply/edit/remove all take one), so
+    // resolve the planned ids back to positions once instead of per card.
+    let index_of: std::collections::HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.id.as_str(), i))
+        .collect();
+
+    let mut first_section = true;
+    for plan in &plans {
+        let matches: Vec<(usize, &LibraryEntry)> = plan
+            .ids
             .iter()
-            .enumerate()
-            .filter(|(_, e)| entry_category(e) == cat && entry_matches_query(e, &q))
+            .filter_map(|id| index_of.get(id.as_str()).copied())
+            .map(|i| (i, &entries[i]))
             .collect();
         if matches.is_empty() {
             continue;
         }
-
         sections_box.append(&build_section(
-            category_label(cat),
+            &plan.title,
             first_section,
             &matches,
             &cfg,
             state,
             stack,
             bucket,
+            plan.reorderable,
         ));
         first_section = false;
     }
+
+    // Scoped to a folder that the search emptied (or an empty folder): say so,
+    // rather than leaving a blank page that looks like the library was lost.
+    if first_section {
+        let empty = gtk4::Label::new(Some(if q.is_empty() {
+            t!("This folder is empty — move wallpapers into it from any card’s menu")
+        } else {
+            t!("No wallpapers match your search here")
+        }));
+        empty.add_css_class("dialog-sub");
+        empty.set_wrap(true);
+        empty.set_margin_top(24);
+        empty.set_margin_bottom(24);
+        sections_box.append(&empty);
+    }
 }
 
-/// One labelled FlowBox grid of library cards (used for Favorites and each
-/// kind category).
+/// One labelled FlowBox grid of library cards — one [`SectionPlan`], rendered.
+///
+/// `reorderable` comes straight from the plan and is passed through to every
+/// card: it is what decides whether the hover cluster grows a pair of
+/// move-earlier / move-later arrows.
+#[allow(clippy::too_many_arguments)]
 fn build_section(
     label: &str,
     first_section: bool,
@@ -1271,6 +1756,7 @@ fn build_section(
     state: &Rc<RefCell<AppState>>,
     stack: &gtk4::Stack,
     bucket: LayoutBucket,
+    reorderable: bool,
 ) -> gtk4::Box {
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = overline(label);
@@ -1291,7 +1777,14 @@ fn build_section(
     flow.set_margin_bottom(6);
     for (idx, entry) in matches {
         let active = entry_is_active(entry, cfg);
-        let card = build_library_card(entry, *idx, state.clone(), stack.clone(), active);
+        let card = build_library_card(
+            entry,
+            *idx,
+            state.clone(),
+            stack.clone(),
+            active,
+            reorderable,
+        );
         flow.append(&card);
     }
     section.append(&flow);
@@ -1389,6 +1882,7 @@ fn build_library_card(
     state: Rc<RefCell<AppState>>,
     stack: gtk4::Stack,
     active: bool,
+    reorderable: bool,
 ) -> gtk4::AspectFrame {
     let overlay = gtk4::Overlay::new();
     overlay.add_css_class("wp-card");
@@ -1538,6 +2032,25 @@ fn build_library_card(
     actions.set_valign(gtk4::Align::End);
     actions.set_visible(false);
 
+    // Manual-order arrows. Only where the section is one ordering group shown
+    // in manual order (see `SectionPlan::reorderable`) — anywhere else the move
+    // would be written to `order` and instantly overruled by the sort.
+    if reorderable {
+        for (icon, tip, delta) in [
+            ("go-previous-symbolic", t!("Move earlier"), -1i32),
+            ("go-next-symbolic", t!("Move later"), 1i32),
+        ] {
+            let b = gtk4::Button::from_icon_name(icon);
+            b.add_css_class("wp-edit");
+            b.add_css_class("circular");
+            b.set_tooltip_text(Some(tip));
+            let state_r = state.clone();
+            let id = entry.id.clone();
+            b.connect_clicked(move |_| move_entry(&state_r, &id, delta));
+            actions.append(&b);
+        }
+    }
+
     let fav = gtk4::Button::from_icon_name("emblem-favorite-symbolic");
     fav.add_css_class("wp-edit");
     fav.add_css_class("circular");
@@ -1582,7 +2095,15 @@ fn build_library_card(
             let (x, y) = btn
                 .translate_coordinates(&overlay_m, 0.0, 0.0)
                 .unwrap_or((0.0, 0.0));
-            show_card_menu(&overlay_m, state_m.clone(), stack_m.clone(), idx, x, y);
+            show_card_menu(
+                &overlay_m,
+                state_m.clone(),
+                stack_m.clone(),
+                idx,
+                x,
+                y,
+                reorderable,
+            );
         });
     }
     actions.append(&more);
@@ -1623,7 +2144,15 @@ fn build_library_card(
         let stack_c = stack.clone();
         let overlay_c = overlay.clone();
         rclick.connect_pressed(move |_, _, x, y| {
-            show_card_menu(&overlay_c, state_c.clone(), stack_c.clone(), idx, x, y);
+            show_card_menu(
+                &overlay_c,
+                state_c.clone(),
+                stack_c.clone(),
+                idx,
+                x,
+                y,
+                reorderable,
+            );
         });
     }
     overlay.add_controller(rclick);
@@ -1698,6 +2227,7 @@ fn preview_video_path(entry: &LibraryEntry) -> Option<PathBuf> {
 }
 
 /// Right-click context menu for a library card.
+#[allow(clippy::too_many_arguments)]
 fn show_card_menu(
     parent: &gtk4::Overlay,
     state: Rc<RefCell<AppState>>,
@@ -1705,6 +2235,7 @@ fn show_card_menu(
     idx: usize,
     x: f64,
     y: f64,
+    reorderable: bool,
 ) {
     let pop = gtk4::Popover::new();
     pop.set_parent(parent);
@@ -1874,6 +2405,70 @@ fn show_card_menu(
     }
     menu.append(&rename);
 
+    let move_to = item(t!("Move to folder…"));
+    {
+        let s = state.clone();
+        let p = pop.clone();
+        let parent = parent.clone();
+        let id = s.borrow().entries.get(idx).map(|e| e.id.clone());
+        move_to.connect_clicked(move |_| {
+            // Popdown BEFORE the dialog: an override-redirect popover outranks
+            // any toplevel on X11 (issue #6) — see `menu_item_opening_window`.
+            p.popdown();
+            let Some(id) = id.clone() else { return };
+            if let Some(window) = parent
+                .root()
+                .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok())
+            {
+                show_move_to_collection_dialog(&window, s.clone(), vec![id]);
+            }
+        });
+    }
+    menu.append(&move_to);
+
+    // Multi-file entries own a list the user could not edit until now: adding
+    // to, removing from or reordering a playlist meant rebuilding it by hand.
+    let is_multi = state
+        .borrow()
+        .entries
+        .get(idx)
+        .map(|e| matches!(e.kind, Kind::Playlist | Kind::Slideshow))
+        .unwrap_or(false);
+    if is_multi {
+        let items = item(t!("Edit items…"));
+        let s = state.clone();
+        let p = pop.clone();
+        let parent = parent.clone();
+        items.connect_clicked(move |_| {
+            p.popdown();
+            if let Some(window) = parent
+                .root()
+                .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok())
+            {
+                show_items_dialog(&window, s.clone(), idx);
+            }
+        });
+        menu.append(&items);
+    }
+
+    // Keyboard/touch-reachable twin of the hover arrows, under the same rule.
+    if reorderable {
+        let id = state.borrow().entries.get(idx).map(|e| e.id.clone());
+        for (label, delta) in [(t!("Move earlier"), -1i32), (t!("Move later"), 1i32)] {
+            let b = item(label);
+            let s = state.clone();
+            let p = pop.clone();
+            let id = id.clone();
+            b.connect_clicked(move |_| {
+                if let Some(id) = id.as_deref() {
+                    move_entry(&s, id, delta);
+                }
+                p.popdown();
+            });
+            menu.append(&b);
+        }
+    }
+
     if state
         .borrow()
         .entries
@@ -1960,6 +2555,68 @@ fn toggle_favorite(state: &Rc<RefCell<AppState>>, idx: usize) {
 
 /// Case-insensitive substring match over both the raw and prettified names
 /// (`q` must already be lowercased). Shared by home search and the palette.
+/// Nudge one card one place within its own folder. `delta` is -1 (earlier) or
+/// +1 (later).
+///
+/// The model returns `false` for "already at that end" (and for an id that has
+/// since been removed). That is not an error, but it must not be treated as a
+/// move either: writing the library and rebuilding the whole grid for a move
+/// that did not happen shows up as a visible flicker on a button that did
+/// nothing.
+fn move_entry(state: &Rc<RefCell<AppState>>, id: &str, delta: i32) {
+    {
+        let mut s = state.borrow_mut();
+        let moved = if delta < 0 {
+            library::move_entry_up(&mut s.entries, id)
+        } else {
+            library::move_entry_down(&mut s.entries, id)
+        };
+        if !moved {
+            return;
+        }
+        save_entries(&s.entries).ok();
+    }
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// File `ids` into `collection` (`None` = back out of every folder), persist,
+/// and redraw. Leaves select mode, since the cards it was aimed at have just
+/// moved somewhere the user may not be looking.
+fn move_entries_to_collection(
+    state: &Rc<RefCell<AppState>>,
+    ids: &[String],
+    collection: Option<String>,
+) {
+    if ids.is_empty() {
+        return;
+    }
+    let name = {
+        let mut s = state.borrow_mut();
+        library::assign(&mut s.entries, ids, collection.as_deref());
+        // `assign` renumbers both the destination and every folder the entries
+        // left, so this one write is the whole story.
+        save_entries(&s.entries).ok();
+        s.selection = None;
+        collection
+            .as_deref()
+            .and_then(|id| library::collection_name(&s.collections, id))
+            .map(str::to_string)
+    };
+    let msg = match (name, ids.len()) {
+        (Some(name), 1) => tf!("Moved to “{folder}”", "folder" => name),
+        (Some(name), n) => {
+            tf!("Moved {count} wallpapers to “{folder}”", "count" => n.to_string(), "folder" => name)
+        }
+        (None, 1) => t!("Removed from its folder").to_string(),
+        (None, n) => tf!("Removed {count} wallpapers from their folders", "count" => n.to_string()),
+    };
+    show_toast(state, &msg);
+    refresh_selection(state);
+}
+
 fn entry_matches_query(e: &LibraryEntry, q: &str) -> bool {
     q.is_empty()
         || e.name.to_lowercase().contains(q)
@@ -2335,6 +2992,988 @@ fn commit_rename(state: &Rc<RefCell<AppState>>, idx: usize, name: &str) {
     }
 }
 
+// ─── Folders (collections) ───────────────────────────────────────────────────
+
+/// Keep `state.collections` in the order it is displayed in, so the manage
+/// dialog's up/down arrows can work on plain vector indices.
+fn sort_collections_in_place(collections: &mut [library::Collection]) {
+    collections.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
+}
+
+/// Move a folder one place in the sidebar order. Returns false at the ends.
+fn shift_collection(state: &Rc<RefCell<AppState>>, id: &str, delta: i32) -> bool {
+    let mut s = state.borrow_mut();
+    sort_collections_in_place(&mut s.collections);
+    let Some(pos) = s.collections.iter().position(|c| c.id == id) else {
+        return false;
+    };
+    let target = pos as i32 + delta;
+    if target < 0 || target as usize >= s.collections.len() {
+        return false;
+    }
+    s.collections.swap(pos, target as usize);
+    library::renumber_collections(&mut s.collections);
+    sort_collections_in_place(&mut s.collections);
+    library::save_collections(&s.collections).ok();
+    true
+}
+
+/// Create a folder and return its id, or `None` for a blank name.
+fn add_collection(state: &Rc<RefCell<AppState>>, name: &str) -> Option<String> {
+    if name.trim().is_empty() {
+        return None;
+    }
+    let mut s = state.borrow_mut();
+    let id = library::create_collection(&mut s.collections, name);
+    sort_collections_in_place(&mut s.collections);
+    library::save_collections(&s.collections).ok();
+    Some(id)
+}
+
+/// Manage the folder list: create, rename, reorder, delete.
+///
+/// Deleting is offered without a confirmation on purpose — it is the one
+/// destructive-looking action here that destroys nothing. `delete_collection`
+/// hands the folder's contents back to Uncategorized in the order they were
+/// in, so the worst case is one "New folder" and one bulk move to undo it.
+fn show_collections_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    let (dialog, content) = glass_dialog(window, t!("Folders"), 460, 520);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let sub = gtk4::Label::new(Some(t!(
+        "Your own categories — SCI-FI, Nature, Cityscapes. Deleting a folder never deletes wallpapers: its contents go back to Uncategorized."
+    )));
+    sub.add_css_class("dialog-sub");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    body.append(&sub);
+
+    let list = gtk4::ListBox::new();
+    list.add_css_class("boxed-list");
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&list));
+    body.append(&scroll);
+
+    // Self-referential rebuild: every row's action has to redraw the list it
+    // lives in, and the rows are built by the very closure they call.
+    let rebuild: SelfRebuild = Rc::new(RefCell::new(None));
+    let build: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let list = list.clone();
+        let rebuild = rebuild.clone();
+        Rc::new(move || {
+            while let Some(row) = list.first_child() {
+                list.remove(&row);
+            }
+            let (collections, counts) = {
+                let s = state.borrow();
+                let counts: Vec<usize> = s
+                    .collections
+                    .iter()
+                    .map(|c| library::entries_in(&s.entries, &c.id).len())
+                    .collect();
+                (s.collections.clone(), counts)
+            };
+            if collections.is_empty() {
+                let empty = adw::ActionRow::new();
+                empty.set_title(t!("No folders yet"));
+                empty.set_subtitle(t!("Create one below, then move wallpapers into it"));
+                list.append(&empty);
+            }
+            let again = {
+                let rebuild = rebuild.clone();
+                move || {
+                    let f = rebuild.borrow().clone();
+                    if let Some(f) = f {
+                        f();
+                    }
+                }
+            };
+            for (i, c) in collections.iter().enumerate() {
+                let row = adw::ActionRow::new();
+                row.set_title(&glib::markup_escape_text(&c.name));
+                let n = counts.get(i).copied().unwrap_or(0);
+                row.set_subtitle(&if n == 1 {
+                    t!("1 wallpaper").to_string()
+                } else {
+                    tf!("{count} wallpapers", "count" => n.to_string())
+                });
+
+                for (icon, tip, delta) in [
+                    ("go-up-symbolic", t!("Move up"), -1i32),
+                    ("go-down-symbolic", t!("Move down"), 1i32),
+                ] {
+                    let b = gtk4::Button::from_icon_name(icon);
+                    b.add_css_class("flat");
+                    b.set_valign(gtk4::Align::Center);
+                    b.set_tooltip_text(Some(tip));
+                    let state2 = state.clone();
+                    let id = c.id.clone();
+                    let again = again.clone();
+                    b.connect_clicked(move |_| {
+                        if shift_collection(&state2, &id, delta) {
+                            again();
+                            let r = state2.borrow().refresh.clone();
+                            if let Some(r) = r {
+                                r();
+                            }
+                        }
+                    });
+                    row.add_suffix(&b);
+                }
+
+                let ren = gtk4::Button::from_icon_name("document-edit-symbolic");
+                ren.add_css_class("flat");
+                ren.set_valign(gtk4::Align::Center);
+                ren.set_tooltip_text(Some(t!("Rename…")));
+                {
+                    let state2 = state.clone();
+                    let id = c.id.clone();
+                    let current = c.name.clone();
+                    let again = again.clone();
+                    ren.connect_clicked(move |btn| {
+                        rename_collection_popover(
+                            btn,
+                            state2.clone(),
+                            id.clone(),
+                            &current,
+                            again.clone(),
+                        );
+                    });
+                }
+                row.add_suffix(&ren);
+
+                let del = gtk4::Button::from_icon_name("user-trash-symbolic");
+                del.add_css_class("flat");
+                del.set_valign(gtk4::Align::Center);
+                del.set_tooltip_text(Some(t!("Delete folder (wallpapers are kept)")));
+                {
+                    let state2 = state.clone();
+                    let id = c.id.clone();
+                    let again = again.clone();
+                    del.connect_clicked(move |_| {
+                        {
+                            let mut s = state2.borrow_mut();
+                            // Mutates BOTH vectors — the members are handed
+                            // back to Uncategorized — so both get saved.
+                            let mut cols = std::mem::take(&mut s.collections);
+                            let removed =
+                                library::delete_collection(&mut cols, &mut s.entries, &id);
+                            s.collections = cols;
+                            if !removed {
+                                return;
+                            }
+                            library::save_collections(&s.collections).ok();
+                            save_entries(&s.entries).ok();
+                            s.view = normalize_view(s.view.clone(), &s.collections);
+                            library::save_view(&s.view).ok();
+                        }
+                        show_toast(
+                            &state2,
+                            t!("Folder deleted — its wallpapers moved to Uncategorized"),
+                        );
+                        again();
+                        let r = state2.borrow().refresh.clone();
+                        if let Some(r) = r {
+                            r();
+                        }
+                    });
+                }
+                row.add_suffix(&del);
+                list.append(&row);
+            }
+        })
+    };
+    *rebuild.borrow_mut() = Some(build.clone());
+    build();
+
+    let add_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let name_entry = gtk4::Entry::new();
+    name_entry.set_placeholder_text(Some(t!("New folder name")));
+    name_entry.set_hexpand(true);
+    let add_btn = gtk4::Button::with_label(t!("Create"));
+    add_btn.add_css_class("suggested-action");
+    add_row.append(&name_entry);
+    add_row.append(&add_btn);
+    body.append(&add_row);
+
+    // Two commit paths, as everywhere else in this file: the button and Enter.
+    let commit = {
+        let state = state.clone();
+        let name_entry = name_entry.clone();
+        let build = build.clone();
+        Rc::new(move || {
+            if add_collection(&state, &name_entry.text()).is_none() {
+                return;
+            }
+            name_entry.set_text("");
+            build();
+            let r = state.borrow().refresh.clone();
+            if let Some(r) = r {
+                r();
+            }
+        })
+    };
+    {
+        let commit = commit.clone();
+        add_btn.connect_clicked(move |_| commit());
+    }
+    {
+        let commit = commit.clone();
+        name_entry.connect_activate(move |_| commit());
+    }
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// Inline rename prompt for a folder — the same popover shape as
+/// [`rename_entry`], parented to the pencil button that opened it.
+fn rename_collection_popover(
+    anchor: &gtk4::Button,
+    state: Rc<RefCell<AppState>>,
+    id: String,
+    current: &str,
+    after: impl Fn() + Clone + 'static,
+) {
+    let pop = gtk4::Popover::new();
+    pop.set_parent(anchor);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    row.set_margin_top(6);
+    row.set_margin_bottom(6);
+    row.set_margin_start(6);
+    row.set_margin_end(6);
+    let entry = gtk4::Entry::new();
+    entry.set_text(current);
+    entry.set_hexpand(true);
+    let save = gtk4::Button::from_icon_name("emblem-ok-symbolic");
+    save.add_css_class("suggested-action");
+    row.append(&entry);
+    row.append(&save);
+    pop.set_child(Some(&row));
+
+    let commit = {
+        let state = state.clone();
+        let id = id.clone();
+        let after = after.clone();
+        Rc::new(move |text: String| {
+            {
+                let mut s = state.borrow_mut();
+                if !library::rename_collection(&mut s.collections, &id, &text) {
+                    return;
+                }
+                library::save_collections(&s.collections).ok();
+            }
+            after();
+            let r = state.borrow().refresh.clone();
+            if let Some(r) = r {
+                r();
+            }
+        })
+    };
+    {
+        let commit = commit.clone();
+        let entry = entry.clone();
+        let pop = pop.clone();
+        save.connect_clicked(move |_| {
+            commit(entry.text().to_string());
+            pop.popdown();
+        });
+    }
+    {
+        let commit = commit.clone();
+        let pop = pop.clone();
+        entry.connect_activate(move |e| {
+            commit(e.text().to_string());
+            pop.popdown();
+        });
+    }
+    pop.connect_closed(|p| p.unparent());
+    pop.popup();
+    entry.grab_focus();
+}
+
+/// Pick a destination folder for one card or a whole selection.
+///
+/// A dialog rather than a submenu: a popover opened from inside another
+/// popover takes a second seat grab, which is what leaves the toplevel dead to
+/// input on X11/DDE (issue #5, see `build_language_row`).
+fn show_move_to_collection_dialog(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    ids: Vec<String>,
+) {
+    if ids.is_empty() {
+        return;
+    }
+    let (dialog, content) = glass_dialog(window, t!("Move to folder"), 420, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let heading = gtk4::Label::new(Some(&if ids.len() == 1 {
+        t!("Move 1 wallpaper").to_string()
+    } else {
+        tf!("Move {count} wallpapers", "count" => ids.len().to_string())
+    }));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    body.append(&heading);
+
+    let choices = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_max_content_height(260);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_child(Some(&choices));
+    body.append(&scroll);
+
+    let collections = {
+        let s = state.borrow();
+        s.collections.clone()
+    };
+    let ids = Rc::new(ids);
+    for c in &collections {
+        let btn = menu_item(&c.name);
+        let state2 = state.clone();
+        let ids = ids.clone();
+        let id = c.id.clone();
+        let d = dialog.clone();
+        btn.connect_clicked(move |_| {
+            move_entries_to_collection(&state2, &ids, Some(id.clone()));
+            d.close();
+        });
+        choices.append(&btn);
+    }
+    {
+        let btn = menu_item(t!("Uncategorized"));
+        let state2 = state.clone();
+        let ids = ids.clone();
+        let d = dialog.clone();
+        btn.connect_clicked(move |_| {
+            move_entries_to_collection(&state2, &ids, None);
+            d.close();
+        });
+        choices.append(&btn);
+    }
+
+    body.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+    let new_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let name_entry = gtk4::Entry::new();
+    name_entry.set_placeholder_text(Some(t!("New folder name")));
+    name_entry.set_hexpand(true);
+    let create = gtk4::Button::with_label(t!("Create & move"));
+    create.add_css_class("suggested-action");
+    new_row.append(&name_entry);
+    new_row.append(&create);
+    body.append(&new_row);
+
+    let commit = {
+        let state = state.clone();
+        let name_entry = name_entry.clone();
+        let ids = ids.clone();
+        let d = dialog.clone();
+        Rc::new(move || {
+            let Some(id) = add_collection(&state, &name_entry.text()) else {
+                return;
+            };
+            move_entries_to_collection(&state, &ids, Some(id));
+            d.close();
+        })
+    };
+    {
+        let commit = commit.clone();
+        create.connect_clicked(move |_| commit());
+    }
+    {
+        let commit = commit.clone();
+        name_entry.connect_activate(move |_| commit());
+    }
+
+    content.append(&body);
+    dialog.present();
+}
+
+// ─── Playlist / slideshow item editing ───────────────────────────────────────
+
+/// Persist an edit to a multi-file entry's item list.
+///
+/// `add_paths` / `remove_path_at` / `move_path` clear `thumbnail` when the item
+/// the poster was rendered from (index 0) changed. Regenerating it shells out
+/// to ffmpeg, so it happens here on a clone — never while a `borrow_mut` on the
+/// shared state is held.
+fn commit_item_edit(state: &Rc<RefCell<AppState>>, idx: usize) {
+    let stale = {
+        let s = state.borrow();
+        s.entries
+            .get(idx)
+            .filter(|e| e.thumbnail.is_none())
+            .cloned()
+    };
+    if let Some(mut clone) = stale {
+        clone.generate_thumbnail();
+        let mut s = state.borrow_mut();
+        if let Some(e) = s.entries.get_mut(idx) {
+            if e.id == clone.id {
+                e.thumbnail = clone.thumbnail;
+            }
+        }
+    }
+    {
+        let s = state.borrow();
+        save_entries(&s.entries).ok();
+    }
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Edit what is inside a playlist or slideshow: add files, drop items, reorder.
+///
+/// Until now a multi-file entry was write-once — the only way to change it was
+/// to delete it and re-pick every file, which is exactly the complaint that
+/// drove this ("no way to add wallpapers to that list or take some out").
+fn show_items_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, idx: usize) {
+    let Some(entry) = state.borrow().entries.get(idx).cloned() else {
+        return;
+    };
+    let (dialog, content) = glass_dialog(window, t!("Edit items"), 560, 460);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let heading = gtk4::Label::new(Some(&entry.name));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    body.append(&heading);
+
+    let note = gtk4::Label::new(None);
+    note.add_css_class("dialog-sub");
+    note.set_xalign(0.0);
+    note.set_wrap(true);
+    body.append(&note);
+
+    let list = gtk4::ListBox::new();
+    list.add_css_class("boxed-list");
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&list));
+    body.append(&scroll);
+
+    let rebuild: SelfRebuild = Rc::new(RefCell::new(None));
+    let build: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let list = list.clone();
+        let note = note.clone();
+        let rebuild = rebuild.clone();
+        Rc::new(move || {
+            while let Some(row) = list.first_child() {
+                list.remove(&row);
+            }
+            let Some(e) = state.borrow().entries.get(idx).cloned() else {
+                return;
+            };
+            // A folder-backed slideshow has no `paths` to edit yet: show what
+            // the folder currently holds, read-only, and say plainly what
+            // adding a file does to it (`add_paths` materialises the folder).
+            let folder_backed = e.paths.is_empty() && e.folder.is_some();
+            if folder_backed {
+                note.set_text(t!(
+                    "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder."
+                ));
+            } else {
+                note.set_text(t!(
+                    "Reorder with the arrows; the first item is the one the card’s thumbnail comes from."
+                ));
+            }
+            let items: Vec<PathBuf> = if folder_backed {
+                e.folder
+                    .as_deref()
+                    .map(|f| library::folder_media(f, false))
+                    .unwrap_or_default()
+            } else {
+                e.paths.clone()
+            };
+            if items.is_empty() {
+                let empty = adw::ActionRow::new();
+                empty.set_title(t!("Nothing in this list yet"));
+                list.append(&empty);
+            }
+            let again = {
+                let rebuild = rebuild.clone();
+                move || {
+                    let f = rebuild.borrow().clone();
+                    if let Some(f) = f {
+                        f();
+                    }
+                }
+            };
+            let last = items.len().saturating_sub(1);
+            for (i, path) in items.iter().enumerate() {
+                let row = adw::ActionRow::new();
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                row.set_title(&glib::markup_escape_text(&name));
+                row.set_subtitle(&glib::markup_escape_text(
+                    &path.parent().unwrap_or(path).to_string_lossy(),
+                ));
+                if !path.exists() {
+                    row.set_subtitle(t!("Missing"));
+                }
+                if folder_backed {
+                    list.append(&row);
+                    continue;
+                }
+                for (icon, tip, delta) in [
+                    ("go-up-symbolic", t!("Move up"), -1i32),
+                    ("go-down-symbolic", t!("Move down"), 1i32),
+                ] {
+                    let b = gtk4::Button::from_icon_name(icon);
+                    b.add_css_class("flat");
+                    b.set_valign(gtk4::Align::Center);
+                    b.set_tooltip_text(Some(tip));
+                    b.set_sensitive(if delta < 0 { i > 0 } else { i < last });
+                    let state2 = state.clone();
+                    let again = again.clone();
+                    b.connect_clicked(move |_| {
+                        let target = i as i32 + delta;
+                        if target < 0 {
+                            return;
+                        }
+                        let moved = {
+                            let mut s = state2.borrow_mut();
+                            s.entries
+                                .get_mut(idx)
+                                .map(|e| e.move_path(i, target as usize))
+                                .unwrap_or(false)
+                        };
+                        if !moved {
+                            return;
+                        }
+                        commit_item_edit(&state2, idx);
+                        again();
+                    });
+                    row.add_suffix(&b);
+                }
+                let del = gtk4::Button::from_icon_name("list-remove-symbolic");
+                del.add_css_class("flat");
+                del.set_valign(gtk4::Align::Center);
+                del.set_tooltip_text(Some(t!("Remove this item")));
+                {
+                    let state2 = state.clone();
+                    let again = again.clone();
+                    del.connect_clicked(move |_| {
+                        let gone = {
+                            let mut s = state2.borrow_mut();
+                            s.entries
+                                .get_mut(idx)
+                                .and_then(|e| e.remove_path_at(i))
+                                .is_some()
+                        };
+                        if !gone {
+                            return;
+                        }
+                        commit_item_edit(&state2, idx);
+                        again();
+                    });
+                }
+                row.add_suffix(&del);
+                list.append(&row);
+            }
+        })
+    };
+    *rebuild.borrow_mut() = Some(build.clone());
+    build();
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    let add = gtk4::Button::with_label(t!("Add files…"));
+    add.add_css_class("suggested-action");
+    {
+        let state2 = state.clone();
+        let build = build.clone();
+        let win = window.clone();
+        add.connect_clicked(move |_| {
+            pick_items_to_add(&win, state2.clone(), idx, build.clone());
+        });
+    }
+    actions.append(&add);
+    let close = gtk4::Button::with_label(t!("Done"));
+    {
+        let d = dialog.clone();
+        close.connect_clicked(move |_| d.close());
+    }
+    actions.append(&close);
+    body.append(&actions);
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// File picker feeding [`LibraryEntry::add_paths`] for the item editor.
+fn pick_items_to_add(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    idx: usize,
+    after: Rc<dyn Fn()>,
+) {
+    let chooser = gtk4::FileChooserNative::new(
+        Some(t!("Add to this list")),
+        Some(window),
+        FileChooserAction::Open,
+        Some(t!("Open")),
+        Some(t!("Cancel")),
+    );
+    chooser.set_select_multiple(true);
+    let all_pat: Vec<&str> = VIDEO_PATTERNS
+        .iter()
+        .chain(IMAGE_PATTERNS.iter())
+        .copied()
+        .collect();
+    chooser.add_filter(&media_filter(t!("All supported"), &all_pat));
+
+    let state_cb = state.clone();
+    chooser.connect_response(move |ch, resp| {
+        state_cb.borrow_mut().current_picker = None;
+        if resp != ResponseType::Accept {
+            return;
+        }
+        let model = ch.files();
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for i in 0..model.n_items() {
+            if let Some(p) = model
+                .item(i)
+                .and_then(|o| o.downcast::<gio::File>().ok())
+                .and_then(|f| f.path())
+            {
+                paths.push(p);
+            }
+        }
+        if paths.is_empty() {
+            return;
+        }
+        {
+            let mut s = state_cb.borrow_mut();
+            if let Some(e) = s.entries.get_mut(idx) {
+                e.add_paths(paths);
+            }
+        }
+        commit_item_edit(&state_cb, idx);
+        after();
+    });
+    state.borrow_mut().current_picker = Some(chooser.clone());
+    chooser.show();
+}
+
+// ─── Batch import ────────────────────────────────────────────────────────────
+
+/// Import a batch as **one wallpaper per file**, skipping anything the library
+/// already holds. Returns `(added, skipped)`.
+fn import_individually(state: &Rc<RefCell<AppState>>, paths: Vec<PathBuf>) -> (usize, usize) {
+    let (fresh, dupes) = {
+        let s = state.borrow();
+        library::partition_new(&s.entries, paths)
+    };
+    let new_entries = library::entries_for_each(fresh);
+    let ids: Vec<String> = new_entries.iter().map(|e| e.id.clone()).collect();
+    {
+        let mut s = state.borrow_mut();
+        for e in new_entries {
+            // `push_entry`, not `Vec::push`: a plain push lands the entry at
+            // `order == 0`, i.e. jumps it to the front of the manual order.
+            library::push_entry(&mut s.entries, e);
+        }
+        save_entries(&s.entries).ok();
+    }
+    spawn_thumbnail_batch(state, ids.clone());
+    spawn_metadata_probe(state);
+    (ids.len(), dupes.len())
+}
+
+/// Render thumbnails for a batch off the UI thread.
+///
+/// One `generate_thumbnail` is an ffmpeg process; fifty of them in a row on the
+/// main loop is a frozen window for the length of a folder import. Mirrors
+/// `spawn_metadata_probe`: one worker thread, one save, one redraw.
+fn spawn_thumbnail_batch(state: &Rc<RefCell<AppState>>, ids: Vec<String>) {
+    let pending: Vec<LibraryEntry> = {
+        let s = state.borrow();
+        s.entries
+            .iter()
+            .filter(|e| ids.contains(&e.id) && e.thumbnail.is_none())
+            .cloned()
+            .collect()
+    };
+    if pending.is_empty() {
+        return;
+    }
+    let (tx, rx) = async_channel::bounded::<Vec<(String, Option<PathBuf>)>>(1);
+    std::thread::spawn(move || {
+        let out: Vec<(String, Option<PathBuf>)> = pending
+            .into_iter()
+            .map(|mut e| {
+                e.generate_thumbnail();
+                (e.id, e.thumbnail)
+            })
+            .collect();
+        let _ = tx.send_blocking(out);
+    });
+    let state = state.clone();
+    glib::spawn_future_local(async move {
+        let Ok(results) = rx.recv().await else {
+            return;
+        };
+        {
+            let mut s = state.borrow_mut();
+            for (id, thumb) in results {
+                if thumb.is_none() {
+                    continue;
+                }
+                if let Some(e) = s.entries.iter_mut().find(|e| e.id == id) {
+                    e.thumbnail = thumb;
+                }
+            }
+            save_entries(&s.entries).ok();
+        }
+        let refresh = state.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            r();
+        }
+    });
+}
+
+/// "Added 7 · skipped 3 duplicates" — one toast for a whole batch.
+fn report_import(state: &Rc<RefCell<AppState>>, added: usize, skipped: usize) {
+    let msg = match (added, skipped) {
+        (0, 0) => t!("Nothing to add").to_string(),
+        (0, n) => tf!("Already in your library — skipped {count}", "count" => n.to_string()),
+        (a, 0) => tf!("Added {count} wallpapers", "count" => a.to_string()),
+        (a, n) => {
+            tf!("Added {count} · skipped {dupes} duplicates", "count" => a.to_string(), "dupes" => n.to_string())
+        }
+    };
+    show_toast(state, &msg);
+}
+
+/// Ask what a multi-file pick should become.
+///
+/// The old behaviour — silently fusing every multi-selection into one playlist
+/// — is the thing people hit when they download a batch of wallpapers and want
+/// ten wallpapers, not one ten-item playlist. It is still a real intent though,
+/// so this offers both rather than swapping one default for another.
+fn show_import_choice_dialog(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    stack: gtk4::Stack,
+    paths: Vec<PathBuf>,
+) {
+    let n = paths.len();
+    let all_images = paths.iter().all(|p| library::is_image(p));
+    let (dialog, content) = glass_dialog(window, t!("Add wallpapers"), 460, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let heading = gtk4::Label::new(Some(&tf!(
+        "{count} files selected",
+        "count" => n.to_string()
+    )));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    body.append(&heading);
+
+    let paths = Rc::new(paths);
+
+    let separate = gtk4::Button::new();
+    separate.add_css_class("suggested-action");
+    separate.set_child(Some(&two_line_choice(
+        t!("Add as separate wallpapers"),
+        t!("One entry per file. Keep one up for days and switch when the mood strikes."),
+    )));
+    {
+        let state2 = state.clone();
+        let paths = paths.clone();
+        let d = dialog.clone();
+        separate.connect_clicked(move |_| {
+            let (added, skipped) = import_individually(&state2, (*paths).clone());
+            report_import(&state2, added, skipped);
+            let r = state2.borrow().refresh.clone();
+            if let Some(r) = r {
+                r();
+            }
+            d.close();
+        });
+    }
+    body.append(&separate);
+
+    let combined = gtk4::Button::new();
+    combined.set_child(Some(&two_line_choice(
+        if all_images {
+            t!("Combine into one slideshow")
+        } else {
+            t!("Combine into one playlist")
+        },
+        t!("A single wallpaper that plays the files in sequence."),
+    )));
+    {
+        let state2 = state.clone();
+        let stack2 = stack.clone();
+        let paths = paths.clone();
+        let d = dialog.clone();
+        combined.connect_clicked(move |_| {
+            add_media_paths(&state2, &stack2, (*paths).clone(), None);
+            d.close();
+        });
+    }
+    body.append(&combined);
+
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    cancel.set_halign(gtk4::Align::End);
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    body.append(&cancel);
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// Title + dim explanation, for the big choice buttons in the import dialogs.
+fn two_line_choice(title: &str, sub: &str) -> gtk4::Box {
+    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    b.set_margin_top(4);
+    b.set_margin_bottom(4);
+    let t = gtk4::Label::new(Some(title));
+    t.set_xalign(0.0);
+    t.set_halign(gtk4::Align::Start);
+    b.append(&t);
+    let s = gtk4::Label::new(Some(sub));
+    s.add_css_class("dialog-sub");
+    s.set_xalign(0.0);
+    s.set_halign(gtk4::Align::Start);
+    s.set_wrap(true);
+    b.append(&s);
+    b
+}
+
+/// Ask what a picked folder should become: the timed slideshow it has always
+/// made, or one wallpaper per image in it.
+fn show_folder_import_choice(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    stack: gtk4::Stack,
+    folder: PathBuf,
+) {
+    let (dialog, content) = glass_dialog(window, t!("Add folder"), 460, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let heading = gtk4::Label::new(Some(
+        &folder
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| folder.to_string_lossy().into_owned()),
+    ));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    body.append(&heading);
+
+    let recursive = gtk4::CheckButton::with_label(t!("Include subfolders"));
+    body.append(&recursive);
+
+    let slideshow = gtk4::Button::new();
+    slideshow.set_child(Some(&two_line_choice(
+        t!("As a timed slideshow"),
+        t!("One wallpaper that cycles through the folder and follows what you put in it."),
+    )));
+    {
+        let state2 = state.clone();
+        let stack2 = stack.clone();
+        let folder2 = folder.clone();
+        let d = dialog.clone();
+        slideshow.connect_clicked(move |_| {
+            create_folder_slideshow(&state2, &stack2, folder2.clone());
+            d.close();
+        });
+    }
+    body.append(&slideshow);
+
+    let individual = gtk4::Button::new();
+    individual.add_css_class("suggested-action");
+    individual.set_child(Some(&two_line_choice(
+        t!("As individual wallpapers"),
+        t!("One entry per image or video in the folder, so you can pick between them."),
+    )));
+    {
+        let state2 = state.clone();
+        let folder2 = folder.clone();
+        let recursive = recursive.clone();
+        let d = dialog.clone();
+        individual.connect_clicked(move |_| {
+            let files = library::folder_media(&folder2, recursive.is_active());
+            if files.is_empty() {
+                show_toast(&state2, t!("No supported media in that folder"));
+                d.close();
+                return;
+            }
+            let (added, skipped) = import_individually(&state2, files);
+            report_import(&state2, added, skipped);
+            let r = state2.borrow().refresh.clone();
+            if let Some(r) = r {
+                r();
+            }
+            d.close();
+        });
+    }
+    body.append(&individual);
+
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    cancel.set_halign(gtk4::Align::End);
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    body.append(&cancel);
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// The pre-1.2 "Add folder" outcome: one folder-backed slideshow, then the
+/// editor. Unchanged behaviour, now reached through a choice.
+fn create_folder_slideshow(state: &Rc<RefCell<AppState>>, stack: &gtk4::Stack, folder: PathBuf) {
+    let mut entry = library::LibraryEntry::new_slideshow(folder);
+    entry.generate_thumbnail();
+    {
+        let mut s = state.borrow_mut();
+        library::push_entry(&mut s.entries, entry);
+        let idx = s.entries.len() - 1;
+        s.config.wallpaper = s.entries[idx].to_wallpaper();
+        s.editing_idx = Some(idx);
+        save_entries(&s.entries).ok();
+    }
+    stack.set_visible_child_name("editor");
+}
+
 /// Set an entry as the wallpaper of ONE display (a `config.monitors` override).
 fn apply_entry_on_monitor(state: Rc<RefCell<AppState>>, idx: usize, connector: &str) {
     let name = {
@@ -2676,6 +4315,29 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
 
     controls.append(&prefs);
 
+    // Playlist/slideshow item list (shown only for those kinds; see the
+    // on-enter handler). The card context menu has the same entry — this is
+    // the discoverable one, since the editor is where people already come to
+    // change a wallpaper's settings.
+    let items_btn = gtk4::Button::with_label(t!("Edit items…"));
+    items_btn.add_css_class("pill");
+    items_btn.set_margin_top(12);
+    items_btn.set_visible(false);
+    {
+        let state_i = state.clone();
+        items_btn.connect_clicked(move |btn| {
+            let idx = state_i.borrow().editing_idx;
+            let window = btn
+                .root()
+                .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok());
+            let (Some(idx), Some(window)) = (idx, window) else {
+                return;
+            };
+            show_items_dialog(&window, state_i.clone(), idx);
+        });
+    }
+    controls.append(&items_btn);
+
     // Set Wallpaper button.
     let set_btn = gtk4::Button::with_label(t!("Set as wallpaper"));
     set_btn.add_css_class("suggested-action");
@@ -2796,6 +4458,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let crop_frame_ref = crop_frame.clone();
         let tp_frame_ref = tp_frame.clone();
         let edit_actions_ref = edit_actions.clone();
+        let items_btn_ref = items_btn.clone();
         let tp = transition_preview.clone();
         let state2 = state.clone();
         stack.connect_visible_child_name_notify(move |s| {
@@ -2823,6 +4486,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 vol_row_ref.set_visible(has_audio);
                 // Decode-skipping only matters for moving media.
                 power_row_ref.set_visible(has_audio);
+                items_btn_ref.set_visible(matches!(entry.kind, Kind::Playlist | Kind::Slideshow));
                 let is_slideshow = entry.kind == Kind::Slideshow;
                 interval_ref.set_visible(is_slideshow);
                 transition_ref.set_visible(is_slideshow);
@@ -3163,6 +4827,13 @@ const LYRIC_PRESET_COLOUR: &str = "#FFFFFF";
 /// Redraws the lyrics-folder row for a given folder, or for none. Shared by the
 /// folder picker and the Clear button so the two cannot disagree about it.
 type FolderDisplay = Rc<dyn Fn(Option<&std::path::Path>)>;
+
+/// A list-rebuilding closure that the rows it builds call to redraw the list.
+///
+/// The cell is what breaks the cycle: the closure is constructed capturing an
+/// empty slot, then stored into it, so a row's handler can reach the rebuild
+/// that created the row.
+type SelfRebuild = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 /// Position of `value` in a label table. The tables above cover every variant,
 /// so the fallback is unreachable; it exists so adding a variant degrades to
@@ -4690,6 +6361,7 @@ fn open_file_picker(
     chooser.add_filter(&media_filter(t!("Image files"), &IMAGE_PATTERNS));
 
     let state_cb = state.clone();
+    let win_cb = window.clone();
     chooser.connect_response(move |ch, resp| {
         // Release the keep-alive ref now that the dialog has answered (also
         // breaks the chooser↔state reference cycle). GTK keeps `ch` valid for
@@ -4715,7 +6387,13 @@ fn open_file_picker(
         if paths.is_empty() {
             return;
         }
-        add_media_paths(&state_cb, &stack, paths, editing_idx);
+        // Replacing an existing entry's source keeps the old semantics: the
+        // choice only makes sense when something new is being created.
+        if editing_idx.is_none() && paths.len() > 1 {
+            show_import_choice_dialog(&win_cb, state_cb.clone(), stack.clone(), paths);
+        } else {
+            add_media_paths(&state_cb, &stack, paths, editing_idx);
+        }
     });
     state.borrow_mut().current_picker = Some(chooser.clone());
     chooser.show();
@@ -4732,6 +6410,27 @@ fn add_media_paths(
 ) {
     if paths.is_empty() {
         return;
+    }
+    // Adding a file the library already holds used to make a second, identical
+    // card — one of the two things the folders request was actually about.
+    // Open the entry that already has it instead.
+    if editing_idx.is_none() && paths.len() == 1 {
+        let existing = {
+            let s = state.borrow();
+            library::duplicate_of(&s.entries, &paths[0]).map(|e| (e.id.clone(), e.name.clone()))
+        };
+        if let Some((id, name)) = existing {
+            let idx = state.borrow().entries.iter().position(|e| e.id == id);
+            if let Some(idx) = idx {
+                show_toast(
+                    state,
+                    &tf!("“{name}” is already in your library", "name" => name),
+                );
+                state.borrow_mut().editing_idx = Some(idx);
+                stack.set_visible_child_name("editor");
+                return;
+            }
+        }
     }
     let mut entry = if paths.len() > 1 {
         // All images → an image slideshow that loops on a timer. Mixed/videos
@@ -4768,7 +6467,8 @@ fn add_media_paths(
     stack.set_visible_child_name("editor");
 }
 
-/// Folder picker → create an image slideshow entry, then open the editor.
+/// Folder picker → ask whether the folder becomes one timed slideshow or one
+/// wallpaper per file, then do that.
 fn open_folder_picker(
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
@@ -4782,6 +6482,7 @@ fn open_folder_picker(
         Some(t!("Cancel")),
     );
     let state_cb = state.clone();
+    let win_cb = window.clone();
     chooser.connect_response(move |ch, resp| {
         state_cb.borrow_mut().current_picker = None;
         if resp != ResponseType::Accept {
@@ -4790,16 +6491,7 @@ fn open_folder_picker(
         let Some(folder) = ch.file().and_then(|f| f.path()) else {
             return;
         };
-        let mut entry = library::LibraryEntry::new_slideshow(folder);
-        entry.generate_thumbnail();
-        let mut s = state_cb.borrow_mut();
-        s.entries.push(entry);
-        let idx = s.entries.len() - 1;
-        s.config.wallpaper = s.entries[idx].to_wallpaper();
-        s.editing_idx = Some(idx);
-        save_entries(&s.entries).ok();
-        drop(s);
-        stack.set_visible_child_name("editor");
+        show_folder_import_choice(&win_cb, state_cb.clone(), stack.clone(), folder);
     });
     state.borrow_mut().current_picker = Some(chooser.clone());
     chooser.show();
@@ -7375,5 +9067,204 @@ mod tests {
         assert!(!entry_is_active(&side, &cfg));
         assign_entry_to_monitor(&mut cfg, side.to_wallpaper(), "DP-2");
         assert!(entry_is_active(&side, &cfg), "override counts as active");
+    }
+
+    // ─── Folders, sorting and batch import ───────────────────────────────
+
+    /// A video entry named after `name`, filed into `collection`.
+    fn filed(name: &str, collection: Option<&str>, order: i64) -> LibraryEntry {
+        LibraryEntry {
+            collection: collection.map(str::to_string),
+            order,
+            ..LibraryEntry::new_video(PathBuf::from(format!("/{name}.mp4")))
+        }
+    }
+
+    /// Same trap the lyric/clock tables have: a variant added to `SortMode`
+    /// that never reaches the menu would silently select "My order" instead.
+    #[test]
+    fn sort_label_table_covers_every_variant() {
+        let table = sort_table();
+        assert_eq!(table.len(), library::SortMode::ALL.len());
+        for (i, (mode, label)) in table.iter().enumerate() {
+            assert_eq!(table_index(&table, *mode), i as u32, "{label}");
+            assert!(!label.is_empty(), "every mode needs a menu label");
+        }
+        // The default must select its own row, not fall through to index 0.
+        assert_eq!(table[0].0, library::SortMode::Manual);
+        assert_eq!(table_index(&table, library::SortMode::default()), 0);
+        // Two rows reading the same is a menu you cannot use.
+        let mut labels: Vec<&str> = table.iter().map(|(_, l)| *l).collect();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), library::SortMode::ALL.len());
+    }
+
+    /// Folders render in the user's folder order, with everything still loose
+    /// collected at the bottom rather than dropped.
+    #[test]
+    fn sections_follow_the_folder_order_then_uncategorized() {
+        let space = library::Collection::new("Space", 1);
+        let nature = library::Collection::new("Nature", 0);
+        let entries = vec![
+            filed("a", Some(&space.id), 0),
+            filed("b", Some(&nature.id), 0),
+            filed("c", None, 0),
+        ];
+        let plans = plan_sections(
+            &entries,
+            &[space, nature],
+            &library::LibraryView::default(),
+            "",
+        );
+        let titles: Vec<&str> = plans.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, vec!["Nature", "Space", t!("Uncategorized")]);
+        assert!(
+            plans.iter().all(|p| p.reorderable),
+            "each of these sections is exactly one ordering group"
+        );
+    }
+
+    /// Nobody who never makes a folder may notice this feature exists.
+    #[test]
+    fn no_folders_keeps_the_pre_folder_kind_grouping() {
+        let entries = vec![
+            filed("clip", None, 0),
+            LibraryEntry::new_image(PathBuf::from("/pic.png")),
+        ];
+        let plans = plan_sections(&entries, &[], &library::LibraryView::default(), "");
+        let titles: Vec<&str> = plans.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, vec![t!("Images"), t!("Videos")]);
+        assert!(
+            plans.iter().all(|p| !p.reorderable),
+            "a kind section slices one group in two: a move would jump a card \
+             past a neighbour that is not on screen"
+        );
+    }
+
+    /// "Largest file" split across three sections answers a question nobody
+    /// asked, so a derived sort collapses the grid to one list.
+    #[test]
+    fn a_derived_sort_flattens_the_grid_and_hides_the_arrows() {
+        let nature = library::Collection::new("Nature", 0);
+        let inside = filed("b", Some(&nature.id), 0);
+        let loose = filed("a", None, 0);
+        let view = library::LibraryView {
+            sort: library::SortMode::NameAsc,
+            collection: None,
+        };
+        let plans = plan_sections(&[inside.clone(), loose.clone()], &[nature], &view, "");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].title, t!("All wallpapers"));
+        assert!(!plans[0].reorderable, "a move would be instantly overruled");
+        assert_eq!(plans[0].ids, vec![loose.id, inside.id]);
+    }
+
+    /// Opening one folder gives a flat, reorderable grid of just that folder —
+    /// the "reorder them in each folder" half of the request.
+    #[test]
+    fn an_open_folder_is_flat_and_reorderable() {
+        let nature = library::Collection::new("Nature", 0);
+        let entries = vec![filed("b", Some(&nature.id), 1), filed("a", None, 0)];
+        let view = library::LibraryView {
+            sort: library::SortMode::Manual,
+            collection: Some(nature.id.clone()),
+        };
+        let plans = plan_sections(&entries, &[nature.clone()], &view, "");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].title, "Nature");
+        assert_eq!(plans[0].ids.len(), 1, "the loose entry is out of scope");
+        assert!(plans[0].reorderable);
+    }
+
+    /// Favorites keep their place at the top of every layout, and never grow
+    /// arrows: the section mixes folders, so "one place earlier" is undefined.
+    #[test]
+    fn favorites_stay_on_top_and_are_never_reorderable() {
+        let nature = library::Collection::new("Nature", 0);
+        let fav = LibraryEntry {
+            favorite: true,
+            ..filed("star", Some(&nature.id), 0)
+        };
+        let plans = plan_sections(
+            &[filed("plain", None, 0), fav],
+            &[nature],
+            &library::LibraryView::default(),
+            "",
+        );
+        assert_eq!(plans[0].title, t!("Favorites"));
+        assert!(!plans[0].reorderable);
+    }
+
+    /// The invariant behind "Select all": it must never tick a card that the
+    /// open folder is hiding, or the next Remove deletes off-screen wallpapers.
+    #[test]
+    fn scoped_ids_respect_the_open_folder_and_the_search_box() {
+        let space = library::Collection::new("Space", 0);
+        let inside = filed("nebula", Some(&space.id), 0);
+        let outside = filed("desk", None, 0);
+        let entries = vec![inside.clone(), outside.clone()];
+
+        let all = library::LibraryView::default();
+        assert_eq!(scoped_ids(&entries, &all, "").len(), 2);
+
+        let in_folder = library::LibraryView {
+            sort: library::SortMode::Manual,
+            collection: Some(space.id.clone()),
+        };
+        assert_eq!(scoped_ids(&entries, &in_folder, ""), vec![inside.id]);
+        assert!(
+            scoped_ids(&entries, &in_folder, "desk").is_empty(),
+            "the search must narrow within the folder, not escape it"
+        );
+
+        let loose = library::LibraryView {
+            sort: library::SortMode::Manual,
+            collection: Some(SCOPE_UNCATEGORIZED.to_string()),
+        };
+        assert_eq!(scoped_ids(&entries, &loose, ""), vec![outside.id]);
+    }
+
+    /// A folder deleted underneath a saved scope must not leave the library
+    /// filtered to an id nothing matches, with no visible way back.
+    #[test]
+    fn a_scope_pointing_at_a_deleted_folder_falls_back_to_everything() {
+        let gone = library::Collection::new("Gone", 0);
+        let view = library::LibraryView {
+            sort: library::SortMode::Manual,
+            collection: Some(gone.id.clone()),
+        };
+        assert_eq!(
+            normalize_view(view.clone(), std::slice::from_ref(&gone)).collection,
+            Some(gone.id.clone())
+        );
+        assert_eq!(normalize_view(view, &[]).collection, None);
+
+        // The uncategorized pool matches no folder by design, and must survive.
+        let loose = library::LibraryView {
+            sort: library::SortMode::Manual,
+            collection: Some(SCOPE_UNCATEGORIZED.to_string()),
+        };
+        assert_eq!(
+            normalize_view(loose, &[]).collection,
+            Some(SCOPE_UNCATEGORIZED.to_string())
+        );
+    }
+
+    /// The number the import toast reports. Both kinds of duplicate count: one
+    /// the library already holds, and one the same batch names twice.
+    #[test]
+    fn a_batch_import_counts_the_duplicates_it_skips() {
+        let existing = vec![entry("/wall/a.mp4")];
+        let picked = vec![
+            PathBuf::from("/wall/a.mp4"),
+            PathBuf::from("/wall/b.mp4"),
+            PathBuf::from("/wall/b.mp4"),
+        ];
+        let (fresh, dupes) = library::partition_new(&existing, picked);
+        assert_eq!(fresh, vec![PathBuf::from("/wall/b.mp4")]);
+        assert_eq!(dupes.len(), 2);
+        // …and the fresh ones become one wallpaper each, not one playlist.
+        assert_eq!(library::entries_for_each(fresh).len(), 1);
     }
 }

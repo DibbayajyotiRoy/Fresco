@@ -128,15 +128,28 @@ jobs:
         # distros.yml release-parity; this catches a broken artifact at the
         # moment of release.
         run: |
-          ok=0
+          ok=0; recent=0
           for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
             [ -x "$bin" ] || continue
-            rc=0; "$bin" --help >/dev/null 2>&1 || rc=$?
+            rc=0; out=$("$bin" --help 2>/dev/null) || rc=$?
             echo "$bin --help → exit $rc"
-            [ "$rc" -ne 127 ] && ok=1
+            if [ "$rc" -ne 127 ]; then
+              ok=1
+              # --auto-mode landed in mpvpaper 1.9, the version pinned by
+              # scripts/build-mpvpaper.sh. Its absence means we bundled a
+              # pre-1.9 renderer, which brings up EGL and then draws a black
+              # wallpaper on the NVIDIA proprietary driver — upstream fixed
+              # that in 1.6/1.7. Shipping it again would be silent breakage,
+              # so fail the build rather than the user's desktop.
+              case "$out" in *--auto-mode*) recent=1 ;; esac
+            fi
           done
           if [ "$ok" -ne 1 ]; then
             echo "::error::released .deb has no loadable renderer on this host"
+            exit 1
+          fi
+          if [ "$recent" -ne 1 ]; then
+            echo "::error::bundled mpvpaper predates 1.9 (no --auto-mode in --help) — missing the NVIDIA black-wallpaper fix; check the VERSION pin in scripts/build-mpvpaper.sh"
             exit 1
           fi
 

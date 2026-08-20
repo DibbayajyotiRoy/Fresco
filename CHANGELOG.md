@@ -4,6 +4,78 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.39] — 2026-08-20
+
+### Added
+- **Folders for your wallpapers.** A library of a few dozen wallpapers is a
+  list; a library of a few hundred is a problem. Wallpapers can now be filed
+  into folders you name yourself — Sci-Fi, Nature, Space, Cityscapes — and
+  reordered by hand inside each one. Right-click a wallpaper → **Move to
+  folder…**, or select several and move them in one step. The app menu →
+  **Manage folders…** creates, renames, reorders, and deletes them; deleting a
+  folder never deletes what is in it, the wallpapers just become uncategorized
+  again.
+
+  A library with no folders looks and behaves exactly as it did before: the
+  same Favorites row, the same Images / Videos / GIFs grouping. Nobody who
+  never makes a folder sees this feature.
+
+- **A sort control.** The grid can be ordered by your own manual order, by name
+  (A–Z or Z–A), by when you last used a wallpaper, by when you added it, by
+  file size, or by resolution. The choice is remembered between launches.
+
+  Sorting by anything other than your own order collapses the grid to one flat
+  list on purpose. "Largest file" split across three sections tells you the
+  largest *image* and the largest *video*, but never the largest wallpaper —
+  which is the question the sort was asked.
+
+- **Add a batch of files as separate wallpapers.** Picking several files used
+  to fuse them into a single playlist that cycled on a timer, which is the
+  wrong answer if you download wallpapers in batches and keep one for days at
+  a time. **Add** now creates one wallpaper per file. Building a playlist or a
+  slideshow from a multi-file selection is still available — it is now a choice
+  you make rather than the only behaviour. **Add folder** gained the same
+  choice, with an option to include subfolders.
+
+- **Duplicates are detected instead of silently added.** Re-adding a file you
+  already have opens the wallpaper you already have and says so. A batch import
+  reports what it skipped ("Added 7 · skipped 3 duplicates"). Files buried
+  inside an existing playlist count too — that is exactly the duplicate you
+  cannot spot by eye.
+
+- **Playlists and slideshows can be edited after they are made.** Right-click →
+  **Edit items…**, or the button in the editor pane. Add files, remove them,
+  reorder them. Previously a playlist was final at the moment of creation.
+
+### Fixed
+- **A completely black wallpaper on the NVIDIA proprietary driver.** Fresco
+  starts, detects the session, loads the wallpaper, reports no error — and
+  draws nothing. The cause was not in Fresco: the `mpvpaper` renderer it
+  bundles was pinned to 1.4, a version whose own release notes state that
+  "some Nvidia GPU users are still finding that mpvpaper isn't working" with no
+  known fix or workaround. Upstream fixed it in 1.6 ("fix support for the
+  Nvidia proprietary drivers") and improved the compositor render-loop
+  handshake for the same drivers in 1.7. The bundled renderer is now 1.9.
+
+  This was invisible to Fresco's own checks. The renderer probe only rejected a
+  binary that fails to load at all (a dynamic-linker failure, exit 127); one
+  that starts cleanly and renders nothing passed every test. Reported on
+  COSMIC / Wayland with a GeForce GTX 1650 SUPER, but it was never
+  COSMIC-specific — it affected NVIDIA users on every Wayland compositor.
+
+- **A newer mpvpaper you installed yourself now wins over an older bundled
+  one.** Fresco preferred its own copy unconditionally, so a user who fixed
+  this by installing a current mpvpaper still got the broken bundled one unless
+  they also found the undocumented `FRESCO_MPVPAPER` environment variable. The
+  same bug made `install.sh`'s local rebuild a no-op: the freshly built
+  renderer was shadowed by the stale bundled binary sitting next to it.
+
+- **`fresco doctor` explains the renderer.** It now reports which mpvpaper was
+  chosen, where it came from (bundled, your own, or an override), roughly how
+  old it is, and warns when that version predates the NVIDIA fix — with the
+  `FRESCO_MPVPAPER` escape hatch spelled out. `FRESCO_MPVPAPER` is also
+  documented in the README for the first time.
+
 ## [1.1.38] — 2026-08-07
 
 ### Fixed

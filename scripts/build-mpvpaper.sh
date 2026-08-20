@@ -10,7 +10,28 @@
 #           libwayland-egl1-mesa-dev (or equivalent), libegl1-mesa-dev.
 set -euo pipefail
 
-VERSION="1.4"
+# Pinned upstream mpvpaper release. Keep this in sync with install.sh's
+# local-rebuild fallback.
+#
+# 1.9 (not 1.4) because 1.4 renders a *black* wallpaper on the NVIDIA
+# proprietary driver: it brings up EGL, reports success and then never presents
+# a frame. Upstream's own 1.4 notes admit "some Nvidia GPU users still
+# experiencing issues" after the render-loop rewrite; 1.6 shipped the fix ("fix
+# support for the Nvidia proprietary drivers", 3 commits) and 1.7 reworked the
+# compositor render-loop handshake, again calling out Nvidia. Nothing in Fresco
+# can work around it — the bug is entirely inside mpvpaper.
+#
+# One pin for BOTH release runners (ubuntu-24.04 → libmpv2, ubuntu-22.04 →
+# libmpv1). Verified 1.9 still builds on the 22.04 base:
+#   * meson.build declares no meson_version and no dependency version floors.
+#   * The only 1.9 build change is get_pkgconfig_variable() → get_variable(),
+#     which meson has supported since 0.58; 22.04 ships 0.61.
+#   * 1.9's extra protocol (wlr-foreign-toplevel-management) is vendored in the
+#     repo's proto/, so wayland-protocols 1.25 on 22.04 is still enough (only
+#     stable/xdg-shell is pulled from it).
+#   * The only libmpv API 1.9 adds over 1.4 is mpv_free() and
+#     mpv_render_context_report_swap(), both present in mpv 0.34 (libmpv1).
+VERSION="1.9"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 TARGET="${CARGO_TARGET_DIR:-$ROOT/target}/release"
 

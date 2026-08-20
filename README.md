@@ -36,7 +36,7 @@ Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs
 | **Built with** | Rust, GTK4 / libadwaita, libmpv |
 | **Install** | `.deb` package or one-line script |
 | **Users** | 130+ worldwide |
-| **Latest version** | 1.1.38 |
+| **Latest version** | 1.1.39 |
 
 ## Install
 
@@ -289,6 +289,38 @@ wallpaper returns after that, and another click buys another ten seconds. To
 change the delay, set `dde_icon_peek_secs` in `~/.config/fresco/config.toml`
 (`0` keeps the wallpaper on top always). Deepin's own wallpaper still shows
 whenever Fresco is off or paused.
+
+### My wallpaper is black on Wayland (NVIDIA, COSMIC, Hyprland, Sway)
+
+A black wallpaper — everything else working, no errors in the log — almost
+always means the mpvpaper renderer that Fresco bundles is too old for your
+setup. Versions before 1.6 initialise EGL, report success and then never
+present a frame on the NVIDIA proprietary driver.
+
+Run `fresco doctor` first. It prints the renderer it picked, where that binary
+came from (bundled vs. one you installed) and roughly which version it is, and
+it warns when that version predates the fix:
+
+```
+  ✓ mpvpaper available (/usr/lib/fresco/mpvpaper-libmpv2)
+      source: bundled · version: 1.4–1.6
+  ⚠ mpvpaper may be too old …
+```
+
+Fresco already prefers a newer `mpvpaper` on your `PATH` over an older bundled
+one, so installing your distro's `mpvpaper` package (or building
+[upstream](https://github.com/GhostNaN/mpvpaper) with `scripts/build-mpvpaper.sh`)
+is usually enough. To point Fresco at a specific binary, set **`FRESCO_MPVPAPER`**
+to its full path — this overrides every other choice:
+
+```bash
+mkdir -p ~/.config/environment.d
+echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/fresco.conf
+```
+
+Log out and back in (systemd reads `environment.d` at session start), then
+confirm with `fresco doctor` that the `source:` line now says
+`FRESCO_MPVPAPER override`.
 
 ### How do I remove several wallpapers at once?
 

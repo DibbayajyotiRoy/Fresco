@@ -99,20 +99,44 @@ fn doctor() -> i32 {
     );
     // mpvpaper only matters on layer-shell Wayland (it's how we render there).
     if matches!(cap, Capability::WaylandLayerShell) {
-        match crate::mpvpaper_resolved() {
-            Some(p) => println!(
-                "  {GREEN}✓{RESET} mpvpaper available {DIM}({}){RESET}",
-                p.display()
-            ),
+        // Report *which* mpvpaper we picked, not just that one exists. The bug
+        // this exists for renders a black wallpaper with no error anywhere, and
+        // the only distinguishing facts are the path, the provenance and the
+        // version — so print all three rather than making the next reporter
+        // strace the daemon to find them.
+        match crate::mpvpaper_describe().filter(|c| c.path.is_file()) {
+            Some(c) => {
+                println!(
+                    "  {GREEN}✓{RESET} mpvpaper available {DIM}({}){RESET}",
+                    c.path.display()
+                );
+                println!(
+                    "      {DIM}source: {} · version: {}{RESET}",
+                    c.source.label(),
+                    c.version_label()
+                );
+                // mpvpaper before 1.6 initialises EGL, reports success and then
+                // draws nothing on the NVIDIA proprietary driver — a black
+                // wallpaper with a totally clean log. Upstream fixed it in 1.6
+                // and reworked the compositor render-loop handshake again in
+                // 1.7. We cannot tell 1.4 from 1.6 apart (identical --help), so
+                // warn whenever we cannot *prove* the renderer is new enough.
+                if c.maybe_predates_nvidia_fix() {
+                    warn(
+                        "mpvpaper may be too old",
+                        "this build predates (or may predate) mpvpaper 1.6/1.7, which fixed black output on the NVIDIA proprietary driver — if your wallpaper is black, install a newer mpvpaper and set FRESCO_MPVPAPER=/path/to/mpvpaper",
+                    );
+                }
+            }
             None => {
                 problems += 1;
                 match crate::mpvpaper_broken() {
                     Some(p) => println!(
-                        "  {RED}✗{RESET} mpvpaper available {DIM}({} exists but fails to load — likely a libmpv version mismatch; update Fresco or install the matching libmpv){RESET}",
+                        "  {RED}✗{RESET} mpvpaper available {DIM}({} exists but fails to load — likely a libmpv version mismatch; update Fresco, install the matching libmpv, or set FRESCO_MPVPAPER=/path/to/mpvpaper){RESET}",
                         p.display()
                     ),
                     None => println!(
-                        "  {RED}✗{RESET} mpvpaper available {DIM}install or build mpvpaper, or use the .deb/Flatpak release which bundles it{RESET}"
+                        "  {RED}✗{RESET} mpvpaper available {DIM}install or build mpvpaper (then set FRESCO_MPVPAPER=/path/to/mpvpaper), or use the .deb/Flatpak release which bundles it{RESET}"
                     ),
                 }
             }

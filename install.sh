@@ -101,16 +101,39 @@ sudo apt-get install -y "$TMP_DEB" 2>&1 | grep -v '^Reading\|^Building\|^Selecti
 rm -f "$TMP_DEB"
 ok "Installed"
 
-# 6. Verify the bundled Wayland renderer actually loads on this OS.
+# 6. Verify the bundled Wayland renderer is both loadable AND recent enough.
 # The package ships one mpvpaper build per libmpv soname generation
 # (mpvpaper-libmpv2 / mpvpaper-libmpv1; older packages shipped a single
-# "mpvpaper"). A build linked against a libmpv this distro doesn't ship execs
-# but dies in the dynamic linker with exit 127 — apt can't catch that, so we
-# probe here and, if every bundled copy is unloadable, build one locally
-# against the system libmpv.
+# "mpvpaper"). Two things can be wrong with it, and apt can catch neither:
+#
+#   1. It doesn't load. A build linked against a libmpv this distro doesn't ship
+#      execs but dies in the dynamic linker with exit 127.
+#   2. It loads but is too old. mpvpaper before 1.6 brings up EGL, reports
+#      success and then renders nothing on the NVIDIA proprietary driver — a
+#      completely black wallpaper with a clean log.
+#
+# Both end in the same place, so both trigger the same one-time local rebuild
+# against the system libmpv. The age check is a local feature probe, not a
+# network lookup: mpvpaper ships no --version, but --auto-mode was added in 1.9
+# (the version scripts/build-mpvpaper.sh pins), so its presence in --help is our
+# "new enough" signal. Keep MPVPAPER_VERSION in sync with that script.
+MPVPAPER_VERSION="1.9"
+
 probe() { "$1" --help >/dev/null 2>&1; [[ $? -ne 127 ]]; }
+# Same 1.9 marker frescod itself fingerprints (see mpvpaper_version_from_help).
+recent() { "$1" --help 2>/dev/null | grep -q -- '--auto-mode'; }
 
 renderer_ok() {
+  local bin
+  for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
+    [[ -x "$bin" ]] || continue
+    if probe "$bin" && recent "$bin"; then return 0; fi
+  done
+  return 1
+}
+
+# Distinguish the two failures so the message tells the truth about which it is.
+renderer_loads() {
   local bin
   for bin in /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/mpvpaper-libmpv1 /usr/lib/fresco/mpvpaper; do
     [[ -x "$bin" ]] || continue
@@ -120,23 +143,28 @@ renderer_ok() {
 }
 
 if [[ "$SESSION" == "wayland" ]] && ! renderer_ok; then
-  warn "The bundled wallpaper renderer can't load this system's libmpv — building a local copy (one-time)"
+  if renderer_loads; then
+    warn "The bundled wallpaper renderer is older than $MPVPAPER_VERSION (can render black on NVIDIA) — building a current copy (one-time)"
+  else
+    warn "The bundled wallpaper renderer can't load this system's libmpv — building a local copy (one-time)"
+  fi
   info "Installing build tools (may ask for your password)…"
   sudo apt-get install -y git gcc meson ninja-build pkg-config libmpv-dev \
     libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev >/dev/null
   BUILD_DIR=$(mktemp -d)
-  git clone -q --depth 1 --branch 1.4 https://github.com/GhostNaN/mpvpaper.git "$BUILD_DIR/mpvpaper"
+  git clone -q --depth 1 --branch "$MPVPAPER_VERSION" https://github.com/GhostNaN/mpvpaper.git "$BUILD_DIR/mpvpaper"
   (cd "$BUILD_DIR/mpvpaper" && meson setup build >/dev/null && meson compile -C build >/dev/null)
   sudo install -m 755 "$BUILD_DIR/mpvpaper/build/mpvpaper" /usr/lib/fresco/mpvpaper
   rm -rf "$BUILD_DIR"
   if renderer_ok; then
-    ok "Renderer rebuilt against this system's libmpv"
+    ok "Renderer rebuilt (mpvpaper $MPVPAPER_VERSION) against this system's libmpv"
     # Restart the daemon so it picks up the fixed renderer right away.
     if pkill -x frescod 2>/dev/null; then
       (setsid frescod >/dev/null 2>&1 &) || true
     fi
   else
-    warn "Renderer still can't load — run 'fresco doctor' and report the output at https://github.com/${REPO}/issues"
+    warn "Renderer still isn't usable — run 'fresco doctor' and report the output at https://github.com/${REPO}/issues"
+    warn "Workaround: install mpvpaper yourself and set FRESCO_MPVPAPER=/path/to/mpvpaper"
   fi
 fi
 

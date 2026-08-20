@@ -236,8 +236,7 @@ fn pick_newest(probed: Vec<Probed>) -> Option<Probed> {
 /// The best bundled candidate that exists AND loads, with its version floor.
 /// Probed once per process (each probe spawns the binary with `--help`).
 fn mpvpaper_bundled() -> Option<&'static Probed> {
-    static FOUND: std::sync::OnceLock<Option<Probed>> =
-        std::sync::OnceLock::new();
+    static FOUND: std::sync::OnceLock<Option<Probed>> = std::sync::OnceLock::new();
     FOUND
         .get_or_init(|| {
             pick_newest(
@@ -257,8 +256,7 @@ fn mpvpaper_bundled() -> Option<&'static Probed> {
 /// A user-installed `mpvpaper` on `PATH`, with its version floor. Probed once
 /// per process, so preferring it costs no extra spawn per wallpaper change.
 fn mpvpaper_system() -> Option<&'static Probed> {
-    static FOUND: std::sync::OnceLock<Option<Probed>> =
-        std::sync::OnceLock::new();
+    static FOUND: std::sync::OnceLock<Option<Probed>> = std::sync::OnceLock::new();
     FOUND
         .get_or_init(|| {
             let paths = std::env::var_os("PATH")?;
@@ -413,7 +411,10 @@ mod mpvpaper_tests {
         );
         // Not mpvpaper at all (or output we don't recognise).
         assert_eq!(mpvpaper_version_from_help(""), None);
-        assert_eq!(mpvpaper_version_from_help("bash: mpvpaper: not found"), None);
+        assert_eq!(
+            mpvpaper_version_from_help("bash: mpvpaper: not found"),
+            None
+        );
     }
 
     #[test]
@@ -453,11 +454,8 @@ mod mpvpaper_tests {
         let plain = std::path::PathBuf::from("/usr/lib/fresco/mpvpaper");
 
         // Normal case: same upstream version per soname → keep libmpv2.
-        let got = pick_newest(vec![
-            (v2.clone(), Some((1, 9))),
-            (v1.clone(), Some((1, 9))),
-        ])
-        .unwrap();
+        let got =
+            pick_newest(vec![(v2.clone(), Some((1, 9))), (v1.clone(), Some((1, 9)))]).unwrap();
         assert_eq!(got.0, v2);
 
         // install.sh rebuilt a current mpvpaper next to a stale packaged one.
@@ -484,7 +482,10 @@ mod mpvpaper_tests {
         )
         .unwrap();
         assert_eq!(c.source, MpvpaperSource::Override);
-        assert_eq!(c.path, std::path::PathBuf::from("/home/u/.local/bin/mpvpaper"));
+        assert_eq!(
+            c.path,
+            std::path::PathBuf::from("/home/u/.local/bin/mpvpaper")
+        );
     }
 
     #[test]
@@ -511,11 +512,15 @@ mod mpvpaper_tests {
     #[test]
     fn falls_back_to_whichever_exists() {
         assert_eq!(
-            choose_mpvpaper(bundled(Some((1, 9))), None, None).unwrap().source,
+            choose_mpvpaper(bundled(Some((1, 9))), None, None)
+                .unwrap()
+                .source,
             MpvpaperSource::Bundled
         );
         assert_eq!(
-            choose_mpvpaper(None, system(Some((1, 4))), None).unwrap().source,
+            choose_mpvpaper(None, system(Some((1, 4))), None)
+                .unwrap()
+                .source,
             MpvpaperSource::System
         );
         // A known-version system copy beats a bundle we could not identify.

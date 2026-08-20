@@ -9170,7 +9170,7 @@ mod tests {
             sort: library::SortMode::Manual,
             collection: Some(nature.id.clone()),
         };
-        let plans = plan_sections(&entries, &[nature.clone()], &view, "");
+        let plans = plan_sections(&entries, std::slice::from_ref(&nature), &view, "");
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].title, "Nature");
         assert_eq!(plans[0].ids.len(), 1, "the loose entry is out of scope");

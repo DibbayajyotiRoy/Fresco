@@ -36,8 +36,8 @@ use std::io::Read;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
-use crate::config::{self, LyricAnchor, LyricStylePreset};
-use crate::lyrics::{self, Anchor, LrcLine, LyricStyle};
+use crate::config::{self, LyricAnchor};
+use crate::lyrics::{self, Anchor, LrcLine};
 use crate::mpris::{NowPlaying, PlaybackStatus};
 
 // ---------------------------------------------------------------------------
@@ -254,11 +254,10 @@ pub fn load_lyrics(candidates: &[PathBuf]) -> Option<Vec<LrcLine>> {
 /// What the daemon should do with the overlay after a [`LyricsRuntime::tick`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    /// Push this exact payload to mpv's `osd-overlay` (with `format:
-    /// "ass-events"`, `res_x: lyrics::PLAY_RES_X`, `res_y:
-    /// lyrics::PLAY_RES_Y`). Returned **only** when the string differs from the
-    /// one already on screen.
-    Show(String),
+    /// Draw this. Returned **only** when the words differ from the ones
+    /// already on screen — see [`LyricFrame`], which deliberately carries
+    /// content and no markup at all.
+    Show(LyricFrame),
     /// Remove the overlay. Returned once per transition into "nothing to show",
     /// never repeatedly.
     Clear,
@@ -278,7 +277,7 @@ pub enum Action {
 enum Screen {
     Unknown,
     Clear,
-    Text(String),
+    Text(LyricFrame),
 }
 
 /// The lyric overlay's memory: loaded lines, resolved config, and what has
@@ -301,10 +300,8 @@ pub struct LyricsRuntime {
     /// What we last pushed.
     screen: Screen,
     /// Line index behind `screen`. Comparing indices is how a tick decides it
-    /// has nothing to do without building a string.
+    /// has nothing to do without building a frame.
     idx: Option<usize>,
-    /// Accent behind `screen`, for the same reason.
-    accent: String,
     /// Something *other than the clock* changed — config, track, teardown — so
     /// the next tick must recompute even if the index and accent look
     /// unchanged, and even while playback is paused.
@@ -321,7 +318,6 @@ impl LyricsRuntime {
             track: None,
             screen: Screen::Unknown,
             idx: None,
-            accent: String::new(),
             dirty: true,
         }
     }
@@ -384,18 +380,16 @@ impl LyricsRuntime {
 
     /// Advance to `position_us` and say what the overlay should do.
     ///
-    /// `accent_hex` is `#RRGGBB` from the app theme, used only when
-    /// [`config::Lyrics::accent_follow`] is set; it is passed per tick rather
-    /// than stored because the theme can change under the daemon and a stale
-    /// tint is worse than the cost of a `&str`.
+    /// The accent is deliberately **not** an input any more. It is a property
+    /// of the palette, the palette belongs to the rasteriser, and a change to
+    /// it reaches the widget through the engine's dirty flag — not by making
+    /// this state machine believe the words changed.
     ///
     /// Two guarantees, in order of importance:
     ///
-    /// * **[`Action::Show`] only when the payload actually differs.** Not when
-    ///   the line index changes — when the *string* changes. Everything the
-    ///   overlay shows is a function of the line, the style and the accent, so
-    ///   comparing the rendered result is both the cheapest correct test and
-    ///   the one that cannot drift out of step with the renderer.
+    /// * **[`Action::Show`] only when the words actually differ.** Not when the
+    ///   line index changes — when the *content* changes. A repeated chorus and
+    ///   a re-announced track are both free.
     /// * **Paused and stopped freeze.** Not clear — the user is looking at a
     ///   paused song and expects its lyric to stay put — and not advance
     ///   either: players report a slightly different position on every poll
@@ -405,7 +399,7 @@ impl LyricsRuntime {
     /// The freeze yields to `dirty`. A config or track change while paused is a
     /// deliberate user action, and a style preview that does nothing until you
     /// press play is a bug report.
-    pub fn tick(&mut self, position_us: i64, status: PlaybackStatus, accent_hex: &str) -> Action {
+    pub fn tick(&mut self, position_us: i64, status: PlaybackStatus) -> Action {
         let idx = self.index_at(position_us);
 
         // Rule 1's fast path: no string built, no style resolved, no allocation
@@ -414,28 +408,24 @@ impl LyricsRuntime {
             if status != PlaybackStatus::Playing {
                 return Action::Idle;
             }
-            if idx == self.idx && self.accent == accent_hex {
+            if idx == self.idx {
                 return Action::Idle;
             }
         }
 
-        let desired = self.render(idx, accent_hex);
+        let desired = self.render(idx);
         self.idx = idx;
-        if self.accent != accent_hex {
-            self.accent = accent_hex.to_string();
-        }
         self.dirty = false;
 
         match desired {
-            Some(text) => {
-                if matches!(&self.screen, Screen::Text(shown) if *shown == text) {
-                    // The index or the accent moved but the pixels did not:
-                    // a duplicated line, a repeated chorus, or an accent the
-                    // preset ignores. Still not a redraw.
+            Some(frame) => {
+                if matches!(&self.screen, Screen::Text(shown) if *shown == frame) {
+                    // The index moved but the words did not: a duplicated line
+                    // or a repeated chorus. Still not a redraw.
                     Action::Idle
                 } else {
-                    self.screen = Screen::Text(text.clone());
-                    Action::Show(text)
+                    self.screen = Screen::Text(frame.clone());
+                    Action::Show(frame)
                 }
             }
             None => {
@@ -518,7 +508,7 @@ impl LyricsRuntime {
         position_us as f64 / 1e6 - f64::from(self.cfg.offset_ms) / 1e3
     }
 
-    /// The payload for line `idx`, or `None` when the overlay should be empty.
+    /// The frame for line `idx`, or `None` when the overlay should be empty.
     ///
     /// **Two independent things can be on screen**: the current lyric line, and
     /// — when [`config::Lyrics::show_track_info`] is on — a title/artist header
@@ -528,12 +518,18 @@ impl LyricsRuntime {
     /// a now-playing readout that disappears on exactly the tracks LRCLIB has
     /// never heard of is the setting appearing broken where it is wanted most.
     ///
-    /// One string, one event. mpv's `osd-overlay` carries a single ASS payload
-    /// per widget, so the header, the lyric and the optional next-line preview
-    /// are runs of text *inside* one payload rather than three overlays — and
-    /// the whole thing is compared as a unit by [`tick`](Self::tick), so an
-    /// unchanged header over an unchanged lyric is still not a redraw.
-    fn render(&self, idx: Option<usize>, accent_hex: &str) -> Option<String> {
+    /// # Content, never markup
+    ///
+    /// This used to return the ASS payload, which meant the *look* — colours,
+    /// sizes, alphas, the accent — was folded into the value the state machine
+    /// compared against. On a rasterised card that is exactly wrong twice over:
+    /// the palette is not this module's business, and a value that carries the
+    /// look changes when the look changes, which would key a megabyte of pixels
+    /// off a colour the renderer resolves for itself. So the frame is the
+    /// **words**, and nothing else. The engine hashes it into a
+    /// `ContentKey`, and everything that is a style change reaches the
+    /// rasteriser through the widget's dirty flag instead.
+    fn render(&self, idx: Option<usize>) -> Option<LyricFrame> {
         // The master switch used to be enforced entirely by `index_at`
         // returning `None`. The header does not come from a line index, so
         // "no index" no longer implies "nothing to show" and the switch has to
@@ -555,32 +551,27 @@ impl LyricsRuntime {
             return None;
         }
 
-        let style = self.style(accent_hex);
-        // `render_ass` with empty text is exactly the base override block that
-        // every run of text after it inherits. Building the payload on top of
-        // it rather than re-deriving the block keeps the tags the renderer's
-        // own, and makes a header-less payload byte-for-byte what it has always
-        // been — the regression guard the tests pin.
-        let mut out = lyrics::render_ass("", &style);
-        if let Some((title, artist)) = &info {
-            push_track_info(&mut out, title, artist.as_deref(), &style);
-            if current.is_some() {
-                push_lyric_reset(&mut out, &style);
-            }
+        let mut frame = LyricFrame::default();
+        if let Some((title, artist)) = info {
+            // The card's micro-label. Only ever drawn with a title under it, so
+            // it is set here rather than unconditionally — a "Now playing" with
+            // nothing playing is furniture, not information.
+            frame.label = NOW_PLAYING_LABEL.to_string();
+            frame.title = title;
+            frame.artist = artist.unwrap_or_default();
         }
         if let Some((i, line)) = current {
-            out.push_str(&lyrics::ass_escape(&line.text));
+            frame.lyric = line.text.clone();
             // Only the immediately following line, and only if it has words: a
             // gap marker is the next thing that happens, and previewing past it
             // would show a lyric that is two changes away.
             if self.cfg.show_next_line {
-                let next = self.lines.get(i + 1).filter(|n| !n.text.trim().is_empty());
-                if let Some(next) = next {
-                    append_next_line(&mut out, &next.text, &style);
+                if let Some(next) = self.lines.get(i + 1).filter(|n| !n.text.trim().is_empty()) {
+                    frame.next_lyric = next.text.clone();
                 }
             }
         }
-        Some(out)
+        Some(frame)
     }
 
     /// The header's contents: the title, and the artist under it when there is
@@ -604,180 +595,41 @@ impl LyricsRuntime {
         let artist = Some(fit_for_header(&np.artist_line())).filter(|a| !a.is_empty());
         Some((title, artist))
     }
-
-    /// Resolve the configured preset into the concrete look the renderer wants.
-    fn style(&self, accent_hex: &str) -> LyricStyle {
-        let size = self.cfg.font_size_pt;
-        // (size, bold, fill, outline). Four presets, four rows, so the whole
-        // design lives in one place instead of four scattered branches.
-        let (size, bold, fill, outline) = match self.cfg.style {
-            // Quiet by default: regular weight, plain white, thin presence. A
-            // wallpaper widget should be noticed only when you look for it.
-            LyricStylePreset::Minimal => (size, false, MINIMAL_FILL, DARK_OUTLINE),
-            // Loud: bold, a quarter larger than asked, warm amber fill.
-            //
-            // Deliberately NOT karaoke markup. `\k`/`\kf` sweep within an event
-            // using the *track's* clock, and mpv renders OSD ASS at time 0
-            // (`ass_render_frame(…, 0, …)` in `sub/osd_libass.c`), so a sweep
-            // pushed here would render permanently unswept — visibly broken,
-            // not merely absent. Plain `.lrc` has no word timings to sweep with
-            // either. So this preset is a *static* singing-along look, and real
-            // karaoke waits for W2, where Fresco drives the surface itself.
-            LyricStylePreset::Karaoke => {
-                (size.saturating_mul(5) / 4, true, KARAOKE_FILL, DARK_OUTLINE)
-            }
-            // The film look: bold white, hard black edge, size as configured.
-            LyricStylePreset::Subtitle => (size, true, SUBTITLE_FILL, DARK_OUTLINE),
-            // Inverted, and that is the whole trick. `render_ass` emits a single
-            // ASS event; a background panel needs either `BorderStyle=3` (a
-            // *style* field, and the OSD style belongs to mpv) or a `\p1` vector
-            // drawn as a second event — neither is reachable from here. So the
-            // panel is approximated by putting near-black text inside a heavy
-            // near-white outline, which reads as a light card behind the words.
-            // A real rounded panel is W2 work; this is the closest the OSD path
-            // gets, and it is honestly a good deal closer than it sounds.
-            LyricStylePreset::Card => (size, true, CARD_INK, CARD_PANEL),
-        };
-        LyricStyle {
-            // No font knob in the config: presets pick the feeling, and a family
-            // the user does not have would degrade through fontconfig anyway.
-            font: LyricStyle::default().font,
-            size_pt: size,
-            // Precedence: accent-follow wins, then an explicit colour, then
-            // the preset's own fill. `colour` is `Option` on purpose — `None`
-            // means "let the preset decide", so shipping the key does not
-            // repaint every existing accent-free Karaoke lyric white.
-            primary: if self.cfg.accent_follow && is_hex_colour(accent_hex) {
-                accent_hex.to_string()
-            } else if let Some(c) = self.cfg.colour.as_deref().filter(|c| is_hex_colour(c)) {
-                c.to_string()
-            } else {
-                fill.to_string()
-            },
-            outline: outline.to_string(),
-            anchor: map_anchor(self.cfg.anchor),
-            margin_px: self.cfg.margin_px,
-            bold,
-        }
-    }
 }
 
-/// Fill for [`LyricStylePreset::Minimal`] and the base for everything unaccented.
-const MINIMAL_FILL: &str = "#FFFFFF";
-/// Fill for [`LyricStylePreset::Subtitle`].
-const SUBTITLE_FILL: &str = "#FFFFFF";
-/// Fill for [`LyricStylePreset::Karaoke`] — warm amber, the colour every
-/// karaoke box on earth uses, and legible against both bright and dark video.
-const KARAOKE_FILL: &str = "#FFD166";
-/// Outline for every preset whose text is light: near-black is what makes the
-/// text survive an arbitrary frame of video behind it.
-const DARK_OUTLINE: &str = "#000000";
-/// [`LyricStylePreset::Card`]'s text — near-black rather than pure, so it reads
-/// as ink on paper instead of a hole.
-const CARD_INK: &str = "#14141A";
-/// [`LyricStylePreset::Card`]'s "panel": a heavy near-white outline standing in
-/// for the background box ASS will not give us on this path.
-const CARD_PANEL: &str = "#F2F2F4";
-
-/// Append the upcoming line under the current one, smaller and dimmed.
+/// Everything one now-playing card draws, and nothing else.
 ///
-/// Hand-built rather than passing `"current\nnext"` to `lyrics::render_ass`:
-/// that would produce the break correctly (`ass_escape` turns a newline into
-/// `\N`), but both lines would then share one size and one opacity, and there
-/// is no way to ask for two looks in a single event. So the break and the
-/// second override block are written here — while the lyric text still goes
-/// through [`lyrics::ass_escape`], so nothing from the file reaches the payload
-/// unescaped.
-fn append_next_line(out: &mut String, text: &str, style: &LyricStyle) {
-    let small = scaled_size(style, 3, 4);
-    // `\alpha` and not `\1a`: dimming only the fill would leave a full-strength
-    // outline around a faded interior, which reads as *more* prominent than the
-    // current line rather than less.
-    out.push_str(&format!("\\N{{\\fs{small}\\alpha&H80&}}"));
-    out.push_str(&lyrics::ass_escape(text));
+/// Deliberately **content only**: no colour, no size, no anchor, no accent. The
+/// look is [`crate::widgetkit`]'s and the placement is the engine's; what this
+/// carries is the words, so that "did anything visibly change" is a comparison
+/// of what a person would read rather than of a rendered payload.
+///
+/// `Hash` because the engine turns exactly this into the widget's
+/// `ContentKey`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct LyricFrame {
+    /// The card's micro-label. Empty when there is no header.
+    pub label: String,
+    /// Track title, already fitted to [`MAX_HEADER_CHARS`]. Empty with no
+    /// header.
+    pub title: String,
+    /// Artist, or empty. `artist · album` is already joined by
+    /// [`NowPlaying::artist_line`].
+    pub artist: String,
+    /// The current lyric line. Empty removes the whole lyric block *and* its
+    /// divider, and the card becomes header-only.
+    pub lyric: String,
+    /// The upcoming line, when [`config::Lyrics::show_next_line`] is on and
+    /// there is one with words in it.
+    pub next_lyric: String,
 }
 
-/// Write the title (and artist) at the head of the payload, above the lyric.
+/// The card's micro-label above the title.
 ///
-/// Hand-built markup for the same reason [`append_next_line`] is: one ASS event
-/// carries one look per run of text, so a header that is visually *different*
-/// from the lyric has to write its own override block. Every string here is
-/// third-party metadata out of another process's tags, so all of it goes
-/// through [`lyrics::ass_escape`] before it reaches the payload.
-///
-/// The hierarchy is the whole design of this function. The lyric is what the
-/// widget is for and must stay the thing your eye lands on, so the header gives
-/// up all three of the levers that would compete with it: it is smaller (¾ and
-/// ⅝ of the lyric's size), lighter ([`TITLE_ALPHA`]/[`ARTIST_ALPHA`] against
-/// the lyric's full opacity) and unbolded, with the artist a further step down
-/// from the title. Above rather than below because the anchor is usually along
-/// the bottom edge (`\an2`), where a trailing header would sit between the
-/// lyric and the screen edge and read as the more important line.
-fn push_track_info(out: &mut String, title: &str, artist: Option<&str>, style: &LyricStyle) {
-    let title_size = scaled_size(style, 3, 4);
-    out.push_str(&format!("{{\\fs{title_size}\\b0\\alpha{TITLE_ALPHA}}}"));
-    out.push_str(&lyrics::ass_escape(title));
-    if let Some(artist) = artist {
-        let artist_size = scaled_size(style, 5, 8);
-        out.push_str(&format!(
-            "\\N{{\\fs{artist_size}\\b0\\alpha{ARTIST_ALPHA}}}"
-        ));
-        out.push_str(&lyrics::ass_escape(artist));
-    }
-}
-
-/// Break out of the header and put the lyric's own look back.
-///
-/// Every property the header changed has to be restored explicitly: `\alpha`
-/// sets all four alpha channels at once, so simply not repeating it would leave
-/// the lyric wearing the header's transparency. The values mirror the ones
-/// `render_ass` puts in the base block — full fill and outline, a soft shadow.
-fn push_lyric_reset(out: &mut String, style: &LyricStyle) {
-    let size = scaled_size(style, 1, 1);
-    let bold = u8::from(style.bold);
-    out.push_str(&format!(
-        "\\N{{\\fs{size}\\b{bold}\\1a&H00&\\3a&H00&\\4a&H80&}}"
-    ));
-}
-
-/// Transparency of the title line — subordinate to the lyric, still plainly
-/// readable at a glance across a room.
-const TITLE_ALPHA: &str = "&H70&";
-/// Transparency of the artist line, one step further back than the title: you
-/// read the song name, and the artist is there when you look for it.
-const ARTIST_ALPHA: &str = "&HA0&";
-
-/// Longest title or artist the header will draw, in characters.
-///
-/// Not a taste decision. `xesam:title` is whatever the player was handed, and a
-/// web radio stream or a DJ set publishes a title with the station name, the
-/// bitrate and a URL in it; libass wraps rather than clips, so an unbounded one
-/// becomes four lines of furniture that shoves the lyric off its anchor. An
-/// ellipsis says "there was more" where a silent clip would look like bad
-/// metadata.
-const MAX_HEADER_CHARS: usize = 56;
-
-/// One metadata field → the string the header actually draws: trimmed, and
-/// shortened to [`MAX_HEADER_CHARS`] with an ellipsis. Empty when there is
-/// nothing left, which is how the caller tells "no artist" from "an artist".
-///
-/// Counted in `chars` and not bytes: a byte slice would panic on a multibyte
-/// boundary, and every non-Latin title in a library is multibyte.
-fn fit_for_header(s: &str) -> String {
-    let trimmed = s.trim();
-    if trimmed.chars().count() <= MAX_HEADER_CHARS {
-        return trimmed.to_string();
-    }
-    let kept: String = trimmed.chars().take(MAX_HEADER_CHARS - 1).collect();
-    format!("{}…", kept.trim_end())
-}
-
-/// A type size `num`/`den` of the lyric's own, clamped exactly the way
-/// `render_ass` clamps its own — `MIN_SIZE_PT`/`MAX_SIZE_PT` are private to
-/// that module, so the bounds are mirrored here rather than imported.
-fn scaled_size(style: &LyricStyle, num: u32, den: u32) -> u32 {
-    (style.size_pt.saturating_mul(num) / den).clamp(8, 400)
-}
+/// Not translated here: `crate::i18n` is a GUI concern and the daemon has no
+/// locale of its own to consult. The GUI owns the widget controls, and if this
+/// is ever localised it is localised there and handed down.
+const NOW_PLAYING_LABEL: &str = "Now playing";
 
 /// [`config::LyricAnchor`] → [`lyrics::Anchor`].
 ///
@@ -800,24 +652,35 @@ const fn map_anchor(a: LyricAnchor) -> Anchor {
     }
 }
 
-/// Whether `s` is a colour [`lyrics::hex_to_ass_colour`] will actually accept.
+/// Longest title or artist the header will draw, in characters.
 ///
-/// Checked here rather than relying on that function's fallback, because the
-/// fallback is *white*: the right call for a `Subtitle`'s fill, and a disaster
-/// for `Card`, whose panel is near-white and whose text would vanish into it.
-/// An unusable accent must leave the preset's own colour standing.
-fn is_hex_colour(s: &str) -> bool {
-    let h = s.trim();
-    let h = h.strip_prefix('#').unwrap_or(h);
-    matches!(h.len(), 3 | 6) && h.bytes().all(|b| b.is_ascii_hexdigit())
+/// Not a taste decision. `xesam:title` is whatever the player was handed, and a
+/// web radio stream or a DJ set publishes a title with the station name, the
+/// bitrate and a URL in it. The card ellipsises to one line on its own, but it
+/// measures what it is given first, and measuring a four-kilobyte title on
+/// every track change is work nobody asked for. An ellipsis says "there was
+/// more" where a silent clip would look like bad metadata.
+pub const MAX_HEADER_CHARS: usize = 56;
+
+/// One metadata field → the string the header actually draws: trimmed, and
+/// shortened to [`MAX_HEADER_CHARS`] with an ellipsis. Empty when there is
+/// nothing left, which is how the caller tells "no artist" from "an artist".
+///
+/// Counted in `chars` and not bytes: a byte slice would panic on a multibyte
+/// boundary, and every non-Latin title in a library is multibyte.
+fn fit_for_header(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.chars().count() <= MAX_HEADER_CHARS {
+        return trimmed.to_string();
+    }
+    let kept: String = trimmed.chars().take(MAX_HEADER_CHARS - 1).collect();
+    format!("{}…", kept.trim_end())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mpris::PlaybackStatus::{Paused, Playing, Stopped};
-
-    const ACCENT: &str = "#3584E4";
 
     // -- helpers ------------------------------------------------------------
 
@@ -868,11 +731,17 @@ mod tests {
     }
 
     /// The rendered lyric out of a `Show`, or a failure naming what came back.
-    fn shown(a: Action) -> String {
+    fn shown(a: Action) -> LyricFrame {
         match a {
-            Action::Show(s) => s,
+            Action::Show(f) => f,
             other => panic!("expected a Show, got {other:?}"),
         }
+    }
+
+    /// Just the lyric line off a [`Action::Show`], which is what most of the
+    /// assertions below are actually about.
+    fn lyric(a: Action) -> String {
+        shown(a).lyric
     }
 
     // -- lrc_candidates -----------------------------------------------------
@@ -1048,27 +917,27 @@ mod tests {
         let mut rt = runtime();
         // Before the first line there is nothing to show — one Clear, then
         // silence, not a Clear every tick.
-        assert_eq!(rt.tick(us(0.0), Playing, ACCENT), Action::Clear);
+        assert_eq!(rt.tick(us(0.0), Playing), Action::Clear);
         for step in 0..100 {
             let t = us(f64::from(step) * 0.1);
-            assert_eq!(rt.tick(t, Playing, ACCENT), Action::Idle, "at {t}us");
+            assert_eq!(rt.tick(t, Playing), Action::Idle, "at {t}us");
         }
         // The line lands once...
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
         // ...and every one of the 99 ticks across the rest of its life is free.
         for step in 1..100 {
             let t = us(10.0 + f64::from(step) * 0.1);
-            assert_eq!(rt.tick(t, Playing, ACCENT), Action::Idle, "at {t}us");
+            assert_eq!(rt.tick(t, Playing), Action::Idle, "at {t}us");
         }
     }
 
     #[test]
     fn a_line_change_is_exactly_one_show_carrying_the_new_text() {
         let mut rt = runtime();
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
-        assert!(shown(rt.tick(us(20.0), Playing, ACCENT)).ends_with("}b"));
-        assert_eq!(rt.tick(us(20.1), Playing, ACCENT), Action::Idle);
-        assert!(shown(rt.tick(us(30.0), Playing, ACCENT)).ends_with("}c"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
+        assert_eq!(lyric(rt.tick(us(20.0), Playing)), "b");
+        assert_eq!(rt.tick(us(20.1), Playing), Action::Idle);
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "c");
     }
 
     #[test]
@@ -1077,41 +946,41 @@ mod tests {
         // Comparing the *string* and not the index is what catches this.
         let lines = lyrics::parse_lrc("[00:10.00]chorus\n[00:20.00]chorus\n[00:30.00]verse");
         let mut rt = runtime_with(lines, |_| {});
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}chorus"));
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
-        assert!(shown(rt.tick(us(30.0), Playing, ACCENT)).ends_with("}verse"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "chorus");
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "verse");
     }
 
     #[test]
     fn pause_freezes_the_line_and_resume_does_not_repaint_it() {
         let mut rt = runtime();
-        assert!(shown(rt.tick(us(20.0), Playing, ACCENT)).ends_with("}b"));
+        assert_eq!(lyric(rt.tick(us(20.0), Playing)), "b");
         // Paused players report a drifting position — some report 0 — and none
         // of it may move the overlay. Note the tick at 30s: playing, that is a
         // new line; paused, it must be ignored entirely.
         for t in [us(20.0), us(20.4), us(30.0), 0] {
-            assert_eq!(rt.tick(t, Paused, ACCENT), Action::Idle, "paused at {t}us");
+            assert_eq!(rt.tick(t, Paused), Action::Idle, "paused at {t}us");
         }
-        assert_eq!(rt.tick(us(20.0), Stopped, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(20.0), Stopped), Action::Idle);
         // Resuming where we left off must not re-push what is already there.
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
         // And the line the pause hid still arrives once playback resumes.
-        assert!(shown(rt.tick(us(30.0), Playing, ACCENT)).ends_with("}c"));
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "c");
     }
 
     #[test]
     fn before_the_first_line_clears_and_past_the_last_holds() {
         let mut rt = runtime();
-        assert_eq!(rt.tick(us(0.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(9.999), Playing, ACCENT), Action::Idle);
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(rt.tick(us(0.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(9.999), Playing), Action::Idle);
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
         // The last line holds to the end of the track rather than clearing —
         // an outro is not an instrumental gap unless the file says so.
-        assert!(shown(rt.tick(us(30.0), Playing, ACCENT)).ends_with("}c"));
-        assert_eq!(rt.tick(us(600.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "c");
+        assert_eq!(rt.tick(us(600.0), Playing), Action::Idle);
         // Seeking back before the first line clears once, then stays quiet.
-        assert_eq!(rt.tick(us(1.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(2.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(1.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(2.0), Playing), Action::Idle);
     }
 
     #[test]
@@ -1120,41 +989,41 @@ mod tests {
         // Holding the previous lyric through a 20-second gap is the failure.
         let lines = lyrics::parse_lrc("[00:10.00]a\n[00:20.00]\n[00:30.00]c");
         let mut rt = runtime_with(lines, |_| {});
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(25.0), Playing, ACCENT), Action::Idle);
-        assert!(shown(rt.tick(us(30.0), Playing, ACCENT)).ends_with("}c"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(25.0), Playing), Action::Idle);
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "c");
     }
 
     #[test]
     fn no_lyrics_and_disabled_both_clear_once() {
         let mut rt = LyricsRuntime::new(&enabled_cfg());
         rt.track_changed(&np("song"), None);
-        assert_eq!(rt.tick(us(10.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(11.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(11.0), Playing), Action::Idle);
 
         // Turning the feature off mid-song must take the overlay down, once.
         let mut rt = runtime();
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
         let mut off = enabled_cfg();
         off.enabled = false;
         rt.set_config(&off);
-        assert_eq!(rt.tick(us(10.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
         assert_eq!(rt.next_deadline_us(us(10.0)), None);
     }
 
     #[test]
     fn clear_takes_the_overlay_down_exactly_once() {
         let mut rt = runtime();
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
         rt.clear();
-        assert_eq!(rt.tick(us(10.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
         assert_eq!(rt.next_deadline_us(us(10.0)), None);
         // And a fresh track brings it back.
         rt.track_changed(&np("next song"), Some(fixture()));
-        assert!(shown(rt.tick(us(20.0), Playing, ACCENT)).ends_with("}b"));
+        assert_eq!(lyric(rt.tick(us(20.0), Playing)), "b");
     }
 
     #[test]
@@ -1162,12 +1031,12 @@ mod tests {
         // Players emit PropertiesChanged on Metadata for late album art and for
         // volume; each one would otherwise drop the overlay back to Clear.
         let mut rt = runtime();
-        assert!(shown(rt.tick(us(20.0), Playing, ACCENT)).ends_with("}b"));
+        assert_eq!(lyric(rt.tick(us(20.0), Playing)), "b");
         rt.track_changed(&np("song"), None);
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
         // A genuinely different track does reset, lyrics or not.
         rt.track_changed(&np("another song"), None);
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Clear);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Clear);
     }
 
     /// Regression, the second half of the double guard.
@@ -1195,17 +1064,17 @@ mod tests {
 
         let mut rt = LyricsRuntime::new(&enabled_cfg());
         rt.track_changed(&counting_stars, Some(fixture()));
-        assert!(shown(rt.tick(us(20.0), Playing, ACCENT)).ends_with("}b"));
+        assert_eq!(lyric(rt.tick(us(20.0), Playing)), "b");
 
         // Firefox re-emits byte-identical Metadata ~20x a song. Still nothing.
         rt.track_changed(&counting_stars, None);
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
 
         // The song ends and the next one starts on its own. Same track id, new
         // everything else — this must take the old lyrics down…
         rt.track_changed(&dil_nu, None);
         assert_eq!(
-            rt.tick(us(20.0), Playing, ACCENT),
+            rt.tick(us(20.0), Playing),
             Action::Clear,
             "the old track's lyric must not survive an automatic advance"
         );
@@ -1215,7 +1084,7 @@ mod tests {
         let mut third = np_full("Third", &["Someone"], "Album");
         third.track_id = Some(FIREFOX_ID.into());
         rt.track_changed(&third, Some(fixture()));
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
     }
 
     // -- offset -------------------------------------------------------------
@@ -1228,23 +1097,23 @@ mod tests {
         // backwards is invisible in review and immediately wrong on screen.
         let mut late = runtime_with(fixture(), |c| c.offset_ms = 1_000);
         // The line is stamped 10s. With +1s it must NOT be up at 10s...
-        assert_eq!(late.tick(us(10.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(late.tick(us(10.9), Playing, ACCENT), Action::Idle);
+        assert_eq!(late.tick(us(10.0), Playing), Action::Clear);
+        assert_eq!(late.tick(us(10.9), Playing), Action::Idle);
         // ...and must arrive a full second late.
-        assert!(shown(late.tick(us(11.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(late.tick(us(11.0), Playing)), "a");
 
         // Negative pulls every line earlier, for a file timed against a master
         // with a longer intro.
         let mut early = runtime_with(fixture(), |c| c.offset_ms = -1_000);
-        assert!(shown(early.tick(us(9.0), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(early.tick(us(9.0), Playing)), "a");
 
         // The `[offset:]` tag composes on top in its own direction: +250ms in
         // the file pulls the line 0.25s earlier, the user's +1s pushes it 1s
         // later, so it lands at 10.75s.
         let tagged = lyrics::parse_lrc("[offset:+250]\n[00:10.00]a");
         let mut rt = runtime_with(tagged, |c| c.offset_ms = 1_000);
-        assert_eq!(rt.tick(us(10.74), Playing, ACCENT), Action::Clear);
-        assert!(shown(rt.tick(us(10.75), Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(rt.tick(us(10.74), Playing), Action::Clear);
+        assert_eq!(lyric(rt.tick(us(10.75), Playing)), "a");
     }
 
     // -- Smart Sleep --------------------------------------------------------
@@ -1293,191 +1162,128 @@ mod tests {
         let mut rt = runtime_with(lines, |_| {});
         let mut pos = us(10.0);
         let mut wakes = 0;
-        assert!(shown(rt.tick(pos, Playing, ACCENT)).ends_with("}a"));
+        assert_eq!(lyric(rt.tick(pos, Playing)), "a");
         while let Some(d) = rt.next_deadline_us(pos) {
             pos += d;
             wakes += 1;
-            assert!(matches!(rt.tick(pos, Playing, ACCENT), Action::Show(_)));
+            assert!(matches!(rt.tick(pos, Playing), Action::Show(_)));
             assert!(wakes < 5, "far too many wakes");
         }
         assert_eq!(wakes, 1);
     }
 
-    // -- style --------------------------------------------------------------
+    // -- what changes the frame ---------------------------------------------
+    //
+    // The frame is **content**, so what repaints it is a content change and
+    // nothing else. A style change — preset, colour, anchor, size — no longer
+    // moves it, and must not: the look belongs to the palette and the placement
+    // to the engine, and both reach the widget through its dirty flag. The
+    // tests that used to pin those looks are gone with the payload they read;
+    // what is left is the half that is still this module's job.
 
     #[test]
-    fn a_style_change_repaints_the_current_line_immediately() {
-        // A preset that only takes effect at the next lyric reads as broken.
+    fn a_content_change_repaints_the_current_line_immediately() {
+        // A settings row that only takes effect at the next lyric reads as
+        // broken.
         let mut rt = runtime();
-        let before = shown(rt.tick(us(10.0), Playing, ACCENT));
+        let before = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(before.lyric, "a");
+        assert!(before.next_lyric.is_empty());
+
         let mut cfg = enabled_cfg();
-        cfg.anchor = LyricAnchor::TopLeft;
+        cfg.show_next_line = true;
         rt.set_config(&cfg);
-        let after = shown(rt.tick(us(10.0), Playing, ACCENT));
+        let after = shown(rt.tick(us(10.0), Playing));
         assert_ne!(before, after);
-        assert!(after.contains("\\an7"), "{after}");
+        assert_eq!(after.next_lyric, "b");
 
         // Re-applying the same block is not a change and must not repaint...
         rt.set_config(&cfg);
-        assert_eq!(rt.tick(us(10.0), Playing, ACCENT), Action::Idle);
-        // ...and neither does a change that cannot alter the payload. The GUI
-        // rewrites the whole file for unrelated edits; only pixels count.
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Idle);
+        // ...and neither does a change that cannot alter the content. The GUI
+        // rewrites the whole file for unrelated edits.
         cfg.folder = Some(PathBuf::from("/l"));
         rt.set_config(&cfg);
-        assert_eq!(rt.tick(us(10.0), Playing, ACCENT), Action::Idle);
-    }
-
-    #[test]
-    fn a_style_change_lands_even_while_paused() {
-        // The freeze is about the clock, not about the user. Someone tuning the
-        // size slider on a paused song must see it move.
-        let mut rt = runtime();
-        shown(rt.tick(us(10.0), Playing, ACCENT));
-        let mut cfg = enabled_cfg();
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Idle);
+        // A *style* edit is the interesting one, and the answer changed with
+        // the substrate: it no longer reaches this state machine at all, so the
+        // frame is unchanged and the engine's dirty flag is what repaints the
+        // pixels. Asserting `Idle` here is asserting that the accent and the
+        // size are not smuggled into the content key.
+        cfg.anchor = LyricAnchor::TopLeft;
         cfg.font_size_pt = 96;
+        cfg.accent_follow = !cfg.accent_follow;
         rt.set_config(&cfg);
-        assert!(shown(rt.tick(us(10.0), Paused, ACCENT)).contains("\\fs96"));
-        assert_eq!(rt.tick(us(10.0), Paused, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Idle);
     }
 
     #[test]
-    fn presets_resolve_to_four_distinguishable_looks() {
-        let render = |preset: LyricStylePreset, accent: bool| {
-            let mut rt = runtime_with(fixture(), |c| {
-                c.style = preset;
-                c.accent_follow = accent;
-            });
-            shown(rt.tick(us(10.0), Playing, ACCENT))
-        };
-        // Minimal is the quiet one: regular weight, plain white.
-        let minimal = render(LyricStylePreset::Minimal, false);
-        assert!(minimal.contains("\\fs28\\b0"), "{minimal}");
-        assert!(minimal.contains("\\1c&HFFFFFF&\\3c&H000000&"), "{minimal}");
-        // Karaoke is bold and a quarter larger — and carries no `\k` tags,
-        // because mpv renders OSD ASS at time 0 and a sweep would sit frozen.
-        let karaoke = render(LyricStylePreset::Karaoke, false);
-        assert!(
-            karaoke.contains(&format!("\\fs35\\b{}", crate::lyrics::BOLD_WEIGHT)),
-            "{karaoke}"
-        );
-        assert!(karaoke.contains("\\1c&H66D1FF&"), "{karaoke}");
-        assert!(!karaoke.contains("\\k"), "karaoke tags never sweep here");
-        // Subtitle is the film look: bold white on black at the asked size.
-        let subtitle = render(LyricStylePreset::Subtitle, false);
-        assert!(
-            subtitle.contains(&format!("\\fs28\\b{}", crate::lyrics::BOLD_WEIGHT)),
-            "{subtitle}"
-        );
-        assert!(
-            subtitle.contains("\\1c&HFFFFFF&\\3c&H000000&"),
-            "{subtitle}"
-        );
-        // Card inverts: dark ink inside a near-white "panel" outline.
-        let card = render(LyricStylePreset::Card, false);
-        assert!(card.contains("\\1c&H1A1414&\\3c&HF4F2F2&"), "{card}");
-        // All four differ from each other.
-        let all = [&minimal, &karaoke, &subtitle, &card];
-        for (i, a) in all.iter().enumerate() {
-            for b in &all[i + 1..] {
-                assert_ne!(a, b);
-            }
-        }
-    }
-
-    /// Colour precedence: accent-follow, then an explicit colour, then the
-    /// preset's own fill.
-    ///
-    /// `colour` is `Option` so that shipping the key changes nothing for
-    /// existing users — `None` must leave Karaoke amber, not repaint it white.
-    #[test]
-    fn an_explicit_colour_is_used_only_when_accent_follow_is_off() {
-        let shown_with = |accent: bool, colour: Option<&str>| {
-            let mut rt = runtime_with(fixture(), |c| {
-                c.style = LyricStylePreset::Karaoke;
-                c.accent_follow = accent;
-                c.colour = colour.map(str::to_string);
-            });
-            shown(rt.tick(us(10.0), Playing, "#FF8800"))
-        };
-        // Accent on: the accent wins even when a colour is set.
-        assert!(shown_with(true, Some("#00FF00")).contains("\\1c&H0088FF&"));
-        // Accent off: the explicit colour is used.
-        assert!(shown_with(false, Some("#00FF00")).contains("\\1c&H00FF00&"));
-        // Accent off, no colour: the preset's own amber survives.
-        assert!(shown_with(false, None).contains("\\1c&H66D1FF&"));
-        // Garbage colour falls back to the preset rather than rendering wrong.
-        assert!(shown_with(false, Some("nonsense")).contains("\\1c&H66D1FF&"));
+    fn a_content_change_lands_even_while_paused() {
+        // The freeze is about the clock, not about the user. Someone turning
+        // the track readout on during a paused song must see it appear.
+        let mut rt = runtime();
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
+        let mut cfg = enabled_cfg();
+        cfg.show_next_line = true;
+        rt.set_config(&cfg);
+        assert_eq!(shown(rt.tick(us(10.0), Paused)).next_lyric, "b");
+        assert_eq!(rt.tick(us(10.0), Paused), Action::Idle);
     }
 
     #[test]
-    fn accent_follow_tints_the_fill_and_only_when_the_accent_is_usable() {
-        let mut rt = runtime_with(fixture(), |c| c.accent_follow = true);
-        assert!(shown(rt.tick(us(10.0), Playing, "#FF8800")).contains("\\1c&H0088FF&"));
-        // A changed accent repaints the line that is already up.
-        assert!(shown(rt.tick(us(10.0), Playing, "#3584E4")).contains("\\1c&HE48435&"));
-        assert_eq!(rt.tick(us(10.0), Playing, "#3584E4"), Action::Idle);
-
-        // An unusable accent must leave the preset's colour standing rather
-        // than falling through to hex_to_ass_colour's white — which would make
-        // Card's near-black ink white on a near-white panel, i.e. invisible.
-        for junk in ["", "  ", "accent", "#12345", "rgb(1,2,3)"] {
-            let mut rt = runtime_with(fixture(), |c| {
-                c.accent_follow = true;
-                c.style = LyricStylePreset::Card;
-            });
-            let got = shown(rt.tick(us(10.0), Playing, junk));
-            assert!(got.contains("\\1c&H1A1414&"), "accent {junk:?}: {got}");
-        }
-        // accent_follow off leaves the preset alone whatever the accent is.
-        let mut off = runtime_with(fixture(), |c| c.accent_follow = false);
-        assert!(shown(off.tick(us(10.0), Playing, "#FF8800")).contains("\\1c&HFFFFFF&"));
-    }
-
-    #[test]
-    fn show_next_line_appends_the_upcoming_line_dimmed() {
+    fn show_next_line_carries_the_upcoming_line() {
         let mut rt = runtime_with(fixture(), |c| c.show_next_line = true);
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        // One event, two looks: the break and the second override block are
-        // ours, the words still go through ass_escape.
-        assert!(got.contains("a\\N{\\fs21\\alpha&H80&}b"), "{got}");
-        // mpv splits the payload on real newlines into separate events.
-        assert!(!got.contains('\n'), "{got}");
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!((got.lyric.as_str(), got.next_lyric.as_str()), ("a", "b"));
         // The last line has nothing to preview.
-        let last = shown(rt.tick(us(30.0), Playing, ACCENT));
-        assert!(last.ends_with("}c"), "{last}");
+        let last = shown(rt.tick(us(30.0), Playing));
+        assert_eq!(last.lyric, "c");
+        assert!(last.next_lyric.is_empty(), "{last:?}");
         // Neither does a line followed by a gap marker — previewing past it
         // would show a lyric that is two changes away.
         let mut gapped = runtime_with(
             lyrics::parse_lrc("[00:10.00]a\n[00:20.00]\n[00:30.00]c"),
             |c| c.show_next_line = true,
         );
-        assert!(shown(gapped.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        let got = shown(gapped.tick(us(10.0), Playing));
+        assert_eq!(got.lyric, "a");
+        assert!(got.next_lyric.is_empty(), "{got:?}");
         // The preview changes at the same instants as the line itself, so the
         // deadline does not move.
         assert_eq!(rt.next_deadline_us(us(10.0)), Some(us(10.0)));
     }
 
     #[test]
-    fn untrusted_lyric_text_cannot_escape_the_payload() {
-        // The dimmed tail is hand-built markup, so it is the one place where a
-        // second escape could have been forgotten.
-        let mut rt = runtime_with(
-            lyrics::parse_lrc("[00:10.00]{\\an7}first\n[00:20.00]{\\fs900}second"),
-            |c| c.show_next_line = true,
-        );
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(got.contains("\\{\\\u{2060}an7\\}first"), "{got}");
-        assert!(got.contains("\\{\\\u{2060}fs900\\}second"), "{got}");
+    fn untrusted_lyric_text_is_carried_verbatim_and_reaches_no_decision() {
+        // Its ASS ancestor checked that `{`, `}` and `\` in a `.lrc` file could
+        // not open an override block and re-anchor the overlay. That escape
+        // class does not exist on a rasterised card — there is no markup to
+        // escape into — so what is worth pinning is the property underneath it:
+        // third-party text is **data**. It arrives at the renderer exactly as
+        // the file wrote it, and nothing in it changes what the widget does.
+        let hostile = "[00:10.00]{\\an7}first\n[00:20.00]{\\fs900}\u{2060}second\n\
+                       [00:30.00]}}}{{{";
+        let mut rt = runtime_with(lyrics::parse_lrc(hostile), |c| c.show_next_line = true);
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(got.lyric, "{\\an7}first");
+        assert_eq!(got.next_lyric, "{\\fs900}\u{2060}second");
+        // Same shape of frame as a harmless line: the words differ and nothing
+        // else does.
+        let mut plain = runtime_with(fixture(), |c| c.show_next_line = true);
+        let benign = shown(plain.tick(us(10.0), Playing));
+        assert_eq!(got.label, benign.label);
+        assert_eq!(got.title, benign.title);
+        assert_eq!(got.artist, benign.artist);
+        // And it still advances on the file's own schedule.
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "}}}{{{");
     }
 
     // -- the track-info header ----------------------------------------------
 
-    /// A runtime for one named track with the header switched on. The accent is
-    /// pinned off so the payloads below are the preset's own colours.
+    /// A runtime for one named track with the header switched on.
     fn info_runtime(track: &NowPlaying, lines: Option<Vec<LrcLine>>) -> LyricsRuntime {
         let mut cfg = enabled_cfg();
         cfg.show_track_info = true;
-        cfg.accent_follow = false;
         let mut rt = LyricsRuntime::new(&cfg);
         rt.track_changed(track, lines);
         rt
@@ -1488,83 +1294,36 @@ mod tests {
     }
 
     #[test]
-    fn the_header_off_is_byte_for_byte_the_payload_it_always_was() {
-        // `show_track_info` is off by default, and off must not cost a single
-        // character: this is the exact string the overlay has carried since W1,
-        // pinned so that composing the header cannot quietly perturb it.
-        let mut cfg = enabled_cfg();
-        cfg.accent_follow = false;
-        let mut rt = LyricsRuntime::new(&cfg);
+    fn the_header_off_costs_nothing_and_shows_nothing() {
+        // `show_track_info` is off by default, and off must not put a single
+        // character of metadata on the wallpaper.
+        let mut rt = LyricsRuntime::new(&enabled_cfg());
         rt.track_changed(&nightcall(), Some(fixture()));
-        let rich = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert_eq!(
-            rich,
-            "{\\an2\\pos(960,1032)\\fnInter\\fs28\\b0\\bord2\\shad1\
-             \\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&\\1a&H00&\\3a&H00&\\4a&H80&}a"
-        );
-        // And a track with full metadata renders identically to one with none,
-        // so the switch is the only thing that can put a title on screen.
-        let mut bare = LyricsRuntime::new(&cfg);
+        let rich = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(rich.lyric, "a");
+        assert!(rich.label.is_empty(), "{rich:?}");
+        assert!(rich.title.is_empty(), "{rich:?}");
+        assert!(rich.artist.is_empty(), "{rich:?}");
+        // A track with full metadata gives the same frame as one with none, so
+        // the switch is the only thing that can put a title on screen.
+        let mut bare = LyricsRuntime::new(&enabled_cfg());
         bare.track_changed(&np("song"), Some(fixture()));
-        assert_eq!(shown(bare.tick(us(10.0), Playing, ACCENT)), rich);
-        // The next-line preview is untouched too.
-        let mut preview = runtime_with(fixture(), |c| {
-            c.show_next_line = true;
-            c.accent_follow = false;
-        });
-        assert!(
-            shown(preview.tick(us(10.0), Playing, ACCENT)).ends_with("}a\\N{\\fs21\\alpha&H80&}b")
-        );
+        assert_eq!(shown(bare.tick(us(10.0), Playing)), rich);
     }
 
     #[test]
-    fn the_header_puts_title_and_artist_above_the_lyric() {
+    fn the_header_puts_title_and_artist_beside_the_lyric() {
         let mut rt = info_runtime(
             &np_full("Nightcall", &["Kavinsky", "Lovefoxxx"], "OutRun"),
             Some(fixture()),
         );
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        // One payload, one event. A raw newline would make mpv split this into
-        // two events and style the second one itself.
-        assert!(!got.contains('\n'), "{got}");
-        // Order is the hierarchy: title, then artist, then the lyric last —
-        // which is what keeps the lyric on the anchor at `\an2`.
-        let title = got.find("Nightcall").expect("the title");
-        let artist = got.find("Kavinsky, Lovefoxxx").expect("the artist");
-        let lyric = got.rfind("}a").expect("the lyric");
-        assert!(title < artist && artist < lyric, "{got}");
-        // Subordinate on every lever there is: smaller, lighter, unbolded, and
-        // the artist a further step back than the title.
-        assert!(
-            got.contains(&format!("{{\\fs21\\b0\\alpha{TITLE_ALPHA}}}Nightcall")),
-            "{got}"
-        );
-        assert!(
-            got.contains(&format!(
-                "\\N{{\\fs17\\b0\\alpha{ARTIST_ALPHA}}}Kavinsky, Lovefoxxx"
-            )),
-            "{got}"
-        );
-        // The lyric gets its own look back. `\alpha` sets all four channels at
-        // once, so a missing reset would leave the lyric itself half-faded.
-        assert!(
-            got.ends_with("\\N{\\fs28\\b0\\1a&H00&\\3a&H00&\\4a&H80&}a"),
-            "{got}"
-        );
-        // The reset restores the preset's weight, not a fixed one: a bold
-        // preset must come back bold after the unbolded header.
-        let mut cfg = enabled_cfg();
-        cfg.show_track_info = true;
-        cfg.accent_follow = false;
-        cfg.style = LyricStylePreset::Subtitle;
-        let mut bold = LyricsRuntime::new(&cfg);
-        bold.track_changed(&nightcall(), Some(fixture()));
-        let got = shown(bold.tick(us(10.0), Playing, ACCENT));
-        assert!(got.contains("\\b0\\alpha&H70&}Nightcall"), "{got}");
-        assert!(
-            got.ends_with("\\N{\\fs28\\b1\\1a&H00&\\3a&H00&\\4a&H80&}a"),
-            "{got}"
-        );
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(got.title, "Nightcall");
+        assert_eq!(got.artist, "Kavinsky, Lovefoxxx");
+        assert_eq!(got.lyric, "a");
+        // The micro-label only ever appears with a title under it: a "Now
+        // playing" over nothing is furniture, not information.
+        assert_eq!(got.label, NOW_PLAYING_LABEL);
     }
 
     #[test]
@@ -1574,19 +1333,22 @@ mod tests {
         // to be the one case that showed nothing at all — so the switch would
         // look broken precisely where it earns its keep.
         let mut rt = info_runtime(&np_full("Unknown Track", &["Some Band"], ""), None);
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(got.contains("Unknown Track"), "{got}");
-        // No lyric under it means no reset block and no trailing break.
-        assert!(got.ends_with("}Some Band"), "{got}");
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(got.title, "Unknown Track");
+        assert_eq!(got.artist, "Some Band");
+        // No lyric under it: the card drops the whole lyric block and its
+        // divider rather than drawing an empty band.
+        assert!(got.lyric.is_empty(), "{got:?}");
+        assert!(got.next_lyric.is_empty(), "{got:?}");
         // There is no clock to follow, so every tick after the first is free.
         for step in 0..100 {
             let t = us(f64::from(step) * 0.7);
-            assert_eq!(rt.tick(t, Playing, ACCENT), Action::Idle, "at {t}us");
+            assert_eq!(rt.tick(t, Playing), Action::Idle, "at {t}us");
         }
         // With the switch off the same track is still nothing to draw.
         let mut off = LyricsRuntime::new(&enabled_cfg());
         off.track_changed(&np_full("Unknown Track", &["Some Band"], ""), None);
-        assert_eq!(off.tick(us(10.0), Playing, ACCENT), Action::Clear);
+        assert_eq!(off.tick(us(10.0), Playing), Action::Clear);
         // Turning lyrics off entirely takes the header down with them — the
         // master switch is the master switch.
         let mut cfg = enabled_cfg();
@@ -1594,8 +1356,8 @@ mod tests {
         let mut rt = info_runtime(&nightcall(), None);
         cfg.enabled = false;
         rt.set_config(&cfg);
-        assert_eq!(rt.tick(us(10.0), Playing, ACCENT), Action::Clear);
-        assert_eq!(rt.tick(us(11.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(10.0), Playing), Action::Clear);
+        assert_eq!(rt.tick(us(11.0), Playing), Action::Idle);
     }
 
     #[test]
@@ -1605,44 +1367,40 @@ mod tests {
         // present rather than blinking in and out.
         let lines = lyrics::parse_lrc("[00:10.00]a\n[00:20.00]\n[00:30.00]c");
         let mut rt = info_runtime(&nightcall(), Some(lines));
-        let intro = shown(rt.tick(us(0.0), Playing, ACCENT));
-        assert!(intro.ends_with("}Kavinsky"), "{intro}");
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).ends_with("}a"));
+        let intro = shown(rt.tick(us(0.0), Playing));
+        assert_eq!(intro.artist, "Kavinsky");
+        assert!(intro.lyric.is_empty(), "{intro:?}");
+        assert_eq!(lyric(rt.tick(us(10.0), Playing)), "a");
         // The gap marker drops the lyric and leaves the header exactly where it
         // was, rather than clearing the overlay outright.
-        assert_eq!(shown(rt.tick(us(20.0), Playing, ACCENT)), intro);
-        assert_eq!(rt.tick(us(25.0), Playing, ACCENT), Action::Idle);
-        assert!(shown(rt.tick(us(30.0), Playing, ACCENT)).ends_with("}c"));
+        assert_eq!(shown(rt.tick(us(20.0), Playing)), intro);
+        assert_eq!(rt.tick(us(25.0), Playing), Action::Idle);
+        assert_eq!(lyric(rt.tick(us(30.0), Playing)), "c");
     }
 
     #[test]
-    fn a_track_with_no_title_draws_no_header_and_no_stray_separator() {
+    fn a_track_with_no_title_draws_no_header_at_all() {
         // An artist with no song attached is a caption, not a now-playing
-        // display, and a separator with a hole on one side reads as a bug.
+        // display.
         let mut rt = info_runtime(&np_full("", &["Some Band"], "An Album"), Some(fixture()));
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(!got.contains("Some Band"), "{got}");
-        assert!(!got.contains("An Album"), "{got}");
-        assert!(got.ends_with("}a"), "{got}");
-        assert!(!got.contains("\\N"), "a break with nothing above it: {got}");
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert!(got.title.is_empty(), "{got:?}");
+        assert!(got.artist.is_empty(), "{got:?}");
+        assert!(got.label.is_empty(), "{got:?}");
+        assert_eq!(got.lyric, "a");
         // A whitespace-only title is the same as none — players do pad.
         let mut padded = info_runtime(&np_full("   ", &["Some Band"], ""), None);
-        assert_eq!(padded.tick(us(10.0), Playing, ACCENT), Action::Clear);
-        // A title with no artist renders alone: one line, one break, no dash
-        // and no empty second row.
+        assert_eq!(padded.tick(us(10.0), Playing), Action::Clear);
+        // A title with no artist renders alone, with no empty second row.
         let mut solo = info_runtime(&np("Solo"), Some(fixture()));
-        let got = shown(solo.tick(us(10.0), Playing, ACCENT));
-        assert!(
-            got.contains(&format!("\\alpha{TITLE_ALPHA}}}Solo\\N{{")),
-            "{got}"
-        );
-        assert_eq!(got.matches("\\N").count(), 1, "{got}");
-        assert!(!got.contains(ARTIST_ALPHA), "{got}");
+        let got = shown(solo.tick(us(10.0), Playing));
+        assert_eq!(got.title, "Solo");
+        assert!(got.artist.is_empty(), "{got:?}");
         // No track at all is nothing to show, switch or no switch.
         let mut cfg = enabled_cfg();
         cfg.show_track_info = true;
         assert_eq!(
-            LyricsRuntime::new(&cfg).tick(us(10.0), Playing, ACCENT),
+            LyricsRuntime::new(&cfg).tick(us(10.0), Playing),
             Action::Clear
         );
     }
@@ -1652,112 +1410,105 @@ mod tests {
         // A settings row that does nothing until the next lyric arrives — or
         // until you press play — is a bug report either way.
         let mut cfg = enabled_cfg();
-        cfg.accent_follow = false;
         let mut rt = LyricsRuntime::new(&cfg);
         rt.track_changed(&nightcall(), Some(fixture()));
-        let before = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(!before.contains("Nightcall"), "{before}");
+        let before = shown(rt.tick(us(10.0), Playing));
+        assert!(before.title.is_empty(), "{before:?}");
 
         cfg.show_track_info = true;
         rt.set_config(&cfg);
-        let after = shown(rt.tick(us(10.0), Paused, ACCENT));
-        assert!(after.contains("Nightcall"), "{after}");
-        assert_eq!(rt.tick(us(10.0), Paused, ACCENT), Action::Idle);
+        let after = shown(rt.tick(us(10.0), Paused));
+        assert_eq!(after.title, "Nightcall");
+        assert_eq!(rt.tick(us(10.0), Paused), Action::Idle);
 
-        // And back off takes it down again, once, returning the exact payload
-        // it started from.
+        // And back off takes it down again, once, returning the exact frame it
+        // started from.
         cfg.show_track_info = false;
         rt.set_config(&cfg);
-        assert_eq!(shown(rt.tick(us(10.0), Paused, ACCENT)), before);
-        assert_eq!(rt.tick(us(10.0), Paused, ACCENT), Action::Idle);
+        assert_eq!(shown(rt.tick(us(10.0), Paused)), before);
+        assert_eq!(rt.tick(us(10.0), Paused), Action::Idle);
     }
 
     #[test]
     fn an_unchanged_header_over_an_unchanged_line_is_painted_exactly_once() {
-        // Rule 1 again, and the reason the header is composed *into* the same
-        // string instead of tracked beside it: the payload is the unit of
-        // comparison, so an unchanged title over an unchanged lyric is not a
-        // redraw however many times the daemon asks.
+        // Rule 1 again, and the reason the header is part of the same frame
+        // instead of tracked beside it: the frame is the unit of comparison, so
+        // an unchanged title over an unchanged lyric is not a redraw however
+        // many times the daemon asks.
         let mut rt = info_runtime(&nightcall(), Some(fixture()));
         // The header lands once during the intro...
-        assert!(shown(rt.tick(us(0.0), Playing, ACCENT)).ends_with("}Kavinsky"));
+        assert_eq!(shown(rt.tick(us(0.0), Playing)).artist, "Kavinsky");
         for step in 0..100 {
             let t = us(f64::from(step) * 0.09);
-            assert_eq!(rt.tick(t, Playing, ACCENT), Action::Idle, "at {t}us");
+            assert_eq!(rt.tick(t, Playing), Action::Idle, "at {t}us");
         }
         // ...the first lyric costs one push...
-        let first = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(
-            first.contains("Nightcall") && first.ends_with("}a"),
-            "{first}"
+        let first = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(
+            (first.title.as_str(), first.lyric.as_str()),
+            ("Nightcall", "a")
         );
         for step in 1..100 {
             let t = us(10.0 + f64::from(step) * 0.09);
-            assert_eq!(rt.tick(t, Playing, ACCENT), Action::Idle, "at {t}us");
+            assert_eq!(rt.tick(t, Playing), Action::Idle, "at {t}us");
         }
         // ...and so does the next, header and all.
-        assert!(shown(rt.tick(us(20.0), Playing, ACCENT)).ends_with("}b"));
+        assert_eq!(lyric(rt.tick(us(20.0), Playing)), "b");
         for step in 1..100 {
             let t = us(20.0 + f64::from(step) * 0.09);
-            assert_eq!(rt.tick(t, Playing, ACCENT), Action::Idle, "at {t}us");
+            assert_eq!(rt.tick(t, Playing), Action::Idle, "at {t}us");
         }
         // A re-announcement of the same track is not new content either.
         rt.track_changed(&nightcall(), None);
-        assert_eq!(rt.tick(us(20.0), Playing, ACCENT), Action::Idle);
+        assert_eq!(rt.tick(us(20.0), Playing), Action::Idle);
     }
 
     #[test]
-    fn untrusted_track_metadata_cannot_escape_the_payload() {
-        // Tags are third-party text out of another process. Inside an ASS event
-        // `{` opens an override block, so an unescaped title could move,
-        // recolour or hide the whole overlay — and a raw newline would make mpv
-        // split the payload into a second event it styles itself.
+    fn untrusted_track_metadata_is_data_and_only_data() {
+        // Tags are third-party text out of another process. On the ASS path a
+        // `{` in a title opened an override block and could move, recolour or
+        // hide the whole overlay; a raw newline split the payload into a second
+        // event mpv styled itself. Neither exists here — but the property that
+        // made those bugs matter does, so it is pinned: metadata is carried
+        // through untouched except for the length bound, and it changes nothing
+        // about the frame's shape.
         let evil = np_full(
             "{\\pos(0,0)\\fs900}gotcha\nsecond",
             &["a\\Nb", "{\\an7}"],
             "",
         );
         let mut rt = info_runtime(&evil, Some(fixture()));
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(!got.contains('\n'), "a raw newline splits the event: {got}");
-        assert!(
-            got.contains("\\{\\\u{2060}pos(0,0)\\\u{2060}fs900\\}gotcha\\Nsecond"),
-            "{got}"
-        );
-        assert!(got.contains("a\\\u{2060}Nb, \\{\\\u{2060}an7\\}"), "{got}");
-        // Exactly the four blocks we wrote — base, title, artist, reset — and
-        // every other brace in the payload is escaped.
-        let blocks = got.replace("\\{", "").replace("\\}", "");
-        assert_eq!(blocks.matches('{').count(), 4, "{got}");
-        assert_eq!(blocks.matches('}').count(), 4, "{got}");
-        // The lyric still ends up where it belongs, at the end.
-        assert!(got.ends_with("}a"), "{got}");
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(got.title, "{\\pos(0,0)\\fs900}gotcha\nsecond");
+        assert_eq!(got.artist, "a\\Nb, {\\an7}");
+        assert_eq!(got.lyric, "a");
+        assert_eq!(got.label, NOW_PLAYING_LABEL);
     }
 
     #[test]
-    fn an_absurd_title_is_clipped_rather_than_left_to_wrap_over_the_lyric() {
+    fn an_absurd_title_is_clipped_rather_than_measured_in_full() {
         // Web radio and DJ sets publish a title with the station name, the
-        // bitrate and a URL in it. libass wraps rather than clips, so an
-        // unbounded one becomes four lines of furniture pushing the lyric off
-        // its anchor.
+        // bitrate and a URL in it. The card ellipsises to one line itself, but
+        // it measures what it is given first, and shaping a four-kilobyte title
+        // on every track change is work nobody asked for.
         let long = "A".repeat(400);
         let mut rt = info_runtime(&np_full(&long, &["B".repeat(400).as_str()], ""), None);
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        let clipped = format!("{}…", "A".repeat(MAX_HEADER_CHARS - 1));
-        assert!(got.contains(&clipped), "{got}");
-        assert!(!got.contains(&"A".repeat(MAX_HEADER_CHARS + 1)), "{got}");
-        assert!(got.ends_with(&format!("{}…", "B".repeat(MAX_HEADER_CHARS - 1))));
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(got.title, format!("{}…", "A".repeat(MAX_HEADER_CHARS - 1)));
+        assert_eq!(got.artist, format!("{}…", "B".repeat(MAX_HEADER_CHARS - 1)));
         // Counted in chars and not bytes: a byte slice would panic here, and
         // every non-Latin title in a real library is multibyte.
         let mut cjk = info_runtime(&np_full(&"宇".repeat(200), &[], ""), None);
-        let got = shown(cjk.tick(us(10.0), Playing, ACCENT));
-        assert!(got.ends_with(&format!("{}…", "宇".repeat(MAX_HEADER_CHARS - 1))));
+        assert_eq!(
+            shown(cjk.tick(us(10.0), Playing)).title,
+            format!("{}…", "宇".repeat(MAX_HEADER_CHARS - 1))
+        );
         // A title at exactly the limit keeps every character and gains nothing.
         let exact = "x".repeat(MAX_HEADER_CHARS);
         let mut rt = info_runtime(&np(&exact), None);
-        let got = shown(rt.tick(us(10.0), Playing, ACCENT));
-        assert!(got.ends_with(&exact), "{got}");
-        assert!(!got.contains('…'), "{got}");
+        let got = shown(rt.tick(us(10.0), Playing));
+        assert_eq!(got.title, exact);
+        assert!(!got.title.contains('…'), "{got:?}");
     }
 
     #[test]
@@ -1777,30 +1528,6 @@ mod tests {
         ];
         for (cfg_anchor, want) in table {
             assert_eq!(map_anchor(cfg_anchor), want, "{cfg_anchor:?}");
-        }
-        // And the margin reaches the payload with it.
-        let mut rt = runtime_with(fixture(), |c| {
-            c.anchor = LyricAnchor::TopRight;
-            c.margin_px = 100;
-        });
-        assert!(shown(rt.tick(us(10.0), Playing, ACCENT)).contains("\\an9\\pos(1820,100)"));
-    }
-
-    #[test]
-    fn is_hex_colour_accepts_exactly_what_the_renderer_can_use() {
-        for ok in ["#FF8800", "ff8800", "#f80", "  #F80  ", "123456"] {
-            assert!(is_hex_colour(ok), "rejected {ok:?}");
-        }
-        for bad in [
-            "",
-            "#",
-            "#12",
-            "#12345",
-            "#1234567",
-            "#gg0000",
-            "rgb(1,2,3)",
-        ] {
-            assert!(!is_hex_colour(bad), "accepted {bad:?}");
         }
     }
 }

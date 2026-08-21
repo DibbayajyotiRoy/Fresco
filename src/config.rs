@@ -341,6 +341,53 @@ pub struct Widgets {
     /// back to a single screen, and to that saving.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub monitor: Option<String>,
+    /// Which palette every widget card is drawn in. See [`WidgetTheme`].
+    ///
+    /// One key for the whole layer and not one per widget: four cards on one
+    /// wallpaper, half of them dark glass and half light, is not a system.
+    #[serde(default)]
+    pub theme: WidgetTheme,
+}
+
+/// The palette the on-wallpaper widgets are drawn in.
+///
+/// TOML spellings are the variant names lowercased: `"auto"`, `"light"`,
+/// `"dark"`.
+///
+/// # What `Auto` resolves to, and why it is not [`Config::theme_mode`]
+///
+/// **`Auto` is dark.** Not "follow the desktop", not "follow the app theme" —
+/// dark, always, unless the user says otherwise.
+///
+/// [`Config::theme_mode`] describes the *app's own chrome*, which is a window
+/// with a known background. A widget is drawn on **someone's wallpaper**, and
+/// the desktop's light/dark preference carries no information at all about what
+/// is behind it: a light desktop theme over a dark photo is completely ordinary,
+/// and following it would flip the widget's legibility on a signal unrelated to
+/// the thing it has to stay legible against. The daemon has never read
+/// `theme_mode` and this is not the key to start with.
+///
+/// The contrast model itself points the same way. `widgetkit`'s dark palette is
+/// fitted against a **white** worst-case backdrop and its light palette against
+/// a black one — and of the two, "a dark card over a bright wallpaper" is the
+/// case every alpha in the spec was chosen for. Dark also costs less: the dark
+/// shadow bleed is 52 lu against light's 84, which at 4K is 104 device pixels of
+/// buffer per side instead of 168, and three of the six light accents fail AA on
+/// a bare light card where none of the dark ones do.
+///
+/// So `Light` is a deliberate opt-in for someone whose wallpapers are
+/// consistently bright, and it is the only way to get it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WidgetTheme {
+    /// Resolve for the user — which today, and for the reasons above, means
+    /// [`WidgetTheme::Dark`].
+    #[default]
+    Auto,
+    /// Translucent near-white cards with near-black ink.
+    Light,
+    /// Translucent near-black cards with white ink.
+    Dark,
 }
 
 /// Synced-lyric overlay settings.
@@ -633,9 +680,8 @@ impl Default for Clock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ClockThemeCfg {
-    /// Clean, large, bold `HH:MM`. The default: a clock should read at a glance
-    /// and then be forgotten.
-    #[default]
+    /// Clean, large, bold `HH:MM`. A clock should read at a glance and then be
+    /// forgotten.
     Digital,
     /// Thin, small, wide-set and lower case. Time only — no date, ever.
     Minimal,
@@ -653,6 +699,26 @@ pub enum ClockThemeCfg {
     /// drawing work per repaint — it is a vector card, ticks and hands, not
     /// just text — so it costs more than the others at the same cadence.
     Card,
+    /// **NOS** — a near-square squircle with dot-matrix numerals and a ring of
+    /// discrete dots carrying the day's progress. Monochrome plus one red,
+    /// flat, sparse.
+    ///
+    /// A *theme* and not a palette, deliberately. [`Widgets::theme`] decides
+    /// light or dark for the whole widget layer and NOS renders in both;
+    /// putting a form language into the palette key would have made "dark" and
+    /// "NOS" mutually exclusive, which they are not, and would have applied one
+    /// widget's look to the other three. It also does not replace the existing
+    /// looks: an upgrade that repainted every user's clock into a new shape is
+    /// not a design decision, it is an unrequested change to someone's desktop.
+    ///
+    /// It is nonetheless the **only** theme the picker offers for now, and the
+    /// default: the other six are being reworked into this design language, and
+    /// offering looks that are mid-rework would ship a picker whose entries
+    /// disagree with each other. The renderer still carries all seven — see
+    /// `clock::ClockTheme::ALL` — so restoring them is a one-line change to
+    /// `CLOCK_THEMES_SHOWN`, not a re-implementation.
+    #[default]
+    Nos,
 }
 
 /// Audio-spectrum overlay settings.
@@ -1722,6 +1788,7 @@ mod tests {
     fn widgets_roundtrip_through_toml() {
         let cfg = Config {
             widgets: Some(Widgets {
+                theme: WidgetTheme::Light,
                 lyrics: Lyrics {
                     enabled: true,
                     style: LyricStylePreset::Card,
@@ -1908,7 +1975,12 @@ folder = "/srv/lyrics"
         // not merely "whatever Default says".
         let c = Clock::default();
         assert!(!c.enabled);
-        assert_eq!(c.theme, ClockThemeCfg::Digital);
+        // NOS, not Digital: it is the only theme the picker offers while the
+        // others are reworked. It draws more per repaint than Digital did (a
+        // ring of discrete dots and a dot-matrix face, against plain text), but
+        // the power contract is the *cadence* the rest of this test pins — no
+        // seconds, no date — and that is unchanged.
+        assert_eq!(c.theme, ClockThemeCfg::Nos);
         assert_eq!(c.anchor, LyricAnchor::TopRight, "clear of icons and docks");
         assert_eq!(c.font_size_pt, 64);
         assert_eq!(c.margin_px, 56);

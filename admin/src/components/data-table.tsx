@@ -7,11 +7,31 @@ import { cn } from "@/lib/utils";
 
 export function DataTable({
   className,
+  maxHeight,
   children,
 }: {
   className?: string;
+  /**
+   * Cap the grid's height and scroll the rows inside it (e.g. "15rem").
+   *
+   * Without this the table grows with the row count and pushes everything
+   * below it off-screen — fine for a full-page table, wrong for a panel that
+   * shares a grid row with shorter neighbours. Pair it with
+   * `<THead sticky="container">`, since a header pinned to the viewport is
+   * meaningless once the rows scroll in their own box.
+   */
+  maxHeight?: string;
   children: React.ReactNode;
 }) {
+  const table = (
+    /* tabular-nums on the table, not per cell: every column that turns out
+       to hold digits then aligns by construction, instead of depending on
+       each call site remembering. */
+    <table className="w-full table-fixed border-collapse text-sm tabular-nums">
+      {children}
+    </table>
+  );
+
   return (
     <div
       className={cn(
@@ -25,18 +45,37 @@ export function DataTable({
         className
       )}
     >
-      {/* tabular-nums on the table, not per cell: every column that turns out
-          to hold digits then aligns by construction, instead of depending on
-          each call site remembering. */}
-      <table className="w-full table-fixed border-collapse text-sm tabular-nums">
-        {children}
-      </table>
+      {maxHeight ? (
+        // The scroll box is a child of the rounded border, not the border
+        // itself, so the corners stay clipped while the rows move.
+        <div className="overflow-y-auto overscroll-contain" style={{ maxHeight }}>
+          {table}
+        </div>
+      ) : (
+        table
+      )}
     </div>
   );
 }
 
-export function THead({ children }: { children: React.ReactNode }) {
-  return <thead className="sticky top-14 z-10">{children}</thead>;
+export function THead({
+  sticky = "page",
+  children,
+}: {
+  /**
+   * What the header pins to. "page" clears the 56px topbar and is right for a
+   * table that scrolls with the document; "container" pins to the top of a
+   * `maxHeight` scroll box, where a 56px offset would park the header
+   * mid-table.
+   */
+  sticky?: "page" | "container";
+  children: React.ReactNode;
+}) {
+  return (
+    <thead className={sticky === "container" ? "sticky top-0 z-10" : "sticky top-14 z-10"}>
+      {children}
+    </thead>
+  );
 }
 
 export function TH({

@@ -244,6 +244,7 @@
   "Not running": "未运行",
   "Nothing in this list yet": "此列表还是空的",
   "Nothing to add": "没有可添加的内容",
+  "Of day": "今日进度",
   "Off": "关闭",
   "On GNOME Wayland, wallpapers are shown as a static frame. For live playback, use an X11 session or a layer-shell compositor (COSMIC, Hyprland, Sway, KDE Plasma).": "在 GNOME Wayland 下，壁纸只显示为静态画面。如需动态播放，请使用 X11 会话或支持 layer-shell 的合成器（COSMIC、Hyprland、Sway、KDE Plasma）。",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "每个文件一张壁纸。可以挂着一张用上几天，想换的时候再换。",
@@ -451,5 +452,15 @@
   "“{name}” set as wallpaper": "已将“{name}”设为壁纸",
   "“{name}” set on {display}": "已在 {display} 上设置“{name}”",
   "“{name}” set. Close the window; it keeps playing": "已设置“{name}”。关闭窗口后它仍会继续播放",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ 导航 · Enter 执行 · Esc 关闭"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ 导航 · Enter 执行 · Esc 关闭",
+  "Widget appearance": "挂件外观",
+  "Palette": "配色",
+  "Automatic": "自动",
+  "Visualiser and disc": "频谱与唱片",
+  "How the clock, lyrics, visualiser and disc are drawn. The setting applies to all of them.": "时钟、歌词、频谱和唱片的绘制方式。此设置对它们全部生效。",
+  "Dark cards suit most wallpapers. Choose Light if yours are consistently bright.": "深色卡片适合大多数壁纸。若你的壁纸一贯明亮，请选择浅色。",
+  "Tell us what's working and what isn't — it takes ten seconds and shapes the next release.": "告诉我们哪些好用、哪些不好用——只需十秒，就能影响下一个版本。",
+  "{m}m left today": "今天还剩 {m} 分钟",
+  "{h}h left today": "今天还剩 {h} 小时",
+  "{h}h {m}m left today": "今天还剩 {h} 小时 {m} 分钟"
 }

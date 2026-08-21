@@ -1,5 +1,6 @@
 import {
   PanelSkeleton,
+  ReleasesPanelSkeleton,
   Skeleton,
   StatRowSkeleton,
 } from "@/components/skeleton";
@@ -23,7 +24,7 @@ export default function OverviewLoading() {
       />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <PanelSkeleton rows={8} className="lg:col-span-2" />
+        <ReleasesPanelSkeleton className="lg:col-span-2" />
         <div className="flex flex-col gap-3">
           <PanelSkeleton rows={4} />
           <PanelSkeleton rows={4} />

@@ -332,10 +332,7 @@ fn feedback_reminder_loop() {
             write_epoch(&path, epoch_now());
             notify(
                 t!("Enjoying Fresco?"),
-                t!(
-                    "Tell us what's working and what isn't — it takes ten seconds \
-                 and shapes the next release."
-                ),
+                t!("Tell us what's working and what isn't — it takes ten seconds and shapes the next release."),
                 Some((t!("Send feedback"), Click::OpenApp)),
             );
         }

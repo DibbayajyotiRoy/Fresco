@@ -336,6 +336,29 @@ impl WaylandPlayer {
             .ok()
     }
 
+    /// The size of the coordinate space [`Self::overlay_add`] places into.
+    ///
+    /// **Not the output's mode, and the difference is not cosmetic.** `overlay-add`
+    /// positions in mpv's OSD space, which is mpvpaper's *buffer*, and a buffer is
+    /// the surface's logical size times whatever integer scale the compositor
+    /// negotiated. On a 2560x1440 panel at 150% the logical surface is 1707x960,
+    /// mpvpaper cannot do fractional scale so it takes buffer scale 2, and the OSD
+    /// is 3414x1920 — larger than the mode, not smaller. Placing against the mode
+    /// there puts a bottom-centre widget at 28% across and 41% down.
+    ///
+    /// Asked rather than derived because every term in that chain belongs to
+    /// somebody else: the compositor picks the scale, mpvpaper picks how to round
+    /// it, and mpv decides what the OSD ends up as. Recomputing it here would be
+    /// duplicating three other components' decisions and would drift from all of
+    /// them. `None` while the renderer is still starting, which is why callers
+    /// keep the mode as a fallback rather than blanking the widget.
+    pub fn osd_size(&self) -> Option<(u32, u32)> {
+        let mut ipc = self.inner.borrow_mut();
+        let w: u32 = ipc.ipc.get("osd-width")?.trim().parse().ok()?;
+        let h: u32 = ipc.ipc.get("osd-height")?.trim().parse().ok()?;
+        (w > 0 && h > 0).then_some((w, h))
+    }
+
     /// Length of the current file in seconds. A still image reports `0` — the
     /// supervisor uses that to tell a frame held on purpose apart from a wedged
     /// renderer (see `WlOutput::check_stall`).

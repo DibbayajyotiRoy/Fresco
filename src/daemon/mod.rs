@@ -38,10 +38,9 @@ use x11win::{Atoms, WallpaperWindow, WindowKind};
 
 const TICK: Duration = Duration::from_millis(100);
 
-/// Bitmap overlays (`overlay-add`) use an id space separate from the ASS
-/// overlays, whose ids live in `widgets` so engine and daemon can't disagree.
-#[allow(dead_code)]
-const OVERLAY_BMP_DISC: u32 = 0;
+/// Floor on a widget-clamped wait, so a widget that reports itself permanently
+/// overdue cannot turn a run loop into a spin. See [`widget_wait`].
+const MIN_WIDGET_WAIT: Duration = Duration::from_millis(1);
 
 const LOWER_INTERVAL: Duration = Duration::from_secs(2);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
@@ -330,6 +329,31 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.is_alive(),
         }
     }
+
+    /// Renderer pid, where there is a separate process to have one.
+    ///
+    /// `None` on X11, where mpv is embedded rather than spawned as a paper
+    /// process — which also means there is no buffer negotiation to go stale,
+    /// so nothing there needs a pid to key a cache on.
+    fn pid(&self) -> Option<u32> {
+        match self {
+            PlayerHandle::X11(_) => None,
+            PlayerHandle::Wayland(p) => Some(p.pid()),
+        }
+    }
+
+    /// The space `overlay-add` places into, when it can differ from the mode.
+    ///
+    /// `None` on X11: the mpv window is sized in root-window pixels there, so
+    /// the output mode already *is* that space and there is nothing to correct.
+    /// See [`crate::daemon::mpvpaper::WaylandPlayer::osd_size`] for why Wayland
+    /// is different.
+    fn osd_size(&self) -> Option<(u32, u32)> {
+        match self {
+            PlayerHandle::X11(_) => None,
+            PlayerHandle::Wayland(p) => p.osd_size(),
+        }
+    }
 }
 
 pub struct Daemon {
@@ -374,8 +398,7 @@ impl Daemon {
         let (conn, screen_num) =
             x11rb::connect(None).context("connecting to X11 (is DISPLAY set?)")?;
         let atoms = Atoms::new(&conn)?.reply()?;
-        let mut widgets =
-            widgets::WidgetEngine::new(config.widgets.as_ref(), accent_hex(config.accent));
+        let mut widgets = widgets::WidgetEngine::new(config.widgets.as_ref(), config.accent);
         apply_widget_config(&mut widgets, &config);
         Ok(Daemon {
             conn,
@@ -413,10 +436,6 @@ impl Daemon {
         if !self.widgets.is_active() {
             return;
         }
-        let updates = self.widgets.tick();
-        if updates.is_empty() {
-            return;
-        }
         // A widget belongs to one display: the configured connector, else the
         // first renderer. Pushing to every renderer would duplicate the lyric
         // across monitors, which reads as a bug rather than a feature.
@@ -425,38 +444,65 @@ impl Daemon {
         // showing it on one screen reads as half-broken. Naming a connector in
         // `widgets.monitor` narrows it to that one.
         let want = self.widgets.monitor().map(str::to_string);
-        let targets: Vec<&Renderer> = self
+        let targets: Vec<String> = self
             .renderers
             .iter()
-            .filter(|r| {
-                want.as_deref()
-                    .is_none_or(|c| c == r.window.connector.as_str())
-            })
+            .map(|r| r.window.connector.clone())
+            .filter(|c| want.as_deref().is_none_or(|w| w == c.as_str()))
             .collect();
         if targets.is_empty() {
             return;
         }
-        // The bitmap widgets place pixels in real output coordinates, not the
-        // ASS PLAY_RES space, so the engine needs this display's actual mode.
-        if let Some(m) = self
-            .monitors
-            .iter()
-            .find(|m| m.connector == targets[0].window.connector)
-        {
-            self.widgets
-                .set_output_size(u32::from(m.width), u32::from(m.height));
+        // Geometry **before** the tick, not after: a bitmap widget computes its
+        // size and position during `tick`, so a mode change told to the engine
+        // afterwards would place the first frame after the change against the
+        // old resolution.
+        self.widgets.set_outputs(&self.output_geoms(&targets));
+        let updates = self.widgets.tick();
+        if updates.is_empty() {
+            return;
         }
         for u in updates {
             log::debug!(
-                "widget: overlay {} -> {} chars on {} display(s)",
+                "widget: overlay {} -> {} chars, target {:?}",
                 u.overlay_id,
                 u.ass.len(),
-                targets.len()
+                u.target.as_deref().unwrap_or("all")
             );
-            for r in &targets {
-                dispatch_widget(&r.player, &u);
+            for r in &self.renderers {
+                if targets.iter().any(|c| c == &r.window.connector) && u.is_for(&r.window.connector)
+                {
+                    dispatch_widget(&r.player, &u);
+                }
             }
         }
+    }
+
+    /// The real pixel mode of each target, in target order.
+    ///
+    /// A connector RandR has not reported falls back to the first known mode
+    /// (else 1080p), which is what the engine assumed before it knew about more
+    /// than one output — a widget in roughly the right place beats no widget.
+    fn output_geoms(&self, targets: &[String]) -> Vec<widgets::OutputGeom> {
+        let fallback = self
+            .monitors
+            .first()
+            .map_or((1920, 1080), |m| (u32::from(m.width), u32::from(m.height)));
+        targets
+            .iter()
+            .map(|c| {
+                let (w, h) = self
+                    .monitors
+                    .iter()
+                    .find(|m| &m.connector == c)
+                    .map_or(fallback, |m| (u32::from(m.width), u32::from(m.height)));
+                widgets::OutputGeom {
+                    connector: c.clone(),
+                    w,
+                    h,
+                }
+            })
+            .collect()
     }
 
     /// Blank every widget overlay. Called before a rebuild/teardown so an
@@ -465,7 +511,9 @@ impl Daemon {
     fn clear_widgets(&mut self) {
         for u in self.widgets.clear_all() {
             for r in &self.renderers {
-                dispatch_widget(&r.player, &u);
+                if u.is_for(&r.window.connector) {
+                    dispatch_widget(&r.player, &u);
+                }
             }
         }
     }
@@ -632,7 +680,17 @@ impl Daemon {
             self.push_widgets();
             let animating = self.advance_slideshows(now);
 
-            std::thread::sleep(if animating { ANIM_TICK } else { TICK });
+            // Smart Sleep: the engine knows when the next lyric line, minute
+            // boundary or animation frame is due, and this is the only loop
+            // that cannot be woken by its command channel — so the deadline has
+            // to come out of the sleep itself. It can only shorten it; see
+            // `widget_wait`.
+            let base = if animating { ANIM_TICK } else { TICK };
+            std::thread::sleep(widget_wait(
+                base,
+                self.widgets.next_deadline(),
+                Instant::now(),
+            ));
         }
     }
 
@@ -1663,8 +1721,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut last_generations: u64 = 0;
     // On-wallpaper widgets. Same engine the X11 loop uses, so the two backends
     // cannot drift apart — the failure mode `raise_demuxer_cache` is named for.
-    let mut widget_engine =
-        widgets::WidgetEngine::new(config.widgets.as_ref(), accent_hex(config.accent));
+    let mut widget_engine = widgets::WidgetEngine::new(config.widgets.as_ref(), config.accent);
     apply_widget_config(&mut widget_engine, &config);
 
     // One supervised mpvpaper per output, keyed by connector name.
@@ -1689,21 +1746,34 @@ fn run_wayland_layershell() -> Result<()> {
     crate::telemetry::heartbeat(Some("wayland"), None, Some(outputs.len() as u32));
 
     loop {
-        let tick = if outputs.values().any(|o| o.animating) {
+        let base = if outputs.values().any(|o| o.animating) {
             ANIM_TICK
         } else {
             TICK
         };
+        // Smart Sleep: `recv_timeout` is exactly the interruptible wait the
+        // engine's docs ask for, so clamping it to the widget deadline costs
+        // nothing and an IPC request still lands immediately. It only ever
+        // shortens the wait — see `widget_wait`.
+        let tick = widget_wait(base, widget_engine.next_deadline(), Instant::now());
         match commands.recv_timeout(tick) {
             Ok((req, reply)) => {
                 let is_stop = matches!(req, Request::Stop);
                 let resp = match req {
                     Request::Apply => {
+                        // Blank every overlay first, against the mpvpaper
+                        // processes that are still up. The X11 loop gets this
+                        // from `teardown_renderers`; here nothing dies on an
+                        // Apply that only changes settings, so without this a
+                        // widget being switched off — or one that is about to
+                        // be drawn smaller — leaves its old pixels on screen
+                        // with nothing left that would ever take them down.
+                        clear_wayland_widgets(&mut widget_engine, &outputs);
                         config = Config::load().unwrap_or_else(|_| config.clone());
                         sched.hold_current(&config);
                         // Widget settings ride in the same file, so a GUI toggle
-                        // arrives here. invalidate() forces a repaint even when
-                        // the content itself (e.g. the lyric line) is unchanged.
+                        // arrives here. invalidate() re-pushes even when the
+                        // content itself (e.g. the lyric line) is unchanged.
                         apply_widget_config(&mut widget_engine, &config);
                         widget_engine.invalidate();
                         let paused = user_paused || battery_paused;
@@ -1911,22 +1981,25 @@ fn run_wayland_layershell() -> Result<()> {
         // Widgets: only overlays whose content actually changed come back, so
         // this is a cheap no-op on almost every pass.
         if widget_engine.is_active() {
-            let updates = widget_engine.tick();
-            if !updates.is_empty() {
-                // Every display unless a connector is configured — see the
-                // X11 `push_widgets` note; the two backends must agree.
-                let want = widget_engine.monitor().map(str::to_string);
-                // Bitmap widgets place pixels in real output coordinates, not
-                // the ASS PLAY_RES space, so the engine needs the actual mode.
-                if let Some(m) = monitors
-                    .iter()
-                    .find(|m| want.as_deref().is_none_or(|w| w == m.connector.as_str()))
-                {
-                    widget_engine.set_output_size(u32::from(m.width), u32::from(m.height));
-                }
-                for u in updates {
+            // Every display unless a connector is configured — see the X11
+            // `push_widgets` note; the two backends must agree.
+            let want = widget_engine.monitor().map(str::to_string);
+            let targets: Vec<String> = outputs
+                .keys()
+                .filter(|c| want.as_deref().is_none_or(|w| w == c.as_str()))
+                .cloned()
+                .collect();
+            if !targets.is_empty() {
+                // Geometry before the tick, and one entry per target: bitmap
+                // widgets place pixels in real output coordinates, so a
+                // mixed-DPI pair needs a size each, not whichever one the
+                // enumeration happened to list first.
+                widget_engine.set_outputs(&wayland_output_geoms(&monitors, &targets, |c, mode| {
+                    outputs.get(c).and_then(|o| o.osd_size(mode))
+                }));
+                for u in widget_engine.tick() {
                     for (c, o) in &outputs {
-                        if want.as_deref().is_some_and(|w| w != c.as_str()) {
+                        if !targets.iter().any(|t| t == c) || !u.is_for(c) {
                             continue;
                         }
                         if let Some(p) = o.player.as_ref() {
@@ -1942,6 +2015,61 @@ fn run_wayland_layershell() -> Result<()> {
     std::fs::remove_file(crate::ipc::socket_path()).ok();
     log::info!("frescod stopped");
     Ok(())
+}
+
+/// The real pixel mode of each Wayland target, in target order.
+///
+/// Same fallback as the X11 side: an output the enumeration did not describe
+/// (including the `ALL` pseudo-connector used when enumeration failed outright)
+/// borrows the first known mode, else 1080p.
+fn wayland_output_geoms(
+    monitors: &[Monitor],
+    targets: &[String],
+    osd: impl Fn(&str, (u32, u32)) -> Option<(u32, u32)>,
+) -> Vec<widgets::OutputGeom> {
+    let fallback = monitors
+        .iter()
+        .find(|m| m.width != 0 && m.height != 0)
+        .map_or((1920, 1080), |m| (u32::from(m.width), u32::from(m.height)));
+    targets
+        .iter()
+        .map(|c| {
+            let mode = monitors
+                .iter()
+                .find(|m| &m.connector == c && m.width != 0 && m.height != 0)
+                .map_or(fallback, |m| (u32::from(m.width), u32::from(m.height)));
+            // The renderer's own answer wins. The mode is only the fallback for
+            // the window before mpv has an OSD to report, and on an unscaled
+            // output the two agree anyway.
+            let (w, h) = osd(c, mode).unwrap_or(mode);
+            widgets::OutputGeom {
+                connector: c.clone(),
+                w,
+                h,
+            }
+        })
+        .collect()
+}
+
+/// Blank every widget overlay on every mpvpaper that is still up.
+///
+/// The Wayland twin of the X11 loop's `clear_widgets`. Overlays used to vanish
+/// here only because the mpvpaper process died; on the paths where it survives
+/// there was nothing taking them down at all.
+fn clear_wayland_widgets(
+    engine: &mut widgets::WidgetEngine,
+    outputs: &std::collections::BTreeMap<String, WlOutput>,
+) {
+    for u in engine.clear_all() {
+        for (c, o) in outputs {
+            if !u.is_for(c) {
+                continue;
+            }
+            if let Some(p) = o.player.as_ref() {
+                dispatch_widget(p, &u);
+            }
+        }
+    }
 }
 
 /// Re-seat clones of the same video on one clock (see SYNC_INTERVAL/X11
@@ -1990,6 +2118,20 @@ fn sync_wayland_outputs(outputs: &std::collections::BTreeMap<String, WlOutput>) 
 
 /// One supervised output: its mpvpaper renderer (or none, in static fallback),
 /// its slideshow state, and per-output restart bookkeeping.
+/// A remembered OSD reading, together with the facts it is only true under.
+///
+/// `pid` and the mode are the validity conditions, not data: a respawned
+/// mpvpaper renegotiates its buffer and a mode change resizes it, so a reading
+/// taken under either of those is about a space that no longer exists.
+#[derive(Clone, Copy)]
+struct OsdCache {
+    w: u32,
+    h: u32,
+    pid: u32,
+    mode_w: u32,
+    mode_h: u32,
+}
+
 struct WlOutput {
     connector: String,
     wallpaper: Wallpaper,
@@ -2004,6 +2146,15 @@ struct WlOutput {
     animating: bool,
     /// Last pause state we applied to the player — lets `reconcile_pause` send IPC
     /// only on change. `Cell` so reconcile can stay `&self` like `set_paused`.
+    /// Cached mpv OSD size — the space `overlay-add` places into — with the
+    /// renderer pid and output mode it was read under.
+    ///
+    /// Cached because the widget loop asks every tick, which reaches ~60fps
+    /// during a transition, and each read is a blocking IPC round trip. Keyed
+    /// so it cannot outlive what it describes: a respawned mpvpaper renegotiates
+    /// its buffer, and a mode change resizes it. A scale change at the *same*
+    /// mode is the one case this will not notice until the renderer restarts.
+    osd_size: std::cell::Cell<Option<OsdCache>>,
     applied_paused: std::cell::Cell<bool>,
     /// Frozen-but-alive detection: consecutive supervise ticks with no playback
     /// progress, plus the last sampled position.
@@ -2032,6 +2183,31 @@ struct WlOutput {
 }
 
 impl WlOutput {
+    /// The coordinate space this output's widgets must be placed in, if the
+    /// renderer is up and has told us.
+    ///
+    /// `mode` is the output's current mode, and is part of the cache key rather
+    /// than the answer: see [`crate::daemon::mpvpaper::PlayerHandle::osd_size`]
+    /// for why the mode is not what `overlay-add` measures against.
+    fn osd_size(&self, mode: (u32, u32)) -> Option<(u32, u32)> {
+        let p = self.player.as_ref()?;
+        let pid = p.pid()?;
+        if let Some(c) = self.osd_size.get() {
+            if (c.pid, c.mode_w, c.mode_h) == (pid, mode.0, mode.1) {
+                return Some((c.w, c.h));
+            }
+        }
+        let (w, h) = p.osd_size()?;
+        self.osd_size.set(Some(OsdCache {
+            w,
+            h,
+            pid,
+            mode_w: mode.0,
+            mode_h: mode.1,
+        }));
+        Some((w, h))
+    }
+
     fn new(
         connector: String,
         wallpaper: Wallpaper,
@@ -2049,6 +2225,7 @@ impl WlOutput {
             static_fallback: false,
             error: None,
             animating: false,
+            osd_size: std::cell::Cell::new(None),
             applied_paused: std::cell::Cell::new(false),
             stall_strikes: 0,
             last_pos: None,
@@ -2639,10 +2816,41 @@ fn which(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// How long a run loop may wait, given what it wants for itself and what the
+/// widget engine says is coming.
+///
+/// **Smart Sleep, wired up.** `base` is the loop's own cadence — `ANIM_TICK`
+/// while a transition is running, `TICK` otherwise — and already accounts for
+/// hotplug, stacking and battery, all of which are polled on much coarser
+/// intervals and so are satisfied by any wait at or under `base`.
+///
+/// The widget deadline can therefore only ever **shorten** the wait, never
+/// extend it: a lyric that lands 30 ms from now must not sit unpushed for the
+/// rest of a 100 ms tick, but a lyric that is 30 s away must not stop the loop
+/// checking whether a monitor was unplugged. Anything else would make widgets
+/// able to starve the rest of the daemon, which is exactly the class of bug
+/// the engine's own docs call the result "advisory" to avoid.
+///
+/// The floor is a spin guard: `next_deadline` reports "now" for a widget that
+/// is due, and a due widget is pushed by the very next `tick()`, but a zero
+/// wait on a widget that somehow stayed due would be a busy loop.
+fn widget_wait(base: Duration, deadline: Option<Instant>, now: Instant) -> Duration {
+    match deadline {
+        Some(d) => base
+            .min(d.saturating_duration_since(now))
+            .max(MIN_WIDGET_WAIT),
+        None => base,
+    }
+}
+
 /// Send one widget update to a player. Text widgets go through `set_overlay`;
-/// the album-art disc is a bitmap and goes through `overlay_add`/`overlay_remove`
-/// instead — an empty ASS payload does NOT take a bitmap overlay down, which is
-/// why this is a match and not a single call.
+/// a bitmap widget goes through `overlay_add`/`overlay_remove` instead — an
+/// empty ASS payload does NOT take a bitmap overlay down, which is why this is
+/// a match and not a single call.
+///
+/// Routing is the caller's: an update carrying a `target` was rasterised
+/// against that one output's mode and is wrong anywhere else
+/// (`widgets::WidgetUpdate::is_for`).
 fn dispatch_widget(p: &PlayerHandle, u: &widgets::WidgetUpdate) {
     match &u.bitmap {
         None => p.set_overlay(u.overlay_id, &u.ass, widgets::RES_X, widgets::RES_Y),
@@ -2725,9 +2933,8 @@ fn widget_anchor(a: crate::config::LyricAnchor) -> crate::lyrics::Anchor {
 /// Push every widget setting from `config` into `engine`, in one place so the
 /// three loops cannot drift on which widgets they remember to update.
 fn apply_widget_config(engine: &mut widgets::WidgetEngine, config: &Config) {
-    let accent = accent_hex(config.accent);
     let w = config.widgets.as_ref();
-    engine.set_config(w, accent);
+    engine.set_config(w, config.accent);
     engine.set_clock(w.map(|w| widget_clock_cfg(&w.clock)).as_ref());
     engine.set_visualizer(w.map(|w| widget_visual_cfg(&w.visualizer)).as_ref());
     engine.set_disc(w.map(|w| widget_disc_cfg(&w.disc)).as_ref());
@@ -2749,6 +2956,7 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
                 ClockThemeCfg::Stacked => ClockTheme::Stacked,
                 ClockThemeCfg::Wordy => ClockTheme::Wordy,
                 ClockThemeCfg::Card => ClockTheme::Card,
+                ClockThemeCfg::Nos => ClockTheme::Nos,
             },
             anchor: match c.anchor {
                 LyricAnchor::TopLeft => Anchor::TopLeft,
@@ -2773,25 +2981,62 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
     }
 }
 
-/// Accent hex for widget text. `gui::theme::accent_pair` is the same table but
-/// lives behind the `gui` feature, and the daemon must not depend on that; these
-/// are its dark variants, which read best over video.
-fn accent_hex(a: crate::config::Accent) -> &'static str {
-    use crate::config::Accent;
-    match a {
-        Accent::Blue => "#5E6AD2",
-        Accent::Teal => "#2BB6A2",
-        Accent::Green => "#46B96B",
-        Accent::Amber => "#DBA13C",
-        Accent::Coral => "#F0708A",
-        Accent::Graphite => "#98A1B0",
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{parse_stat_ticks, stall_step, WlOutput, STALL_STRIKES};
+    use super::{
+        parse_stat_ticks, stall_step, widget_wait, WlOutput, ANIM_TICK, MIN_WIDGET_WAIT,
+        MONITOR_INTERVAL, STALL_STRIKES, TICK,
+    };
     use crate::config::{PowerSaving, Scaling, Wallpaper};
+    use std::time::{Duration, Instant};
+
+    /// Smart Sleep, from the loops' side. The widget engine knows when the next
+    /// lyric line or minute boundary is due; the loops know when they next have
+    /// to look at monitors, batteries and animation frames. The deadline may
+    /// only ever *shorten* the loop's wait.
+    #[test]
+    fn the_widget_deadline_clamps_the_wait_and_never_extends_it() {
+        let now = Instant::now();
+
+        // Nothing pending: the loop keeps its own cadence exactly.
+        assert_eq!(widget_wait(TICK, None, now), TICK);
+        assert_eq!(widget_wait(ANIM_TICK, None, now), ANIM_TICK);
+
+        // A widget due inside the tick pulls the wait in.
+        let soon = now + Duration::from_millis(30);
+        assert_eq!(
+            widget_wait(TICK, Some(soon), now),
+            Duration::from_millis(30)
+        );
+
+        // A widget due *after* the tick changes nothing — a 30s instrumental
+        // gap must not stop the loop noticing a monitor being unplugged, and
+        // hotplug is checked every `MONITOR_INTERVAL` off the same wait.
+        let far = now + Duration::from_secs(30);
+        assert_eq!(widget_wait(TICK, Some(far), now), TICK);
+        assert!(TICK < MONITOR_INTERVAL);
+
+        // Nor may it stretch an animation frame: a transition runs at
+        // `ANIM_TICK` and a widget 100ms out must not cost it six frames.
+        assert_eq!(widget_wait(ANIM_TICK, Some(now + TICK), now), ANIM_TICK);
+        assert!(ANIM_TICK < TICK);
+
+        // A deadline already past waits the floor, not zero: a widget that
+        // somehow stayed due must not turn the loop into a spin.
+        assert_eq!(widget_wait(TICK, Some(now), now), MIN_WIDGET_WAIT);
+        let overdue = now - Duration::from_secs(5);
+        assert_eq!(widget_wait(TICK, Some(overdue), now), MIN_WIDGET_WAIT);
+        assert!(MIN_WIDGET_WAIT > Duration::ZERO);
+
+        // Whatever the inputs, the result is bounded by the loop's own need.
+        for base in [ANIM_TICK, TICK] {
+            for ms in [0u64, 1, 5, 16, 17, 99, 100, 101, 30_000] {
+                let w = widget_wait(base, Some(now + Duration::from_millis(ms)), now);
+                assert!(w <= base, "{base:?} {ms}ms -> {w:?}");
+                assert!(w >= MIN_WIDGET_WAIT, "{base:?} {ms}ms -> {w:?}");
+            }
+        }
+    }
 
     /// A still image holds `time-pos` at 0 forever (`image-display-duration=inf`),
     /// so the frozen-renderer detector must never strike it — that misread is

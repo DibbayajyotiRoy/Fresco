@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.39"
+version = "1.1.40"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -18,6 +18,8 @@ daemon = [
     "dep:ureq", "dep:tungstenite", "dep:notify-rust", "dep:semver",
     # Album-art widget: decode cover art to RGBA for mpv's `overlay-add`.
     "dep:image",
+    # widgetkit: the 2D rasteriser behind the bitmap widgets (see src/widgetkit).
+    "dep:tiny-skia", "dep:cosmic-text",
 ]
 
 [[bin]]
@@ -66,6 +68,13 @@ semver = { version = "1", optional = true }
 # shell-out approach dde.rs uses for D-Bus) and the FFT is our own, so this is
 # the single dependency the visualiser/disc widgets add.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+# --- widgetkit: the pure-Rust 2D stack for bitmap widgets -------------------
+# Both are pure Rust with no C or system libraries, which is the hard
+# constraint: Fresco already bundles mpvpaper because its dependency wasn't
+# packaged, and we are not repeating that. See src/widgetkit/mod.rs for the
+# full rationale, including why cosmic-text won over fontdue/ab_glyph.
+tiny-skia = { version = "0.12", optional = true }
+cosmic-text = { version = "0.19", optional = true }
 
 [profile.release]
 opt-level = 3

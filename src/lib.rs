@@ -34,6 +34,8 @@ pub mod telemetry;
 #[cfg(any(feature = "gui", feature = "daemon"))]
 pub mod update;
 pub mod visualizer;
+#[cfg(feature = "daemon")]
+pub mod widgetkit;
 
 /// Application ID used for the desktop file, autostart entry, and GTK app.
 pub const APP_ID: &str = "io.github.dibbayajyotiroy.Fresco";

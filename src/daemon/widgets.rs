@@ -14,12 +14,16 @@
 //! ```text
 //! let mut widgets = WidgetEngine::new(config.widgets.as_ref(), accent);  // at start
 //!
+//! widgets.set_outputs(&geoms);             // every tick, BEFORE tick()
 //! for u in widgets.tick() {                                     // every loop tick
-//!     match &u.bitmap {
-//!         None => player.set_overlay(u.overlay_id, &u.ass, RES_X, RES_Y),
-//!         Some(BitmapUpdate::Draw(b)) =>
-//!             player.overlay_add(u.overlay_id, b.x, b.y, &b.path_str(), b.w, b.h, b.stride),
-//!         Some(BitmapUpdate::Remove) => player.overlay_remove(u.overlay_id),
+//!     for target in &targets {
+//!         if !u.is_for(&target.connector) { continue; }   // per-output pixels
+//!         match &u.bitmap {
+//!             None => target.player.set_overlay(u.overlay_id, &u.ass, RES_X, RES_Y),
+//!             Some(BitmapUpdate::Draw(b)) => target.player
+//!                 .overlay_add(u.overlay_id, b.x, b.y, &b.path_str(), b.w, b.h, b.stride),
+//!             Some(BitmapUpdate::Remove) => target.player.overlay_remove(u.overlay_id),
+//!         }
 //!     }
 //! }
 //! let wake = widgets.next_deadline();      // clamp the loop's own wait to this
@@ -27,6 +31,31 @@
 //! for u in widgets.clear_all() { … }       // wallpaper swap / teardown
 //! widgets.invalidate();                    // renderer respawn / rotation change
 //! ```
+//!
+//! # Bitmaps are first-class, and that costs three things ASS did not
+//!
+//! Three of the four widgets are ASS overlays and one — the album-art disc — is
+//! a BGRA bitmap pushed through `overlay-add`. ASS gets three properties for
+//! free that pixels do not, and the engine has to supply each of them itself:
+//!
+//! * **Clearing.** An empty `osd-overlay` blanks ASS; `overlay-remove` blanks a
+//!   bitmap; neither does the other's job. So the engine records the
+//!   [`OverlayKind`] it actually pushed to each id and clears by *that* — never
+//!   by which widget it is, because a widget can change substrate at runtime.
+//! * **Resolution independence.** libass rescales [`RES_X`]×[`RES_Y`] per
+//!   output; `overlay-add` takes real pixels. So the engine is told every
+//!   output ([`WidgetEngine::set_outputs`]) and tags each bitmap update with
+//!   the one it belongs on ([`WidgetUpdate::target`]). The state machine stays
+//!   **single** — one lyric line, one angle, one clock reading — and only
+//!   rasterisation and placement are per output.
+//! * **Change detection.** The ASS widgets compare the rendered string, which
+//!   is free. Pixels are megabytes. So a bitmap widget hands over a
+//!   [`ContentKey`] derived from its content instead, and
+//!   the engine rasterises only when the key moves.
+//!
+//! [`MAX_WIDGET_AREA_PX`] caps what may be rasterised at all, and
+//! `write_frame` documents the one rule a bitmap widget must not break: the
+//! frame file is grown and rewritten in place, never shortened.
 //!
 //! # The power model is the design
 //!
@@ -95,10 +124,17 @@
 //!   the ASS path is the W0 spike's one hard constraint: the OSD coordinate
 //!   space otherwise follows the video's render area, and a rotated wallpaper
 //!   clips the overlay.
-//! * Call [`WidgetEngine::set_output_size`] with the pixel size of the output
-//!   the widget layer is on, and again whenever it changes. `overlay-add` is in
-//!   **real output pixels**, not the ASS coordinate space, so this is what
-//!   places the disc; without it the engine assumes 1920×1080.
+//! * Call [`WidgetEngine::set_outputs`] with every output the widget layer is
+//!   on, **before** [`WidgetEngine::tick`] and on every tick. `overlay-add` is
+//!   in **real output pixels**, not the ASS coordinate space, so this is what
+//!   places and sizes every bitmap widget; without it the engine assumes one
+//!   1920×1080 output. Then route each update by [`WidgetUpdate::is_for`]. A
+//!   loop driving exactly one output can use
+//!   [`WidgetEngine::set_output_size`] and skip the routing entirely.
+//! * Clamp the loop's own wait with [`WidgetEngine::next_deadline`]. It may
+//!   only ever *shorten* it: the loops have their own reasons to wake
+//!   (animation frames, monitor hotplug) and a widget must not be able to
+//!   starve them.
 //! * Call [`WidgetEngine::set_config`] wherever `Config::load()` is re-read
 //!   (`Request::Apply` on all three loops).
 //! * Call [`WidgetEngine::clear_all`] on wallpaper swap, renderer teardown and
@@ -129,8 +165,12 @@ use crate::dsp::{SpectrumAnalyzer, SpectrumConfig};
 use crate::lyrics::{self, Anchor, LrcLine};
 use crate::mpris::{self, NowPlaying, PlaybackStatus, PositionClock, PositionReliability};
 use crate::visualizer::{self, VisualStyleCfg};
+use crate::widgetkit::{
+    self, cards, BarPaint, Canvas, Color, FontStack, Mode, Size, Theme, WidgetSize,
+};
 
 use super::lyrics_runtime::{self, Action, LyricsRuntime};
+use super::widget_anchor;
 
 // ---------------------------------------------------------------------------
 // The wire between the engine and the loops
@@ -202,6 +242,67 @@ pub struct WidgetUpdate {
     /// `None` for the ASS path. `Some` when this update is about pixels; see
     /// [`BitmapUpdate`].
     pub bitmap: Option<BitmapUpdate>,
+    /// Which output this update belongs on.
+    ///
+    /// `None` — the overwhelmingly common case — means *every* target the loop
+    /// is driving: an ASS payload is resolution-independent (libass rescales
+    /// [`RES_X`]×[`RES_Y`] per output for us) and a clear is a clear whatever
+    /// is behind it.
+    ///
+    /// `Some(connector)` means **these pixels were rasterised and placed
+    /// against that one output's mode** and are wrong anywhere else. That is
+    /// the whole of the per-output story: one state machine deciding *what* to
+    /// show, N geometries deciding *how big and where*, so a mixed-DPI desktop
+    /// gets a correctly sized widget on both screens instead of one sized for
+    /// whichever monitor the loop happened to look at first.
+    ///
+    /// The loop's filter is one line — see [`WidgetUpdate::is_for`].
+    pub target: Option<String>,
+}
+
+/// Which of mpv's two overlay commands currently owns an overlay id.
+///
+/// The reason this is tracked at all: clearing an overlay is **not** one
+/// command. An ASS overlay goes down by pushing an empty `osd-overlay`; a
+/// bitmap overlay goes down by `overlay-remove`, and the wrong one of the two
+/// is a silent no-op that leaves the widget burned onto the next wallpaper.
+///
+/// It is deliberately recorded from what the engine **actually emitted**, not
+/// inferred from config: a widget that falls back from a bitmap to ASS (or the
+/// other way) changes kind at runtime, and the only trustworthy answer to
+/// "what is on screen right now" is "what we last pushed".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayKind {
+    /// Drawn by `osd-overlay`; cleared by an empty ASS payload.
+    Ass,
+    /// Drawn by `overlay-add`; cleared by `overlay-remove`.
+    Bitmap,
+}
+
+/// One output the widget layer is being drawn on, in **real pixels**.
+///
+/// The engine keeps a list of these rather than a single size (see
+/// [`WidgetEngine::set_outputs`]) because `overlay-add` takes real pixels: a
+/// bitmap sized for a 4K screen lands at a quarter of the intended size, in the
+/// wrong place, on the 1080p one beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputGeom {
+    /// Connector name (`"DP-1"`). Empty means "the one unnamed output", which
+    /// is what [`WidgetEngine::set_output_size`] installs and what makes every
+    /// update it produces a broadcast.
+    pub connector: String,
+    /// Width in pixels.
+    pub w: u32,
+    /// Height in pixels.
+    pub h: u32,
+}
+
+impl OutputGeom {
+    /// The [`WidgetUpdate::target`] for this output: `None` for the unnamed
+    /// one, since there is then nothing to tell apart.
+    fn target(&self) -> Option<String> {
+        (!self.connector.is_empty()).then(|| self.connector.clone())
+    }
 }
 
 /// The bitmap half of a [`WidgetUpdate`].
@@ -232,12 +333,33 @@ impl WidgetUpdate {
         }
     }
 
+    /// Whether this update belongs on the output called `connector`.
+    ///
+    /// The loop's whole per-output filter: `if u.is_for(&r.connector) { … }`.
+    /// An untargeted update — every ASS payload, every clear — is for all of
+    /// them.
+    pub fn is_for(&self, connector: &str) -> bool {
+        self.target.as_deref().is_none_or(|t| t == connector)
+    }
+
+    /// Which overlay command this update uses, or `None` when it takes the
+    /// overlay down rather than drawing on it.
+    fn kind(&self) -> Option<OverlayKind> {
+        match &self.bitmap {
+            None if self.ass.is_empty() => None,
+            None => Some(OverlayKind::Ass),
+            Some(BitmapUpdate::Draw(_)) => Some(OverlayKind::Bitmap),
+            Some(BitmapUpdate::Remove) => None,
+        }
+    }
+
     /// An ASS update for `overlay_id`.
     fn ass(overlay_id: u32, ass: String) -> Self {
         WidgetUpdate {
             overlay_id,
             ass,
             bitmap: None,
+            target: None,
         }
     }
 
@@ -246,12 +368,20 @@ impl WidgetUpdate {
         WidgetUpdate::ass(overlay_id, String::new())
     }
 
-    /// An update that draws `frame` on `overlay_id`.
+    /// An update that draws `frame` on `overlay_id`, on every target.
+    #[cfg(test)]
     fn draw(overlay_id: u32, frame: BitmapOverlay) -> Self {
+        WidgetUpdate::draw_on(overlay_id, None, frame)
+    }
+
+    /// An update that draws `frame` on `overlay_id`, on one target (or on all
+    /// of them when `target` is `None`).
+    fn draw_on(overlay_id: u32, target: Option<String>, frame: BitmapOverlay) -> Self {
         WidgetUpdate {
             overlay_id,
             ass: String::new(),
             bitmap: Some(BitmapUpdate::Draw(frame)),
+            target,
         }
     }
 
@@ -261,6 +391,18 @@ impl WidgetUpdate {
             overlay_id,
             ass: String::new(),
             bitmap: Some(BitmapUpdate::Remove),
+            target: None,
+        }
+    }
+
+    /// The update that takes `overlay_id` down given what kind of overlay is
+    /// sitting on it. **This is the whole of defect 1**: picking by kind rather
+    /// than by widget is what keeps a clear working when a widget is ported
+    /// from ASS to pixels.
+    fn blank(overlay_id: u32, kind: OverlayKind) -> Self {
+        match kind {
+            OverlayKind::Ass => WidgetUpdate::clear(overlay_id),
+            OverlayKind::Bitmap => WidgetUpdate::remove(overlay_id),
         }
     }
 }
@@ -268,15 +410,17 @@ impl WidgetUpdate {
 /// Where a rendered bitmap frame is and how to read it — everything
 /// `overlay-add` needs and nothing else.
 ///
-/// `path` is a file the engine **keeps and rewrites in place**, one per engine,
-/// because mpv `mmap`s it: a fresh temporary file per frame would be a create,
-/// a write, an unlink and a fresh mapping ten times a second, and a file that
-/// vanished under mpv would be a SIGBUS rather than a missing frame. The engine
-/// owns its lifetime; the caller only ever reads it.
+/// `path` is a file the engine **keeps and rewrites in place**, one per widget
+/// per output geometry, because mpv `mmap`s it: a fresh temporary file per
+/// frame would be a create, a write, an unlink and a fresh mapping ten times a
+/// second, and a file that vanished under mpv would be a SIGBUS rather than a
+/// missing frame. The engine owns its lifetime; the caller only ever reads it.
+/// It is also **never shortened** — see `write_frame` for why that is a
+/// correctness requirement and not a micro-optimisation.
 ///
-/// `x`/`y` are **real output pixels**, not the [`RES_X`]×[`RES_Y`] ASS space —
-/// see [`WidgetEngine::set_output_size`], which is what the engine resolves the
-/// widget's anchor against.
+/// `x`/`y` are **real output pixels**, not the [`RES_X`]×[`RES_Y`] ASS space,
+/// and they are resolved against **one** output — the one named by
+/// [`WidgetUpdate::target`]. See [`WidgetEngine::set_outputs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BitmapOverlay {
     /// Left edge, in output pixels.
@@ -1242,6 +1386,13 @@ pub const VISUAL_FPS: u32 = 24;
 /// which is under the latency of the player's own metadata poll.
 pub const VISUAL_SILENT_PERIOD: Duration = Duration::from_millis(250);
 
+/// Back-off after a failed visualiser frame write.
+///
+/// The longest of the four, and deliberately: this is the widget that would
+/// otherwise retry twenty-four times a second against a full or read-only
+/// runtime directory.
+const VISUAL_RETRY: Duration = Duration::from_secs(3);
+
 /// Band level at or below which the spectrum counts as nothing worth drawing,
 /// on top of [`SpectrumAnalyzer::is_silent`]'s dBFS test.
 ///
@@ -1255,6 +1406,142 @@ const VISUAL_BAND_FLOOR: f32 = 0.01;
 /// [`WidgetEngine::next_deadline`] into a spin.
 fn visual_period(fps: u32) -> Duration {
     Duration::from_micros(1_000_000 / u64::from(fps.clamp(1, 60)))
+}
+
+/// The width percentage above which `widgetkit` draws no card at all.
+///
+/// A copy of `widgetkit::cards::visualizer`'s own `BARE_ABOVE_PCT`, and the one
+/// number in this module that is duplicated from there. It is duplicated on
+/// purpose: the engine resolves the variant itself and passes a **concrete**
+/// one to the card, because the chrome cache below is only valid for the panel
+/// treatment and "let the card decide" would mean the two could disagree about
+/// which treatment is on screen. Passing the resolved answer makes that
+/// impossible; keeping `Auto` would not.
+const BARE_ABOVE_PCT: f32 = 45.0;
+
+/// Which treatment this configuration draws.
+fn visual_variant(cfg: &VisualStyleCfg) -> cards::VisualizerVariant {
+    if cfg.width_pct.is_finite() && cfg.width_pct > BARE_ABOVE_PCT {
+        cards::VisualizerVariant::Bare
+    } else {
+        cards::VisualizerVariant::Panel
+    }
+}
+
+/// How the bars are coloured, from the three config keys that decide it.
+///
+/// `accent_follow` wins over `colour`, exactly as it does everywhere else in
+/// the widget layer, and the gradient mode then decides whether the resulting
+/// colour is flat or one end of a ramp — so the two settings compose instead of
+/// contradicting.
+fn bar_paint(cfg: &VisualStyleCfg, t: &Theme) -> BarPaint {
+    let hex = |s: &str, fallback: Color| Color::from_hex(s).unwrap_or(fallback);
+    match cfg.gradient {
+        // The panel default (spec §8.4): a per-bar vertical ramp, which is what
+        // makes the caps read as the data and the bases as the floor. Only
+        // reachable while the accent is in force — a user-picked colour has no
+        // second stop to ramp to.
+        visualizer::Gradient::None if cfg.accent_follow => BarPaint::Vertical,
+        visualizer::Gradient::None => BarPaint::Fixed(hex(&cfg.colour, t.accent_fill)),
+        visualizer::Gradient::Linear => BarPaint::Across(hex(&cfg.colour_end, t.accent_dim)),
+        visualizer::Gradient::Spectrum => BarPaint::Spectrum,
+    }
+}
+
+/// The palette with every **chrome** token removed, for the per-frame pass.
+///
+/// This is how the visualiser affords to redraw at [`VISUAL_FPS`].
+/// `Canvas::drop_shadow` blurs the *whole canvas* mask on every call, so a
+/// straight full redraw of the panel is two full-canvas blurs a frame — and of
+/// the bare treatment, where every bar carries its own E1 shadow, it is two per
+/// **bar**: ninety-six full-canvas blurs a frame at the default band count,
+/// which is not a frame budget, it is a fan.
+///
+/// So the card body, its hairline, its edge light and every shadow are drawn
+/// **once** into [`ChromeLayer`] and composited under each frame, and the
+/// per-frame pass runs against this palette instead — where `elevation` returns
+/// immediately (`color.a <= 0.0`) and the card's own fills are no-ops. What is
+/// left for it to draw is the well, the bars and the peak caps.
+///
+/// [`Theme::well`] is deliberately **kept**: it is not only the well's fill, it
+/// is also the base of `BarPaint::Vertical`'s ramp, and zeroing it would change
+/// the colour of every bar. The well is therefore drawn on the frame pass and
+/// left out of the chrome layer, which costs one rounded rect and four
+/// hairline strokes — no blur — per frame.
+///
+/// # The one thing this gives up
+///
+/// The bare treatment's **per-bar shadow** (spec §9.3.1). It is the instrument
+/// that keeps a bar visible where it crosses a same-tone region of a photo, and
+/// there is no version of it that survives a full-canvas blur per bar per
+/// frame. The gradient scrim — the other, larger instrument for that treatment
+/// — is untouched, and it is the one doing most of the work.
+fn bars_only(t: &Theme) -> Theme {
+    Theme {
+        shadow: Color::TRANSPARENT,
+        surface: Color::TRANSPARENT,
+        surface_far: Color::TRANSPARENT,
+        edge: Color::TRANSPARENT,
+        edge_highlight: Color::TRANSPARENT,
+        ..*t
+    }
+}
+
+/// The palette with the **well** removed, for the cached chrome pass.
+///
+/// The mirror of [`bars_only`]: between them every layer of the card is drawn
+/// exactly once. Anything added to one must be removed from the other.
+fn chrome_only(t: &Theme) -> Theme {
+    Theme {
+        well: Color::TRANSPARENT,
+        edge_well_top: Color::TRANSPARENT,
+        edge_well_bottom: Color::TRANSPARENT,
+        ..*t
+    }
+}
+
+/// The card body, its hairline, its edge light and its shadow — rasterised once
+/// and composited under every frame.
+///
+/// Premultiplied BGRA, the same layout the frame files are in, so compositing a
+/// frame over it is a source-over in premultiplied space: `out = src + dst ·
+/// (1 − src.a)`, four bytes at a time, with an exact fast path at both ends of
+/// the alpha range. That is a handful of arithmetic per pixel against the
+/// several full-canvas Gaussian passes it replaces.
+struct ChromeLayer {
+    w: u32,
+    h: u32,
+    scale: f32,
+    /// Premultiplied BGRA, `w · h · 4` bytes.
+    data: Vec<u8>,
+}
+
+/// Composite `src` over `dst`, both premultiplied BGRA of the same length.
+///
+/// The Porter-Duff "over" in premultiplied space, which is the whole reason the
+/// chrome is cached in that form: no un-premultiply, no channel swap, no
+/// second `Pixmap`. Most of a bar layer is fully transparent and the caps are
+/// fully opaque, so the two exact branches carry the overwhelming majority of
+/// the pixels and the arithmetic runs on the edges only.
+fn over_in_place(dst: &mut [u8], src: &[u8]) {
+    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+        let a = s[3];
+        if a == 0 {
+            continue;
+        }
+        if a == 255 {
+            d.copy_from_slice(s);
+            continue;
+        }
+        let inv = 255 - u32::from(a);
+        for i in 0..4 {
+            // `+ 127` then the classic /255 approximation: exact for every
+            // input, and no division.
+            let under = u32::from(d[i]) * inv + 127;
+            let under = (under + (under >> 8)) >> 8;
+            d[i] = (u32::from(s[i]) + under).min(255) as u8;
+        }
+    }
 }
 
 /// The visualiser's whole runtime: the capture, the analyser, and what is on
@@ -1277,8 +1564,26 @@ struct VisualState {
     /// Whether anything can produce samples. False makes the widget cost
     /// exactly what a disabled one costs — no reads, no FFT, no deadline.
     live: bool,
-    /// What we last pushed. `None` = we believe the overlay is blank.
-    ass: Option<String>,
+    /// The bar and peak-cap envelopes (spec §10). Caller-owned, because the
+    /// renderer never allocates and this is the widget that redraws every
+    /// frame while audio plays.
+    motion: visualizer::Motion,
+    /// Whether we believe a spectrum is on screen. Silence takes it down.
+    shown: bool,
+    /// When [`VisualState::motion`] was last advanced, so the envelopes run on
+    /// real elapsed time rather than on a frame count.
+    stepped_at: Option<Instant>,
+    /// The card body, its hairline, its edge light and its shadow — see
+    /// [`ChromeLayer`]. `None` for the bare treatment, which has no card, and
+    /// until the first frame.
+    chrome: Option<ChromeLayer>,
+    /// The per-frame surface: well, bars, peak caps. See [`Surface`].
+    canvas: Surface,
+    /// Scratch for the bar layer's pixels, so the per-frame path allocates the
+    /// output buffer and nothing else.
+    layer: Vec<u8>,
+    /// Files, per-output placement, the redraw gate and the write back-off.
+    bmp: BitmapState,
     /// Earliest instant the next frame may be examined. Also what
     /// [`WidgetEngine::next_deadline`] publishes for this widget.
     next_frame: Instant,
@@ -1307,7 +1612,13 @@ impl VisualState {
             scratch: vec![0.0; chunk],
             live: capture.is_some(),
             capture,
-            ass: None,
+            motion: visualizer::Motion::new(cfg.bands),
+            shown: false,
+            stepped_at: None,
+            chrome: None,
+            canvas: Surface::default(),
+            layer: Vec::new(),
+            bmp: BitmapState::new("widget-visualizer", now),
             next_frame: now,
         }
     }
@@ -1323,23 +1634,28 @@ impl VisualState {
     }
 
     /// Advance one frame from the `n` samples sitting in `scratch`, pushing at
-    /// most one update.
+    /// most one update per output.
     ///
     /// The tested seam for this widget, in the same spirit as
     /// [`WidgetEngine::tick_at`]: every decision — the rate cap, the silence
-    /// verdict, whether the payload actually changed — is a pure function of
-    /// the samples and the clock over this struct's own memory, so it can be
-    /// driven from a synthesised tone with no audio device anywhere.
+    /// verdict, the envelopes — is a pure function of the samples and the clock
+    /// over this struct's own memory, so it can be driven from a synthesised
+    /// tone with no audio device anywhere.
     ///
-    /// **Rule 1, twice over.** Silence emits one clear and then nothing at all;
-    /// audio that renders to a byte-identical payload emits nothing either.
+    /// **Rule 1.** Silence emits one `overlay-remove` and then nothing at all.
+    #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
         n: usize,
         cfg: &VisualCfg,
-        accent: &str,
+        theme: &Theme,
+        // Neither treatment this engine selects draws text — the one that does
+        // is the opt-in `Chassis`, which no config key reaches — but the card
+        // signatures take a stack because that one needs it.
+        fonts: &mut FontStack,
+        geoms: &[OutputGeom],
+        repush: bool,
         now: Instant,
-        force: bool,
         out: &mut Vec<WidgetUpdate>,
     ) {
         // Disjoint field borrows: the analyser is written, the scratch read.
@@ -1350,25 +1666,151 @@ impl VisualState {
             // Back off to the silent cadence *before* the early return, so a
             // quiet desktop settles at four looks a second and stays there.
             self.next_frame = now + VISUAL_SILENT_PERIOD;
-            if self.ass.take().is_some() {
-                out.push(WidgetUpdate::clear(VISUALIZER_OVERLAY));
+            // Drop the envelopes with it: coming back from a minute of silence
+            // must not resume a half-fallen peak cap from before it.
+            self.motion.reset();
+            self.stepped_at = None;
+            if self.shown {
+                self.shown = false;
+                self.bmp.forget();
+                out.push(WidgetUpdate::remove(VISUALIZER_OVERLAY));
             }
             return;
         }
-        self.next_frame = now + visual_period(cfg.fps);
-        let ass = visualizer::render_ass(self.analyzer.bands(), &cfg.style, accent);
-        if ass.is_empty() {
-            // `render_ass` returns empty for an empty spectrum, which it
-            // documents as "clear the overlay" rather than as a `{}` block
-            // libass would still have to re-render.
-            if self.ass.take().is_some() {
-                out.push(WidgetUpdate::clear(VISUALIZER_OVERLAY));
-            }
-            return;
-        }
-        if force || self.ass.as_deref() != Some(ass.as_str()) {
-            out.push(WidgetUpdate::ass(VISUALIZER_OVERLAY, ass.clone()));
-            self.ass = Some(ass);
+        let period = visual_period(cfg.fps);
+        self.next_frame = now + period;
+
+        let style = &cfg.style;
+        let variant = visual_variant(style);
+        let opacity = f32::from(style.opacity) / 255.0;
+        let paint = bar_paint(style, theme);
+        let bars_theme = bars_only(theme);
+        let chrome_theme = chrome_only(theme);
+        let anchor = style.anchor;
+        let margin = style.margin_px;
+
+        // Real elapsed time, so the envelopes look the same at 24 Hz and at the
+        // 4 Hz the widget drops to when it is nearly quiet.
+        let dt = self
+            .stepped_at
+            .map_or(period, |t| now.saturating_duration_since(t));
+        self.stepped_at = Some(now);
+
+        // Disjoint borrows again: `push` takes the bitmap state, the closure
+        // takes everything that draws.
+        let VisualState {
+            analyzer,
+            motion,
+            chrome,
+            canvas,
+            layer,
+            bmp,
+            ..
+        } = self;
+        let bands = analyzer.bands();
+
+        // What the picture is *of*, and nothing that moves: the spectrum itself
+        // is the animation, and it is `stepped`. A band magnitude in here would
+        // rasterise at the loop rate and defeat the whole rate cap.
+        let key = ContentKey::of((bands.len(), variant == cards::VisualizerVariant::Bare));
+        // The chrome is only valid until something that is not a band changes.
+        let stale = bmp.dirty;
+
+        let drawn = bmp.push(
+            Push {
+                overlay_id: VISUALIZER_OVERLAY,
+                key,
+                repush,
+                stepped: true,
+                now,
+                // `VisualState::next_frame` is the single rate authority for
+                // this widget — it also gates the capture read and the FFT, and
+                // two caps would only ever disagree.
+                period: Duration::ZERO,
+                retry: VISUAL_RETRY,
+            },
+            geoms,
+            |geom| {
+                let scale = widgetkit::scale_for_output(geom.h);
+                let screen_w = geom.w as f32 / scale;
+                let (w, h) = visualizer::box_size(style, screen_w);
+                // The envelopes need the bar area's height to turn a fall
+                // quoted in logical units into one in the renderer's 0..1. The
+                // box height is within a few units of it and does not depend on
+                // the card's private padding.
+                motion.advance(bands, dt, period, h);
+
+                let data = cards::VisualizerData {
+                    bands: motion.levels(),
+                    // Caller-owned, never allocated by the renderer.
+                    peaks: Some(motion.peaks()),
+                    width: w,
+                    height: h,
+                    width_pct: style.width_pct,
+                    opacity,
+                    rounded: style.rounded,
+                    paint,
+                    variant,
+                    ..cards::VisualizerData::default()
+                };
+                let size = cards::visualizer::measure(&mut *fonts, theme, &data, scale);
+                let buffer = size.buffer();
+                let card = size.card_rect();
+                let px_w = (buffer.w * scale).ceil().max(1.0) as u32;
+                let px_h = (buffer.h * scale).ceil().max(1.0) as u32;
+
+                // -- the cached chrome, for the treatment that has a card -----
+                let want_chrome = variant == cards::VisualizerVariant::Panel;
+                if !want_chrome {
+                    *chrome = None;
+                } else {
+                    let fits = chrome
+                        .as_ref()
+                        .is_some_and(|c| c.w == px_w && c.h == px_h && c.scale == scale);
+                    if stale || !fits {
+                        let empty = cards::VisualizerData {
+                            bands: &[],
+                            peaks: None,
+                            ..data
+                        };
+                        let cv = canvas.get(buffer, scale)?;
+                        cards::visualizer::draw_at(cv, &mut *fonts, &chrome_theme, &empty, card);
+                        let mut data = Vec::new();
+                        cv.write_bgra(&mut data);
+                        *chrome = Some(ChromeLayer {
+                            w: px_w,
+                            h: px_h,
+                            scale,
+                            data,
+                        });
+                    }
+                }
+
+                // -- the bars, every frame ------------------------------------
+                let cv = canvas.get(buffer, scale)?;
+                cards::visualizer::draw_at(cv, &mut *fonts, &bars_theme, &data, card);
+                let bgra = match chrome.as_ref() {
+                    Some(chrome) if chrome.data.len() == (px_w as usize * px_h as usize * 4) => {
+                        cv.write_bgra(layer);
+                        let mut data = chrome.data.clone();
+                        over_in_place(&mut data, layer);
+                        Bgra {
+                            w: px_w,
+                            h: px_h,
+                            data,
+                        }
+                    }
+                    // The bare treatment, and the one frame after a failed
+                    // chrome build: the bar layer is the whole picture.
+                    _ => cv.to_bgra(),
+                };
+                let (x, y) = place(&size, anchor, margin, scale, geom);
+                Some(BitmapFrame { bgra, x, y })
+            },
+            out,
+        );
+        if drawn > 0 {
+            self.shown = true;
         }
     }
 }
@@ -1419,6 +1861,100 @@ fn open_capture(_cfg: &VisualCfg) -> Option<AudioCapture> {
 }
 
 // ---------------------------------------------------------------------------
+// The lyric / now-playing card
+// ---------------------------------------------------------------------------
+
+/// Shortest gap between two lyric frames. See [`CLOCK_PERIOD`] — this is a
+/// floor on bursts, not a frame rate: the lyric changes on `.lrc` timestamps
+/// and nothing else.
+const LYRICS_PERIOD: Duration = Duration::from_millis(200);
+
+/// Back-off after a failed lyric frame write. See [`DISC_RETRY`].
+const LYRICS_RETRY: Duration = Duration::from_secs(2);
+
+/// The lyric widget's pixels: what is on screen, and the surface it is drawn on.
+///
+/// The *state machine* is [`LyricsRuntime`]'s and is untouched by the move to a
+/// bitmap — line selection, offsets, the pause freeze and the "unchanged ⇒
+/// [`Action::Idle`]" fast path all still live there. This is only the part that
+/// is about pixels.
+struct LyricsView {
+    /// The words currently on screen. `None` = the overlay should be empty.
+    frame: Option<lyrics_runtime::LyricFrame>,
+    /// Reused across frames; see [`Surface`].
+    canvas: Surface,
+    /// Files, per-output placement, the redraw gate and the rate cap.
+    bmp: BitmapState,
+}
+
+impl LyricsView {
+    fn new(now: Instant) -> Self {
+        LyricsView {
+            frame: None,
+            canvas: Surface::default(),
+            bmp: BitmapState::new("widget-lyrics", now),
+        }
+    }
+}
+
+/// The lyric type size the card is drawn at, in logical units.
+///
+/// The preset survives the move to a card only as far as size. Face, fill,
+/// outline and the fake "panel" that `LyricStylePreset::Card` was built out of
+/// are all the palette's business now, and the palette does them properly — a
+/// real translucent card with a real scrim, rather than near-black text inside a
+/// heavy near-white outline. What is left that a card *can* honour is
+/// `Karaoke`'s extra quarter of a size, which was always the loudest thing
+/// about it.
+fn lyric_font_size(cfg: &config::Lyrics) -> f32 {
+    let size = match cfg.style {
+        config::LyricStylePreset::Karaoke => cfg.font_size_pt.saturating_mul(5) / 4,
+        _ => cfg.font_size_pt,
+    };
+    size.clamp(8, 200) as f32
+}
+
+// ---------------------------------------------------------------------------
+// The clock
+// ---------------------------------------------------------------------------
+
+/// Shortest gap between two clock frames.
+///
+/// Not a frame rate — the clock is not animated, and its redraw gate is the
+/// content key, which moves once a minute (or once a second with seconds on).
+/// This only stops a burst of config edits rasterising four times in a tick.
+const CLOCK_PERIOD: Duration = Duration::from_millis(200);
+
+/// Back-off after a failed clock frame write. See [`DISC_RETRY`].
+const CLOCK_RETRY: Duration = Duration::from_secs(2);
+
+/// The clock's runtime: what it currently says, and where those pixels are.
+///
+/// Everything substrate-shaped is [`BitmapState`]'s. What is left here is the
+/// two things that are about a clock: the rows it is showing, and the canvas
+/// they are drawn on.
+struct ClockState {
+    /// The rows the card is drawing. `None` until the first render; refreshed
+    /// only when `clock_due` says the visible text has changed, which is what
+    /// makes an idle minute cost no allocation at all.
+    text: Option<clock::ClockText>,
+    /// Reused across frames; see [`Surface`].
+    canvas: Surface,
+    /// Files, per-output placement, the redraw gate and the rate cap.
+    bmp: BitmapState,
+}
+
+impl ClockState {
+    fn new(now: Instant) -> Self {
+        ClockState {
+            text: None,
+            canvas: Surface::default(),
+            bmp: BitmapState::new("widget-clock", now),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The album-art disc
 // ---------------------------------------------------------------------------
 
@@ -1442,13 +1978,18 @@ const DISC_RETRY: Duration = Duration::from_secs(2);
 
 /// The disc's runtime: the art, where it has got to, and what is on screen.
 struct DiscState {
-    /// The one file mpv reads pixels from, rewritten in place per frame. See
-    /// [`BitmapOverlay::path`] for why it is one file and not a fresh one.
-    path: PathBuf,
     /// Prepared source art for the current track, from [`Track::art`].
     art: Option<Arc<RgbaImage>>,
     /// [`Track::seq`] the art belongs to.
     seq: Option<u64>,
+    /// The label's two lines. Drawn only on a disc large enough to carry type
+    /// and opaque enough for its contrast to be bounded — see
+    /// [`cards::disc`] — so on the shipped default size they are computed and
+    /// not used, which costs one `clone` per track.
+    title: String,
+    artist: String,
+    /// The per-frame surface; see [`Surface`].
+    canvas: Surface,
     /// Accumulated **playing** time — the input to [`artwork::rotation_for`].
     /// Advanced only while the player is actually playing, which is how rule 6
     /// ("paused ⇒ rotation speed 0 ⇒ no redraw") holds with no special case:
@@ -1459,42 +2000,583 @@ struct DiscState {
     last: Option<Instant>,
     /// Angle of the frame currently on screen.
     angle: f32,
-    /// The frame currently on screen. `None` = we believe nothing is up.
-    shown: Option<BitmapOverlay>,
-    /// Earliest instant the next frame may be drawn.
-    next_frame: Instant,
-    /// Something about the art or the geometry changed and the next frame must
-    /// be drawn whatever the angle says.
-    dirty: bool,
-    /// One log line per failing state, not one per frame.
-    warned: bool,
+    /// Files, per-output placement and the redraw gate. Everything in here is
+    /// widget-agnostic; the disc contributes only the four fields above.
+    bmp: BitmapState,
 }
 
 impl DiscState {
     fn new(now: Instant) -> Self {
         DiscState {
-            path: disc_frame_path(),
             art: None,
             seq: None,
+            title: String::new(),
+            artist: String::new(),
+            canvas: Surface::default(),
             elapsed: Duration::ZERO,
             last: None,
             angle: 0.0,
-            shown: None,
-            next_frame: now,
-            dirty: true,
-            warned: false,
+            bmp: BitmapState::new("widget-disc", now),
         }
     }
 }
 
-/// Where the disc's BGRA frame lives.
+// ---------------------------------------------------------------------------
+// The bitmap substrate: what every bitmap widget shares
+// ---------------------------------------------------------------------------
+
+/// Largest bitmap a widget may rasterise, in pixels of **area**.
+///
+/// The engine-side twin of [`artwork::MAX_DISC_PX`], which caps the disc at
+/// 2048 per side for exactly this reason. Square widgets are the special case;
+/// a lyric bar or a visualiser is a rectangle, so the cap has to be on area or
+/// it caps nothing useful. 2048² is 16 MB of premultiplied BGRA — already far
+/// more than any widget should want, and the point at which a full-screen
+/// visualiser at 4K (8.3 Mpx, 33 MB **per frame**) is refused instead of
+/// quietly writing 400 MB/s to tmpfs.
+///
+/// A frame over the cap is dropped with one log line and the widget stays
+/// hidden, which is the same degradation a failed write gets: visible, cheap,
+/// and never a partial draw.
+///
+/// It is deliberately the same number as `widgetkit`'s own `MAX_CANVAS_AREA`.
+/// The two guard different things — that one refuses to *allocate* a surface,
+/// this one refuses to *write and push* one — and a widget built any other way
+/// still hits this. If they ever have to differ, this is the outer one.
+pub const MAX_WIDGET_AREA_PX: u64 = 2048 * 2048;
+
+/// The shared font stack: **one per daemon, built once, off the tick.**
+///
+/// [`FontStack::system`] scans the filesystem for fonts, which is tens to
+/// hundreds of milliseconds, and the stack is also the glyph cache — so a
+/// per-widget or per-frame one would pay that scan repeatedly *and* throw away
+/// every rasterised glyph between frames. The daemon's run loops tick every
+/// 100 ms; this must never be built inside one.
+///
+/// It is built lazily rather than in [`WidgetEngine::new`] because the
+/// overwhelmingly common case is a user who has never turned a widget on, and
+/// that user must pay nothing at all. The build is primed from the **config
+/// setters** — [`WidgetEngine::set_clock`] and friends, which run on
+/// `Request::Apply` and at startup, not in a loop — so by the time a tick wants
+/// a glyph the scan has already happened.
+struct Fonts {
+    stack: Option<FontStack>,
+}
+
+impl Fonts {
+    fn new() -> Self {
+        Fonts { stack: None }
+    }
+
+    /// Build the stack now if it is not built. Call from a config setter,
+    /// never from a tick.
+    fn prime(&mut self) {
+        let _ = self.get();
+    }
+
+    /// The stack, building it if this is the first widget to ask.
+    ///
+    /// No `unwrap`: `panic = "abort"` means a panic here takes the user's
+    /// wallpaper down with the daemon, and `get_or_insert_with` gives the same
+    /// answer without one.
+    fn get(&mut self) -> &mut FontStack {
+        self.stack.get_or_insert_with(|| {
+            let t = Instant::now();
+            let stack = FontStack::system();
+            if stack.has_fonts() {
+                log::debug!(
+                    "widgets: font stack ready, {} faces in {:?}",
+                    stack.face_count(),
+                    t.elapsed()
+                );
+            } else {
+                // Worth a line in the journal rather than a bug report: a
+                // machine with no fonts installed draws blank cards, and
+                // nothing downstream can tell that from a layout bug.
+                log::warn!(
+                    "widgets: no system fonts were found — widget cards will draw \
+                     their surfaces but no text"
+                );
+            }
+            stack
+        })
+    }
+}
+
+/// One reusable rasterisation surface.
+///
+/// `widgetkit` is built for a caller that keeps a [`Canvas`] alive across
+/// frames: `reset()` is a memset, and in that loop the steady-state allocation
+/// count is zero. Building one per frame would churn roughly six bytes per
+/// pixel per frame — with the visualiser at [`VISUAL_FPS`] that is tens of MB/s
+/// while music plays, for nothing.
+///
+/// One canvas per **widget**, not per output. A mixed-DPI desktop makes it
+/// resize between outputs on each frame, which reallocates; that is the rare
+/// case, and the alternative (a canvas per output per widget) holds four idle
+/// buffers per screen forever.
+#[derive(Default)]
+struct Surface {
+    canvas: Option<Canvas>,
+    /// One log line per failing size, not one per frame.
+    warned: bool,
+}
+
+impl Surface {
+    /// A cleared canvas of exactly `size` logical units at `scale`, reusing the
+    /// buffer whenever the device size has not moved.
+    ///
+    /// `None` when the surface is larger than `widgetkit` will allocate — which
+    /// is a refusal, not a clamp: a widget that asked for a full-screen 4K
+    /// buffer wants to know it did, and `BitmapState`'s own area cap would
+    /// refuse the frame a moment later anyway.
+    fn get(&mut self, size: Size, scale: f32) -> Option<&mut Canvas> {
+        let w = (size.w * scale).ceil().max(1.0) as u32;
+        let h = (size.h * scale).ceil().max(1.0) as u32;
+        let fits = self
+            .canvas
+            .as_ref()
+            .is_some_and(|c| c.width_px() == w && c.height_px() == h && c.scale() == scale);
+        if !fits {
+            let resized = match &mut self.canvas {
+                Some(c) => c.resize(w, h, scale).is_ok(),
+                None => false,
+            };
+            if !resized {
+                self.canvas = None;
+                match Canvas::new(w, h, scale) {
+                    Ok(c) => self.canvas = Some(c),
+                    Err(e) => {
+                        if !self.warned {
+                            self.warned = true;
+                            log::warn!("widgets: cannot rasterise a {w}x{h} widget: {e:#}");
+                        }
+                        return None;
+                    }
+                }
+            }
+        }
+        self.warned = false;
+        let canvas = self.canvas.as_mut()?;
+        canvas.reset();
+        Some(canvas)
+    }
+}
+
+/// Top-left corner, in **output pixels**, of the buffer holding a measured card.
+///
+/// The one subtlety of the whole bitmap path, and the one that is invisible at
+/// 1x: `margin_px` is measured to the **card**, never to the buffer edge. The
+/// buffer is the card plus its shadow bleed on all four sides — 52 logical
+/// units in dark mode and 84 in light, which at 4K is 104 and 168 *device*
+/// pixels — so anchoring the buffer instead makes every widget drift inward as
+/// density rises, by an amount nobody can explain from the config.
+///
+/// So the card is anchored, and the buffer's corner is the card's corner minus
+/// the bleed.
+fn place(
+    size: &WidgetSize,
+    anchor: Anchor,
+    margin_px: u32,
+    scale: f32,
+    geom: &OutputGeom,
+) -> (i32, i32) {
+    let card = size.card_rect();
+    let cw = (card.w * scale).round().max(1.0) as u32;
+    let ch = (card.h * scale).round().max(1.0) as u32;
+    let margin = (margin_px as f32 * scale)
+        .round()
+        .clamp(0.0, f32::from(u16::MAX)) as u32;
+    let (x, y) = anchor_xy(anchor, cw, ch, margin, geom.w, geom.h);
+    let bleed = (size.bleed * scale).round() as i32;
+    (x - bleed, y - bleed)
+}
+
+/// A cheap stand-in for a bitmap widget's pixels.
+///
+/// **Why this type exists.** The ASS widgets detect "did anything visibly
+/// change" by comparing the *rendered string*, which is free because the string
+/// is what gets pushed anyway. That trick dies with bitmaps: the payload is
+/// megabytes, comparing it costs more than redrawing, and it does not even
+/// exist until after the expensive step. So a bitmap widget instead hands the
+/// engine a small key derived from its **content**, and the engine rasterises
+/// only when the key moves.
+///
+/// A good key is whatever the renderer reads and nothing else — the clock's is
+/// its formatted time (which it already computes), a lyric's is the line plus
+/// its highlight, the disc's is the track and the geometry it was drawn at.
+///
+/// The key must **not** include a continuously animating quantity. The disc's
+/// angle changes every tick; folding it in here would defeat [`DISC_FPS`] and
+/// redraw at the loop rate. Animation is the separate, rate-capped `stepped`
+/// input to `BitmapState::push`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentKey(u64);
+
+impl ContentKey {
+    /// Hash anything hashable into a key.
+    pub fn of<T: std::hash::Hash>(value: T) -> Self {
+        use std::hash::Hasher as _;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        value.hash(&mut h);
+        ContentKey(h.finish())
+    }
+}
+
+/// One rasterised frame, ready to be written and placed.
+///
+/// What a bitmap widget's render closure hands back: the pixels, and where on
+/// *this* output their top-left corner goes. Placement is the widget's own
+/// because only the widget knows how big the box turned out — a lyric line's
+/// width is not known until it has been laid out.
+pub struct BitmapFrame {
+    /// Premultiplied BGRA, tightly packed.
+    pub bgra: Bgra,
+    /// Left edge in output pixels.
+    pub x: i32,
+    /// Top edge in output pixels.
+    pub y: i32,
+}
+
+/// One output's frame file and what we believe is on that output.
+struct BitmapSlot {
+    /// The output this slot draws on.
+    geom: OutputGeom,
+    /// The file mpv reads pixels from for this output.
+    path: PathBuf,
+    /// What the pixels in `path` are of. `None` = nothing written yet.
+    key: Option<ContentKey>,
+    /// The frame currently on screen here. `None` = we believe nothing is up.
+    shown: Option<BitmapOverlay>,
+}
+
+/// The reusable runtime of a **bitmap** widget: its files, its per-output
+/// placement, its redraw gate and its rate cap.
+///
+/// One of these per bitmap widget, holding everything that is not about what
+/// the widget draws. The disc had all of it inline; four widgets sharing one
+/// copy is the point of the type.
+///
+/// # The redraw gate
+///
+/// Five questions, cheapest first, and all five have to say no for the frame to
+/// be free:
+///
+/// 1. `repush` — the renderer lost our overlays. Re-issues `overlay-add` from
+///    the file already on disk: **no rasterising at all**, see
+///    [`WidgetEngine::invalidate`].
+/// 2. `dirty` — config, output geometry or anything else that moves the box.
+///    This is what the disc's old `misplaced` check was really testing.
+/// 3. `shown.is_none()` — we have pushed nothing to this output yet.
+/// 4. the [`ContentKey`] moved — the picture is of something else now.
+/// 5. `stepped` — a rate-capped animation says the picture moved.
+struct BitmapState {
+    /// Base path; slot *n*'s file is `{stem}-{n}.bgra`.
+    stem: PathBuf,
+    /// One per output currently driven, in [`WidgetEngine::outputs`] order.
+    slots: Vec<BitmapSlot>,
+    /// Earliest instant the next frame may be drawn.
+    next_frame: Instant,
+    /// Something about the content or the geometry changed and the next frame
+    /// must be drawn whatever the rate cap says.
+    dirty: bool,
+    /// One log line per failing state, not one per frame.
+    warned: bool,
+    /// Set while a failed write is backing off; nothing rasterises until then.
+    retry_at: Option<Instant>,
+}
+
+/// Everything [`BitmapState::push`] needs that is not about *what* the widget
+/// draws: which overlay, what the pixels are of, and when it is allowed to.
+///
+/// A struct rather than seven arguments because the four bitmap widgets will
+/// each fill it in, and a positional `bool, bool, Instant, Duration, Duration`
+/// is a transposition waiting to happen.
+struct Push {
+    /// mpv overlay id.
+    overlay_id: u32,
+    /// What the pixels are of. See [`ContentKey`].
+    key: ContentKey,
+    /// Re-issue `overlay-add` from the file already on disk, without
+    /// rasterising. See [`WidgetEngine::invalidate`].
+    repush: bool,
+    /// A rate-capped animation says the picture moved. Kept out of `key` on
+    /// purpose — see [`ContentKey`].
+    stepped: bool,
+    /// Monotonic now.
+    now: Instant,
+    /// Shortest gap between two frames of this widget.
+    period: Duration,
+    /// Back-off after a write that failed, which is much longer.
+    retry: Duration,
+}
+
+impl BitmapState {
+    fn new(name: &str, now: Instant) -> Self {
+        BitmapState {
+            stem: frame_stem(name),
+            slots: Vec::new(),
+            next_frame: now,
+            dirty: true,
+            warned: false,
+            retry_at: None,
+        }
+    }
+
+    /// Point this widget's frame files somewhere else, dropping what we had.
+    ///
+    /// Only the tests need it, and they need it badly: without redirecting the
+    /// stem, a `cargo test` run writes frames into the developer's live
+    /// `$XDG_RUNTIME_DIR` beside the daemon's own.
+    #[cfg(test)]
+    fn set_stem(&mut self, stem: PathBuf) {
+        self.stem = stem;
+        self.slots.clear();
+        self.dirty = true;
+    }
+
+    /// Whether anything of ours is believed to be on screen anywhere.
+    fn is_shown(&self) -> bool {
+        self.slots.iter().any(|s| s.shown.is_some())
+    }
+
+    /// Bring the slot list in line with the outputs the loop is driving.
+    ///
+    /// An output that went away takes its overlay with it (its renderer is
+    /// gone), so a dropped slot needs no `overlay-remove`. An output whose mode
+    /// changed is a new geometry and therefore a redraw.
+    fn sync(&mut self, outputs: &[OutputGeom]) {
+        if self.slots.len() == outputs.len()
+            && self.slots.iter().zip(outputs).all(|(s, g)| &s.geom == g)
+        {
+            return;
+        }
+        let mut old: Vec<BitmapSlot> = std::mem::take(&mut self.slots);
+        // Keep a slot whose geometry is unchanged: its file already holds the
+        // right pixels, so a hotplug elsewhere costs it nothing.
+        let mut kept: Vec<Option<BitmapSlot>> = outputs
+            .iter()
+            .map(|g| old.iter().position(|s| s.geom == *g).map(|i| old.remove(i)))
+            .collect();
+        // A kept slot brings its file with it, and that file's index is now
+        // spoken for: handing the same name to a new slot would have two
+        // outputs writing each other's pixels.
+        let used: Vec<PathBuf> = kept.iter().flatten().map(|s| s.path.clone()).collect();
+        let mut n = 0usize;
+        for (i, entry) in kept.iter_mut().enumerate() {
+            if entry.is_some() {
+                continue;
+            }
+            while used.contains(&slot_path(&self.stem, n)) {
+                n += 1;
+            }
+            *entry = Some(BitmapSlot {
+                geom: outputs[i].clone(),
+                path: slot_path(&self.stem, n),
+                key: None,
+                shown: None,
+            });
+            n += 1;
+        }
+        self.slots = kept.into_iter().flatten().collect();
+    }
+
+    /// Forget what is on screen without emitting anything.
+    ///
+    /// For [`WidgetEngine::clear_all`], which has already emitted the blank
+    /// itself — by kind, which is a decision only the engine can make.
+    fn forget(&mut self) {
+        for s in &mut self.slots {
+            s.shown = None;
+        }
+        // Back to "we have pushed nothing": the next tick must draw again
+        // rather than decide nothing has changed.
+        self.dirty = true;
+    }
+
+    /// Take every overlay of ours down and forget the widget is drawable.
+    fn retire(&mut self, overlay_id: u32, out: &mut Vec<WidgetUpdate>) {
+        if self.is_shown() {
+            out.push(WidgetUpdate::remove(overlay_id));
+        }
+        self.slots.clear();
+    }
+
+    /// Rasterise and push this widget wherever it needs it.
+    ///
+    /// `render` is called **at most once per output**, and only for the outputs
+    /// the gate above says need it — that is the whole reason it is a closure
+    /// and not a pre-built frame.
+    ///
+    /// `render` returning `None` means "nothing to draw here"; the overlay comes
+    /// down on that output, once.
+    ///
+    /// Returns the number of outputs actually rasterised, so the caller can
+    /// tell an animation step ("arm the rate cap") from a no-op.
+    fn push<F>(
+        &mut self,
+        args: Push,
+        outputs: &[OutputGeom],
+        mut render: F,
+        out: &mut Vec<WidgetUpdate>,
+    ) -> usize
+    where
+        F: FnMut(&OutputGeom) -> Option<BitmapFrame>,
+    {
+        let Push {
+            overlay_id,
+            key,
+            repush,
+            stepped,
+            now,
+            period,
+            retry,
+        } = args;
+        self.sync(outputs);
+        let dirty = self.dirty;
+        // A widget whose last write failed is not asked to rasterise again
+        // until the back-off is up. Without this the retry cadence is the
+        // *loop's*, and a read-only runtime directory costs a full render ten
+        // times a second forever.
+        let blocked = self.retry_at.is_some_and(|t| now < t);
+        let mut drawn = 0usize;
+        let mut failed = false;
+        let mut removed = false;
+        for slot in &mut self.slots {
+            // `shown` is deliberately not in this gate: a slot that drew
+            // nothing for the current key recorded the key anyway, so "we have
+            // pushed nothing here" is `key == None`, which a fresh slot has.
+            let changed = !blocked && (dirty || slot.key != Some(key) || stepped);
+            if !changed {
+                // Nothing moved. The file on disk is still exactly right, so a
+                // renderer that lost its overlays gets the command again and
+                // not the rasteriser.
+                if repush {
+                    if let Some(b) = &slot.shown {
+                        out.push(WidgetUpdate::draw_on(
+                            overlay_id,
+                            slot.geom.target(),
+                            b.clone(),
+                        ));
+                    }
+                }
+                continue;
+            }
+            let Some(frame) = render(&slot.geom) else {
+                // Nothing to draw here. `overlay-remove` is not per output, so
+                // one is enough however many slots have just gone empty.
+                if slot.shown.take().is_some() && !removed {
+                    removed = true;
+                    out.push(WidgetUpdate::remove(overlay_id));
+                }
+                // Record the key anyway: "there is nothing to draw for this
+                // content" is an answer, and asking again every tick until the
+                // content changes is the whole cost the key exists to avoid.
+                slot.key = Some(key);
+                continue;
+            };
+            let area = u64::from(frame.bgra.w) * u64::from(frame.bgra.h);
+            if area > MAX_WIDGET_AREA_PX {
+                if !self.warned {
+                    self.warned = true;
+                    log::warn!(
+                        "widgets: overlay {overlay_id} wanted a {}x{} bitmap ({area} px), over the \
+                         {MAX_WIDGET_AREA_PX} px cap — the widget stays hidden",
+                        frame.bgra.w,
+                        frame.bgra.h
+                    );
+                }
+                failed = true;
+                continue;
+            }
+            if let Err(e) = write_frame(&slot.path, &frame.bgra) {
+                if !self.warned {
+                    self.warned = true;
+                    log::warn!(
+                        "widgets: cannot write the frame for overlay {overlay_id} to {}: {e} — \
+                         the widget stays hidden",
+                        slot.path.display()
+                    );
+                }
+                failed = true;
+                continue;
+            }
+            slot.key = Some(key);
+            let bitmap = BitmapOverlay {
+                x: frame.x,
+                y: frame.y,
+                path: slot.path.clone(),
+                w: frame.bgra.w,
+                h: frame.bgra.h,
+                stride: frame.bgra.stride(),
+            };
+            slot.shown = Some(bitmap.clone());
+            out.push(WidgetUpdate::draw_on(
+                overlay_id,
+                slot.geom.target(),
+                bitmap,
+            ));
+            drawn += 1;
+        }
+        if failed {
+            // Long backoff, so a full or read-only runtime directory costs one
+            // attempt every couple of seconds rather than one every frame.
+            self.retry_at = Some(now + retry);
+            self.next_frame = now + retry;
+            return drawn;
+        }
+        if !blocked {
+            self.retry_at = None;
+            self.warned = false;
+            self.dirty = false;
+        }
+        if drawn > 0 {
+            self.next_frame = now + period;
+        }
+        drawn
+    }
+}
+
+/// Where a bitmap widget's frames live.
 ///
 /// Under `$XDG_RUNTIME_DIR/fresco/` beside the control socket: a tmpfs, so the
 /// per-frame write never reaches a disk, and per-user, so two people on the
 /// same machine cannot collide. [`crate::ipc::socket_dir`] already carries the
 /// `/tmp` fallback for a session with no runtime directory.
-fn disc_frame_path() -> PathBuf {
-    crate::ipc::socket_dir().join("widget-disc.bgra")
+///
+/// **Under `cfg(test)` this is redirected**, and it has to be. Four of the four
+/// widgets rasterise now, so a `cargo test` run that used the real answer would
+/// write frames into the developer's live `$XDG_RUNTIME_DIR/fresco/` beside the
+/// running daemon's own — and, because the harness runs tests in parallel in one
+/// process, two tests exercising the same widget would be writing each other's
+/// pixels into one file. The counter is what keeps every [`BitmapState`] in a
+/// run on its own files; the directory is stable across runs so the files are
+/// overwritten rather than accumulated.
+fn frame_stem(name: &str) -> PathBuf {
+    #[cfg(test)]
+    {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join("fresco-test-frames")
+            .join(format!("{name}-{n}"))
+    }
+    #[cfg(not(test))]
+    {
+        crate::ipc::socket_dir().join(name)
+    }
+}
+
+/// The file for one output's frames: `{stem}-{n}.bgra`.
+///
+/// One file per output and not one per widget, because two outputs of different
+/// sizes hold genuinely different pixels — sharing would mean the second
+/// `overlay-add` read the first output's frame.
+fn slot_path(stem: &Path, n: usize) -> PathBuf {
+    let mut p = stem.to_path_buf().into_os_string();
+    p.push(format!("-{n}.bgra"));
+    PathBuf::from(p)
 }
 
 /// Write one frame to the file mpv reads.
@@ -1502,8 +2584,33 @@ fn disc_frame_path() -> PathBuf {
 /// **Not** `fs::write`, which truncates first: mpv `mmap`s this file for
 /// `overlay-add`, and truncating a live mapping out from under it is a SIGBUS
 /// in the renderer rather than a dropped frame. The bytes are overwritten in
-/// place, and the file is only shortened when the disc has actually been
-/// resized — the one case where the old mapping is going away regardless.
+/// place.
+///
+/// # Why the file is never shortened
+///
+/// The old version of this function called `set_len` unconditionally, which is
+/// the one path here that can shorten a live mapping. It was safe only because
+/// the disc resizes on a config change and nowhere else. It is **not** safe for
+/// a widget whose bitmap changes size as its content does — a lyric line is a
+/// different width on every line — and the failure is the worst kind: a SIGBUS
+/// inside mpv, on a machine other than the developer's, at a rate proportional
+/// to how much the user likes lyrics.
+///
+/// The fix is to grow and never shrink. mpv maps the file when it handles
+/// `overlay-add` and keeps that mapping until the next `overlay-add` on the id
+/// (or `overlay-remove`), so between our write and mpv's next command there is
+/// always a mapping of the *previous* frame's length still live. Growing leaves
+/// it fully backed; shrinking unbacks its tail. The trailing bytes of a frame
+/// smaller than its predecessor are simply never read — mpv reads `h * stride`
+/// bytes, which we pass it explicitly.
+///
+/// The cost is that the file settles at the largest frame the widget has ever
+/// drawn. That is bounded, and bounded tightly, by [`MAX_WIDGET_AREA_PX`].
+///
+/// The alternative — confirming that mpv re-`mmap`s on every `overlay-add` and
+/// shrinking anyway — buys back only tmpfs pages we have already capped, and
+/// stakes a renderer crash on an implementation detail of whichever mpv the
+/// user's distribution ships. Not worth it.
 fn write_frame(path: &Path, frame: &Bgra) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -1513,12 +2620,17 @@ fn write_frame(path: &Path, frame: &Bgra) -> std::io::Result<()> {
         .create(true)
         .truncate(false)
         .open(path)?;
+    let want = frame.data.len() as u64;
+    // Grow first, so the write never lands past the end of a mapping mpv is
+    // still holding; never shrink (see above).
+    if f.metadata()?.len() < want {
+        f.set_len(want)?;
+    }
     f.write_all(&frame.data)?;
-    f.set_len(frame.data.len() as u64)?;
     f.flush()
 }
 
-/// Resolve an anchor to the top-left corner of a `size`×`size` box on a
+/// Resolve an anchor to the top-left corner of a `w`×`h` box on a
 /// `out_w`×`out_h` output, in **output pixels**.
 ///
 /// The bitmap twin of the ASS `\an` placement the text widgets get for free.
@@ -1526,20 +2638,25 @@ fn write_frame(path: &Path, frame: &Bgra) -> std::io::Result<()> {
 /// and doing it here rather than in the three run loops is the whole reason
 /// this module exists.
 ///
-/// Saturating throughout: a margin or a disc larger than the output pins the
-/// box to the edge instead of wrapping to a nonsense coordinate.
-fn anchor_xy(anchor: Anchor, size: u32, margin: u32, out_w: u32, out_h: u32) -> (i32, i32) {
-    let far = |extent: u32| -> u32 { extent.saturating_sub(size).saturating_sub(margin) };
-    let centre = |extent: u32| -> u32 { extent.saturating_sub(size) / 2 };
+/// `w` and `h` are separate because only the disc is square: a clock, a lyric
+/// line and a spectrum are all wider than they are tall, and resolving both
+/// axes against one number puts every one of them in the wrong place.
+///
+/// Saturating throughout: a margin or a box larger than the output pins it to
+/// the edge instead of wrapping to a nonsense coordinate.
+fn anchor_xy(anchor: Anchor, w: u32, h: u32, margin: u32, out_w: u32, out_h: u32) -> (i32, i32) {
+    let far =
+        |extent: u32, size: u32| -> u32 { extent.saturating_sub(size).saturating_sub(margin) };
+    let centre = |extent: u32, size: u32| -> u32 { extent.saturating_sub(size) / 2 };
     let x = match anchor {
-        Anchor::TopLeft | Anchor::MidLeft | Anchor::BottomLeft => margin.min(far(out_w)),
-        Anchor::TopCenter | Anchor::MidCenter | Anchor::BottomCenter => centre(out_w),
-        Anchor::TopRight | Anchor::MidRight | Anchor::BottomRight => far(out_w),
+        Anchor::TopLeft | Anchor::MidLeft | Anchor::BottomLeft => margin.min(far(out_w, w)),
+        Anchor::TopCenter | Anchor::MidCenter | Anchor::BottomCenter => centre(out_w, w),
+        Anchor::TopRight | Anchor::MidRight | Anchor::BottomRight => far(out_w, w),
     };
     let y = match anchor {
-        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => margin.min(far(out_h)),
-        Anchor::MidLeft | Anchor::MidCenter | Anchor::MidRight => centre(out_h),
-        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => far(out_h),
+        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => margin.min(far(out_h, h)),
+        Anchor::MidLeft | Anchor::MidCenter | Anchor::MidRight => centre(out_h, h),
+        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => far(out_h, h),
     };
     // Both fit in i32 for any output a compositor will ever report.
     (x as i32, y as i32)
@@ -1563,16 +2680,29 @@ pub struct WidgetEngine {
     visual_cfg: VisualCfg,
     disc_cfg: DiscWidgetCfg,
     monitor: Option<String>,
-    /// Size of the output the widget layer is on, in pixels. Only the disc
-    /// needs it — `overlay-add` is not in the ASS coordinate space — and it is
-    /// assumed rather than required, so a loop that never calls
-    /// [`WidgetEngine::set_output_size`] still gets a disc, just placed against
-    /// 1080p.
-    out_w: u32,
-    out_h: u32,
-    /// `#RRGGBB` from the app theme, used by whichever widget has
-    /// `accent_follow` set.
-    accent: String,
+    /// Every output the widget layer is being drawn on, in the order the loop
+    /// handed them over. **Never empty**: an engine nobody has told about a
+    /// display assumes one unnamed 1080p output, so a loop that never calls
+    /// [`WidgetEngine::set_outputs`] still gets its widgets.
+    ///
+    /// Only the bitmap widgets read it — `overlay-add` is in real pixels, where
+    /// ASS is laid out in the fixed [`RES_X`]×[`RES_Y`] space and is
+    /// resolution-independent for free — but they *must*, and per output: this
+    /// is what stops a bitmap sized for the 4K screen landing at the wrong size
+    /// on the 1080p one beside it.
+    outputs: Vec<OutputGeom>,
+    /// The app accent, as the enum rather than a hex string: the dark and
+    /// light palettes use **different** colours for the same accent, and
+    /// [`Theme::for_accent`] is the only thing that knows both tables.
+    accent: config::Accent,
+    /// Which palette the cards are drawn in, straight from the config.
+    theme_cfg: config::WidgetTheme,
+    /// The resolved palette. Recomputed whenever the accent or the mode moves,
+    /// never per frame — it is a table of thirty-odd colours and every one of
+    /// them is a fixed function of those two inputs.
+    theme: Theme,
+    /// The shared font stack and glyph cache. See [`Fonts`].
+    fonts: Fonts,
     /// Line selection, offsets, presets and the "unchanged ⇒ [`Action::Idle`]"
     /// fast path all live in here; this module never re-implements any of it.
     lyrics: LyricsRuntime,
@@ -1580,11 +2710,10 @@ pub struct WidgetEngine {
     worker: Option<Worker>,
     /// [`Track::seq`] of the track currently loaded into `lyrics`.
     track_seq: Option<u64>,
-    /// What we last pushed to each overlay. `None` = we believe it is blank.
-    /// This is what makes an unchanged tick free, and what [`WidgetEngine::invalidate`]
-    /// re-pushes.
-    lyrics_ass: Option<String>,
-    clock_ass: Option<String>,
+    /// `Some` exactly while the lyric widget is enabled.
+    lyrics_view: Option<LyricsView>,
+    /// `Some` exactly while the clock is enabled.
+    clock: Option<ClockState>,
     /// `Some` exactly while the visualiser is enabled. Holds the capture, so
     /// dropping it stops recording.
     visual: Option<VisualState>,
@@ -1593,8 +2722,35 @@ pub struct WidgetEngine {
     /// Wall-clock instant at which the clock's *text* next differs. Between now
     /// and then, the clock branch does not render, allocate or compare.
     clock_due: Option<DateTime<Local>>,
-    /// Re-push everything on the next tick, whatever we believe is on screen.
-    force: bool,
+    /// Re-*push* everything on the next tick, whatever we believe is on screen
+    /// — see [`WidgetEngine::invalidate`]. Deliberately not "re-render": the
+    /// pixels on disk are still valid, and re-rasterising four bitmap widgets
+    /// because an output's respawn counter flapped is a visible hitch.
+    repush: bool,
+    /// Which mpv command owns each overlay id right now, indexed by
+    /// [`overlay_slot`]. Recorded from what was actually emitted, because a
+    /// widget can change kind at runtime and only the emitted command knows.
+    /// [`clear_all`](WidgetEngine::clear_all) reads it to pick between an empty
+    /// ASS payload and `overlay-remove`.
+    on_screen: [Option<OverlayKind>; OVERLAY_SLOTS],
+}
+
+/// How many overlay ids this engine owns. See [`overlay_slot`].
+const OVERLAY_SLOTS: usize = 4;
+
+/// Index of `overlay_id` in the engine's per-overlay arrays, or `None` for an
+/// id this engine does not own.
+///
+/// Spelled out rather than computed from the id, so adding a fifth widget is a
+/// compile-time decision here instead of an off-by-one somewhere else.
+fn overlay_slot(overlay_id: u32) -> Option<usize> {
+    match overlay_id {
+        LYRICS_OVERLAY => Some(0),
+        CLOCK_OVERLAY => Some(1),
+        VISUALIZER_OVERLAY => Some(2),
+        DISC_OVERLAY => Some(3),
+        _ => None,
+    }
 }
 
 impl WidgetEngine {
@@ -1608,27 +2764,34 @@ impl WidgetEngine {
     /// `accent_hex` is the app accent as `#RRGGBB`. It is stored rather than
     /// borrowed because the engine outlives any borrow of the config the daemon
     /// is about to replace.
-    pub fn new(cfg: Option<&config::Widgets>, accent_hex: &str) -> Self {
+    pub fn new(cfg: Option<&config::Widgets>, accent: config::Accent) -> Self {
         let mut engine = WidgetEngine {
             lyrics_cfg: config::Lyrics::default(),
             clock_cfg: ClockCfg::default(),
             visual_cfg: VisualCfg::default(),
             disc_cfg: DiscWidgetCfg::default(),
             monitor: None,
-            out_w: 1920,
-            out_h: 1080,
-            accent: String::new(),
+            outputs: vec![OutputGeom {
+                connector: String::new(),
+                w: 1920,
+                h: 1080,
+            }],
+            accent: config::Accent::default(),
+            theme_cfg: config::WidgetTheme::default(),
+            theme: Theme::for_accent(Mode::Dark, config::Accent::default()),
+            fonts: Fonts::new(),
             lyrics: LyricsRuntime::new(&config::Lyrics::default()),
             worker: None,
             track_seq: None,
-            lyrics_ass: None,
-            clock_ass: None,
+            lyrics_view: None,
+            clock: None,
             visual: None,
             disc: None,
             clock_due: None,
-            force: false,
+            repush: false,
+            on_screen: [None; OVERLAY_SLOTS],
         };
-        engine.set_config(cfg, accent_hex);
+        engine.set_config(cfg, accent);
         engine
     }
 
@@ -1648,21 +2811,45 @@ impl WidgetEngine {
     /// * **An identical config is ignored.** The GUI rewrites the whole file for
     ///   unrelated edits, and repainting because the user picked a new wallpaper
     ///   is exactly the redraw rule 1 exists to prevent.
-    pub fn set_config(&mut self, cfg: Option<&config::Widgets>, accent_hex: &str) {
+    pub fn set_config(&mut self, cfg: Option<&config::Widgets>, accent: config::Accent) {
         let lyrics_cfg = cfg.map(|w| w.lyrics.clone()).unwrap_or_default();
         self.monitor = cfg.and_then(|w| w.monitor.clone());
+        let theme_cfg = cfg.map_or_else(config::WidgetTheme::default, |w| w.theme);
 
-        if self.accent != accent_hex {
-            self.accent = accent_hex.to_string();
-            // The lyric runtime takes the accent per tick and notices for
-            // itself; the clock is only rendered when due, so it needs telling.
-            self.clock_due = None;
+        if self.accent != accent || self.theme_cfg != theme_cfg {
+            self.accent = accent;
+            self.theme_cfg = theme_cfg;
+            // A palette is a fixed function of (mode, accent), so it is
+            // resolved here and never in a frame.
+            self.theme = Theme::for_accent(widget_mode(theme_cfg), accent);
+            // Every card on screen is now drawn in the wrong colours, and a
+            // content key cannot see a palette change.
+            self.mark_bitmaps_dirty();
         }
 
         // `LyricsRuntime::set_config` owns the "did anything visible change"
         // decision for lyrics, including ignoring a no-op edit.
+        let lyrics_changed = lyrics_cfg != self.lyrics_cfg;
         self.lyrics.set_config(&lyrics_cfg);
         self.lyrics_cfg = lyrics_cfg;
+        if self.lyrics_cfg.enabled {
+            if self.lyrics_view.is_none() {
+                self.lyrics_view = Some(LyricsView::new(Instant::now()));
+            }
+            // Off the tick: this is a config setter, not a loop.
+            self.fonts.prime();
+        }
+        if lyrics_changed {
+            // A style change a content key cannot see, so the lyric widget has
+            // to be told to repaint. **Only the lyric widget**: the accent and
+            // the theme are handled above, and dirtying all four here would
+            // make a lyric anchor edit re-rasterise the clock, the spectrum and
+            // the record as well — a rule-1 violation with nothing on the other
+            // side of it.
+            if let Some(l) = &mut self.lyrics_view {
+                l.bmp.dirty = true;
+            }
+        }
         self.sync_worker();
     }
 
@@ -1693,25 +2880,76 @@ impl WidgetEngine {
         }
     }
 
-    /// Tell the engine how big the output carrying the widget layer is.
+    /// Tell the engine every output the widget layer is being drawn on, in the
+    /// order the loop will dispatch to them.
     ///
-    /// Only the disc reads this, and it must: `overlay-add` places a bitmap in
-    /// **real output pixels**, where the ASS widgets are laid out in the fixed
-    /// [`RES_X`]×[`RES_Y`] space and are resolution-independent for free. Call
-    /// it once the loop knows its output's mode, and again on a mode or
-    /// rotation change — the disc is re-placed and re-pushed on the next tick.
+    /// **Call this before [`tick`](Self::tick), every tick.** Only the bitmap
+    /// widgets read it, and they must: `overlay-add` places pixels in **real
+    /// output pixels**, where the ASS widgets are laid out in the fixed
+    /// [`RES_X`]×[`RES_Y`] space and are resolution-independent for free. A
+    /// mixed-DPI desktop given one monitor's size gets a widget at the wrong
+    /// size and in the wrong place on the other.
     ///
-    /// Ignored when either dimension is zero (a compositor reporting a mode it
-    /// has not brought up yet), because a disc placed against a 0×0 output
-    /// would land in the corner and stay there.
-    pub fn set_output_size(&mut self, w: u32, h: u32) {
-        if w == 0 || h == 0 || (self.out_w == w && self.out_h == h) {
+    /// The engine stays **one state machine**: which lyric line, what angle,
+    /// what the clock reads are decided once. Only rasterisation and placement
+    /// are per output, and the updates come back tagged with
+    /// [`WidgetUpdate::target`] so the loop can route them.
+    ///
+    /// Outputs with a zero dimension are dropped (a compositor reporting a mode
+    /// it has not brought up yet); if that leaves nothing, the previous list is
+    /// kept, because a widget placed against a 0×0 output would land in the
+    /// corner and stay there.
+    pub fn set_outputs(&mut self, outputs: &[OutputGeom]) {
+        let want: Vec<OutputGeom> = outputs
+            .iter()
+            .filter(|g| g.w != 0 && g.h != 0)
+            .cloned()
+            .collect();
+        if want.is_empty() || want == self.outputs {
             return;
         }
-        self.out_w = w;
-        self.out_h = h;
-        if let Some(disc) = &mut self.disc {
-            disc.dirty = true;
+        self.outputs = want;
+        self.mark_bitmaps_dirty();
+    }
+
+    /// [`set_outputs`](Self::set_outputs) for a loop that drives exactly one
+    /// output and has no name for it.
+    ///
+    /// Kept because it is the smallest thing a call site can do to place a
+    /// bitmap correctly, and because updates for an unnamed output carry no
+    /// [`WidgetUpdate::target`] — so a loop that only ever calls this needs no
+    /// routing at all.
+    pub fn set_output_size(&mut self, w: u32, h: u32) {
+        self.set_outputs(&[OutputGeom {
+            connector: String::new(),
+            w,
+            h,
+        }]);
+    }
+
+    /// The geometry every bitmap widget is currently placed against. Never
+    /// empty.
+    fn out_geoms(&self) -> &[OutputGeom] {
+        &self.outputs
+    }
+
+    /// Force every bitmap widget to re-rasterise on the next tick.
+    ///
+    /// The generalisation of the disc's old `dirty = true`: anything that moves
+    /// a box — a config edit, a new output list, a mode change — goes through
+    /// here, and adding a bitmap widget means adding one line to it.
+    fn mark_bitmaps_dirty(&mut self) {
+        if let Some(l) = &mut self.lyrics_view {
+            l.bmp.dirty = true;
+        }
+        if let Some(c) = &mut self.clock {
+            c.bmp.dirty = true;
+        }
+        if let Some(v) = &mut self.visual {
+            v.bmp.dirty = true;
+        }
+        if let Some(d) = &mut self.disc {
+            d.bmp.dirty = true;
         }
     }
 
@@ -1730,6 +2968,19 @@ impl WidgetEngine {
         // Anything here can change the text or the look, and a change that only
         // took effect at the next minute boundary would read as a dead switch.
         self.clock_due = None;
+        if self.clock_cfg.enabled {
+            match &mut self.clock {
+                // The frame on disk is now of the wrong thing — a content key
+                // cannot see a style change. **Only this widget's frame**:
+                // dirtying all four here would make a clock edit re-rasterise
+                // the lyric card, the spectrum and the record for nothing.
+                Some(c) => c.bmp.dirty = true,
+                None => self.clock = Some(ClockState::new(Instant::now())),
+            }
+            // Off the tick: this is a config setter, and the font scan is tens
+            // to hundreds of milliseconds.
+            self.fonts.prime();
+        }
     }
 
     /// Adopt the audio visualiser's settings. `None` disables it.
@@ -1784,9 +3035,18 @@ impl WidgetEngine {
             self.visual = Some(VisualState::new(&self.visual_cfg, capture, now));
         } else if let Some(v) = &mut self.visual {
             // Style-only edit: repaint at the next frame rather than waiting
-            // for the spectrum to happen to differ.
-            v.ass = None;
+            // for the spectrum to happen to differ. The chrome cache goes with
+            // it — a colour change a content key cannot see is exactly what it
+            // would otherwise hold on to.
+            v.bmp.dirty = true;
         }
+        if self.visual_cfg.enabled {
+            self.fonts.prime();
+        }
+        // No `mark_bitmaps_dirty` here: both arms above have already dirtied
+        // *this* widget (a restart builds a fresh `BitmapState`, which starts
+        // dirty), and a visualiser edit is not a reason to redraw the other
+        // three.
     }
 
     /// Adopt the album-art disc's settings. `None` disables it.
@@ -1808,9 +3068,11 @@ impl WidgetEngine {
                 // Size, anchor, margin, opacity and spin all change the frame,
                 // and a change that only took effect at the next track would
                 // read as a dead switch.
-                Some(disc) => disc.dirty = true,
+                Some(disc) => disc.bmp.dirty = true,
                 None => self.disc = Some(DiscState::new(now)),
             }
+            // Off the tick: this is a config setter, not a loop.
+            self.fonts.prime();
         }
         self.sync_worker();
     }
@@ -1849,10 +3111,15 @@ impl WidgetEngine {
     /// at all until 14:33 — the clock is not even *rendered* in between, so
     /// there is no string built and nothing compared.
     ///
-    /// The one push that is not a content change: the first tick after the
-    /// engine starts (or after [`clear_all`](Self::clear_all)) blanks the lyric
-    /// overlay once, because we cannot assume an overlay left by a previous
-    /// daemon run is gone. Exactly one, then silence.
+    /// **Nothing is pushed for a widget that has never drawn.** The ASS engine
+    /// opened with one blank per text overlay, on the grounds that an overlay
+    /// left by a previous daemon run might still be up. A bitmap widget cannot
+    /// honestly say that: `BitmapState` tracks what it actually put on each
+    /// output, and an `overlay-remove` for a frame we never drew is an IPC round
+    /// trip that changes nothing. The case the blank was defending against is
+    /// [`clear_all`](Self::clear_all)'s, which still blanks **unconditionally**
+    /// — and which is what the loop calls on renderer teardown and on wallpaper
+    /// swap, i.e. at every point where our belief could be wrong.
     pub fn tick(&mut self) -> Vec<WidgetUpdate> {
         if !self.lyrics_live() && !self.clock_live() && !self.visual_live() && !self.disc_live() {
             return Vec::new();
@@ -1907,66 +3174,139 @@ impl WidgetEngine {
     /// from the worker's snapshot rather than staying dark until the next song.
     pub fn clear_all(&mut self) -> Vec<WidgetUpdate> {
         let mut out = Vec::new();
-        if self.lyrics_cfg.enabled || self.lyrics_ass.is_some() {
-            out.push(WidgetUpdate::clear(LYRICS_OVERLAY));
+        let live = [
+            (LYRICS_OVERLAY, self.lyrics_cfg.enabled),
+            (CLOCK_OVERLAY, self.clock_cfg.enabled),
+            (VISUALIZER_OVERLAY, self.visual_cfg.enabled),
+            (DISC_OVERLAY, self.disc_cfg.enabled),
+        ];
+        for (id, enabled) in live {
+            let Some(slot) = overlay_slot(id) else {
+                continue;
+            };
+            let on = self.on_screen[slot];
+            if !enabled && on.is_none() {
+                continue;
+            }
+            // **Defect 1.** The command is chosen by what is *on the overlay*,
+            // never by which widget it is: an empty `osd-overlay` does not take
+            // a bitmap down and `overlay-remove` does not take ASS down, so
+            // guessing leaves a stale widget burned onto the next wallpaper.
+            // Falling back to `substrate` covers the one case where there is
+            // nothing to read — an overlay we believe is already blank, which
+            // is cleared anyway precisely because that belief may be wrong.
+            out.push(WidgetUpdate::blank(id, on.unwrap_or(self.substrate(id))));
         }
-        if self.clock_cfg.enabled || self.clock_ass.is_some() {
-            out.push(WidgetUpdate::clear(CLOCK_OVERLAY));
+        if let Some(l) = &mut self.lyrics_view {
+            l.bmp.forget();
         }
-        if self.visual_cfg.enabled || self.visual.as_ref().is_some_and(|v| v.ass.is_some()) {
-            out.push(WidgetUpdate::clear(VISUALIZER_OVERLAY));
-        }
-        if self.disc_cfg.enabled || self.disc.as_ref().is_some_and(|d| d.shown.is_some()) {
-            // `overlay-remove`, not an empty ASS payload: a bitmap overlay is a
-            // different mpv command and an empty `osd-overlay` would leave the
-            // record sitting on the next wallpaper.
-            out.push(WidgetUpdate::remove(DISC_OVERLAY));
-        }
-        self.lyrics_ass = None;
-        self.clock_ass = None;
         self.clock_due = None;
+        if let Some(c) = &mut self.clock {
+            c.bmp.forget();
+        }
         if let Some(v) = &mut self.visual {
-            v.ass = None;
+            v.bmp.forget();
+            v.shown = false;
         }
         if let Some(d) = &mut self.disc {
-            d.shown = None;
-            // Back to "we have pushed nothing": the next tick must draw the
-            // disc again rather than decide the angle has not moved enough.
-            d.dirty = true;
+            d.bmp.forget();
         }
         // Back to "we have pushed nothing", not to "the overlay is empty": the
         // next tick must re-adopt the track rather than assume it still holds.
         self.lyrics.clear();
         self.track_seq = None;
-        self.force = false;
+        self.repush = false;
+        self.on_screen = [None; OVERLAY_SLOTS];
         out
     }
 
-    /// Force a full re-push on the next [`tick`](Self::tick).
+    /// Which overlay kind a widget rasterises into when it has content.
+    ///
+    /// **The seam a widget port flips.** All four widgets rasterise today;
+    /// moving one back to text — or adding a fifth that is text — means
+    /// changing its renderer and this one arm. Everything else — clearing,
+    /// per-output placement, deadlines — already reads the kind that was
+    /// actually pushed (`on_screen`), so a widget that falls back from one to
+    /// the other at runtime stays correct without touching this at all.
+    fn substrate(&self, overlay_id: u32) -> OverlayKind {
+        match overlay_id {
+            LYRICS_OVERLAY | CLOCK_OVERLAY | VISUALIZER_OVERLAY | DISC_OVERLAY => {
+                OverlayKind::Bitmap
+            }
+            _ => OverlayKind::Ass,
+        }
+    }
+
+    /// Record what a batch of updates leaves on each overlay, and insert the
+    /// blank that a **kind change** needs.
+    ///
+    /// A widget that switches substrate mid-run (a bitmap renderer failing back
+    /// to ASS, say) would otherwise leave the old overlay up underneath the new
+    /// one: mpv keeps `osd-overlay` and `overlay-add` in separate namespaces,
+    /// so pushing one never displaces the other. One blank of the outgoing kind
+    /// goes out first, and then everything downstream just works.
+    fn note_pushed(&mut self, out: &mut Vec<WidgetUpdate>) {
+        // Verdict per overlay: `None` = untouched, `Some(k)` = what this batch
+        // leaves on it. A batch can carry one update per output, so a single
+        // draw anywhere outweighs a remove elsewhere.
+        let mut verdict: [Option<Option<OverlayKind>>; OVERLAY_SLOTS] = [None; OVERLAY_SLOTS];
+        for u in out.iter() {
+            let Some(slot) = overlay_slot(u.overlay_id) else {
+                continue;
+            };
+            let kind = u.kind();
+            verdict[slot] = Some(match (verdict[slot].flatten(), kind) {
+                (Some(prev), None) => Some(prev),
+                (_, k) => k,
+            });
+        }
+        for (slot, want) in verdict.iter().enumerate() {
+            let Some(want) = *want else { continue };
+            let (Some(prev), Some(want)) = (self.on_screen[slot], want) else {
+                self.on_screen[slot] = want;
+                continue;
+            };
+            if prev != want {
+                let id = out
+                    .iter()
+                    .find(|u| overlay_slot(u.overlay_id) == Some(slot))
+                    .map(|u| u.overlay_id)
+                    .expect("the verdict came from an update");
+                let at = out
+                    .iter()
+                    .position(|u| u.overlay_id == id)
+                    .expect("same update");
+                out.insert(at, WidgetUpdate::blank(id, prev));
+            }
+            self.on_screen[slot] = Some(want);
+        }
+    }
+
+    /// Re-**push** what is on screen on the next [`tick`](Self::tick).
     ///
     /// For the cases where the renderer lost our overlays without us clearing
     /// them: a respawned mpv (which starts with none), and a rotation change
     /// (W0: the OSD coordinate space follows the video's render area, so the
     /// payload must be pushed again against the new one).
     ///
+    /// **This re-pushes; it does not re-render.** The distinction is invisible
+    /// while every widget is a string, and expensive once they are pixels: the
+    /// Wayland loop calls this whenever any output's respawn generation moves,
+    /// which can flap, and re-rasterising four bitmap widgets on each flap is a
+    /// visible hitch for no gain. The files on disk are still valid frames of
+    /// exactly the right thing, so what goes out is the `overlay-add` command
+    /// again — not the rasteriser. Same for the ASS widgets: the stored payload
+    /// is re-sent, and the clock is not re-formatted.
+    ///
+    /// Anything that genuinely invalidates the *pixels* — a config edit, a new
+    /// output list — already marks the widgets dirty at the setter that
+    /// caused it, and is not this.
+    ///
     /// Only overlays that *have* content are re-pushed — re-sending a blank to a
     /// renderer that never had the overlay is a wasted IPC round trip, and after
     /// [`clear_all`](Self::clear_all) there is by definition nothing to restore.
     pub fn invalidate(&mut self) {
-        self.force = true;
-        // Make the clock render on the next tick rather than at its next
-        // minute boundary; the push itself is still gated on `force`.
-        self.clock_due = None;
-        // Same for the two rate-capped widgets: a respawned mpv must not wait
-        // out a frame period before the bars and the record come back.
-        let now = Instant::now();
-        if let Some(v) = &mut self.visual {
-            v.next_frame = now;
-        }
-        if let Some(d) = &mut self.disc {
-            d.next_frame = now;
-            d.dirty = true;
-        }
+        self.repush = true;
     }
 
     // -- the tested seam ----------------------------------------------------
@@ -1984,25 +3324,30 @@ impl WidgetEngine {
     #[cfg(test)]
     fn feed_audio(&mut self, samples: &[f32], now: Instant) -> Vec<WidgetUpdate> {
         let mut out = Vec::new();
-        let force = self.force;
+        let repush = self.repush;
+        let theme = self.theme;
+        let geoms = self.outputs.clone();
+        let fonts = &mut self.fonts;
         let Some(v) = &mut self.visual else {
             return out;
         };
         v.live = true;
-        if !force && now < v.next_frame {
-            return out;
+        if now >= v.next_frame {
+            let n = samples.len().min(v.scratch.len());
+            v.scratch[..n].copy_from_slice(&samples[..n]);
+            v.frame(
+                n,
+                &self.visual_cfg,
+                &theme,
+                fonts.get(),
+                &geoms,
+                repush,
+                now,
+                &mut out,
+            );
         }
-        let n = samples.len().min(v.scratch.len());
-        v.scratch[..n].copy_from_slice(&samples[..n]);
-        v.frame(
-            n,
-            &self.visual_cfg,
-            self.accent.as_str(),
-            now,
-            force,
-            &mut out,
-        );
-        self.force = false;
+        self.repush = false;
+        self.note_pushed(&mut out);
         out
     }
 
@@ -2028,48 +3373,185 @@ impl WidgetEngine {
                 // player, and the runtime already freezes on that.
                 None => (0, PlaybackStatus::Stopped),
             };
-            match self.lyrics.tick(position_us, status, self.accent.as_str()) {
-                Action::Show(ass) => {
-                    self.lyrics_ass = Some(ass.clone());
-                    out.push(WidgetUpdate::ass(LYRICS_OVERLAY, ass));
-                }
-                Action::Clear => {
-                    self.lyrics_ass = None;
-                    out.push(WidgetUpdate::clear(LYRICS_OVERLAY));
-                }
-                Action::Idle => {
-                    if self.force {
-                        if let Some(ass) = &self.lyrics_ass {
-                            out.push(WidgetUpdate::ass(LYRICS_OVERLAY, ass.clone()));
-                        }
-                    }
-                }
-            }
+            self.lyrics_tick(position_us, status, now, &mut out);
         }
 
         if let Some(wall) = wall {
-            if self.clock_cfg.enabled {
-                let period = clock::tick_secs(&self.clock_cfg.style);
-                if self.force || clock_is_due(self.clock_due, wall, period) {
-                    let ass = clock::render_ass(wall, &self.clock_cfg.style, self.accent.as_str());
-                    self.clock_due = Some(clock::next_change(wall, &self.clock_cfg.style));
-                    if self.force || self.clock_ass.as_deref() != Some(ass.as_str()) {
-                        out.push(WidgetUpdate::ass(CLOCK_OVERLAY, ass.clone()));
-                        self.clock_ass = Some(ass);
-                    }
-                }
-            } else if self.clock_ass.take().is_some() {
-                // Switched off while it was on screen: take it down, once.
-                self.clock_due = None;
-                out.push(WidgetUpdate::clear(CLOCK_OVERLAY));
-            }
+            self.clock_tick(wall, now, &mut out);
         }
 
         self.visual_tick(now, &mut out);
         self.disc_tick(snapshot, now, &mut out);
 
-        self.force = false;
+        self.repush = false;
+        self.note_pushed(&mut out);
         out
+    }
+
+    /// Advance the lyric / now-playing card.
+    ///
+    /// The state machine's answer is [`LyricsRuntime::tick`]'s and nothing here
+    /// second-guesses it: `Show` means the words changed, `Clear` means there
+    /// is nothing to say, and `Idle` — the answer to ~99% of ticks — means the
+    /// picture on disk is still of exactly the right thing.
+    ///
+    /// **What is deliberately not on this card.** `NowPlayingData` can carry a
+    /// progress bar, an elapsed/total readout and the album art, and all three
+    /// are left empty. The first two move every second, which would turn a
+    /// widget that wakes on `.lrc` timestamps — one wake per line, one per
+    /// 30-second instrumental gap — into a permanent 1 Hz rasterise-and-write
+    /// for as long as anything is playing. That is the power model this whole
+    /// module is built around, and it is not worth a readout the player already
+    /// shows. The art is absent for a different reason: the worker only fetches
+    /// cover art when the *disc* widget is on, and making the lyric widget pull
+    /// art would put a network fetch behind a switch that never promised one.
+    fn lyrics_tick(
+        &mut self,
+        position_us: i64,
+        status: PlaybackStatus,
+        now: Instant,
+        out: &mut Vec<WidgetUpdate>,
+    ) {
+        let repush = self.repush;
+        let cfg = self.lyrics_cfg.clone();
+        let geoms = self.outputs.clone();
+        let theme = self.theme;
+        let action = self.lyrics.tick(position_us, status);
+
+        let fonts = &mut self.fonts;
+        let Some(state) = &mut self.lyrics_view else {
+            return;
+        };
+        if !cfg.enabled {
+            // Switched off while it was on screen: take it down, once.
+            state.bmp.retire(LYRICS_OVERLAY, out);
+            self.lyrics_view = None;
+            return;
+        }
+        match action {
+            Action::Show(frame) => state.frame = Some(frame),
+            Action::Clear => state.frame = None,
+            Action::Idle => {}
+        }
+
+        let LyricsView { frame, canvas, bmp } = state;
+        // `None` is a content state, not an absence of one: it is what makes
+        // "there is nothing to draw for this track" cost one `overlay-remove`
+        // rather than one question per tick.
+        let key = ContentKey::of(&*frame);
+        let font_size = lyric_font_size(&cfg);
+        let anchor = widget_anchor(cfg.anchor);
+        bmp.push(
+            Push {
+                overlay_id: LYRICS_OVERLAY,
+                key,
+                repush,
+                stepped: false,
+                now,
+                period: LYRICS_PERIOD,
+                retry: LYRICS_RETRY,
+            },
+            &geoms,
+            |geom| {
+                let frame = frame.as_ref()?;
+                let scale = widgetkit::scale_for_output(geom.h);
+                let data = cards::NowPlayingData {
+                    label: &frame.label,
+                    title: &frame.title,
+                    artist: &frame.artist,
+                    lyric: &frame.lyric,
+                    next_lyric: &frame.next_lyric,
+                    font_size,
+                    accent_follow: cfg.accent_follow,
+                    // So the card can clamp itself to 0.9 of the screen. In
+                    // logical units, like everything else it is handed.
+                    screen_width: geom.w as f32 / scale,
+                    ..cards::NowPlayingData::default()
+                };
+                let fonts = fonts.get();
+                let size = cards::nowplaying::measure(fonts, &theme, &data, scale);
+                let canvas = canvas.get(size.buffer(), scale)?;
+                cards::nowplaying::draw_at(canvas, fonts, &theme, &data, size.card_rect());
+                let (x, y) = place(&size, anchor, cfg.margin_px, scale, geom);
+                Some(BitmapFrame {
+                    bgra: canvas.to_bgra(),
+                    x,
+                    y,
+                })
+            },
+            out,
+        );
+    }
+
+    /// Advance the clock.
+    ///
+    /// The redraw discipline is unchanged from the ASS version and is the whole
+    /// power story for this widget: between `clock_due` and now, **nothing
+    /// happens** — no format, no measure, no rasterise, no compare. A clock
+    /// reading `14:32` costs one `Instant` comparison per tick until 14:33.
+    ///
+    /// What changed is only what happens when it *is* due: the rows go into a
+    /// [`clock::ClockText`], the content key is hashed from that struct, and
+    /// [`BitmapState`] decides per output whether the pixels on disk are still
+    /// of the right thing.
+    fn clock_tick(&mut self, wall: DateTime<Local>, now: Instant, out: &mut Vec<WidgetUpdate>) {
+        let repush = self.repush;
+        let cfg = self.clock_cfg.clone();
+        let geoms = self.outputs.clone();
+        let theme = self.theme;
+        let due = clock_is_due(self.clock_due, wall, clock::tick_secs(&cfg.style));
+        let next_due = clock::next_change(wall, &cfg.style);
+        // The gauge's value, deliberately computed here and deliberately *not*
+        // in the content key — see `clock::day_fraction`.
+        let day = clock::day_fraction(wall);
+
+        let fonts = &mut self.fonts;
+        let Some(state) = &mut self.clock else { return };
+        if !cfg.enabled {
+            // Switched off while it was on screen: take it down, once, and only
+            // then throw the runtime away.
+            state.bmp.retire(CLOCK_OVERLAY, out);
+            self.clock = None;
+            self.clock_due = None;
+            return;
+        }
+        if due {
+            state.text = Some(clock::ClockText::of(wall, &cfg.style));
+            self.clock_due = Some(next_due);
+        }
+        // Disjoint field borrows: `push` takes the bitmap state, the render
+        // closure takes the canvas and the rows.
+        let ClockState { text, canvas, bmp } = state;
+        let Some(text) = text.as_ref() else { return };
+        // Everything the card draws, and nothing that moves on its own.
+        let key = ContentKey::of(text);
+        bmp.push(
+            Push {
+                overlay_id: CLOCK_OVERLAY,
+                key,
+                repush,
+                stepped: false,
+                now,
+                period: CLOCK_PERIOD,
+                retry: CLOCK_RETRY,
+            },
+            &geoms,
+            |geom| {
+                let scale = widgetkit::scale_for_output(geom.h);
+                let data = text.card_data(&cfg.style, day);
+                let fonts = fonts.get();
+                let size = cards::clock::measure(fonts, &theme, &data, scale);
+                let canvas = canvas.get(size.buffer(), scale)?;
+                cards::clock::draw_at(canvas, fonts, &theme, &data, size.card_rect());
+                let (x, y) = place(&size, cfg.style.anchor, cfg.style.margin_px, scale, geom);
+                Some(BitmapFrame {
+                    bgra: canvas.to_bgra(),
+                    x,
+                    y,
+                })
+            },
+            out,
+        );
     }
 
     /// Advance the visualiser. See [`VisualState::frame`] for the decisions.
@@ -2079,14 +3561,15 @@ impl WidgetEngine {
     /// comparison — no read, no FFT, no allocation). Only past all three does
     /// this touch the audio.
     fn visual_tick(&mut self, now: Instant, out: &mut Vec<WidgetUpdate>) {
-        let force = self.force;
+        let repush = self.repush;
+        let theme = self.theme;
+        let geoms = self.outputs.clone();
+        let fonts = &mut self.fonts;
         let Some(v) = &mut self.visual else { return };
         if !self.visual_cfg.enabled {
             // Switched off while it was on screen: take it down, once, and only
             // then throw the runtime away.
-            if v.ass.take().is_some() {
-                out.push(WidgetUpdate::clear(VISUALIZER_OVERLAY));
-            }
+            v.bmp.retire(VISUALIZER_OVERLAY, out);
             self.visual = None;
             return;
         }
@@ -2108,40 +3591,67 @@ impl WidgetEngine {
             log::warn!("widgets: the audio visualiser stopped: {why}");
             v.capture = None;
             v.live = false;
-            if v.ass.take().is_some() {
-                out.push(WidgetUpdate::clear(VISUALIZER_OVERLAY));
+            v.bmp.retire(VISUALIZER_OVERLAY, out);
+            v.shown = false;
+            return;
+        }
+        if now < v.next_frame {
+            // The bars we last sent are still the bars that are up; a fresh mpv
+            // just needs telling. No capture read, no FFT, no render — the file
+            // on disk is still a frame of exactly the right thing.
+            if repush {
+                v.bmp.push(
+                    Push {
+                        overlay_id: VISUALIZER_OVERLAY,
+                        // Unreachable: `repush` never rasterises, so the key is
+                        // only ever compared, and an unchanged one is what makes
+                        // this the re-push path rather than the redraw one.
+                        key: ContentKey::of(()),
+                        repush: true,
+                        stepped: false,
+                        now,
+                        period: Duration::ZERO,
+                        retry: VISUAL_RETRY,
+                    },
+                    &geoms,
+                    |_| None,
+                    out,
+                );
             }
             return;
         }
-        if !force && now < v.next_frame {
-            return;
-        }
         let n = v.fill();
-        v.frame(n, &self.visual_cfg, self.accent.as_str(), now, force, out);
+        v.frame(
+            n,
+            &self.visual_cfg,
+            &theme,
+            fonts.get(),
+            &geoms,
+            repush,
+            now,
+            out,
+        );
     }
 
     /// Advance the album-art disc.
     ///
-    /// The redraw gate is four questions, cheapest first, and all four have to
-    /// say no for the frame to be free: is anything forced or dirty, has the
-    /// geometry moved, is the frame period up, and has the record actually
-    /// turned far enough to see ([`artwork::should_redraw`])? A paused player
-    /// fails the last one forever, because `elapsed` stops advancing and the
-    /// angle it computes is the angle already on screen.
+    /// Everything substrate-shaped — the files, the per-output placement, the
+    /// redraw gate, the rate cap, the write failure path — is
+    /// [`BitmapState::push`]'s. What is left here is the four things that are
+    /// actually about a spinning record: which art, how far it has turned, how
+    /// big, and where.
     fn disc_tick(
         &mut self,
         snapshot: Option<&Snapshot>,
         now: Instant,
         out: &mut Vec<WidgetUpdate>,
     ) {
-        let force = self.force;
+        let repush = self.repush;
         let cfg = self.disc_cfg;
-        let (out_w, out_h) = (self.out_w, self.out_h);
+        let geoms = self.outputs.clone();
         let Some(d) = &mut self.disc else { return };
         if !cfg.enabled {
-            if d.shown.take().is_some() {
-                out.push(WidgetUpdate::remove(DISC_OVERLAY));
-            }
+            d.bmp.retire(DISC_OVERLAY, out);
             self.disc = None;
             return;
         }
@@ -2152,6 +3662,8 @@ impl WidgetEngine {
                 if d.seq != Some(track.seq) {
                     d.seq = Some(track.seq);
                     d.art = track.art.clone();
+                    d.title = track.now_playing.title.clone();
+                    d.artist = track.now_playing.artist_line();
                     // A new record goes on at the top rather than continuing
                     // the last one's angle. `last` goes with it: the time since
                     // the previous tick belongs to the previous track, and
@@ -2160,12 +3672,15 @@ impl WidgetEngine {
                     d.elapsed = Duration::ZERO;
                     d.last = None;
                     d.angle = 0.0;
-                    d.dirty = true;
+                    d.bmp.dirty = true;
                 }
             }
             None => {
                 if d.seq.take().is_some() {
                     d.art = None;
+                    d.title.clear();
+                    d.artist.clear();
+                    d.bmp.dirty = true;
                 }
             }
         }
@@ -2180,65 +3695,85 @@ impl WidgetEngine {
         }
         d.last = Some(now);
 
-        let Some(art) = d.art.clone() else {
-            // No player, so no record. Down it comes, once.
-            if d.shown.take().is_some() {
-                out.push(WidgetUpdate::remove(DISC_OVERLAY));
-            }
-            return;
-        };
-
+        let art = d.art.clone();
         let size = cfg.size_px.clamp(1, artwork::MAX_DISC_PX);
-        let (x, y) = anchor_xy(cfg.anchor, size, cfg.margin_px, out_w, out_h);
         let angle = if cfg.spin {
             artwork::rotation_for(d.elapsed, artwork::VINYL_RPM)
         } else {
             0.0
         };
-        let moved = now >= d.next_frame
+        // The animation input, kept out of the content key on purpose: an angle
+        // in the key would move on every tick and defeat `DISC_FPS`.
+        let stepped = art.is_some()
+            && now >= d.bmp.next_frame
             && artwork::should_redraw(d.angle, angle, artwork::DEFAULT_MIN_STEP_DEG);
-        let misplaced = d
-            .shown
-            .as_ref()
-            .is_none_or(|b| (b.x, b.y, b.w) != (x, y, size));
-        if !(force || d.dirty || misplaced || moved) {
-            return;
-        }
+        // What the picture is *of*: which record, at what size and opacity.
+        // Anchor and margin are not in here because they cannot move without
+        // `set_disc` marking the widget dirty.
+        let key = ContentKey::of((d.seq, size, cfg.opacity, art.is_some()));
+        // `d` is re-borrowed field-by-field below, so everything read off it
+        // whole has to happen first.
 
-        let frame = artwork::render_disc(
-            &art,
-            &DiscCfg {
-                size_px: size,
-                rotation_deg: angle,
-                opacity: cfg.opacity,
-                ..DiscCfg::default()
+        let theme = self.theme;
+        let fonts = &mut self.fonts;
+        let DiscState {
+            title,
+            artist,
+            canvas,
+            bmp,
+            ..
+        } = d;
+        let drawn = bmp.push(
+            Push {
+                overlay_id: DISC_OVERLAY,
+                key,
+                repush,
+                stepped,
+                now,
+                period: DISC_PERIOD,
+                retry: DISC_RETRY,
             },
+            &geoms,
+            |geom| {
+                let art = art.as_ref()?;
+                // `widgetkit::cards::disc` rather than `artwork::render_disc`:
+                // the rim bevel and the specular sweep are *fixed* layers that
+                // composite over the artwork in unrotated space, which is what
+                // makes it read as a record catching a light in the room rather
+                // than as a printed circle with a smear painted on it. A
+                // pre-rendered bitmap cannot have layers drawn under and over
+                // it. `render_disc` keeps its own callers and its own tests;
+                // the published proportions are shared, so `label_ratio`,
+                // `hole_ratio` and `ring_darken` still have one definition.
+                let scale = widgetkit::scale_for_output(geom.h);
+                let disc = DiscCfg {
+                    size_px: size,
+                    rotation_deg: angle,
+                    opacity: cfg.opacity,
+                    ..DiscCfg::default()
+                };
+                let data = cards::DiscData {
+                    art: Some(art),
+                    cfg: disc,
+                    title,
+                    artist,
+                };
+                let fonts = fonts.get();
+                let wsize = cards::disc::measure(fonts, &theme, &data, scale);
+                let canvas = canvas.get(wsize.buffer(), scale)?;
+                cards::disc::draw_at(canvas, fonts, &theme, &data, wsize.card_rect());
+                let (x, y) = place(&wsize, cfg.anchor, cfg.margin_px, scale, geom);
+                Some(BitmapFrame {
+                    bgra: canvas.to_bgra(),
+                    x,
+                    y,
+                })
+            },
+            out,
         );
-        if let Err(e) = write_frame(&d.path, &frame) {
-            if !d.warned {
-                d.warned = true;
-                log::warn!(
-                    "widgets: cannot write the album-art frame to {}: {e} — the disc stays hidden",
-                    d.path.display()
-                );
-            }
-            d.next_frame = now + DISC_RETRY;
-            return;
+        if drawn > 0 {
+            d.angle = angle;
         }
-        d.warned = false;
-        d.angle = angle;
-        d.dirty = false;
-        d.next_frame = now + DISC_PERIOD;
-        let bitmap = BitmapOverlay {
-            x,
-            y,
-            path: d.path.clone(),
-            w: frame.w,
-            h: frame.h,
-            stride: frame.stride(),
-        };
-        d.shown = Some(bitmap.clone());
-        out.push(WidgetUpdate::draw(DISC_OVERLAY, bitmap));
     }
 
     /// [`next_deadline`](Self::next_deadline) with its inputs handed in. See
@@ -2300,8 +3835,8 @@ impl WidgetEngine {
                 let spinning = self.disc_cfg.spin
                     && snapshot.map_or(PlaybackStatus::Stopped, |s| s.clock.status())
                         == PlaybackStatus::Playing;
-                if spinning || d.shown.is_none() {
-                    best = min_instant(best, d.next_frame.max(now));
+                if spinning || !d.bmp.is_shown() {
+                    best = min_instant(best, d.bmp.next_frame.max(now));
                 }
             }
         }
@@ -2312,12 +3847,12 @@ impl WidgetEngine {
     /// Whether the lyric branch has anything to do: it is enabled, or it still
     /// has an overlay of ours to take down.
     fn lyrics_live(&self) -> bool {
-        self.lyrics_cfg.enabled || self.lyrics_ass.is_some()
+        self.lyrics_cfg.enabled || self.lyrics_view.is_some()
     }
 
     /// The same question for the clock.
     fn clock_live(&self) -> bool {
-        self.clock_cfg.enabled || self.clock_ass.is_some()
+        self.clock_cfg.enabled || self.clock.is_some()
     }
 
     /// The same question for the visualiser.
@@ -2368,6 +3903,22 @@ fn min_instant(a: Option<Instant>, b: Instant) -> Option<Instant> {
     })
 }
 
+/// Resolve [`config::WidgetTheme`] into the palette the cards are drawn in.
+///
+/// **`Auto` is dark**, and that is a decision rather than a placeholder — see
+/// [`config::WidgetTheme`] for the reasoning. The short version: a widget is
+/// drawn on someone's wallpaper, `Config::theme_mode` describes the app's own
+/// chrome, and the desktop's light/dark preference says nothing about what is
+/// behind the card. The dark palette is the one every alpha in the spec was
+/// fitted for, against a white worst-case backdrop, and it is also the cheaper
+/// of the two (52 lu of shadow bleed against 84).
+fn widget_mode(theme: config::WidgetTheme) -> Mode {
+    match theme {
+        config::WidgetTheme::Auto | config::WidgetTheme::Dark => Mode::Dark,
+        config::WidgetTheme::Light => Mode::Light,
+    }
+}
+
 /// Whether the clock's text needs re-rendering at `wall`.
 ///
 /// `None` means "never rendered", which is always due. The second arm is the
@@ -2388,7 +3939,13 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    const ACCENT: &str = "#3584E4";
+    /// The accent every fixture uses. An enum now and not a hex string: the
+    /// dark and light palettes use different colours for the same accent, and
+    /// only `Theme::for_accent` knows both tables.
+    const ACCENT: config::Accent = config::Accent::Blue;
+
+    /// A second accent, for the "a palette change repaints" tests.
+    const OTHER_ACCENT: config::Accent = config::Accent::Coral;
 
     // -- fixtures -----------------------------------------------------------
 
@@ -2499,13 +4056,90 @@ mod tests {
         (secs * 1e6).round() as i64
     }
 
-    /// The payload pushed to `overlay`, or a failure naming what did come back.
-    fn payload(updates: &[WidgetUpdate], overlay: u32) -> &str {
+    // -- reading a batch of updates -----------------------------------------
+    //
+    // These replace the old `payload()`, which read `WidgetUpdate::ass` and is
+    // now always `""`: every widget rasterises, and the two payload kinds are
+    // alternatives rather than layers. What a test asserts against instead is
+    // the update itself — which command it is, which output it is for, and
+    // what picture it carries.
+
+    /// The update pushed to `overlay`, or a failure naming what did come back.
+    fn update_for(updates: &[WidgetUpdate], overlay: u32) -> &WidgetUpdate {
         updates
             .iter()
             .find(|u| u.overlay_id == overlay)
-            .map(|u| u.ass.as_str())
             .unwrap_or_else(|| panic!("no update for overlay {overlay} in {updates:?}"))
+    }
+
+    /// The pixels pushed to `overlay`.
+    fn frame_for(updates: &[WidgetUpdate], overlay: u32) -> &BitmapOverlay {
+        update_for(updates, overlay)
+            .frame()
+            .unwrap_or_else(|| panic!("overlay {overlay} drew nothing in {updates:?}"))
+    }
+
+    /// The overlay ids in a batch, in the order they were emitted.
+    fn ids(updates: &[WidgetUpdate]) -> Vec<u32> {
+        updates.iter().map(|u| u.overlay_id).collect()
+    }
+
+    /// Everything a viewer of this overlay could tell apart: where it is, how
+    /// big it is, and a hash of the `h * stride` bytes mpv would read from its
+    /// file.
+    ///
+    /// **The bitmap answer to "is this the same picture as last time".** The
+    /// [`BitmapOverlay`] alone is not enough — the path, the corner and the
+    /// size are all identical between two frames of the same widget while the
+    /// file underneath has been completely rewritten — and comparing megabytes
+    /// of pixels in every assertion is precisely the cost [`ContentKey`] exists
+    /// to avoid, so the bytes are read once and hashed.
+    ///
+    /// Read it **immediately**: the widget rewrites the same file in place, so
+    /// a hash taken after the next push is a hash of the next frame.
+    fn picture(b: &BitmapOverlay) -> (i32, i32, u32, u32, u64) {
+        let want = b.h as usize * b.stride as usize;
+        let bytes = std::fs::read(&b.path)
+            .unwrap_or_else(|e| panic!("the frame file {} is unreadable: {e}", b.path.display()));
+        assert!(
+            bytes.len() >= want,
+            "{} holds {} bytes, mpv would read {want}",
+            b.path.display(),
+            bytes.len()
+        );
+        (b.x, b.y, b.w, b.h, ContentKey::of(&bytes[..want]).0)
+    }
+
+    /// [`picture`] of whatever `overlay` was pushed in this batch.
+    fn picture_for(updates: &[WidgetUpdate], overlay: u32) -> (i32, i32, u32, u32, u64) {
+        picture(frame_for(updates, overlay))
+    }
+
+    /// The gap between a frame's right/bottom edges and its output's, in
+    /// **logical** units.
+    ///
+    /// The one comparison that is meaningful across two outputs of different
+    /// densities: a widget anchored the same way on both must sit the same
+    /// distance from the corner *as the user sees it*, which is logical units —
+    /// and a different number of device pixels on each.
+    fn corner_gap_lu(b: &BitmapOverlay, geom: &OutputGeom) -> (f32, f32) {
+        let scale = widgetkit::scale_for_output(geom.h);
+        (
+            (geom.w as f32 - (b.x + b.w as i32) as f32) / scale,
+            (geom.h as f32 - (b.y + b.h as i32) as f32) / scale,
+        )
+    }
+
+    /// The gap between a frame's left/top edges and its output's, in **logical**
+    /// units. The near-edge twin of [`corner_gap_lu`].
+    ///
+    /// Both can be slightly **negative**, and that is not a placement fault:
+    /// the buffer is the card *plus its shadow bleed on all four sides*, and
+    /// `margin_px` is measured to the card. A card 48 units from the edge with
+    /// a 76-unit bleed hangs 28 units of (nearly transparent) shadow off it.
+    fn near_gap_lu(b: &BitmapOverlay, geom: &OutputGeom) -> (f32, f32) {
+        let scale = widgetkit::scale_for_output(geom.h);
+        (b.x as f32 / scale, b.y as f32 / scale)
     }
 
     // -- nothing enabled ----------------------------------------------------
@@ -2552,16 +4186,16 @@ mod tests {
         let mut engine = WidgetEngine::new(Some(&widgets(true)), ACCENT);
         let t0 = Instant::now();
 
-        // The establishing push: we cannot assume an overlay left by a previous
-        // daemon run is gone, so exactly one blank goes out first.
-        let first = engine.tick_at(None, t0, None);
-        assert_eq!(first, vec![WidgetUpdate::clear(LYRICS_OVERLAY)]);
+        // Nothing playing, and nothing of ours has ever been on this renderer:
+        // the ASS engine opened with one establishing blank here, and the
+        // bitmap one has nothing honest to say. See `tick`.
+        assert!(engine.tick_at(None, t0, None).is_empty());
         assert!(engine.tick_at(None, t0, None).is_empty());
 
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
         let shown = engine.tick_at(Some(&snap), t0, None);
-        assert_eq!(shown.len(), 1);
-        assert!(payload(&shown, LYRICS_OVERLAY).ends_with("}a"));
+        assert_eq!(ids(&shown), vec![LYRICS_OVERLAY]);
+        let line_a = picture_for(&shown, LYRICS_OVERLAY);
 
         // A hundred consecutive ticks across the rest of the line's life, at the
         // daemon's real 100ms cadence: every one of them free.
@@ -2571,10 +4205,17 @@ mod tests {
             assert!(updates.is_empty(), "tick {step} pushed {updates:?}");
         }
 
-        // The next line lands once, and is then silent in its turn.
+        // The next line lands once, and is then silent in its turn. It is a
+        // genuinely different picture: a redraw budget that spent its one push
+        // on the same pixels would be worse than no budget at all.
         let now = t0 + Duration::from_secs(50);
         let next = engine.tick_at(Some(&snap), now, None);
-        assert!(payload(&next, LYRICS_OVERLAY).ends_with("}b"));
+        assert_eq!(ids(&next), vec![LYRICS_OVERLAY]);
+        let line_b = picture_for(&next, LYRICS_OVERLAY);
+        assert_ne!(
+            line_a, line_b,
+            "the second line drew the first line's pixels"
+        );
         assert!(engine
             .tick_at(Some(&snap), now + Duration::from_millis(100), None)
             .is_empty());
@@ -2588,8 +4229,11 @@ mod tests {
         let t0 = Instant::now();
 
         let first = engine.tick_at(None, t0, Some(at(14, 32, 0)));
-        assert_eq!(first.len(), 1);
-        assert!(payload(&first, CLOCK_OVERLAY).ends_with("14:32"));
+        assert_eq!(ids(&first), vec![CLOCK_OVERLAY]);
+        let at_32 = picture_for(&first, CLOCK_OVERLAY);
+        // What the pixels are of, asserted at the source the content key is
+        // hashed from rather than by reading the picture back.
+        assert_eq!(clock_reads(&engine), "14:32");
 
         // Every tick for the rest of the minute — a hundred of them, plus the
         // last instant before the boundary — produces nothing.
@@ -2602,11 +4246,23 @@ mod tests {
         }
         assert!(engine.tick_at(None, t0, Some(at(14, 32, 59))).is_empty());
 
-        // And exactly one at the boundary.
+        // And exactly one at the boundary, of a different minute.
         let next = engine.tick_at(None, t0, Some(at(14, 33, 0)));
-        assert_eq!(next.len(), 1);
-        assert!(payload(&next, CLOCK_OVERLAY).ends_with("14:33"));
+        assert_eq!(ids(&next), vec![CLOCK_OVERLAY]);
+        assert_eq!(clock_reads(&engine), "14:33");
+        assert_ne!(at_32, picture_for(&next, CLOCK_OVERLAY));
         assert!(engine.tick_at(None, t0, Some(at(14, 33, 1))).is_empty());
+    }
+
+    /// The hero row the clock widget currently holds — the string its content
+    /// key is hashed from, and so the honest answer to "what does it say".
+    fn clock_reads(engine: &WidgetEngine) -> &str {
+        engine
+            .clock
+            .as_ref()
+            .and_then(|c| c.text.as_ref())
+            .map(|t| t.time.as_str())
+            .expect("the clock has rendered")
     }
 
     #[test]
@@ -2622,9 +4278,13 @@ mod tests {
         let mut engine = WidgetEngine::new(None, ACCENT);
         engine.set_clock(Some(&clock_cfg()));
         let t0 = Instant::now();
-        assert_eq!(engine.tick_at(None, t0, Some(at(14, 32, 30))).len(), 1);
+        let first = engine.tick_at(None, t0, Some(at(14, 32, 30)));
+        assert_eq!(ids(&first), vec![CLOCK_OVERLAY]);
+        let at_1432 = picture_for(&first, CLOCK_OVERLAY);
         let back = engine.tick_at(None, t0, Some(at(12, 0, 0)));
-        assert!(payload(&back, CLOCK_OVERLAY).ends_with("12:00"));
+        assert_eq!(ids(&back), vec![CLOCK_OVERLAY]);
+        assert_eq!(clock_reads(&engine), "12:00");
+        assert_ne!(at_1432, picture_for(&back, CLOCK_OVERLAY));
     }
 
     #[test]
@@ -2637,18 +4297,34 @@ mod tests {
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
         let wall = Some(at(14, 32, 30));
         let first = engine.tick_at(Some(&snap), t0, wall);
-        assert_eq!(first.len(), 2);
+        assert_eq!(ids(&first), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        let lyric_before = picture_for(&first, LYRICS_OVERLAY);
+        let clock_before = picture_for(&first, CLOCK_OVERLAY);
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
 
-        // Lyrics: a new anchor moves the line.
+        // Lyrics: a new anchor moves the line — and moves *only* the line. A
+        // lyric edit that also re-rasterised the clock would be spending three
+        // widgets' worth of work on one widget's change.
         let mut cfg = widgets(true);
         cfg.lyrics.anchor = config::LyricAnchor::TopLeft;
         engine.set_config(Some(&cfg), ACCENT);
         let moved = engine.tick_at(Some(&snap), t0, wall);
-        assert_eq!(moved.len(), 1);
-        assert!(payload(&moved, LYRICS_OVERLAY).contains("\\an7"));
+        assert_eq!(ids(&moved), vec![LYRICS_OVERLAY]);
+        let lyric_after = picture_for(&moved, LYRICS_OVERLAY);
+        assert_ne!(lyric_before, lyric_after);
+        // Top-left rather than the default corner: the anchor is the thing that
+        // changed, so it is the thing to check. The card sits its margin in
+        // from both near edges (less its shadow bleed — see `near_gap_lu`).
+        let geom = engine.out_geoms()[0].clone();
+        let moved_frame = frame_for(&moved, LYRICS_OVERLAY);
+        let (nx, ny) = near_gap_lu(moved_frame, &geom);
+        let (fx, fy) = corner_gap_lu(moved_frame, &geom);
+        assert!(
+            nx < fx && ny < fy,
+            "an anchor of TopLeft put the card at {moved_frame:?} on {geom:?}"
+        );
 
-        // Clock: a new theme changes the payload mid-minute.
+        // Clock: a new theme changes what it says mid-minute.
         engine.set_clock(Some(&ClockCfg {
             enabled: true,
             style: ClockStyle {
@@ -2657,8 +4333,9 @@ mod tests {
             },
         }));
         let themed = engine.tick_at(Some(&snap), t0, wall);
-        assert_eq!(themed.len(), 1);
-        assert!(payload(&themed, CLOCK_OVERLAY).ends_with("half past two"));
+        assert_eq!(ids(&themed), vec![CLOCK_OVERLAY]);
+        assert_eq!(clock_reads(&engine), "half past two");
+        assert_ne!(clock_before, picture_for(&themed, CLOCK_OVERLAY));
 
         // Re-applying the same config is not a change and must not repaint.
         engine.set_config(Some(&cfg), ACCENT);
@@ -2676,7 +4353,7 @@ mod tests {
     fn an_accent_change_repaints_both_widgets() {
         let mut cfg = widgets(true);
         cfg.lyrics.accent_follow = true;
-        let mut engine = WidgetEngine::new(Some(&cfg), "#FF8800");
+        let mut engine = WidgetEngine::new(Some(&cfg), config::Accent::Amber);
         engine.set_clock(Some(&ClockCfg {
             enabled: true,
             style: ClockStyle {
@@ -2688,14 +4365,33 @@ mod tests {
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
         let wall = Some(at(14, 32, 30));
         let first = engine.tick_at(Some(&snap), t0, wall);
-        assert!(payload(&first, LYRICS_OVERLAY).contains("\\1c&H0088FF&"));
-        assert!(payload(&first, CLOCK_OVERLAY).contains("\\1c&H0088FF&"));
+        assert_eq!(ids(&first), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        let amber_lyric = picture_for(&first, LYRICS_OVERLAY);
+        let amber_clock = picture_for(&first, CLOCK_OVERLAY);
+        assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
 
+        // The palette is what changed, and a content key cannot see a palette:
+        // nothing either widget *says* is different, so the only thing that can
+        // prove the repaint happened is the pixels.
         engine.set_config(Some(&cfg), ACCENT);
         let retinted = engine.tick_at(Some(&snap), t0, wall);
-        assert_eq!(retinted.len(), 2);
-        assert!(payload(&retinted, LYRICS_OVERLAY).contains("\\1c&HE48435&"));
-        assert!(payload(&retinted, CLOCK_OVERLAY).contains("\\1c&HE48435&"));
+        assert_eq!(ids(&retinted), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        let blue_lyric = picture_for(&retinted, LYRICS_OVERLAY);
+        let blue_clock = picture_for(&retinted, CLOCK_OVERLAY);
+        assert_ne!(
+            amber_lyric, blue_lyric,
+            "the lyric card kept its old accent"
+        );
+        assert_ne!(
+            amber_clock, blue_clock,
+            "the clock card kept its old accent"
+        );
+        // The card did not move or resize: an accent is a colour, and a widget
+        // that jumped a pixel on a theme change would be a layout bug.
+        let placement = |p: (i32, i32, u32, u32, u64)| (p.0, p.1, p.2, p.3);
+        assert_eq!(placement(amber_lyric), placement(blue_lyric));
+        assert_eq!(placement(amber_clock), placement(blue_clock));
+        // And one repaint, not a permanent one.
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
     }
 
@@ -2706,29 +4402,40 @@ mod tests {
         let mut engine = WidgetEngine::new(Some(&widgets(true)), ACCENT);
         let t0 = Instant::now();
         let first = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
-        assert!(payload(&engine.tick_at(Some(&first), t0, None), LYRICS_OVERLAY).ends_with("}a"));
+        let shown = engine.tick_at(Some(&first), t0, None);
+        assert_eq!(ids(&shown), vec![LYRICS_OVERLAY]);
+        let song_one = picture_for(&shown, LYRICS_OVERLAY);
 
         // Same seq, same everything: the worker is telling us nothing new.
         assert!(engine.tick_at(Some(&first), t0, None).is_empty());
 
-        // A different track with no lyrics takes the overlay down, once.
+        // A different track with no lyrics takes the overlay down, once — and
+        // by `overlay-remove`, which is the only command that takes a bitmap
+        // overlay down. An empty ASS payload here would leave the last song's
+        // card on the wallpaper.
         let second = snapshot_at(t0, None, us(10.0), PlaybackStatus::Playing, 2);
         assert_eq!(
             engine.tick_at(Some(&second), t0, None),
-            vec![WidgetUpdate::clear(LYRICS_OVERLAY)]
+            vec![WidgetUpdate::remove(LYRICS_OVERLAY)]
         );
         assert!(engine.tick_at(Some(&second), t0, None).is_empty());
 
+        // A third track draws again, and draws its own words rather than
+        // re-pushing the file the first song left on disk.
+        let other_words = lyrics::parse_lrc("[00:10.00]c\n[01:00.00]d");
+        let third = snapshot_at(t0, Some(other_words), us(10.0), PlaybackStatus::Playing, 3);
+        let again = engine.tick_at(Some(&third), t0, None);
+        assert_eq!(ids(&again), vec![LYRICS_OVERLAY]);
+        assert_ne!(song_one, picture_for(&again, LYRICS_OVERLAY));
+
         // The player going away clears too, and only once.
-        let third = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 3);
-        assert!(payload(&engine.tick_at(Some(&third), t0, None), LYRICS_OVERLAY).ends_with("}a"));
         let gone = Snapshot {
             track: None,
             ..third.clone()
         };
         assert_eq!(
             engine.tick_at(Some(&gone), t0, None),
-            vec![WidgetUpdate::clear(LYRICS_OVERLAY)]
+            vec![WidgetUpdate::remove(LYRICS_OVERLAY)]
         );
         assert!(engine.tick_at(Some(&gone), t0, None).is_empty());
     }
@@ -2739,7 +4446,9 @@ mod tests {
         let mut engine = WidgetEngine::new(Some(&widgets(true)), ACCENT);
         let t0 = Instant::now();
         let playing = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
-        assert!(payload(&engine.tick_at(Some(&playing), t0, None), LYRICS_OVERLAY).ends_with("}a"));
+        let shown = engine.tick_at(Some(&playing), t0, None);
+        assert_eq!(ids(&shown), vec![LYRICS_OVERLAY]);
+        assert!(frame_for(&shown, LYRICS_OVERLAY).w > 0);
 
         let paused = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Paused, 1);
         for step in 0..600 {
@@ -2753,11 +4462,12 @@ mod tests {
 
     #[test]
     fn clear_all_blanks_every_enabled_overlay_and_nothing_else() {
-        // Lyrics only.
+        // Lyrics only, and never ticked: blanked anyway, because the reason to
+        // call this is that our belief about the renderer may be wrong.
         let mut engine = WidgetEngine::new(Some(&widgets(true)), ACCENT);
         assert_eq!(
             engine.clear_all(),
-            vec![WidgetUpdate::clear(LYRICS_OVERLAY)]
+            vec![WidgetUpdate::remove(LYRICS_OVERLAY)]
         );
 
         // Both.
@@ -2765,28 +4475,34 @@ mod tests {
         engine.set_clock(Some(&clock_cfg()));
         let t0 = Instant::now();
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
-        assert_eq!(
-            engine.tick_at(Some(&snap), t0, Some(at(14, 32, 30))).len(),
-            2
-        );
+        let up = engine.tick_at(Some(&snap), t0, Some(at(14, 32, 30)));
+        assert_eq!(ids(&up), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        let lyric_up = picture_for(&up, LYRICS_OVERLAY);
+        let clock_up = picture_for(&up, CLOCK_OVERLAY);
 
         let cleared = engine.clear_all();
-        assert_eq!(cleared.len(), 2);
+        assert_eq!(ids(&cleared), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
         assert!(cleared.iter().all(WidgetUpdate::is_clear));
-        assert_eq!(cleared[0].overlay_id, LYRICS_OVERLAY);
-        assert_eq!(cleared[1].overlay_id, CLOCK_OVERLAY);
 
         // And the widgets come straight back on the next tick — a wallpaper swap
-        // must not leave the desktop without its lyric until the next song.
+        // must not leave the desktop without its lyric until the next song —
+        // showing exactly what was up before it.
         let restored = engine.tick_at(Some(&snap), t0, Some(at(14, 32, 30)));
-        assert_eq!(restored.len(), 2);
-        assert!(payload(&restored, LYRICS_OVERLAY).ends_with("}a"));
-        assert!(payload(&restored, CLOCK_OVERLAY).ends_with("14:32"));
+        assert_eq!(ids(&restored), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        assert_eq!(lyric_up, picture_for(&restored, LYRICS_OVERLAY));
+        assert_eq!(clock_up, picture_for(&restored, CLOCK_OVERLAY));
+        // Once each, not once per tick.
+        assert!(engine
+            .tick_at(Some(&snap), t0, Some(at(14, 32, 30)))
+            .is_empty());
 
         // The clock alone: nothing is pushed for a widget that is off.
         let mut engine = WidgetEngine::new(None, ACCENT);
         engine.set_clock(Some(&clock_cfg()));
-        assert_eq!(engine.clear_all(), vec![WidgetUpdate::clear(CLOCK_OVERLAY)]);
+        assert_eq!(
+            engine.clear_all(),
+            vec![WidgetUpdate::remove(CLOCK_OVERLAY)]
+        );
     }
 
     #[test]
@@ -2799,30 +4515,29 @@ mod tests {
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
         let wall = Some(at(14, 32, 30));
         let first = engine.tick_at(Some(&snap), t0, wall);
-        assert_eq!(first.len(), 2);
+        assert_eq!(ids(&first), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        let lyric = frame_for(&first, LYRICS_OVERLAY).clone();
+        let clock = frame_for(&first, CLOCK_OVERLAY).clone();
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
 
         engine.invalidate();
         let again = engine.tick_at(Some(&snap), t0, wall);
-        assert_eq!(again.len(), 2);
-        assert_eq!(
-            payload(&again, LYRICS_OVERLAY),
-            payload(&first, LYRICS_OVERLAY)
-        );
-        assert_eq!(
-            payload(&again, CLOCK_OVERLAY),
-            payload(&first, CLOCK_OVERLAY)
-        );
+        assert_eq!(ids(&again), vec![LYRICS_OVERLAY, CLOCK_OVERLAY]);
+        // Byte for byte the same `overlay-add`: same file, same corner, same
+        // size. Anything else and this would be a re-render, which is the whole
+        // thing `invalidate` promises not to be.
+        assert_eq!(frame_for(&again, LYRICS_OVERLAY), &lyric);
+        assert_eq!(frame_for(&again, CLOCK_OVERLAY), &clock);
         // One re-push, not a permanent one.
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
 
-        // With nothing on screen there is nothing to restore: a blank overlay on
-        // a fresh renderer is already blank.
+        // With nothing on screen there is nothing to restore: `clear_all` has
+        // already emitted the blanks and forgotten what was up, so a re-push
+        // has nothing to re-push and the disabled clock has nothing to retire.
         engine.clear_all();
         engine.set_clock(None);
         engine.invalidate();
-        let empty = engine.tick_at(None, t0, wall);
-        assert_eq!(empty, vec![WidgetUpdate::clear(LYRICS_OVERLAY)]);
+        assert!(engine.tick_at(None, t0, wall).is_empty());
     }
 
     // -- Smart Sleep --------------------------------------------------------
@@ -2980,7 +4695,7 @@ mod tests {
         assert!(engine.now_playing().is_none());
         assert_eq!(
             engine.tick_at(None, t0, None),
-            vec![WidgetUpdate::clear(LYRICS_OVERLAY)]
+            vec![WidgetUpdate::remove(LYRICS_OVERLAY)]
         );
         assert!(engine.tick_at(None, t0, None).is_empty());
 
@@ -2996,12 +4711,12 @@ mod tests {
         engine.set_clock(Some(&clock_cfg()));
         let t0 = Instant::now();
         let wall = Some(at(14, 32, 30));
-        assert_eq!(engine.tick_at(None, t0, wall).len(), 1);
+        assert_eq!(ids(&engine.tick_at(None, t0, wall)), vec![CLOCK_OVERLAY]);
         engine.set_clock(None);
         assert!(!engine.is_active());
         assert_eq!(
             engine.tick_at(None, t0, wall),
-            vec![WidgetUpdate::clear(CLOCK_OVERLAY)]
+            vec![WidgetUpdate::remove(CLOCK_OVERLAY)]
         );
         assert!(engine.tick_at(None, t0, wall).is_empty());
         // And the public tick, which decides for itself whether to read a clock,
@@ -3401,7 +5116,7 @@ mod tests {
         assert!(engine.visual.as_ref().is_some_and(|v| v.capture.is_none()));
 
         let down = engine.tick_at(None, t0, None);
-        assert_eq!(down, vec![WidgetUpdate::clear(VISUALIZER_OVERLAY)]);
+        assert_eq!(down, vec![WidgetUpdate::remove(VISUALIZER_OVERLAY)]);
         assert!(engine.visual.is_none(), "the runtime must be thrown away");
         assert!(engine.tick_at(None, t0, None).is_empty());
         assert!(engine.tick().is_empty());
@@ -3411,7 +5126,11 @@ mod tests {
         // the setter — would leave the widget on and permanently deaf.
         engine.set_visualizer(Some(&visual_cfg(true)));
         let v = engine.visual.as_ref().expect("re-enabled");
-        assert!(v.ass.is_none());
+        // Nothing on screen yet, asserted on both halves of "on screen": the
+        // runtime's own flag *and* the per-output slots the substrate keeps.
+        // The ASS version read `v.ass.is_none()`, which was one field for both.
+        assert!(!v.shown);
+        assert!(!v.bmp.is_shown());
         // Off and on again *before* the tick that takes it down is the same
         // story, and must not leave a half-disabled runtime behind either.
         engine.set_visualizer(None);
@@ -3428,7 +5147,8 @@ mod tests {
     fn with_disc(engine: &mut WidgetEngine, cfg: DiscWidgetCfg, tag: &str) {
         engine.set_disc(Some(&cfg));
         let disc = engine.disc.as_mut().expect("the disc is enabled");
-        disc.path = std::env::temp_dir().join(format!("fresco-test-disc-{tag}.bgra"));
+        disc.bmp
+            .set_stem(std::env::temp_dir().join(format!("fresco-test-disc-{tag}")));
     }
 
     fn disc_cfg() -> DiscWidgetCfg {
@@ -3576,47 +5296,91 @@ mod tests {
         // widget gets `\an` placement for free. Getting this wrong puts the
         // record off the edge of a 4K screen and nowhere near it on a 720p one.
         let (w, h) = (3840, 2160);
-        assert_eq!(anchor_xy(Anchor::TopLeft, 320, 48, w, h), (48, 48));
+        assert_eq!(anchor_xy(Anchor::TopLeft, 320, 320, 48, w, h), (48, 48));
         assert_eq!(
-            anchor_xy(Anchor::BottomRight, 320, 48, w, h),
+            anchor_xy(Anchor::BottomRight, 320, 320, 48, w, h),
             ((w - 320 - 48) as i32, (h - 320 - 48) as i32)
         );
         assert_eq!(
-            anchor_xy(Anchor::MidCenter, 320, 48, w, h),
+            anchor_xy(Anchor::MidCenter, 320, 320, 48, w, h),
             (((w - 320) / 2) as i32, ((h - 320) / 2) as i32)
         );
         // A disc bigger than the output pins to the edge instead of wrapping
         // around to a nonsense coordinate.
-        assert_eq!(anchor_xy(Anchor::BottomRight, 4000, 48, w, h), (0, 0));
-        assert_eq!(anchor_xy(Anchor::TopLeft, 4000, 48, w, h), (0, 0));
+        assert_eq!(anchor_xy(Anchor::BottomRight, 4000, 4000, 48, w, h), (0, 0));
+        assert_eq!(anchor_xy(Anchor::TopLeft, 4000, 4000, 48, w, h), (0, 0));
 
-        // And a size change re-places and re-pushes rather than waiting for the
+        // And the widget itself is placed against the output it is drawn on.
+        //
+        // The record is no longer a bare 32x32 bitmap: it is a card, measured
+        // by the rasteriser, and its buffer is the card *plus its shadow bleed
+        // on all four sides*. So the corner is not `anchor_xy` of the frame,
+        // and asserting that it were would just be re-running `place` inside
+        // the test.
+        //
+        // What is checkable without re-deriving the bleed is the symmetry the
+        // placement cannot break if it used this output's mode: the **same**
+        // widget anchored at opposite corners is a mirror image about the
+        // output's centre, so `left + right + width == the output's width`. Get
+        // the geometry from the wrong screen and that identity misses by the
+        // difference between the two screens.
+        let t0 = Instant::now();
+        let snap = snapshot_with_art(t0, us(0.0), PlaybackStatus::Paused, 1);
+        let corner = |anchor: Anchor, out: (u32, u32), tag: &str| -> BitmapOverlay {
+            let mut engine = WidgetEngine::new(None, ACCENT);
+            with_disc(
+                &mut engine,
+                DiscWidgetCfg {
+                    anchor,
+                    ..disc_cfg()
+                },
+                tag,
+            );
+            engine.set_output_size(out.0, out.1);
+            let placed = engine.tick_at(Some(&snap), t0, None);
+            frame_for(&placed, DISC_OVERLAY).clone()
+        };
+
+        let br = corner(Anchor::BottomRight, (w, h), "place-br");
+        let tl = corner(Anchor::TopLeft, (w, h), "place-tl");
+        assert_eq!((tl.w, tl.h), (br.w, br.h), "the anchor resized the card");
+        assert_eq!(
+            tl.x + br.x + tl.w as i32,
+            w as i32,
+            "the two corners are not mirrored about the output's centre"
+        );
+        assert_eq!(tl.y + br.y + tl.h as i32, h as i32);
+        // The buffer holds at least the record itself, and is tightly packed.
+        assert!(br.w >= 32 && br.h >= 32, "{br:?}");
+        assert_eq!(br.stride, br.w * 4);
+
+        // The same widget on a 720p screen: the identity holds against *that*
+        // output's mode, and against nothing else.
+        let small_br = corner(Anchor::BottomRight, (1280, 720), "place-small");
+        let small_tl = corner(Anchor::TopLeft, (1280, 720), "place-small-tl");
+        assert_eq!(small_tl.x + small_br.x + small_tl.w as i32, 1280);
+        assert_eq!(small_tl.y + small_br.y + small_tl.h as i32, 720);
+        assert!(small_br.w < br.w, "{small_br:?} vs {br:?}");
+
+        // A mode change re-places and re-pushes rather than waiting for the
         // next track.
         let mut engine = WidgetEngine::new(None, ACCENT);
         with_disc(&mut engine, disc_cfg(), "place");
         engine.set_output_size(w, h);
-        let t0 = Instant::now();
-        let snap = snapshot_with_art(t0, us(0.0), PlaybackStatus::Paused, 1);
         let placed = engine.tick_at(Some(&snap), t0, None);
-        let frame = placed[0].frame().expect("pixels");
-        assert_eq!(
-            (frame.x, frame.y),
-            anchor_xy(Anchor::BottomRight, 32, 48, w, h)
-        );
-        assert_eq!((frame.w, frame.h), (32, 32));
-        assert_eq!(frame.stride, 32 * 4);
-
+        let frame = frame_for(&placed, DISC_OVERLAY).clone();
+        assert!(engine.tick_at(Some(&snap), t0, None).is_empty());
         engine.set_output_size(1280, 720);
         let moved = engine.tick_at(Some(&snap), t0, None);
-        let frame = moved[0].frame().expect("pixels");
-        assert_eq!(
-            (frame.x, frame.y),
-            anchor_xy(Anchor::BottomRight, 32, 48, 1280, 720)
-        );
+        let shrunk = frame_for(&moved, DISC_OVERLAY).clone();
+        assert_ne!((frame.x, frame.y), (shrunk.x, shrunk.y));
+        assert!(shrunk.w < frame.w && shrunk.h < frame.h, "{shrunk:?}");
+
         // A zero-sized mode report is ignored rather than parking the disc in
         // the corner.
         engine.set_output_size(0, 0);
-        assert_eq!((engine.out_w, engine.out_h), (1280, 720));
+        assert_eq!(engine.out_geoms()[0].w, 1280);
+        assert_eq!(engine.out_geoms()[0].h, 720);
     }
 
     // -- all four together ---------------------------------------------------
@@ -3641,14 +5405,16 @@ mod tests {
                 DISC_OVERLAY
             ]
         );
-        // The disc's clear is an `overlay-remove`; everybody else's is an empty
-        // ASS payload. Sending the wrong one leaves the widget on screen.
-        assert_eq!(
-            cleared[3].bitmap,
-            Some(BitmapUpdate::Remove),
-            "a bitmap overlay is not cleared by an empty ASS payload"
+        // Every one of the four is a bitmap overlay now, so every one of them
+        // comes down by `overlay-remove`. An empty `osd-overlay` is a silent
+        // no-op against `overlay-add`, and the widget rides onto the next
+        // wallpaper.
+        assert!(
+            cleared
+                .iter()
+                .all(|u| u.bitmap == Some(BitmapUpdate::Remove)),
+            "a bitmap overlay is not cleared by an empty ASS payload: {cleared:?}"
         );
-        assert!(cleared[..3].iter().all(|u| u.bitmap.is_none()));
 
         // And everything comes straight back: a wallpaper swap must not leave
         // the desktop bare until the next song.
@@ -3711,6 +5477,12 @@ mod tests {
         // …and the visualiser undercuts the disc in turn, being the fastest of
         // the four.
         engine.set_visualizer(Some(&visual_cfg(true)));
+        // `VisualState::new` arms its first frame at the real `Instant::now()`,
+        // which by here is some way past the synthetic `t0` this test drives
+        // everything else from — rasterising three widgets is not free in a
+        // debug build. Re-base it, or the widget is simply not due yet and this
+        // measures the wall clock rather than the rate cap.
+        engine.visual.as_mut().expect("a runtime").next_frame = t0;
         let n = engine.visual.as_ref().expect("a runtime").scratch.len();
         engine.feed_audio(&tone(n), t0);
         let wait = engine
@@ -3815,7 +5587,12 @@ mod tests {
         // A path whose parent is a *file*, so `create_dir_all` cannot succeed.
         let blocker = std::env::temp_dir().join("fresco-test-disc-blocker");
         std::fs::write(&blocker, b"not a directory").expect("temp dir is writable");
-        engine.disc.as_mut().expect("a disc").path = blocker.join("frame.bgra");
+        engine
+            .disc
+            .as_mut()
+            .expect("a disc")
+            .bmp
+            .set_stem(blocker.join("frame"));
 
         let t0 = Instant::now();
         let playing = snapshot_with_art(t0, us(0.0), PlaybackStatus::Playing, 1);
@@ -3826,7 +5603,7 @@ mod tests {
                 engine.tick_at(Some(&playing), now, None).is_empty(),
                 "a frame that was never written must not be announced"
             );
-            if engine.disc.as_ref().expect("a disc").warned {
+            if engine.disc.as_ref().expect("a disc").bmp.warned {
                 attempts += 1;
             }
         }
@@ -3834,7 +5611,7 @@ mod tests {
         // 30 seconds at the retry cadence, not at the frame cadence.
         let retries = 30 / DISC_RETRY.as_secs();
         assert!(
-            engine.disc.as_ref().expect("a disc").warned,
+            engine.disc.as_ref().expect("a disc").bmp.warned,
             "the failure is latched so it is logged once"
         );
         assert!(retries <= 15, "the back-off must be seconds, not frames");
@@ -3864,8 +5641,12 @@ mod tests {
         write_frame(&path, &frame).expect("rewritable");
         assert_eq!(std::fs::metadata(&path).expect("written").len(), first);
 
-        // A resize shortens it, which is the one case where the old mapping was
-        // going away anyway.
+        // A **smaller** frame must not shorten it. `set_len` is the one call
+        // here that can unback a page mpv still has mapped, and a widget whose
+        // bitmap changes size with its content (a lyric line is a different
+        // width on every line) would hit that on every line. Grow only; the
+        // tail of a smaller frame is never read, because `overlay-add` is told
+        // `h * stride` explicitly.
         let small = artwork::render_disc(
             &art,
             &DiscCfg {
@@ -3876,9 +5657,571 @@ mod tests {
         write_frame(&path, &small).expect("rewritable");
         assert_eq!(
             std::fs::metadata(&path).expect("written").len(),
-            u64::from(small.w * small.h * 4)
+            first,
+            "a shrinking frame must never shorten a live mapping"
+        );
+        // The bytes the smaller frame does own are its own, at offset 0.
+        let on_disk = std::fs::read(&path).expect("readable");
+        assert_eq!(&on_disk[..small.data.len()], &small.data[..]);
+
+        // Growing past the high-water mark does extend it: the old mapping
+        // stays fully backed, it simply stops covering the new tail.
+        let big = artwork::render_disc(
+            &art,
+            &DiscCfg {
+                size_px: 32,
+                ..Default::default()
+            },
+        );
+        write_frame(&path, &big).expect("rewritable");
+        assert_eq!(
+            std::fs::metadata(&path).expect("written").len(),
+            u64::from(big.h * big.stride())
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    // -- defect 1: clearing follows what is on screen, not what a widget is ---
+
+    /// Pretend `overlay_id` is currently occupied by `kind`, the way a tick
+    /// that pushed such an update would have left it. This is the only honest
+    /// way to test the clear path against a widget that has *changed*
+    /// substrate, which is precisely the case the engine must survive.
+    fn pretend_on_screen(engine: &mut WidgetEngine, overlay_id: u32, kind: OverlayKind) {
+        let mut batch = vec![match kind {
+            OverlayKind::Ass => WidgetUpdate::ass(overlay_id, "x".into()),
+            OverlayKind::Bitmap => WidgetUpdate::draw(
+                overlay_id,
+                BitmapOverlay {
+                    x: 0,
+                    y: 0,
+                    path: PathBuf::from("/dev/null"),
+                    w: 4,
+                    h: 4,
+                    stride: 16,
+                },
+            ),
+        }];
+        engine.note_pushed(&mut batch);
+    }
+
+    #[test]
+    fn a_clear_uses_the_command_the_overlay_on_screen_needs() {
+        // The highest-risk defect. An empty `osd-overlay` does not take a
+        // bitmap overlay down and `overlay-remove` does not take ASS down, so a
+        // clear that guesses from the widget's name silently no-ops the moment
+        // that widget is ported — and the stale widget rides onto the next
+        // wallpaper.
+        let mut engine = WidgetEngine::new(Some(&widgets(true)), ACCENT);
+        engine.set_clock(Some(&clock_cfg()));
+        engine.set_visualizer(Some(&visual_cfg(true)));
+        with_disc(&mut engine, disc_cfg(), "clearkind");
+
+        // As things stand today: four bitmap widgets, so four `overlay-remove`s.
+        let cleared = engine.clear_all();
+        assert_eq!(cleared.len(), 4);
+        for u in &cleared {
+            assert!(u.is_clear(), "{u:?}");
+            assert_eq!(
+                u.bitmap,
+                Some(BitmapUpdate::Remove),
+                "overlay {} got the wrong command: {u:?}",
+                u.overlay_id
+            );
+        }
+
+        // Now demote two of them to ASS behind the engine's back — a bitmap
+        // renderer failing back to text is exactly the move this has to survive
+        // — without touching any config. What is on screen decides, not what
+        // the widget is nominally made of.
+        pretend_on_screen(&mut engine, LYRICS_OVERLAY, OverlayKind::Ass);
+        pretend_on_screen(&mut engine, DISC_OVERLAY, OverlayKind::Ass);
+        let cleared = engine.clear_all();
+        assert_eq!(update_for(&cleared, LYRICS_OVERLAY).bitmap, None);
+        assert!(update_for(&cleared, LYRICS_OVERLAY).ass.is_empty());
+        assert_eq!(update_for(&cleared, DISC_OVERLAY).bitmap, None);
+        assert_eq!(
+            update_for(&cleared, CLOCK_OVERLAY).bitmap,
+            Some(BitmapUpdate::Remove),
+            "an untouched widget must keep its own command"
+        );
+        // Still one per widget, and every one of them a clear.
+        assert_eq!(cleared.len(), 4);
+        assert!(cleared.iter().all(WidgetUpdate::is_clear));
+
+        // And a second clear with nothing believed to be up falls back to the
+        // widget's own substrate rather than to whatever was last seen.
+        let again = engine.clear_all();
+        assert_eq!(again.len(), 4);
+        for u in &again {
+            assert_eq!(
+                u.bitmap,
+                Some(BitmapUpdate::Remove),
+                "overlay {} did not fall back to its own substrate: {u:?}",
+                u.overlay_id
+            );
+        }
+    }
+
+    #[test]
+    fn changing_substrate_blanks_the_overlay_it_is_leaving() {
+        // mpv keeps `osd-overlay` and `overlay-add` in separate namespaces, so
+        // drawing a bitmap over an id that still holds ASS leaves both up.
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        pretend_on_screen(&mut engine, CLOCK_OVERLAY, OverlayKind::Ass);
+
+        let mut batch = vec![WidgetUpdate::draw(
+            CLOCK_OVERLAY,
+            BitmapOverlay {
+                x: 1,
+                y: 2,
+                path: PathBuf::from("/dev/null"),
+                w: 4,
+                h: 4,
+                stride: 16,
+            },
+        )];
+        engine.note_pushed(&mut batch);
+        assert_eq!(batch.len(), 2, "the outgoing ASS overlay must be blanked");
+        assert!(batch[0].is_clear() && batch[0].bitmap.is_none());
+        assert!(batch[1].frame().is_some());
+
+        // Going back the other way blanks the bitmap.
+        let mut batch = vec![WidgetUpdate::ass(CLOCK_OVERLAY, "back to text".into())];
+        engine.note_pushed(&mut batch);
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].bitmap, Some(BitmapUpdate::Remove));
+        assert_eq!(batch[1].ass, "back to text");
+
+        // Staying on the same substrate inserts nothing.
+        let mut batch = vec![WidgetUpdate::ass(CLOCK_OVERLAY, "still text".into())];
+        engine.note_pushed(&mut batch);
+        assert_eq!(batch.len(), 1);
+    }
+
+    // -- defect 2: one state machine, N geometries ---------------------------
+
+    #[test]
+    fn two_outputs_of_different_sizes_get_their_own_geometry_from_one_tick() {
+        // `overlay-add` is in real pixels. Sizing every output's frame against
+        // whichever monitor the loop looked at first puts the widget at the
+        // wrong size and in the wrong place on the other one.
+        let uhd = OutputGeom {
+            connector: "DP-1".into(),
+            w: 3840,
+            h: 2160,
+        };
+        let hd = OutputGeom {
+            connector: "HDMI-1".into(),
+            w: 1280,
+            h: 720,
+        };
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        with_disc(&mut engine, disc_cfg(), "twoup");
+        engine.set_outputs(&[uhd.clone(), hd.clone()]);
+        let t0 = Instant::now();
+        let snap = snapshot_with_art(t0, us(0.0), PlaybackStatus::Paused, 1);
+        let drawn = engine.tick_at(Some(&snap), t0, None);
+        assert_eq!(drawn.len(), 2, "one frame per output: {drawn:?}");
+
+        let big = by_target(&drawn, "DP-1").frame().expect("pixels").clone();
+        let small = by_target(&drawn, "HDMI-1").frame().expect("pixels").clone();
+        // Each frame is sized and placed against *its own* output. The bug this
+        // guards is one geometry serving both, which shows up as a widget of
+        // the wrong size anchored to the wrong screen's corner.
+        assert!(
+            (big.w, big.h) != (small.w, small.h),
+            "both outputs got one size: {big:?} / {small:?}"
+        );
+        assert!(big.w > small.w && big.h > small.h);
+        assert_ne!((big.x, big.y), (small.x, small.y));
+        // Same anchor on both, so the same gap from the corner — measured in
+        // logical units, which is the only frame of reference two screens of
+        // different densities share. Placed against one geometry, the 720p
+        // frame's gap would be off by the difference between the two screens.
+        let (bx, by) = corner_gap_lu(&big, &uhd);
+        let (sx, sy) = corner_gap_lu(&small, &hd);
+        assert!(
+            (bx - sx).abs() < 2.0 && (by - sy).abs() < 2.0,
+            "{bx},{by} vs {sx},{sy}"
+        );
+        // Separate files, because two outputs of different sizes hold genuinely
+        // different pixels the moment a widget sizes itself against its screen.
+        assert_ne!(big.path, small.path);
+        // And the two files really do hold different pictures, not one written
+        // twice.
+        assert_ne!(picture(&big).4, picture(&small).4);
+        // And each update is routed to exactly one of them.
+        assert!(by_target(&drawn, "DP-1").is_for("DP-1"));
+        assert!(!by_target(&drawn, "DP-1").is_for("HDMI-1"));
+
+        // The state machine stayed single: one record, one angle, one decision.
+        assert_eq!(engine.disc.as_ref().expect("a disc").seq, Some(1));
+        assert!(engine.tick_at(Some(&snap), t0, None).is_empty());
+
+        // A loop that drives one unnamed output gets untargeted updates and so
+        // needs no routing at all — the other half of `WidgetUpdate::target`.
+        let mut one_up = WidgetEngine::new(Some(&widgets(true)), ACCENT);
+        let lyric = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
+        let first = one_up.tick_at(Some(&lyric), t0, None);
+        assert_eq!(ids(&first), vec![LYRICS_OVERLAY]);
+        assert!(first.iter().all(|u| u.target.is_none()));
+        assert!(first[0].is_for("anything at all"));
+    }
+
+    /// The update aimed at `connector`.
+    fn by_target<'a>(updates: &'a [WidgetUpdate], connector: &str) -> &'a WidgetUpdate {
+        updates
+            .iter()
+            .find(|u| u.target.as_deref() == Some(connector))
+            .unwrap_or_else(|| panic!("nothing for {connector} in {updates:?}"))
+    }
+
+    #[test]
+    fn a_widget_that_sizes_itself_against_the_output_gets_a_size_per_output() {
+        // The disc is absolute-sized, so only its corner moves. A clock, a
+        // lyric bar or a spectrum is sized *relative to its screen*, and that
+        // is the case the substrate has to carry — one rasterise per geometry,
+        // into that geometry's own file.
+        let mut st = BitmapState::new("unused", Instant::now());
+        st.set_stem(std::env::temp_dir().join("fresco-test-perout"));
+        let outputs = [
+            OutputGeom {
+                connector: "DP-1".into(),
+                w: 3840,
+                h: 2160,
+            },
+            OutputGeom {
+                connector: "HDMI-1".into(),
+                w: 1280,
+                h: 720,
+            },
+        ];
+        let mut out = Vec::new();
+        let now = Instant::now();
+        let pace = |key: ContentKey| Push {
+            overlay_id: CLOCK_OVERLAY,
+            key,
+            repush: false,
+            stepped: false,
+            now,
+            period: Duration::from_millis(100),
+            retry: Duration::from_secs(2),
+        };
+        let drawn = st.push(
+            pace(ContentKey::of("14:32")),
+            &outputs,
+            |geom| {
+                // A bar a tenth of the screen high, full width — the shape an
+                // ASS widget gets for free and a bitmap one does not.
+                let (w, h) = (geom.w / 4, geom.h / 10);
+                Some(BitmapFrame {
+                    bgra: Bgra {
+                        w,
+                        h,
+                        data: vec![0u8; (w as usize) * (h as usize) * 4],
+                    },
+                    x: anchor_xy(Anchor::TopCenter, w, h, 16, geom.w, geom.h).0,
+                    y: 16,
+                })
+            },
+            &mut out,
+        );
+        assert_eq!(drawn, 2);
+        let big = by_target(&out, "DP-1").frame().expect("pixels");
+        let small = by_target(&out, "HDMI-1").frame().expect("pixels");
+        assert_eq!((big.w, big.h), (960, 216));
+        assert_eq!((small.w, small.h), (320, 72));
+        assert_ne!(big.path, small.path);
+        assert_eq!(big.stride, big.w * 4);
+        // The content key holds both still on the next pass.
+        out.clear();
+        st.push(
+            pace(ContentKey::of("14:32")),
+            &outputs,
+            |_| panic!("an unchanged key must not rasterise"),
+            &mut out,
+        );
+        assert!(out.is_empty());
+        // A new key redraws both.
+        let drawn = st.push(
+            pace(ContentKey::of("14:33")),
+            &outputs,
+            |geom| {
+                let (w, h) = (geom.w / 4, geom.h / 10);
+                Some(BitmapFrame {
+                    bgra: Bgra {
+                        w,
+                        h,
+                        data: vec![0u8; (w as usize) * (h as usize) * 4],
+                    },
+                    x: 0,
+                    y: 0,
+                })
+            },
+            &mut out,
+        );
+        assert_eq!(drawn, 2);
+        for n in 0..2 {
+            let _ = std::fs::remove_file(slot_path(
+                &std::env::temp_dir().join("fresco-test-perout"),
+                n,
+            ));
+        }
+    }
+
+    #[test]
+    fn a_failed_write_backs_off_the_rasteriser_and_not_just_the_push() {
+        // The retry cadence has to gate the *render*, not only the write.
+        // Otherwise a read-only runtime directory costs a full rasterise ten
+        // times a second forever, which is the cost this whole module exists to
+        // keep off an idle desktop.
+        let blocker = std::env::temp_dir().join("fresco-test-bmp-blocker");
+        std::fs::write(&blocker, b"not a directory").expect("temp dir is writable");
+        let t0 = Instant::now();
+        let mut st = BitmapState::new("unused", t0);
+        st.set_stem(blocker.join("frame"));
+        let outputs = [OutputGeom {
+            connector: String::new(),
+            w: 1920,
+            h: 1080,
+        }];
+        let retry = Duration::from_secs(2);
+        let mut renders = 0u32;
+        let mut out = Vec::new();
+        // 30 seconds of a 100ms loop.
+        for step in 0..300u32 {
+            let now = t0 + Duration::from_millis(100 * u64::from(step));
+            st.push(
+                Push {
+                    overlay_id: DISC_OVERLAY,
+                    key: ContentKey::of(1u8),
+                    repush: false,
+                    stepped: false,
+                    now,
+                    period: Duration::from_millis(100),
+                    retry,
+                },
+                &outputs,
+                |_| {
+                    renders += 1;
+                    Some(BitmapFrame {
+                        bgra: Bgra {
+                            w: 2,
+                            h: 2,
+                            data: vec![0u8; 16],
+                        },
+                        x: 0,
+                        y: 0,
+                    })
+                },
+                &mut out,
+            );
+        }
+        assert!(
+            out.is_empty(),
+            "a frame that was never written must not be announced"
+        );
+        assert!(renders > 0, "the failure must actually be attempted");
+        assert!(
+            renders <= 30 / retry.as_secs() as u32 + 2,
+            "{renders} renders in 30s is the frame cadence, not the retry cadence"
+        );
+        assert!(st.warned, "and it is logged once, not once per attempt");
+        let _ = std::fs::remove_file(&blocker);
+    }
+
+    #[test]
+    fn a_hotplug_never_makes_two_outputs_share_one_frame_file() {
+        // Slots are rebuilt when the output list changes, and a slot that
+        // survives keeps its file. Numbering the new ones from scratch would
+        // hand a surviving slot's name to a new one — two outputs writing each
+        // other's pixels, which looks like a corrupted frame and nothing else.
+        let mut st = BitmapState::new("unused", Instant::now());
+        let stem = std::env::temp_dir().join("fresco-test-hotplug");
+        st.set_stem(stem.clone());
+        let geom = |c: &str, w: u32, h: u32| OutputGeom {
+            connector: c.into(),
+            w,
+            h,
+        };
+        st.sync(&[geom("A", 1920, 1080), geom("B", 3840, 2160)]);
+        let b_path = st.slots[1].path.clone();
+        // A goes away, C arrives: B survives at a new index.
+        st.sync(&[geom("B", 3840, 2160), geom("C", 1280, 720)]);
+        assert_eq!(st.slots[0].geom.connector, "B");
+        assert_eq!(st.slots[0].path, b_path, "a surviving slot keeps its file");
+        assert_ne!(st.slots[0].path, st.slots[1].path);
+        let paths: Vec<_> = st.slots.iter().map(|s| s.path.clone()).collect();
+        assert_eq!(
+            paths.len(),
+            paths.iter().collect::<std::collections::HashSet<_>>().len(),
+            "{paths:?} must be distinct"
+        );
+        // And the survivor kept its pixels, while the newcomer has none.
+        assert!(st.slots[1].key.is_none());
+        let _ = std::fs::remove_file(&stem);
+    }
+
+    #[test]
+    fn an_oversized_surface_is_refused_rather_than_rasterised() {
+        // A full-screen visualiser at 4K is 33 MB a frame. `artwork` caps the
+        // disc at 2048 per side for exactly this reason; the engine needs the
+        // same guard for a widget that is not square.
+        let mut st = BitmapState::new("unused", Instant::now());
+        st.set_stem(std::env::temp_dir().join("fresco-test-huge"));
+        let outputs = [OutputGeom {
+            connector: String::new(),
+            w: 3840,
+            h: 2160,
+        }];
+        let mut out = Vec::new();
+        let drawn = st.push(
+            Push {
+                overlay_id: VISUALIZER_OVERLAY,
+                key: ContentKey::of(0u8),
+                repush: false,
+                stepped: false,
+                now: Instant::now(),
+                period: Duration::from_millis(100),
+                retry: Duration::from_secs(2),
+            },
+            &outputs,
+            |geom| {
+                // Deliberately over the cap, and *not* allocated: the guard
+                // reads `w`/`h`, so a real renderer would be asked to stop
+                // before it allocated 33 MB.
+                Some(BitmapFrame {
+                    bgra: Bgra {
+                        w: geom.w,
+                        h: geom.h,
+                        data: Vec::new(),
+                    },
+                    x: 0,
+                    y: 0,
+                })
+            },
+            &mut out,
+        );
+        assert_eq!(drawn, 0);
+        assert!(out.is_empty(), "a refused frame must not be announced");
+        assert!(st.warned, "and it must say so, once");
+        assert!(u64::from(3840u32) * u64::from(2160u32) > MAX_WIDGET_AREA_PX);
+    }
+
+    // -- defect 3: anchors on a rectangle ------------------------------------
+
+    #[test]
+    fn anchor_xy_resolves_both_axes_independently() {
+        // The disc is square, so one `size` was enough. A clock, a lyric line
+        // and a spectrum are not, and resolving `y` against the width puts
+        // every one of them somewhere it was not asked to be.
+        let (ow, oh) = (1920u32, 1080u32);
+        let (w, h, m) = (600u32, 80u32, 40u32);
+        let left = m as i32;
+        let right = (ow - w - m) as i32;
+        let cx = ((ow - w) / 2) as i32;
+        let top = m as i32;
+        let bottom = (oh - h - m) as i32;
+        let cy = ((oh - h) / 2) as i32;
+        for (anchor, want) in [
+            (Anchor::TopLeft, (left, top)),
+            (Anchor::TopCenter, (cx, top)),
+            (Anchor::TopRight, (right, top)),
+            (Anchor::MidLeft, (left, cy)),
+            (Anchor::MidCenter, (cx, cy)),
+            (Anchor::MidRight, (right, cy)),
+            (Anchor::BottomLeft, (left, bottom)),
+            (Anchor::BottomCenter, (cx, bottom)),
+            (Anchor::BottomRight, (right, bottom)),
+        ] {
+            assert_eq!(anchor_xy(anchor, w, h, m, ow, oh), want, "{anchor:?}");
+        }
+
+        // A box wider than the output but shorter than it pins only the axis
+        // that overflows — the saturating behaviour, now per axis.
+        assert_eq!(anchor_xy(Anchor::TopLeft, 4000, h, m, ow, oh), (0, top));
+        assert_eq!(
+            anchor_xy(Anchor::BottomRight, 4000, h, m, ow, oh),
+            (0, bottom)
+        );
+        assert_eq!(anchor_xy(Anchor::MidCenter, 4000, h, m, ow, oh), (0, cy));
+        // Larger than the output on both axes still pins to the corner.
+        for anchor in [
+            Anchor::TopLeft,
+            Anchor::MidCenter,
+            Anchor::BottomRight,
+            Anchor::TopRight,
+            Anchor::BottomLeft,
+        ] {
+            assert_eq!(
+                anchor_xy(anchor, 4000, 4000, m, ow, oh),
+                (0, 0),
+                "{anchor:?}"
+            );
+        }
+        // And the square case the disc relies on is unchanged.
+        assert_eq!(
+            anchor_xy(Anchor::TopLeft, 320, 320, 48, 3840, 2160),
+            (48, 48)
+        );
+    }
+
+    // -- invalidate re-pushes without re-rendering ---------------------------
+
+    #[test]
+    fn invalidate_re_pushes_the_file_on_disk_without_rasterising_again() {
+        // The Wayland loop calls `invalidate` whenever any output's respawn
+        // generation moves, which can flap. Re-rasterising four bitmap widgets
+        // on each flap is a visible hitch, and unnecessary: the frame on disk
+        // is still a frame of exactly the right thing.
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        with_disc(&mut engine, disc_cfg(), "repush");
+        let t0 = Instant::now();
+        let paused = snapshot_with_art(t0, us(0.0), PlaybackStatus::Paused, 1);
+        let first = engine.tick_at(Some(&paused), t0, None);
+        let path = first[0].frame().expect("pixels").path.clone();
+        assert!(path.exists());
+
+        // Delete the file. A re-*render* would put it back; a re-*push* must
+        // hand mpv the same command for the same path and touch nothing.
+        std::fs::remove_file(&path).expect("our own temp file");
+        engine.invalidate();
+        let again = engine.tick_at(Some(&paused), t0, None);
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0].frame().expect("pixels").path, path);
+        assert!(!path.exists(), "invalidate must not rasterise");
+        // One re-push, not a permanent one.
+        assert!(engine.tick_at(Some(&paused), t0, None).is_empty());
+    }
+
+    #[test]
+    fn invalidate_re_pushes_the_clock_without_re_formatting_it() {
+        // The same rule for the widget with a *schedule*, where it is also what
+        // keeps `clock_due` meaningful: a re-push that reset the schedule would
+        // turn a flapping respawn counter into a render per flap.
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        engine.set_clock(Some(&clock_cfg()));
+        let t0 = Instant::now();
+        let wall = at(14, 32, 30);
+        let first = engine.tick_at(None, t0, Some(wall));
+        let frame = frame_for(&first, CLOCK_OVERLAY).clone();
+        let due = engine.clock_due.expect("the clock armed its schedule");
+
+        // Delete the file underneath it. A re-render would put it back; a
+        // re-push hands mpv the same command for the same path and touches
+        // nothing at all.
+        std::fs::remove_file(&frame.path).expect("our own temp file");
+        engine.invalidate();
+        let again = engine.tick_at(None, t0, Some(wall));
+        assert_eq!(frame_for(&again, CLOCK_OVERLAY), &frame);
+        assert!(!frame.path.exists(), "invalidate must not re-rasterise");
+        assert_eq!(
+            engine.clock_due,
+            Some(due),
+            "the render schedule must survive a re-push"
+        );
+        assert!(engine.tick_at(None, t0, Some(wall)).is_empty());
     }
 
     #[test]

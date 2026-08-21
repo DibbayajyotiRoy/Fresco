@@ -16,7 +16,7 @@ use crate::{
     config::{
         Accent, Clock, ClockThemeCfg, Config, Disc, Fit, GradientMode, Kind, LyricAnchor,
         LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition, Visualizer,
-        VisualizerStyleCfg, Widgets,
+        VisualizerStyleCfg, WidgetTheme, Widgets,
     },
     t, tf, APP_ID,
 };
@@ -1219,7 +1219,25 @@ fn build_menu_popover(
     });
     popover_box.append(&about_btn);
 
-    popover.set_child(Some(&popover_box));
+    // The menu is ~25 rows tall and grows every time a setting is added, but a
+    // popover taller than the space under its button does not clip — on
+    // Wayland it fails to map at all, and the button appears simply dead. That
+    // is display-dependent, so it survives testing: the same menu that fits a
+    // 1080p external monitor at scale 1 does not fit a fractionally scaled
+    // laptop panel, whose *logical* height is several hundred units shorter.
+    //
+    // Scrolling the column instead of letting it size itself makes the failure
+    // impossible: `propagate_natural_height` keeps the popover exactly as tall
+    // as its content while that fits, and `max_content_height` caps it below
+    // any plausible logical screen height, after which it scrolls.
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroller.set_propagate_natural_height(true);
+    scroller.set_propagate_natural_width(true);
+    scroller.set_max_content_height(560);
+    scroller.set_child(Some(&popover_box));
+
+    popover.set_child(Some(&scroller));
     popover
 }
 
@@ -4620,6 +4638,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
 
     page.add(&group);
     add_schedule_group(&page, state.clone());
+    add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());
     add_clock_group(&page, state.clone());
     add_visualizer_group(&page, state.clone());
@@ -5031,6 +5050,71 @@ fn lyric_spin_row(
     })
 }
 
+// ─── Widget appearance ────────────────────────────────────────────────────────
+
+/// The three palette choices in the order the combo lists them.
+///
+/// `Auto` leads because it is the default and the right answer for almost
+/// everyone; `Light` and `Dark` follow as the manual override. See
+/// [`config::WidgetTheme`] for why `Auto` resolves to dark rather than
+/// following the app's own light/dark setting: a widget is drawn over the
+/// user's wallpaper, not over the app, so the desktop theme says nothing
+/// useful about what is behind it.
+const WIDGET_THEMES: [(WidgetTheme, &str); 3] = [
+    (WidgetTheme::Auto, "Automatic"),
+    (WidgetTheme::Light, "Light"),
+    (WidgetTheme::Dark, "Dark"),
+];
+
+/// The widget palette currently in force — the default when `config.widgets`
+/// is absent, which is the normal state for anyone who has never opened these
+/// groups. Read-only, like [`lyrics_settings`]: it takes a shared borrow and
+/// returns a copy, so the caller is not holding one across a GTK call.
+fn widget_theme(state: &Rc<RefCell<AppState>>) -> WidgetTheme {
+    state
+        .borrow()
+        .config
+        .widgets
+        .as_ref()
+        .map_or_else(WidgetTheme::default, |w| w.theme)
+}
+
+/// "Widget appearance" preferences group.
+///
+/// Sits above the four per-widget groups because it governs all of them: the
+/// clock, lyrics, visualiser and disc are drawn from one palette, so offering
+/// the choice four times would imply they can disagree. Unlike those groups
+/// there is no master switch — a palette is not a feature to turn on, and the
+/// row stays usable when every widget is off so the choice can be made before
+/// the first one is enabled.
+fn add_widget_appearance_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let group = adw::PreferencesGroup::new();
+    group.set_title(t!("Widget appearance"));
+    group.set_description(Some(t!(
+        "How the clock, lyrics, visualiser and disc are drawn. The setting applies to all of them."
+    )));
+
+    let theme_row = adw::ComboRow::new();
+    theme_row.set_title(t!("Palette"));
+    theme_row.set_subtitle(t!(
+        "Dark cards suit most wallpapers. Choose Light if yours are consistently bright."
+    ));
+    theme_row.set_model(Some(&gtk4::StringList::new(&table_labels(&WIDGET_THEMES))));
+    theme_row.set_selected(table_index(&WIDGET_THEMES, widget_theme(&state)));
+    {
+        let state = state.clone();
+        theme_row.connect_selected_notify(move |row| {
+            let pick = WIDGET_THEMES
+                .get(row.selected() as usize)
+                .map_or_else(WidgetTheme::default, |(t, _)| *t);
+            edit_widgets(&state, |w| w.theme = pick);
+        });
+    }
+    group.add(&theme_row);
+
+    page.add(&group);
+}
+
 /// "Lyrics" preferences group (WIDGETS_ROADMAP W1 GUI). Off by default, and
 /// every row below the master switch is insensitive until it is on, so the
 /// group reads as one feature rather than nine unrelated settings.
@@ -5326,13 +5410,28 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 /// ones `clock::ClockTheme::label` returns and the order is `ClockTheme::ALL`'s
 /// — `clock_theme_labels_match_the_renderer` holds the two together, so the
 /// picker cannot start naming a look the renderer spells differently.
-const CLOCK_THEMES: [(ClockThemeCfg, &str); 6] = [
+/// The themes the picker actually offers.
+///
+/// A subset of [`CLOCK_THEMES`], not a replacement for it: that table stays
+/// complete so `clock_theme_labels_match_the_renderer` can keep checking the
+/// GUI's words against the renderer's, which is the guard that catches a theme
+/// being renamed in one place and not the other. This list is only about what
+/// is *shown*, and re-adding a look is a line here rather than a re-wiring.
+const CLOCK_THEMES_SHOWN: [(ClockThemeCfg, &str); 1] = [(ClockThemeCfg::Nos, "NOS")];
+
+/// Only the tests read this now that the picker is driven by
+/// [`CLOCK_THEMES_SHOWN`]; it is kept because
+/// `clock_theme_labels_match_the_renderer` is the guard that catches a theme
+/// renamed in `clock.rs` and not here, and that guard has to see all seven.
+#[cfg(test)]
+const CLOCK_THEMES: [(ClockThemeCfg, &str); 7] = [
     (ClockThemeCfg::Digital, "Digital"),
     (ClockThemeCfg::Minimal, "Minimal"),
     (ClockThemeCfg::Segment, "Segment"),
     (ClockThemeCfg::Stacked, "Stacked"),
     (ClockThemeCfg::Wordy, "Wordy"),
     (ClockThemeCfg::Card, "Card"),
+    (ClockThemeCfg::Nos, "NOS"),
 ];
 
 /// The clock settings currently in force — the defaults when `config.widgets`
@@ -5414,8 +5513,10 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     theme_row.set_subtitle(t!(
         "Digital reads at a glance; Wordy spells the time out, like \"half past ten\""
     ));
-    theme_row.set_model(Some(&gtk4::StringList::new(&table_labels(&CLOCK_THEMES))));
-    theme_row.set_selected(table_index(&CLOCK_THEMES, cur.theme));
+    theme_row.set_model(Some(&gtk4::StringList::new(&table_labels(
+        &CLOCK_THEMES_SHOWN,
+    ))));
+    theme_row.set_selected(table_index(&CLOCK_THEMES_SHOWN, cur.theme));
 
     // The same nine anchors, with the same names, as the lyric overlay: one
     // placement vocabulary for every widget.
@@ -5483,7 +5584,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     {
         let state = state.clone();
         theme_row.connect_selected_notify(move |row| {
-            let Some((theme, _)) = CLOCK_THEMES.get(row.selected() as usize).copied() else {
+            let Some((theme, _)) = CLOCK_THEMES_SHOWN.get(row.selected() as usize).copied() else {
                 return;
             };
             edit_clock(&state, |c| c.theme = theme);
@@ -7925,17 +8026,14 @@ pub(crate) fn show_onboarding_dialog(
     pages.add_named(&link_page, Some(ONBOARDING_STEPS[0].id));
 
     // ── Step 2: widgets ──────────────────────────────────────────────────────
-    // This screen points at settings, and claims nothing about what gets drawn.
-    // As of writing, the Lyrics and Clock groups exist in Advanced but the
-    // daemon does not yet render either overlay (`daemon/widgets.rs` is not
-    // registered as a module), so promising a working widget would be a lie the
-    // user discovers in about ten seconds. When the daemon does draw them, this
-    // copy can say so — until then it stays where-not-what.
+    // This screen may now say what gets drawn, not just where the settings are:
+    // the daemon renders all four overlays. It deliberately does not show
+    // pictures of them — they are drawn over the user's own wallpaper, so any
+    // mockup here would be of a desktop that is not theirs.
     let widgets_page = onboarding_page(
         &ONBOARDING_STEPS[1],
-        "Widgets draw on top of the wallpaper, underneath your windows. The \
-         settings for the first two are in place — here is what they cover and \
-         where to find them.",
+        "Widgets draw on top of the wallpaper, underneath your windows. There \
+         are four, all off until you turn them on.",
         &[
             (
                 t!("Lyrics"),
@@ -7951,9 +8049,16 @@ pub(crate) fn show_onboarding_dialog(
                  date and seconds.",
             ),
             (
+                t!("Visualiser and disc"),
+                "A spectrum that moves with whatever is playing, and the album \
+                 art as a spinning record. Both follow the same media player \
+                 the lyrics do.",
+            ),
+            (
                 t!("Where the settings are"),
                 "Open the app menu (Ctrl+,), choose Advanced…, and scroll to \
-                 the Lyrics and Clock groups. Both start switched off.",
+                 Widget appearance and the four groups below it. Widget \
+                 appearance sets the palette for all of them at once.",
             ),
         ],
     );
@@ -8900,10 +9005,20 @@ mod tests {
         for (i, (theme, label)) in CLOCK_THEMES.iter().enumerate() {
             assert_eq!(table_index(&CLOCK_THEMES, *theme), i as u32, "{label}");
         }
+        // The invariant that actually matters is about the *shown* table, since
+        // that is what drives the combo: the default has to be offerable, or the
+        // picker opens on some other row and the first edit writes that other
+        // theme back over a config the user never touched.
+        assert!(
+            CLOCK_THEMES_SHOWN
+                .iter()
+                .any(|(t, _)| *t == ClockThemeCfg::default()),
+            "the default theme must be one the picker offers"
+        );
         assert_eq!(
-            table_index(&CLOCK_THEMES, ClockThemeCfg::default()),
+            table_index(&CLOCK_THEMES_SHOWN, ClockThemeCfg::default()),
             0,
-            "Digital is the default and must select its own row"
+            "the default must select its own row in the shown table"
         );
         // The clock reuses the lyric anchor table, so a variant missing there
         // would silently be unreachable from *both* groups.
@@ -8912,6 +9027,51 @@ mod tests {
             2,
             "the default clock anchor (top right) must select its own row"
         );
+    }
+
+    /// Same trap as the lyric and clock tables, for the widget palette combo,
+    /// plus one guard the older tables cannot make.
+    ///
+    /// Iterating a table proves only that it holds no duplicates. A variant
+    /// *missing* from it is the dangerous case and is invisible to that check:
+    /// [`table_index`] answers 0 for anything it cannot find, so the combo
+    /// opens on "Automatic" however the config actually reads, and the next
+    /// selection writes that wrong value back. The exhaustive `match` below
+    /// turns "someone added a `WidgetTheme` and forgot this table" from a
+    /// silent mis-selection into a compile error.
+    #[test]
+    fn widget_theme_label_table_covers_every_variant() {
+        for (i, (theme, label)) in WIDGET_THEMES.iter().enumerate() {
+            assert_eq!(table_index(&WIDGET_THEMES, *theme), i as u32, "{label}");
+        }
+        assert_eq!(
+            table_index(&WIDGET_THEMES, WidgetTheme::default()),
+            0,
+            "Automatic is the default and must select its own row"
+        );
+
+        for theme in [WidgetTheme::Auto, WidgetTheme::Light, WidgetTheme::Dark] {
+            // Adding a variant stops this compiling, which is the whole point.
+            match theme {
+                WidgetTheme::Auto | WidgetTheme::Light | WidgetTheme::Dark => {}
+            }
+            assert!(
+                WIDGET_THEMES.iter().any(|(t, _)| *t == theme),
+                "{theme:?} is missing from WIDGET_THEMES and would select row 0"
+            );
+        }
+
+        // The write-back path the combo actually uses, mirrored: row index in,
+        // palette out. A table reordered without touching the handler would
+        // otherwise store whatever sat at the old index.
+        for (i, (theme, label)) in WIDGET_THEMES.iter().enumerate() {
+            let back = WIDGET_THEMES
+                .get(i)
+                .map_or_else(WidgetTheme::default, |(t, _)| *t);
+            assert_eq!(back, *theme, "{label}");
+        }
+
+        assert_eq!(table_labels(&WIDGET_THEMES).len(), WIDGET_THEMES.len());
     }
 
     /// Same trap as the lyric and clock tables, for the visualiser's style

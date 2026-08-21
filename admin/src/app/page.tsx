@@ -2,6 +2,7 @@ import { Suspense } from "react";
 
 import {
   PanelSkeleton,
+  ReleasesPanelSkeleton,
   StatCardSkeleton,
 } from "@/components/skeleton";
 import {
@@ -72,9 +73,7 @@ export default function OverviewPage() {
 
       {/* Downloads beside the feedback breakdowns. */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <Suspense
-          fallback={<PanelSkeleton rows={8} className="lg:col-span-2" />}
-        >
+        <Suspense fallback={<ReleasesPanelSkeleton className="lg:col-span-2" />}>
           <ReleasesPanel />
         </Suspense>
 

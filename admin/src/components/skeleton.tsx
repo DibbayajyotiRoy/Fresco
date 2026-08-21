@@ -104,6 +104,58 @@ export function PanelSkeleton({
   );
 }
 
+/**
+ * Matches the Overview's releases panel, which is nothing like a
+ * `DistributionList` and so was never the right shape for `PanelSkeleton`.
+ *
+ * Measured against the real thing rather than derived: this box renders 557px
+ * tall, which is exactly what `ReleasesPanel` occupies at any release count
+ * now that its table scrolls internally. The old fallback was a
+ * `PanelSkeleton rows={8}` at ~306px against a ~950px panel, so the page
+ * jumped two thirds of a screen when GitHub answered.
+ */
+export function ReleasesPanelSkeleton({ className }: { className?: string }) {
+  return (
+    <section
+      className={cn(
+        "rounded-lg border border-stone-200 bg-white p-3 shadow-panel",
+        className
+      )}
+    >
+      <div className="mb-2.5 flex h-5.5 items-center justify-between gap-3">
+        <Skeleton className="h-4 w-44" />
+        <Skeleton className="h-2.5 w-32" />
+      </div>
+      <div className="space-y-3">
+        {/* Figure strip: label, value, hint — 52px. */}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i}>
+              <Skeleton className="h-2.5 w-20" />
+              <Skeleton className="mt-1 h-3 w-12" />
+              <Skeleton className="mt-1 h-2.5 w-24" />
+            </div>
+          ))}
+        </div>
+        {/* Chart box + legend row. */}
+        <div className="space-y-1">
+          <Skeleton className="h-[160px] w-full rounded-md" />
+          <div className="flex gap-4 px-1">
+            <Skeleton className="h-2.5 w-24" />
+            <Skeleton className="h-2.5 w-20" />
+          </div>
+        </div>
+        {/* Table: header band plus the scroll box, at their real heights. */}
+        <div className="overflow-clip rounded-lg border border-stone-200">
+          <div className="h-[29px] border-b border-stone-300 bg-white" />
+          <Skeleton className="h-[208px] w-full rounded-none" />
+        </div>
+        <Skeleton className="h-2.5 w-2/3" />
+      </div>
+    </section>
+  );
+}
+
 /** Square placeholder for the globe, which is both slow and large. */
 export function GlobeSkeletonPanel() {
   return (

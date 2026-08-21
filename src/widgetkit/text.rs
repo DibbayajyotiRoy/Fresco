@@ -796,11 +796,19 @@ mod tests {
         // failed on a machine with no CJK coverage at all, because that is a
         // property of the machine, not of the code.
         let Some(mut s) = stack() else { return };
-        let m = s.measure(&run("桌面壁纸", 32.0), 1.0);
-        if m.width <= 0.0 {
+        // Skip on *coverage*, not on a measurement. Absent ideographs do not
+        // measure zero — they measure a fallback box with some default advance
+        // — so the old `width <= 0.0` guard waved a machine with no CJK font
+        // straight into the assertion below and failed there instead of
+        // skipping: CI reported 76.81 against Latin's 77.83, i.e. ~19 units a
+        // glyph where full-width at size 32 is ~32. `cjk_family` asks the font
+        // database what is installed, which is the question actually being
+        // guarded on.
+        let Some(_) = s.cjk_family() else {
             eprintln!("no CJK-capable font installed; skipping coverage assertion");
             return;
-        }
+        };
+        let m = s.measure(&run("桌面壁纸", 32.0), 1.0);
         // CJK ideographs are full-width: four of them at 32 units are far wider
         // than four Latin letters, which is a cheap proof real glyphs were
         // found rather than four notdef boxes of a default advance.

@@ -16,7 +16,13 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev ffmpegthumbnailer \
             libmpv-dev libx11-dev libxrandr-dev \
-            libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev
+            libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev \
+            fonts-wqy-microhei
+          # fonts-wqy-microhei: a CJK face, so the zh-CN text path is actually
+          # exercised here. Without one installed the CJK coverage tests skip
+          # themselves and the shipped Chinese UI goes untested on every run.
+          # Chosen over fonts-noto-cjk because it is a few MB rather than
+          # ~200MB and the tests only need coverage, not a specific face.
 
       - uses: dtolnay/rust-toolchain@1.91.0
         with:

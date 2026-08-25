@@ -242,12 +242,18 @@ enum Click {
 const SUPPORT_POLL: Duration = Duration::from_secs(30 * 60);
 
 /// How often to nudge for feedback, and how often the loop wakes to check.
-const FEEDBACK_REMINDER_INTERVAL: u64 = 5 * 60 * 60; // seconds
+///
+/// Weekly. It was every five hours, which on a machine left running is up to
+/// four prompts a day asking the same favour — frequent enough to read as
+/// nagging from software that is otherwise silent, and the surest way to have
+/// the reminder switched off before it is ever acted on. Once a week is still
+/// present without being a recurring interruption.
+const FEEDBACK_REMINDER_INTERVAL: u64 = 7 * 24 * 60 * 60; // seconds
 const FEEDBACK_REMINDER_POLL: Duration = Duration::from_secs(10 * 60);
 
-/// Spawn the periodic feedback reminder: a desktop notification every 5 hours
-/// until the user submits feedback once (then it stops for good), or disables
-/// `feedback_reminders` in config.toml.
+/// Spawn the periodic feedback reminder: a desktop notification once a week
+/// until the user submits feedback once (then it stops for good), or turns
+/// reminders off in Settings.
 pub fn spawn_feedback_reminder() {
     std::thread::Builder::new()
         .name("fresco-feedback-nudge".into())
@@ -307,8 +313,8 @@ fn support_watch_loop() {
 
 fn feedback_reminder_loop() {
     let path = reminder_state_path();
-    // First run: start the clock now so the first nudge lands 5h from install,
-    // not at first launch.
+    // First run: start the clock now so the first nudge lands a week from
+    // install, not at first launch.
     if read_epoch(&path).is_none() {
         write_epoch(&path, epoch_now());
     }

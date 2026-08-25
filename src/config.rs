@@ -1241,8 +1241,12 @@ pub struct Config {
     /// True once the (one-time, opt-in) feedback prompt has been shown.
     #[serde(default)]
     pub feedback_prompted: bool,
-    /// Periodic desktop reminder to send feedback (every 5 hours until the
-    /// user submits once). Set false in config.toml to silence it.
+    /// Periodic desktop reminder to send feedback (once a week until the user
+    /// submits once, after which it stops for good).
+    ///
+    /// Exposed as a Settings switch: this is the only notification Fresco
+    /// raises on its own schedule, so turning it off is what "stop notifying
+    /// me" means, and a user should not have to find a TOML file to do it.
     #[serde(default = "default_true")]
     pub feedback_reminders: bool,
     /// Full anonymous usage telemetry (daily ping with a random install id,

@@ -462,5 +462,6 @@
   "Tell us what's working and what isn't — it takes ten seconds and shapes the next release.": "告诉我们哪些好用、哪些不好用——只需十秒，就能影响下一个版本。",
   "{m}m left today": "今天还剩 {m} 分钟",
   "{h}h left today": "今天还剩 {h} 小时",
-  "{h}h {m}m left today": "今天还剩 {h} 小时 {m} 分钟"
+  "{h}h {m}m left today": "今天还剩 {h} 小时 {m} 分钟",
+  "Feedback reminders": "反馈提醒"
 }

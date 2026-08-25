@@ -1084,6 +1084,21 @@ fn build_menu_popover(
     // Off here means the country-only tier, not silence — the same trade the
     // consent dialog spells out. config.toml is the way to opt out entirely
     // (see telemetry::opt_out_completely), and TERMS.md documents it.
+    // The only notification Fresco raises on its own schedule, so this switch
+    // is what "stop notifying me" means. It sat in config.toml only, which is
+    // not a place a user should have to go to stop being interrupted.
+    popover_box.append(&switch_row(
+        t!("Feedback reminders"),
+        state.borrow().config.feedback_reminders,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.feedback_reminders = active;
+                s.config.save().ok();
+            }
+        },
+    ));
     popover_box.append(&switch_row(
         t!("Share anonymous usage statistics"),
         state.borrow().config.telemetry,

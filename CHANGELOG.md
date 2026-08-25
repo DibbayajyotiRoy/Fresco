@@ -4,6 +4,77 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.41] — 2026-08-21
+
+### Changed
+- **Feedback reminders are now a switch in the app, and arrive once a week.**
+  The reminder is the only notification Fresco raises on its own schedule, and
+  the only way to stop it was editing `feedback_reminders` in `config.toml` —
+  which its own documentation told you to do. Being interrupted by an app
+  should not require finding a TOML file to make it stop, so it is now a switch
+  in the app menu beside the telemetry one. Turning it off takes effect within
+  minutes rather than at the next daemon start.
+
+  The interval was five hours. On a machine left running that is up to four
+  prompts a day asking the same favour — often enough to read as nagging from
+  software that is otherwise silent, and the surest way to have the reminder
+  switched off before it is ever acted on. It is now weekly, and still stops
+  for good the moment feedback is sent, so most people will see it once or
+  twice in total.
+
+  Event-driven notifications — a maintainer replying to your support thread, an
+  available update, admin notices — are unaffected by this switch.
+
+## [1.1.40] — 2026-08-21
+
+### Added
+- **Widgets are drawn as real graphics instead of subtitles.** The clock,
+  lyrics, visualiser and album-art disc were previously drawn through the
+  renderer's subtitle layer, which could only place text. They are now
+  rasterised as images, which is what made cards, rounded corners, album art
+  and the spectrum panel possible at all. Each display gets its own correctly
+  sized card, so a laptop beside an external monitor no longer shares one
+  layout between two very different screens.
+
+- **A new clock face, NOS.** A rounded square with dot-matrix numerals and a
+  ring of discrete dots carrying how much of the day has passed. The elapsed
+  part of the ring is distinguished by dot *size* as well as colour, so it
+  still reads in greyscale and for red-green colour blindness — a red arc among
+  grey dots of identical brightness would have been invisible to roughly one
+  man in twelve. It is the only face offered while the others are reworked.
+
+### Fixed
+- **Widgets landed in the wrong place on scaled displays.** On a display at
+  125%, 150% or any other fractional scale, a widget set to "bottom centre"
+  appeared adrift near the middle of the screen. Fresco positioned widgets
+  against the display's resolution, but the renderer places them in a
+  coordinate space of its own that is a different size again — on a 2560×1440
+  panel at 150% it is 3414×1920, *larger* than the display, so no amount of
+  dividing would have corrected it. Fresco now asks the renderer where things
+  actually go instead of calculating it. Unscaled displays were never affected,
+  which is why this only ever showed up on some machines.
+
+- **The app menu would not open on some laptops.** The menu had grown taller
+  than the screen it had to fit on, and a menu that does not fit does not get
+  clipped on Wayland — it silently fails to appear, so the button looked dead.
+  It now scrolls. This depended entirely on display size and scale, which is
+  why the same build worked on an external monitor and not on the laptop panel.
+
+- **The clock's date no longer gets cut off mid-word.** It read
+  `THURSDAY · 2…`, which names neither the day nor the date. It now drops the
+  weekday and shows the full date instead.
+
+- **The clock's second line says something useful.** It read
+  `Week 34 · GMT+05:30` — an ISO week number almost nobody can act on, and a
+  fact about your machine's configuration rather than about the day. It now
+  says how much of the day is left.
+
+- **Untranslated Chinese strings.** Several pieces of the interface could never
+  be translated at all because of how they were written in the source, so they
+  stayed in English in an otherwise Chinese interface. Fresco's own tests now
+  cover the Chinese text path, which previously skipped itself on the build
+  machine.
+
 ## [1.1.39] — 2026-08-20
 
 ### Added

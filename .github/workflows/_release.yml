@@ -102,6 +102,29 @@ jobs:
         # the already-stripped release binaries alone.
         run: cargo deb --no-build --no-strip
 
+      # Release notes come from CHANGELOG.md so the page says what changed in
+      # prose. `generate_release_notes` stays on underneath it: GitHub appends
+      # its own commit and contributor list after this body, so nothing is lost.
+      #
+      # A missing section fails the release *before* anything is published.
+      # v1.1.40 shipped with no changelog entry at all and nobody noticed until
+      # a user asked why the release page said nothing, which is exactly the
+      # failure a version bump alone cannot catch.
+      - name: Release notes from CHANGELOG
+        run: |
+          VER="${{ inputs.tag }}"; VER="${VER#v}"
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { inside = 1; next }
+            inside && /^## \[/ { exit }
+            inside { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::CHANGELOG.md has no '## [$VER]' section. Add one before releasing."
+            exit 1
+          fi
+          echo "Release notes ($(wc -l < RELEASE_NOTES.md) lines):"
+          cat RELEASE_NOTES.md
+
       # Publish the installable artifacts first so a flaky smoke test can never
       # block the release.
       - name: Upload artifacts to release
@@ -112,6 +135,7 @@ jobs:
           files: |
             target/debian/fresco_*.deb
             install.sh
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
 
       - name: Smoke test (daemon check subcommand)

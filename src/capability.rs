@@ -80,7 +80,9 @@ fn classify(
     if !is_wayland {
         return Capability::X11;
     }
-    if is_gnome(current_desktop) {
+    // Cinnamon's muffin, like GNOME's Mutter, has no layer-shell: without a
+    // registry probe, guessing layer-shell there means mpvpaper fails at login.
+    if is_gnome(current_desktop) || is_cinnamon_name(current_desktop) {
         Capability::WaylandGnomeStatic
     } else {
         Capability::WaylandLayerShell
@@ -110,6 +112,24 @@ fn classify_deepin_dde(current_desktop: Option<&str>, session_desktop: Option<&s
                 s.contains("deepin") || s == "dde"
             })
         })
+}
+
+/// Is this session Cinnamon (Linux Mint)? Its muffin compositor has no
+/// layer-shell on Wayland and reads its own background schema.
+pub fn is_cinnamon() -> bool {
+    [
+        std::env::var("XDG_CURRENT_DESKTOP").ok(),
+        std::env::var("XDG_SESSION_DESKTOP").ok(),
+    ]
+    .iter()
+    .flatten()
+    .any(|v| is_cinnamon_name(Some(v)))
+}
+
+fn is_cinnamon_name(desktop: Option<&str>) -> bool {
+    desktop
+        .map(|d| d.to_ascii_lowercase().contains("cinnamon"))
+        .unwrap_or(false)
 }
 
 fn is_gnome(desktop: Option<&str>) -> bool {
@@ -185,6 +205,19 @@ mod tests {
                 "desktop {d}"
             );
         }
+    }
+
+    #[test]
+    fn wayland_cinnamon_is_static() {
+        for d in ["X-Cinnamon", "Cinnamon", "cinnamon"] {
+            assert_eq!(
+                classify(Some("wayland"), true, Some(d)),
+                Capability::WaylandGnomeStatic,
+                "desktop {d}"
+            );
+            assert!(is_cinnamon_name(Some(d)));
+        }
+        assert!(!is_cinnamon_name(Some("GNOME")));
     }
 
     #[test]

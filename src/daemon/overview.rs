@@ -12,7 +12,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::{Kind, Wallpaper};
 
-const SCHEMA: &str = "org.gnome.desktop.background";
+const GNOME_SCHEMA: &str = "org.gnome.desktop.background";
+/// Cinnamon (Linux Mint) forked the background settings: muffin and the
+/// Cinnamon Wayland session draw `org.cinnamon.desktop.background` and ignore
+/// the GNOME schema, so writing only GNOME's key is an invisible wallpaper.
+const CINNAMON_SCHEMA: &str = "org.cinnamon.desktop.background";
+
+/// The background schema this session actually draws, and the keys it has.
+/// Cinnamon has no `picture-uri-dark`.
+fn schema() -> (&'static str, &'static [&'static str]) {
+    if crate::capability::is_cinnamon() {
+        (CINNAMON_SCHEMA, &["picture-uri"])
+    } else {
+        (GNOME_SCHEMA, &["picture-uri", "picture-uri-dark"])
+    }
+}
 
 /// Set a still frame of `wallpaper` as the desktop background.
 pub fn apply(wallpaper: &Wallpaper) {
@@ -26,8 +40,9 @@ pub fn apply(wallpaper: &Wallpaper) {
     // GVariant string literal: 'file:///path'. Our frame path is a safe cache
     // location (no spaces/quotes), so simple single-quoting is sufficient.
     let gv = format!("'file://{}'", frame.display());
-    gset("picture-uri", &gv);
-    gset("picture-uri-dark", &gv);
+    for key in schema().1 {
+        gset(key, &gv);
+    }
     log::info!("overview background set to {}", frame.display());
 }
 
@@ -37,12 +52,10 @@ pub fn restore() {
     let Ok(text) = std::fs::read_to_string(&sf) else {
         return;
     };
-    let mut lines = text.lines();
-    if let Some(v) = lines.next() {
-        gset("picture-uri", v);
-    }
-    if let Some(v) = lines.next() {
-        gset("picture-uri-dark", v);
+    for (key, v) in schema().1.iter().zip(text.lines()) {
+        if !v.is_empty() {
+            gset(key, v);
+        }
     }
     std::fs::remove_file(&sf).ok();
     log::info!("overview background restored");
@@ -162,15 +175,14 @@ fn save_original_once() {
     if sf.exists() {
         return;
     }
-    let light = gget("picture-uri");
-    let dark = gget("picture-uri-dark");
-    if light.is_empty() && dark.is_empty() {
+    let values: Vec<String> = schema().1.iter().map(|k| gget(k)).collect();
+    if values.iter().all(String::is_empty) {
         return;
     }
     if let Some(d) = sf.parent() {
         std::fs::create_dir_all(d).ok();
     }
-    std::fs::write(&sf, format!("{light}\n{dark}\n")).ok();
+    std::fs::write(&sf, values.join("\n") + "\n").ok();
 }
 
 /// Whether the GNOME background schema can be driven at all.
@@ -185,7 +197,7 @@ fn save_original_once() {
 /// the way a KDE session does.
 fn gnome_available() -> bool {
     match Command::new("gsettings")
-        .args(["get", SCHEMA, "picture-uri"])
+        .args(["get", schema().0, "picture-uri"])
         .output()
     {
         Ok(out) => out.status.success(),
@@ -212,7 +224,7 @@ fn gnome_available() -> bool {
 
 fn gget(key: &str) -> String {
     Command::new("gsettings")
-        .args(["get", SCHEMA, key])
+        .args(["get", schema().0, key])
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -221,6 +233,6 @@ fn gget(key: &str) -> String {
 
 fn gset(key: &str, gvariant: &str) {
     let _ = Command::new("gsettings")
-        .args(["set", SCHEMA, key, gvariant])
+        .args(["set", schema().0, key, gvariant])
         .status();
 }

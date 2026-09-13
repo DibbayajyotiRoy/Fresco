@@ -11,7 +11,11 @@
 //!
 //! GTK4's CSS is a *subset* of web CSS: this file sticks to the supported
 //! feature set (`alpha()`, `shade()`, `linear-gradient()`, `box-shadow`,
-//! pseudo-classes) and never uses `transform`, `filter`, `var()`, or `calc()`.
+//! pseudo-classes) and never uses `transform`, `var()`, or `calc()`. The one
+//! exception is `filter: blur()` on the `.tp-blur-*` ladder below — GTK's own
+//! default stylesheet uses `filter`, so the property is supported, and a
+//! defocus is the one thing the transition preview cannot fake with opacity
+//! and a `gsk` transform.
 //! It also never references an `@define-color` name — GTK ignores runtime
 //! redefinitions of one, so [`build_css`] substitutes literal colors.
 
@@ -351,6 +355,19 @@ label.error, label.error.dim {{ color: @destructive_color; }}
 /* Crop editor + transition preview stage: give the media a defined edge
    instead of floating on the window background. */
 .crop-frame {{ background-color: @thumb_mat; border: 1px solid @card_border; border-radius: 12px; }}
+
+/* Defocus ladder for the Blur transition preview (src/gui/transition_preview.rs).
+   Declared as fixed steps because GTK CSS takes a literal length here and the
+   animation runs at 30fps — rebuilding a provider per frame to interpolate one
+   number would cost far more than the effect is worth. Six steps is enough for
+   the ramp to read as continuous at this size. Deliberately unthemed: a defocus
+   is not a color, so it is identical in light and dark. */
+.tp-blur-1 {{ filter: blur(2px); }}
+.tp-blur-2 {{ filter: blur(4px); }}
+.tp-blur-3 {{ filter: blur(7px); }}
+.tp-blur-4 {{ filter: blur(10px); }}
+.tp-blur-5 {{ filter: blur(14px); }}
+.tp-blur-6 {{ filter: blur(18px); }}
 
 /* ===== Misc ===== */
 .welcome-cta {{ min-height: 40px; border-radius: 11px; font-weight: 600; }}

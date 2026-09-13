@@ -3456,6 +3456,7 @@ fn commit_item_edit(state: &Rc<RefCell<AppState>>, idx: usize) {
         if let Some(e) = s.entries.get_mut(idx) {
             if e.id == clone.id {
                 e.thumbnail = clone.thumbnail;
+                e.thumbnail_rotation = clone.thumbnail_rotation;
             }
         }
     }
@@ -3754,13 +3755,14 @@ fn spawn_thumbnail_batch(state: &Rc<RefCell<AppState>>, ids: Vec<String>) {
     if pending.is_empty() {
         return;
     }
-    let (tx, rx) = async_channel::bounded::<Vec<(String, Option<PathBuf>)>>(1);
+    type Thumb = (String, Option<PathBuf>, Option<u16>);
+    let (tx, rx) = async_channel::bounded::<Vec<Thumb>>(1);
     std::thread::spawn(move || {
-        let out: Vec<(String, Option<PathBuf>)> = pending
+        let out: Vec<Thumb> = pending
             .into_iter()
             .map(|mut e| {
                 e.generate_thumbnail();
-                (e.id, e.thumbnail)
+                (e.id, e.thumbnail, e.thumbnail_rotation)
             })
             .collect();
         let _ = tx.send_blocking(out);
@@ -3772,12 +3774,13 @@ fn spawn_thumbnail_batch(state: &Rc<RefCell<AppState>>, ids: Vec<String>) {
         };
         {
             let mut s = state.borrow_mut();
-            for (id, thumb) in results {
+            for (id, thumb, baked) in results {
                 if thumb.is_none() {
                     continue;
                 }
                 if let Some(e) = s.entries.iter_mut().find(|e| e.id == id) {
                     e.thumbnail = thumb;
+                    e.thumbnail_rotation = baked;
                 }
             }
             save_entries(&s.entries).ok();
@@ -4286,6 +4289,21 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     ])));
     prefs.add(&fit_row);
 
+    // Transition effect. Sits here, next to Fit, because it is no longer a
+    // slideshow setting: the daemon's animation machine moved out of
+    // `Slideshow`, so a video or a single image gets the same effect when it
+    // comes up. Its subtitle is the *selected* effect's description rather
+    // than one line about the row, which is the only way a ComboRow can say
+    // that Blur costs GPU while it runs and that the fade is a fade.
+    let transition_row = adw::ComboRow::new();
+    transition_row.set_title(t!("Transition"));
+    transition_row.set_model(Some(&gtk4::StringList::new(&table_labels(
+        &TRANSITIONS_SHOWN,
+    ))));
+    transition_row.set_selected(transition_index(Transition::default()));
+    transition_row.set_subtitle(transition_hint(Transition::default()));
+    prefs.add(&transition_row);
+
     let mute_row = adw::ActionRow::new();
     mute_row.set_title(t!("Muted"));
     let mute_sw = gtk4::Switch::new();
@@ -4332,19 +4350,6 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     ])));
     interval_row.set_selected(2);
     prefs.add(&interval_row);
-
-    // Slideshow transition effect (shown only for slideshows).
-    let transition_row = adw::ComboRow::new();
-    transition_row.set_title(t!("Transition"));
-    transition_row.set_subtitle(t!("Effect when the image changes"));
-    transition_row.set_model(Some(&gtk4::StringList::new(&[
-        t!("None"),
-        t!("Crossfade"),
-        t!("Fade to black"),
-        t!("Ken Burns"),
-    ])));
-    transition_row.set_selected(1);
-    prefs.add(&transition_row);
 
     controls.append(&prefs);
 
@@ -4398,6 +4403,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             let interval = interval_secs(interval_ref.selected());
             let transition = transition_from_index(transition_ref.selected());
             let power_saving = power_edit_from_index(power_ref.selected());
+            let mut reseed: Option<(PathBuf, u16)> = None;
             let name = {
                 let mut s = state_set.borrow_mut();
                 s.config.wallpaper.crop = crop;
@@ -4406,6 +4412,10 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 s.config.wallpaper.mute = mute_ref.is_active();
                 s.config.wallpaper.volume = vol_ref.value() as u8;
                 s.config.wallpaper.power_saving = power_saving;
+                // Every kind carries a transition now, so this is written
+                // unconditionally; the slideshow's own copy is kept in step for
+                // a daemon that still reads the old location.
+                s.config.wallpaper.transition = transition;
                 s.config.enabled = true;
                 if let Some(ss) = s.config.wallpaper.slideshow.as_mut() {
                     ss.interval_s = interval;
@@ -4413,9 +4423,9 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 }
                 let idx = s.editing_idx;
                 if let Some(e) = idx.and_then(|i| s.entries.get_mut(i)) {
+                    e.transition = Some(transition);
                     if e.kind == Kind::Slideshow {
                         e.interval_s = Some(interval);
-                        e.transition = Some(transition);
                     } else {
                         // Remember audio + orientation so a later gallery set (which
                         // rebuilds from the entry) keeps what was chosen here.
@@ -4425,6 +4435,11 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                         e.power_saving = power_saving;
                         // The card must show the new orientation immediately.
                         e.generate_thumbnail();
+                        // The preview reads that same file, now turned
+                        // differently; keep it in step in case we stay here.
+                        if let Some(t) = e.thumbnail.clone().filter(|p| p.exists()) {
+                            reseed = Some((t, e.thumbnail_baked_rotation()));
+                        }
                     }
                 }
                 save_entries(&s.entries).ok();
@@ -4432,6 +4447,9 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     .map(|e| e.name.clone())
                     .unwrap_or_default()
             };
+            if let Some((thumb, baked)) = reseed {
+                crop_ref.set_media(&thumb, baked);
+            }
             let ok = {
                 let s = state_set.borrow();
                 match daemon_ctl::ensure_daemon_and_apply(&s.config) {
@@ -4503,15 +4521,17 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             // Show the thumbnail (videos) or the image itself as the crop preview.
             if let Some(entry) = st.editing_idx.and_then(|i| st.entries.get(i)) {
                 title_ref.set_subtitle(&entry.name);
+                // The thumbnail already carries the entry's rotation in its
+                // pixels; tell the preview so it isn't turned a second time.
                 if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
-                    ce.set_media(thumb);
+                    ce.set_media(thumb, entry.thumbnail_baked_rotation());
                 } else if let Some(p) = entry
                     .path
                     .as_deref()
                     .or_else(|| entry.paths.first().map(|p| p.as_path()))
                     .filter(|p| p.exists())
                 {
-                    ce.set_media(p);
+                    ce.set_media(p, 0);
                 }
                 // Audio rows only apply to video; interval only to slideshows.
                 let has_audio = matches!(entry.kind, Kind::Video | Kind::Playlist);
@@ -4522,20 +4542,26 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 items_btn_ref.set_visible(matches!(entry.kind, Kind::Playlist | Kind::Slideshow));
                 let is_slideshow = entry.kind == Kind::Slideshow;
                 interval_ref.set_visible(is_slideshow);
-                transition_ref.set_visible(is_slideshow);
-                // Slideshows preview the transition; other media show the crop tool.
+                // The effect applies to any wallpaper coming up, so the picker
+                // is shown for every kind. Only the looping *demo* needs two
+                // stills, so it stays with slideshows and the crop tool keeps
+                // the pane for everything else.
                 crop_frame_ref.set_visible(!is_slideshow);
                 edit_actions_ref.set_visible(!is_slideshow);
                 tp_frame_ref.set_visible(is_slideshow);
+                // Fall back to the wallpaper-level value for an entry saved
+                // before entries carried one of their own.
+                let stored = entry.transition.unwrap_or(st.config.wallpaper.transition);
+                transition_ref.set_selected(transition_index(stored));
+                // Follow the combo (never the raw entry) so a transition the
+                // picker no longer lists can't reach the subtitle or preview.
+                let shown = transition_from_index(transition_ref.selected());
+                transition_ref.set_subtitle(transition_hint(shown));
                 if is_slideshow {
                     interval_ref.set_selected(interval_index(entry.interval_s.unwrap_or(30)));
                     let (a, b) = slideshow_preview_images(entry);
                     tp.set_images(a, b);
-                    transition_ref
-                        .set_selected(transition_index(entry.transition.unwrap_or_default()));
-                    // Follow the combo (never the raw entry) so a removed
-                    // transition like Slide can't reach the preview.
-                    tp.set_transition(transition_from_index(transition_ref.selected()));
+                    tp.set_transition(shown);
                 } else {
                     tp.stop();
                 }
@@ -4563,11 +4589,14 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         });
     }
 
-    // Live-preview the transition the moment the user picks one.
+    // Live-preview the transition the moment the user picks one, and say what
+    // it does — including which one costs GPU — without making them apply it.
     {
         let tp = transition_preview.clone();
         transition_row.connect_selected_notify(move |row| {
-            tp.set_transition(transition_from_index(row.selected()));
+            let chosen = transition_from_index(row.selected());
+            row.set_subtitle(transition_hint(chosen));
+            tp.set_transition(chosen);
         });
     }
 
@@ -7120,24 +7149,71 @@ fn interval_index(secs: u64) -> u32 {
         .unwrap_or(2) as u32
 }
 
-fn transition_from_index(index: u32) -> Transition {
-    match index {
-        1 => Transition::Crossfade,
-        2 => Transition::Fade,
-        3 => Transition::KenBurns,
-        _ => Transition::None,
+/// The transitions the picker offers, in the order it lists them. Same
+/// two-way index-map idiom as [`LYRIC_STYLES`] and friends.
+///
+/// Two variants are deliberately absent. `Crossfade` never cross-dissolved
+/// anything — one decoder cannot show two files at once, so it was always a
+/// short dip through black, i.e. `Fade` with fewer steps — and offering both
+/// asked people to choose between an effect and the same effect under a name
+/// that lies. `Slide` was dropped from the picker before this change and stays
+/// dropped. Both still play if a config names them; see [`transition_index`].
+const TRANSITIONS_SHOWN: [(Transition, &str); 5] = [
+    (Transition::None, "None"),
+    (Transition::Fade, "Fade through black"),
+    (Transition::KenBurns, "Ken Burns"),
+    (Transition::Zoom, "Zoom"),
+    (Transition::Blur, "Blur"),
+];
+
+/// What one transition actually does, shown as the picker's subtitle for
+/// whichever effect is selected.
+///
+/// A `ComboRow` has one subtitle and no per-item description, so this is the
+/// only place the differences can be stated — and they need stating: two of
+/// these cost nothing and one of them costs GPU for as long as it runs.
+fn transition_hint(t: Transition) -> &'static str {
+    match t {
+        Transition::None => t!("The wallpaper changes with no effect."),
+        // Named "crossfade" for years without ever being one.
+        Transition::Fade | Transition::Crossfade => {
+            t!("Dips out through black and back in — one file at a time, so never a dissolve.")
+        }
+        Transition::Slide => t!("Pushes the old wallpaper off as the new one arrives."),
+        Transition::KenBurns => t!("Drifts and zooms slowly the whole time the wallpaper is up."),
+        Transition::Zoom => t!("Punches in on the old wallpaper and settles on the new one."),
+        Transition::Blur => t!("Defocuses out and back in. Uses the GPU for as long as it runs."),
     }
 }
 
+/// Picker row → the transition it writes.
+fn transition_from_index(index: u32) -> Transition {
+    TRANSITIONS_SHOWN
+        .get(index as usize)
+        .map_or(Transition::None, |(t, _)| *t)
+}
+
+/// A stored transition → the picker row that represents it.
+///
+/// Exhaustive on purpose. [`table_index`] answers 0 for a value it cannot
+/// find, so a variant nobody mapped here would open the picker on "None" and
+/// write that back the moment anything else on the page changed — a silent
+/// downgrade of a setting the user never touched. Matching on the enum turns
+/// that into a compile error instead.
 fn transition_index(t: Transition) -> u32 {
-    match t {
-        Transition::None => 0,
-        Transition::Crossfade => 1,
-        Transition::Fade => 2,
-        Transition::KenBurns => 3,
-        // Slide was removed from the picker; show legacy entries as Crossfade.
-        Transition::Slide => 1,
-    }
+    let shown = match t {
+        Transition::None => Transition::None,
+        // Both are the same dip through black; `Config::migrate` rewrites the
+        // stored value, and this covers one read before that lands.
+        Transition::Crossfade | Transition::Fade => Transition::Fade,
+        // No longer offered. Folds onto the fade, which is where it folded
+        // (via Crossfade) before this table existed.
+        Transition::Slide => Transition::Fade,
+        Transition::KenBurns => Transition::KenBurns,
+        Transition::Zoom => Transition::Zoom,
+        Transition::Blur => Transition::Blur,
+    };
+    table_index(&TRANSITIONS_SHOWN, shown)
 }
 
 // ─── Feedback prompt + admin notifications (Supabase) ──────────────────────────
@@ -9087,6 +9163,84 @@ mod tests {
         }
 
         assert_eq!(table_labels(&WIDGET_THEMES).len(), WIDGET_THEMES.len());
+    }
+
+    /// Same trap as [`widget_theme_label_table_covers_every_variant`], for the
+    /// transition picker — with one wrinkle none of the other tables has.
+    ///
+    /// Two variants are deliberately not offered: `Crossfade`, which was never
+    /// a crossfade, and `Slide`, dropped from the picker earlier. So "every
+    /// variant appears in the table" is the wrong assertion here. What must
+    /// hold instead is that every variant reaches a row that plays the same
+    /// thing, and that nothing falls through to row 0 — [`table_index`]
+    /// answers 0 for a value it cannot find, so a forgotten variant would open
+    /// the picker on "None", turning the user's effect off on screen and
+    /// writing that off back to disk the next time they pressed Set.
+    ///
+    /// The compile-time half is [`transition_index`] itself: it matches on the
+    /// enum, so a new variant is a build error rather than a silent 0. The
+    /// `match` below keeps this test honest about that as the list grows.
+    #[test]
+    fn transition_label_table_covers_every_variant() {
+        const ALL: [Transition; 7] = [
+            Transition::None,
+            Transition::Crossfade,
+            Transition::Fade,
+            Transition::Slide,
+            Transition::KenBurns,
+            Transition::Zoom,
+            Transition::Blur,
+        ];
+
+        // Every offered effect selects its own row, and that row writes it back.
+        for (i, (t, label)) in TRANSITIONS_SHOWN.iter().enumerate() {
+            assert_eq!(transition_index(*t), i as u32, "{label}");
+            assert_eq!(transition_from_index(i as u32), *t, "{label}");
+        }
+        assert_eq!(
+            transition_index(Transition::default()),
+            0,
+            "None is the default and must select its own row"
+        );
+
+        for t in ALL {
+            // Adding a variant stops this compiling, which is the whole point.
+            match t {
+                Transition::None
+                | Transition::Crossfade
+                | Transition::Fade
+                | Transition::Slide
+                | Transition::KenBurns
+                | Transition::Zoom
+                | Transition::Blur => {}
+            }
+            let row = transition_index(t);
+            assert!(
+                (row as usize) < TRANSITIONS_SHOWN.len(),
+                "{t:?} maps to row {row}, which the picker does not have"
+            );
+            assert!(
+                t == Transition::None || row != 0,
+                "{t:?} is missing from the fold and would show — and save — as None"
+            );
+            // Whatever the row writes back must itself be offered, or the next
+            // read would fold again and the value would keep drifting.
+            let back = transition_from_index(row);
+            assert!(
+                TRANSITIONS_SHOWN.iter().any(|(v, _)| *v == back),
+                "{t:?} folds onto {back:?}, which is not in the picker"
+            );
+            assert_eq!(transition_index(back), row, "{t:?} does not fold stably");
+            assert!(
+                !transition_hint(t).is_empty(),
+                "{t:?} has no description for the picker's subtitle"
+            );
+        }
+
+        assert_eq!(
+            table_labels(&TRANSITIONS_SHOWN).len(),
+            TRANSITIONS_SHOWN.len()
+        );
     }
 
     /// Same trap as the lyric and clock tables, for the visualiser's style

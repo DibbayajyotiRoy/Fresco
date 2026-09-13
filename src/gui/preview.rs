@@ -34,6 +34,8 @@ pub struct CropEditor {
     pub state: Rc<RefCell<CropState>>,
     /// Clockwise preview rotation in degrees (0/90/180/270).
     rotation: Rc<Cell<u16>>,
+    /// Clockwise rotation already present in the source's pixels.
+    baked: Rc<Cell<u16>>,
     /// Current media path, kept so a rotation change can re-render it.
     source: Rc<RefCell<Option<PathBuf>>>,
 }
@@ -118,7 +120,9 @@ impl CropEditor {
             if let (Some(handle), Some(start)) = (s.handle, s.drag_start_crop) {
                 let mut crop = start;
                 apply_handle(&mut crop, handle, ndx, ndy, s.aspect);
-                s.crop = Some(clamp_crop(crop));
+                if let Some(c) = clamp_crop(crop, handle, s.aspect) {
+                    s.crop = Some(c);
+                }
             }
             drop(s);
             draw_update.queue_draw();
@@ -147,12 +151,17 @@ impl CropEditor {
             drawing,
             state,
             rotation: Rc::new(Cell::new(0)),
+            baked: Rc::new(Cell::new(0)),
             source: Rc::new(RefCell::new(None)),
         }
     }
 
-    pub fn set_media(&self, path: &Path) {
+    /// Preview `path`, whose pixels are already turned `baked` degrees
+    /// clockwise (a rotated library thumbnail). `rotation()` stays the absolute
+    /// angle the wallpaper gets; only the difference is applied on screen.
+    pub fn set_media(&self, path: &Path, baked: u16) {
         *self.source.borrow_mut() = Some(path.to_path_buf());
+        self.baked.set(baked % 360);
         self.render();
     }
 
@@ -174,7 +183,7 @@ impl CropEditor {
         let src = self.source.borrow();
         let Some(path) = src.as_deref() else { return };
         let file = || gtk4::gio::File::for_path(path);
-        let rot = self.rotation.get();
+        let rot = display_turn(self.rotation.get(), self.baked.get());
         if rot == 0 {
             self.picture.set_file(Some(&file()));
             return;
@@ -315,15 +324,157 @@ fn apply_handle(crop: &mut Crop, handle: Handle, dx: f64, dy: f64, aspect: Optio
     }
     if let Some(ar) = aspect {
         if handle != Handle::Move {
+            // Height follows width; a top handle keeps the bottom edge still,
+            // or the box drifts away from the corner being dragged.
+            let bottom = crop.y + crop.h; // == start bottom: y and h moved by dy together
             crop.h = crop.w / ar;
+            if matches!(handle, Handle::TopLeft | Handle::TopRight) {
+                crop.y = bottom - crop.h;
+            }
         }
     }
 }
 
-fn clamp_crop(mut c: Crop) -> Crop {
-    c.w = c.w.max(0.02);
-    c.h = c.h.max(0.02);
-    c.x = c.x.clamp(0.0, 1.0 - c.w);
-    c.y = c.y.clamp(0.0, 1.0 - c.h);
-    c
+/// Keep a dragged crop inside the frame. `None` when the drag produced no
+/// usable rect (a zero-size widget divides into NaN) — keep the previous one.
+///
+/// Every bound is checked before it reaches `f64::clamp`, which panics when
+/// `min > max`: a corner dragged past the edge used to make `w > 1`, so
+/// `clamp(0.0, 1.0 - w)` aborted the app the moment the box touched the frame.
+fn clamp_crop(c: Crop, handle: Handle, aspect: Option<f64>) -> Option<Crop> {
+    const MIN: f64 = 0.02;
+    if ![c.x, c.y, c.w, c.h].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    if handle == Handle::Move {
+        // Moving never changes size: slide back inside instead of shrinking.
+        let w = c.w.clamp(MIN, 1.0);
+        let h = c.h.clamp(MIN, 1.0);
+        return Some(Crop {
+            x: c.x.clamp(0.0, 1.0 - w),
+            y: c.y.clamp(0.0, 1.0 - h),
+            w,
+            h,
+        });
+    }
+    // Resizing: the frame edge clips the dragged edge, and the opposite edge
+    // stays where the user put it.
+    let (mut x0, mut x1) = (c.x.min(c.x + c.w), c.x.max(c.x + c.w));
+    let (mut y0, mut y1) = (c.y.min(c.y + c.h), c.y.max(c.y + c.h));
+    x0 = x0.clamp(0.0, 1.0 - MIN);
+    y0 = y0.clamp(0.0, 1.0 - MIN);
+    x1 = x1.clamp(x0 + MIN, 1.0);
+    y1 = y1.clamp(y0 + MIN, 1.0);
+    let (mut w, mut h) = (x1 - x0, y1 - y0);
+    // Clipping one side breaks a locked aspect: shrink the other side to match.
+    if let Some(ar) = aspect.filter(|a| a.is_finite() && *a > 0.0) {
+        if w / h > ar {
+            w = (h * ar).max(MIN);
+        } else {
+            h = (w / ar).max(MIN);
+        }
+        // Shrink toward the corner being held still.
+        if matches!(handle, Handle::TopLeft | Handle::BottomLeft) {
+            x0 = x1 - w;
+        }
+        if matches!(handle, Handle::TopLeft | Handle::TopRight) {
+            y0 = y1 - h;
+        }
+    }
+    Some(Crop {
+        x: x0.clamp(0.0, 1.0 - w),
+        y: y0.clamp(0.0, 1.0 - h),
+        w,
+        h,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HANDLES: [Handle; 5] = [
+        Handle::TopLeft,
+        Handle::TopRight,
+        Handle::BottomLeft,
+        Handle::BottomRight,
+        Handle::Move,
+    ];
+
+    fn inside(c: Crop) -> bool {
+        c.x >= 0.0 && c.y >= 0.0 && c.x + c.w <= 1.0 + 1e-9 && c.y + c.h <= 1.0 + 1e-9
+    }
+
+    /// Dragging any handle to or past any frame edge must not panic and must
+    /// stay inside the frame (Deepin 25 crash report).
+    #[test]
+    fn drag_past_every_edge_stays_inside() {
+        let start = Crop { x: 0.3, y: 0.3, w: 0.4, h: 0.4 };
+        let deltas = [-2.0, -0.7, -0.3, 0.0, 0.3, 0.7, 2.0];
+        for aspect in [None, Some(16.0 / 9.0), Some(9.0 / 16.0)] {
+            for handle in HANDLES {
+                for dx in deltas {
+                    for dy in deltas {
+                        let mut c = start;
+                        apply_handle(&mut c, handle, dx, dy, aspect);
+                        let out = clamp_crop(c, handle, aspect).expect("finite input");
+                        assert!(inside(out), "{out:?} handle/aspect {aspect:?}");
+                        assert!(out.w > 0.0 && out.h > 0.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn edge_to_edge_crop_is_reachable() {
+        let mut c = Crop { x: 0.2, y: 0.2, w: 0.5, h: 0.5 };
+        apply_handle(&mut c, Handle::BottomRight, 1.0, 1.0, None);
+        let out = clamp_crop(c, Handle::BottomRight, None).unwrap();
+        assert!((out.x - 0.2).abs() < 1e-9 && (out.y - 0.2).abs() < 1e-9);
+        assert!((out.x + out.w - 1.0).abs() < 1e-9 && (out.y + out.h - 1.0).abs() < 1e-9);
+    }
+
+    /// Dragging the top-left corner out past the corner with the aspect locked
+    /// grows the box toward that corner instead of collapsing it.
+    #[test]
+    fn locked_top_left_drag_past_corner_grows() {
+        let ar = Some(16.0 / 9.0);
+        let start = Crop { x: 0.3, y: 0.3, w: 0.7, h: 0.7 / (16.0 / 9.0) };
+        let mut c = start;
+        apply_handle(&mut c, Handle::TopLeft, -0.33, -0.88, ar);
+        let out = clamp_crop(c, Handle::TopLeft, ar).unwrap();
+        assert!(out.w > start.w, "{out:?}");
+        // The held corner (bottom-right) stays put.
+        assert!((out.x + out.w - 1.0).abs() < 1e-9, "{out:?}");
+        assert!((out.y + out.h - (start.y + start.h)).abs() < 1e-9, "{out:?}");
+    }
+
+    #[test]
+    fn non_finite_drag_keeps_previous_crop() {
+        let c = Crop { x: f64::NAN, y: 0.0, w: 0.5, h: 0.5 };
+        assert!(clamp_crop(c, Handle::Move, None).is_none());
+    }
+}
+
+/// Clockwise turn to apply on screen so a source already rotated `baked`
+/// degrees ends up at the absolute `rotation`.
+fn display_turn(rotation: u16, baked: u16) -> u16 {
+    (rotation % 360 + 360 - baked % 360) % 360
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::display_turn;
+
+    #[test]
+    fn a_pre_rotated_thumbnail_is_not_turned_twice() {
+        assert_eq!(display_turn(0, 0), 0);
+        assert_eq!(display_turn(90, 0), 90);
+        // Re-opening a 90° entry: the thumbnail is already at 90.
+        assert_eq!(display_turn(90, 90), 0);
+        // One more turn from there shows exactly one extra 90°.
+        assert_eq!(display_turn(180, 90), 90);
+        assert_eq!(display_turn(0, 270), 90);
+    }
 }

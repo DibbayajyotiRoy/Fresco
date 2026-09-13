@@ -164,9 +164,9 @@ use crate::config;
 use crate::dsp::{SpectrumAnalyzer, SpectrumConfig};
 use crate::lyrics::{self, Anchor, LrcLine};
 use crate::mpris::{self, NowPlaying, PlaybackStatus, PositionClock, PositionReliability};
-use crate::visualizer::{self, VisualStyleCfg};
+use crate::visualizer::{self, VisualStyle, VisualStyleCfg};
 use crate::widgetkit::{
-    self, cards, BarPaint, Canvas, Color, FontStack, Mode, Size, Theme, WidgetSize,
+    self, cards, BarPaint, Canvas, Color, FontStack, Mode, Size, SpectrumStyle, Theme, WidgetSize,
 };
 
 use super::lyrics_runtime::{self, Action, LyricsRuntime};
@@ -1428,6 +1428,24 @@ fn visual_variant(cfg: &VisualStyleCfg) -> cards::VisualizerVariant {
     }
 }
 
+/// Which shape the spectrum draws.
+///
+/// `visualizer::VisualStyle` is the settings-side name and
+/// [`surface::SpectrumStyle`] the toolkit-side one; they are variant for
+/// variant, and this is the one place the two meet. Exhaustive on purpose —
+/// a sixth shape added to either side must fail to compile here rather than
+/// quietly fall back to bars, which is precisely how the setting came to be
+/// ignored in the first place.
+fn spectrum_style(s: VisualStyle) -> SpectrumStyle {
+    match s {
+        VisualStyle::Bars => SpectrumStyle::Bars,
+        VisualStyle::Mirror => SpectrumStyle::Mirror,
+        VisualStyle::Wave => SpectrumStyle::Wave,
+        VisualStyle::Dots => SpectrumStyle::Dots,
+        VisualStyle::Ring => SpectrumStyle::Ring,
+    }
+}
+
 /// How the bars are coloured, from the three config keys that decide it.
 ///
 /// `accent_follow` wins over `colour`, exactly as it does everywhere else in
@@ -1682,6 +1700,7 @@ impl VisualState {
 
         let style = &cfg.style;
         let variant = visual_variant(style);
+        let shape = spectrum_style(style.style);
         let opacity = f32::from(style.opacity) / 255.0;
         let paint = bar_paint(style, theme);
         let bars_theme = bars_only(theme);
@@ -1712,7 +1731,14 @@ impl VisualState {
         // What the picture is *of*, and nothing that moves: the spectrum itself
         // is the animation, and it is `stepped`. A band magnitude in here would
         // rasterise at the loop rate and defeat the whole rate cap.
-        let key = ContentKey::of((bands.len(), variant == cards::VisualizerVariant::Bare));
+        // The shape belongs in here with the band count and the variant: it
+        // changes the picture without changing any band, so a key that left it
+        // out would hold a cached chrome drawn for the previous shape.
+        let key = ContentKey::of((
+            bands.len(),
+            variant == cards::VisualizerVariant::Bare,
+            shape,
+        ));
         // The chrome is only valid until something that is not a band changes.
         let stale = bmp.dirty;
 
@@ -1750,6 +1776,7 @@ impl VisualState {
                     opacity,
                     rounded: style.rounded,
                     paint,
+                    style: shape,
                     variant,
                     ..cards::VisualizerData::default()
                 };

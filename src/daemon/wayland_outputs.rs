@@ -30,6 +30,14 @@ struct State {
     outputs: HashMap<u32, OutputInfo>,
 }
 
+/// Whether a [`list_outputs`] error means the compositor itself could not be
+/// reached (no socket, or `WAYLAND_DISPLAY` pointing at a dead one) — as
+/// opposed to a protocol hiccup mid-roundtrip, which says nothing about the
+/// displays.
+pub fn is_unreachable(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<wayland_client::ConnectError>().is_some()
+}
+
 /// Enumerate connected Wayland outputs into the neutral [`Monitor`] set.
 pub fn list_outputs() -> Result<Vec<Monitor>> {
     let conn = Connection::connect_to_env().context("connecting to the Wayland display")?;

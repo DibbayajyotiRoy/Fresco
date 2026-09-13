@@ -40,7 +40,7 @@ use crate::widgetkit::canvas::Canvas;
 use crate::widgetkit::color::Color;
 use crate::widgetkit::geom::{Point, Rect, Size};
 use crate::widgetkit::paint::Fill;
-use crate::widgetkit::surface::{self, BarPaint, BarStyle, WidgetSize};
+use crate::widgetkit::surface::{self, BarPaint, BarStyle, SpectrumStyle, WidgetSize};
 use crate::widgetkit::text::FontStack;
 use crate::widgetkit::theme::{radius_nested, Theme};
 use crate::widgetkit::typo::{self, Script, Step};
@@ -81,6 +81,13 @@ pub struct VisualizerData<'a> {
     pub rounded: bool,
     /// How the bars are coloured.
     pub paint: BarPaint,
+    /// Which *shape* the spectrum draws — bars, mirror, wave, dots or ring.
+    ///
+    /// Separate from [`VisualizerData::variant`], which chooses the *chrome*
+    /// around it. The two are independent by design: every shape draws in a
+    /// panel, bare on the wallpaper, or in the chassis's centre bezel, and a
+    /// user picking "Ring" is not also asking to lose the card.
+    pub style: SpectrumStyle,
     /// Which treatment to draw.
     pub variant: VisualizerVariant,
     /// Chassis status strip, left: the track.
@@ -212,19 +219,20 @@ fn draw_panel(c: &mut Canvas, t: &Theme, d: &VisualizerData, card: Rect) {
     if area.is_empty() {
         return;
     }
-    surface::bars(
+    surface::spectrum(
         c,
         area,
         d.bands,
         d.peaks,
         t,
         bar_style(d, VisualizerVariant::Panel),
+        d.style,
     );
 }
 
 fn draw_bare(c: &mut Canvas, t: &Theme, d: &VisualizerData, card: Rect) {
     surface::gradient_scrim(c, card, t);
-    surface::bars(
+    surface::spectrum(
         c,
         card,
         d.bands,
@@ -234,15 +242,34 @@ fn draw_bare(c: &mut Canvas, t: &Theme, d: &VisualizerData, card: Rect) {
             baseline: false,
             ..bar_style(d, VisualizerVariant::Bare)
         },
+        d.style,
     );
     // A stronger baseline than the panel's gridline: with no well behind it,
     // the panel's 0.09 alpha would disappear over a bright wallpaper, and the
     // baseline is what makes a silent spectrum read as silent.
-    c.rounded_rect(
-        Rect::new(card.x, card.bottom(), card.w, t.metrics.hairline),
-        0.0,
-        &Fill::solid(t.text_primary.with_alpha(0.22)),
-    );
+    //
+    // Only for the shapes that actually rest on the bottom edge. A mirror's
+    // floor is its own centre line, and a ring has no floor at all — drawing
+    // this one under either puts a rule across the wallpaper with nothing
+    // sitting on it.
+    if bottom_anchored(d.style) {
+        c.rounded_rect(
+            Rect::new(card.x, card.bottom(), card.w, t.metrics.hairline),
+            0.0,
+            &Fill::solid(t.text_primary.with_alpha(0.22)),
+        );
+    }
+}
+
+/// Whether this shape rests on the bottom edge of its box.
+///
+/// [`SpectrumStyle::Wave`] counts: its curve is a height above the floor, so
+/// the floor is meaningful even though the curve rarely touches it.
+fn bottom_anchored(s: SpectrumStyle) -> bool {
+    matches!(
+        s,
+        SpectrumStyle::Bars | SpectrumStyle::Dots | SpectrumStyle::Wave
+    )
 }
 
 /// The opaque bevelled alternate.
@@ -354,7 +381,10 @@ fn draw_chassis(c: &mut Canvas, fonts: &mut FontStack, t: &Theme, d: &Visualizer
     let face = surface::bezel(c, mid, t);
     if !face.is_empty() {
         let inner = face.inset(6.0);
-        surface::bars(
+        // The chosen shape lands here, in the bezel this theme builds around
+        // the spectrum. The two flanking readouts stay bar arrays whatever the
+        // shape: they are instruments, not the spectrum.
+        surface::spectrum(
             c,
             inner,
             d.bands,
@@ -368,6 +398,7 @@ fn draw_chassis(c: &mut Canvas, fonts: &mut FontStack, t: &Theme, d: &Visualizer
                 opacity: 1.0,
                 shadow: false,
             },
+            d.style,
         );
     }
 
@@ -445,6 +476,7 @@ mod tests {
             opacity: 0.86,
             rounded: true,
             paint: BarPaint::Vertical,
+            style: SpectrumStyle::default(),
             variant: VisualizerVariant::Auto,
             title: "Fatboy Slim — Ya Man",
             status: "4.8 MB · 1:34/3:52",

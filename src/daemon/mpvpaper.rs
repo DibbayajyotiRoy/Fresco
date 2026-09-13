@@ -17,7 +17,9 @@ use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::collections::VecDeque;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -28,10 +30,10 @@ use crate::config::{Fit, Kind, PowerSaving, Scaling, Wallpaper};
 /// One `mpvpaper` process for one output, plus a client for its mpv IPC socket.
 pub struct WaylandPlayer {
     socket_path: PathBuf,
-    /// hwdec read once at spawn (doesn't change mid-playback) so `hwdec_current`
-    /// can stay `&self` without an IPC round-trip on every status poll.
-    hwdec: Option<String>,
     inner: RefCell<Inner>,
+    /// The last lines mpvpaper (and the mpv inside it) wrote to stderr, kept
+    /// by a reader thread so a renderer that dies mid-run can say why.
+    stderr_tail: StderrTail,
 }
 
 struct Inner {
@@ -39,25 +41,161 @@ struct Inner {
     ipc: MpvIpc,
 }
 
+/// Bounded ring of the renderer's most recent stderr lines, shared with the
+/// thread that drains the pipe. Draining is not optional: mpv logs to the
+/// terminal (`terminal=yes` is forced by mpvpaper), and an undrained pipe
+/// would block the renderer once it filled.
+type StderrTail = Arc<Mutex<VecDeque<String>>>;
+
+/// How many stderr lines to keep. mpv's own chatter at startup is a handful of
+/// lines; the error that matters is always among the last few.
+const STDERR_TAIL_LINES: usize = 40;
+
+fn drain_stderr(connector: String, pipe: std::process::ChildStderr, tail: StderrTail) {
+    for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+        let line = line.trim_end().to_string();
+        if line.is_empty() {
+            continue;
+        }
+        log::debug!("[{connector}] mpvpaper: {line}");
+        let mut t = tail.lock().unwrap_or_else(|e| e.into_inner());
+        if t.len() >= STDERR_TAIL_LINES {
+            t.pop_front();
+        }
+        t.push_back(line);
+    }
+}
+
+fn tail_text(tail: &StderrTail) -> String {
+    tail.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Why mpvpaper exited before its IPC socket appeared, classified from its
+/// exit status and stderr into a **content-free** code. Each arm matches a
+/// message mpvpaper 1.x prints on that exact path (src/main.c upstream); the
+/// dynamic-linker case is the one status alone identifies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarlyExit {
+    /// `wl_display_connect` failed: the session is gone, or `WAYLAND_DISPLAY`
+    /// names a socket the compositor no longer serves. Not a renderer fault.
+    CompositorUnreachable,
+    /// The compositor advertises no `zwlr_layer_shell_v1` (GNOME, weston).
+    NoLayerShell,
+    /// The compositor advertises no output at all.
+    NoOutput,
+    /// EGL display / context / surface failure — the GL stack is broken.
+    Egl,
+    /// `mpv_initialize` failed (an option we passed was rejected, or the
+    /// system libmpv is unhappy).
+    MpvInit,
+    /// `mpv_render_context_create` failed — libmpv could not use the EGL
+    /// context (typically a driver or Mesa problem).
+    MpvGl,
+    /// `loadfile` was refused outright.
+    LoadFailed,
+    /// Exit 127: the dynamic linker could not load a library (libmpv soname).
+    Linker,
+    /// Killed by a signal (SIGSEGV in a driver, OOM, …).
+    Signal,
+    /// Exited with an error we do not recognise.
+    Unknown,
+}
+
+impl EarlyExit {
+    pub const fn code(self) -> &'static str {
+        match self {
+            EarlyExit::CompositorUnreachable => "exited_early:compositor_unreachable",
+            EarlyExit::NoLayerShell => "exited_early:no_layer_shell",
+            EarlyExit::NoOutput => "exited_early:no_output",
+            EarlyExit::Egl => "exited_early:egl",
+            EarlyExit::MpvInit => "exited_early:mpv_init",
+            EarlyExit::MpvGl => "exited_early:mpv_gl",
+            EarlyExit::LoadFailed => "exited_early:load_failed",
+            EarlyExit::Linker => "exited_early:linker",
+            EarlyExit::Signal => "exited_early:signal",
+            EarlyExit::Unknown => "exited_early:unknown",
+        }
+    }
+
+    /// A one-line, user-facing explanation for the daemon's status error.
+    pub fn hint(self) -> &'static str {
+        match self {
+            EarlyExit::CompositorUnreachable => "the Wayland compositor is unreachable",
+            EarlyExit::NoLayerShell => "this compositor has no layer-shell support",
+            EarlyExit::NoOutput => "the compositor reports no display",
+            EarlyExit::Egl => "EGL/OpenGL could not be initialised (graphics driver problem)",
+            EarlyExit::MpvInit => "mpv refused to initialise (run `fresco doctor`)",
+            EarlyExit::MpvGl => "mpv could not use the OpenGL context (graphics driver problem)",
+            EarlyExit::LoadFailed => "mpv could not open the media file",
+            EarlyExit::Linker => "the renderer cannot load this system's libmpv (run `fresco doctor`)",
+            EarlyExit::Signal => "the renderer crashed",
+            EarlyExit::Unknown => "the renderer exited at startup (run `fresco doctor`)",
+        }
+    }
+}
+
+/// Classify an early exit. Pure so the fingerprints are unit-testable; the
+/// strings are verbatim prefixes of what mpvpaper prints (its `cflp_error`
+/// wrapper adds a coloured `[ERROR]` marker in front, hence `contains`).
+pub fn classify_early_exit(status: &std::process::ExitStatus, stderr: &str) -> EarlyExit {
+    use std::os::unix::process::ExitStatusExt;
+    if status.code() == Some(127) {
+        return EarlyExit::Linker;
+    }
+    if status.signal().is_some() {
+        return EarlyExit::Signal;
+    }
+    // The loader also fails with 127 under some shells but always prints this.
+    if stderr.contains("error while loading shared libraries") {
+        return EarlyExit::Linker;
+    }
+    const RULES: &[(&str, EarlyExit)] = &[
+        ("Unable to connect to the compositor", EarlyExit::CompositorUnreachable),
+        ("Missing a required Wayland interface", EarlyExit::NoLayerShell),
+        ("can't seem to find any output", EarlyExit::NoOutput),
+        ("Failed to initialize mpv GL context", EarlyExit::MpvGl),
+        ("Failed to init mpv", EarlyExit::MpvInit),
+        ("Failed creating mpv context", EarlyExit::MpvInit),
+        ("Failed to load file", EarlyExit::LoadFailed),
+        ("EGL", EarlyExit::Egl),
+        ("Failed to load OpenGL", EarlyExit::Egl),
+    ];
+    RULES
+        .iter()
+        .find(|(needle, _)| stderr.contains(needle))
+        .map_or(EarlyExit::Unknown, |(_, e)| *e)
+}
+
 /// Why a spawn failed, as a **content-free** code (no paths, no file names) the
 /// supervisor can put in telemetry. Attached to the returned `anyhow` error so
 /// callers classify by type instead of matching on prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnFail {
-    /// The mpvpaper binary could not be executed at all.
+    /// No mpvpaper binary could be found anywhere.
     Missing,
-    /// It started, then exited before its IPC socket appeared — a broken GL/EGL
-    /// stack, or an output the compositor no longer advertises.
-    ExitedEarly,
+    /// A bundled mpvpaper is present but cannot load on this system (built
+    /// against a libmpv soname the distro does not ship), and there is no
+    /// other copy. Telemetry lumped this in with `Missing` until 1.1.42, which
+    /// made a packaging problem look like a user who never installed anything.
+    Unloadable,
+    /// It started, then exited before its IPC socket appeared. The payload
+    /// says why, as far as its stderr and exit status could tell us.
+    ExitedEarly(EarlyExit),
     /// It stayed up but never opened its mpv IPC socket.
     IpcTimeout,
 }
 
 impl SpawnFail {
-    pub fn code(self) -> &'static str {
+    pub const fn code(self) -> &'static str {
         match self {
             SpawnFail::Missing => "mpvpaper_missing",
-            SpawnFail::ExitedEarly => "exited_early",
+            SpawnFail::Unloadable => "mpvpaper_unloadable",
+            SpawnFail::ExitedEarly(why) => why.code(),
             SpawnFail::IpcTimeout => "ipc_timeout",
         }
     }
@@ -106,8 +244,20 @@ impl WaylandPlayer {
             .arg(&opts)
             .arg(connector)
             .arg(file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| anyhow::Error::new(SpawnFail::Missing).context(e))
+            .map_err(|e| {
+                // "Not found" after the bundled copies were rejected by the
+                // load probe is a packaging problem, not an absent install.
+                let fail = if crate::mpvpaper_broken().is_some() {
+                    SpawnFail::Unloadable
+                } else {
+                    SpawnFail::Missing
+                };
+                anyhow::Error::new(fail).context(e)
+            })
             .with_context(|| {
                 format!(
                     "failed to start mpvpaper at {} for output {connector} — is it bundled next to frescod?",
@@ -116,6 +266,11 @@ impl WaylandPlayer {
             })?;
 
         let mut child = child;
+        let stderr_tail: StderrTail = Arc::new(Mutex::new(VecDeque::new()));
+        let reader = child.stderr.take().map(|pipe| {
+            let (c, t) = (connector.to_string(), Arc::clone(&stderr_tail));
+            std::thread::spawn(move || drain_stderr(c, pipe, t))
+        });
         let mut ipc = MpvIpc::new(socket_path.clone());
         // Wait for the IPC socket, but fast-fail if mpvpaper exits first (e.g. a
         // broken GL/EGL stack after a driver update) instead of blocking ~5s.
@@ -123,8 +278,20 @@ impl WaylandPlayer {
         for _ in 0..50 {
             if let Ok(Some(status)) = child.try_wait() {
                 std::fs::remove_file(&socket_path).ok();
-                return Err(anyhow::Error::new(SpawnFail::ExitedEarly).context(format!(
-                    "mpvpaper for {connector} exited immediately ({status})"
+                // The process is gone, so the pipe is at EOF and the reader
+                // finishes on its own; joining just makes the tail complete.
+                if let Some(r) = reader {
+                    let _ = r.join();
+                }
+                let tail = tail_text(&stderr_tail);
+                let why = classify_early_exit(&status, &tail);
+                log::error!(
+                    "[{connector}] mpvpaper exited at startup ({status}, {}); its last output was:\n{tail}",
+                    why.code()
+                );
+                return Err(anyhow::Error::new(SpawnFail::ExitedEarly(why)).context(format!(
+                    "mpvpaper for {connector} exited immediately ({status}): {}",
+                    why.hint()
                 )));
             }
             if ipc.connect_retry(1).is_ok() {
@@ -139,12 +306,10 @@ impl WaylandPlayer {
             return Err(anyhow::Error::new(SpawnFail::IpcTimeout)
                 .context(format!("mpv IPC for {connector} never came up")));
         }
-        let hwdec = ipc.get("hwdec-current");
-
         let player = WaylandPlayer {
             socket_path,
-            hwdec,
             inner: RefCell::new(Inner { child, ipc }),
+            stderr_tail,
         };
         // Crop is a runtime property (matches the X11 Player: post-init).
         player.apply_crop(wallpaper);
@@ -164,6 +329,11 @@ impl WaylandPlayer {
     /// True while the mpvpaper process is still running.
     pub fn is_alive(&self) -> bool {
         matches!(self.inner.borrow_mut().child.try_wait(), Ok(None))
+    }
+
+    /// The renderer's most recent stderr lines — what to log when it dies.
+    pub fn stderr_tail(&self) -> String {
+        tail_text(&self.stderr_tail)
     }
 
     /// The mpvpaper process id (it renders and decodes in-process), so status
@@ -201,6 +371,21 @@ impl WaylandPlayer {
 
     pub fn set_gamma(&self, gamma: i32) {
         self.set("gamma", json!(gamma));
+    }
+
+    /// Defocus the video by `sigma` logical pixels; `0.0` clears the filter.
+    ///
+    /// A gaussian blur through `lavfi`, which is the one transition effect that
+    /// costs something *while it runs* — gamma and zoom are free VO parameters,
+    /// a blur is a real filter pass. It is set for the length of a transition
+    /// and cleared at the end, never left on, and `set_blur(0.0)` must always
+    /// be reachable on the failure paths or the wallpaper stays soft forever.
+    pub fn set_blur(&self, sigma: f64) {
+        if sigma <= 0.0 {
+            self.set("vf", json!(""));
+        } else {
+            self.set("vf", json!(format!("lavfi=[gblur=sigma={sigma:.2}]")));
+        }
     }
 
     /// Draw an ASS overlay on the OSD layer; empty `ass` clears it.
@@ -275,10 +460,7 @@ impl WaylandPlayer {
     pub fn set_rotation(&self, rotation: u16) {
         let rotated = !rotation.is_multiple_of(360);
         self.set("video-rotate", json!(rotation % 360));
-        self.set(
-            "hwdec",
-            json!(if rotated { "auto-copy" } else { "auto-safe" }),
-        );
+        self.set("hwdec", json!(crate::config::hwdec(rotated)));
     }
 
     /// Apply the scaler set (mirrors `Player::apply_scalers`) — the single
@@ -296,9 +478,15 @@ impl WaylandPlayer {
         self.set("playback-time", json!(secs));
     }
 
-    /// Active hardware decoder, e.g. "vaapi" / "nvdec" / "no" — cached at spawn.
+    /// Active hardware decoder, e.g. "vaapi" / "nvdec" / "no", read live.
+    ///
+    /// This used to be read once at spawn, right after the IPC socket came up
+    /// — before mpv had opened the file, when `hwdec-current` is always "no".
+    /// Every Wayland status therefore said "software" whatever mpv went on to
+    /// pick, and it also went stale after a rotation change (which switches
+    /// hwdec) or a new file. One IPC round-trip per status poll is cheap.
     pub fn hwdec_current(&self) -> Option<String> {
-        self.hwdec.clone()
+        self.inner.borrow_mut().ipc.get("hwdec-current")
     }
 
     /// Live audio state: (audio track selected, muted, volume), read over the
@@ -450,17 +638,50 @@ fn build_mpv_opts(
     power_saving: PowerSaving,
     sock: &Path,
 ) -> String {
+    build_mpv_opts_with_hwdec(
+        w,
+        scaling,
+        power_saving,
+        sock,
+        &crate::config::hwdec(!w.rotation.is_multiple_of(360)),
+    )
+}
+
+/// [`build_mpv_opts`] with the hwdec value injected, so tests can check the
+/// encoding of every [`crate::config::select_hwdec`] result without touching
+/// sysfs or the environment.
+///
+/// Commas in the hwdec list (`nvdec,vaapi,auto-safe`) are passed unquoted.
+/// mpvpaper splits `-o` on spaces and writes each piece as one line of an mpv
+/// config file (the bundled binary's "Failed to create file path for mpv
+/// options config" string confirms the config-file route). In mpv's config
+/// grammar a line is `key=value` with the value running to end of line, so a
+/// comma is plain data there, and `hwdec` itself parses the comma list — just
+/// as `--hwdec=nvdec,vaapi` does on the command line. Only spaces (the `-o`
+/// separator) and `#` (comment start) are unsafe, and no hwdec value has either;
+/// a `FRESCO_HWDEC` override containing them is dropped here rather than
+/// silently splitting into bogus options.
+fn build_mpv_opts_with_hwdec(
+    w: &Wallpaper,
+    scaling: Scaling,
+    power_saving: PowerSaving,
+    sock: &Path,
+    hwdec: &str,
+) -> String {
     // NOTE: do not pass `background=#000000` — mpvpaper forwards `-o` options
     // through an mpv config file, where `#` begins a comment, so the value is
     // truncated and mpv rejects it. mpv's default letterbox background is black.
+    let hwdec = if hwdec.contains([' ', '#', '\t', '\n']) {
+        log::warn!("hwdec {hwdec:?} can't be passed through mpvpaper -o; using auto-safe/auto-copy");
+        if w.rotation.is_multiple_of(360) { "auto-safe" } else { "auto-copy" }
+    } else {
+        hwdec
+    };
     let mut o: Vec<String> = vec![
         format!("input-ipc-server={}", sock.display()),
-        // Copy-back decode for rotated video — see the note in mpv/player.rs.
-        if w.rotation.is_multiple_of(360) {
-            "hwdec=auto-safe".into()
-        } else {
-            "hwdec=auto-copy".into()
-        },
+        // Copy-back decode for rotated video — see the note in mpv/player.rs;
+        // config::select_hwdec keeps rotated values on copy-back modes.
+        format!("hwdec={hwdec}"),
         "image-display-duration=inf".into(),
     ];
     if w.kind == Kind::Playlist && w.paths.len() > 1 {
@@ -640,6 +861,38 @@ mod tests {
     }
 
     #[test]
+    fn build_mpv_opts_carries_comma_hwdec_as_one_option() {
+        let sock = Path::new("/tmp/s.sock");
+        for rotation in [0u16, 90] {
+            let w = Wallpaper {
+                kind: Kind::Video,
+                rotation,
+                ..Default::default()
+            };
+            let rotated = rotation != 0;
+            let hw = crate::config::select_hwdec(true, rotated, None);
+            let opts =
+                build_mpv_opts_with_hwdec(&w, Scaling::Balanced, PowerSaving::Full, sock, &hw);
+            // Exactly one space-separated token (= one config-file line) holds
+            // the whole priority list.
+            let tokens: Vec<&str> = opts.split(' ').filter(|t| t.starts_with("hwdec=")).collect();
+            assert_eq!(tokens, [format!("hwdec={hw}").as_str()], "{opts}");
+            assert!(!opts.contains('#'));
+        }
+        // An override with a space would split into bogus options → dropped.
+        let w = Wallpaper { kind: Kind::Video, ..Default::default() };
+        let opts = build_mpv_opts_with_hwdec(
+            &w,
+            Scaling::Balanced,
+            PowerSaving::Full,
+            sock,
+            "nvdec vaapi",
+        );
+        assert!(opts.split(' ').any(|t| t == "hwdec=auto-safe"), "{opts}");
+        assert!(!opts.split(' ').any(|t| t == "vaapi"));
+    }
+
+    #[test]
     fn build_mpv_opts_power_saving_uses_cheap_scalers_not_a_filter() {
         let w = Wallpaper {
             kind: Kind::Video,
@@ -662,7 +915,9 @@ mod tests {
     fn spawn_failures_carry_a_content_free_code() {
         for f in [
             SpawnFail::Missing,
-            SpawnFail::ExitedEarly,
+            SpawnFail::Unloadable,
+            SpawnFail::ExitedEarly(EarlyExit::Egl),
+            SpawnFail::ExitedEarly(EarlyExit::CompositorUnreachable),
             SpawnFail::IpcTimeout,
         ] {
             let e = anyhow::Error::new(f).context("mpvpaper for DP-1 exited immediately (code 1)");
@@ -671,6 +926,38 @@ mod tests {
         }
         // An unrelated error classifies as unknown rather than mis-attributing.
         assert_eq!(SpawnFail::of(&anyhow!("no playable file configured")), None);
+    }
+
+    /// The early-exit fingerprints must map mpvpaper's real messages (verbatim
+    /// from upstream src/main.c) to the right code, and must never leak the
+    /// message itself — only the static code travels.
+    #[test]
+    fn early_exits_classify_by_status_then_stderr() {
+        use std::os::unix::process::ExitStatusExt;
+        let exit = |c: i32| std::process::ExitStatus::from_raw(c << 8);
+        let cases: &[(i32, &str, EarlyExit)] = &[
+            (127, "", EarlyExit::Linker),
+            (1, "mpvpaper: error while loading shared libraries: libmpv.so.1: cannot open shared object file", EarlyExit::Linker),
+            (1, "[ERROR] Unable to connect to the compositor.\nIf your compositor is running, check or set the WAYLAND_DISPLAY environment variable.", EarlyExit::CompositorUnreachable),
+            (1, "[ERROR] Missing a required Wayland interface", EarlyExit::NoLayerShell),
+            (1, "[ERROR] :/ sorry about this but we can't seem to find any output.", EarlyExit::NoOutput),
+            (1, "[ERROR] Failed to initialize EGL EGL_NOT_INITIALIZED", EarlyExit::Egl),
+            (1, "[ERROR] Failed to create EGL context EGL_BAD_CONFIG", EarlyExit::Egl),
+            (1, "[ERROR] Failed to init mpv, option not found", EarlyExit::MpvInit),
+            (1, "[ERROR] Failed to initialize mpv GL context, unsupported", EarlyExit::MpvGl),
+            (1, "[ERROR] Failed to load file, error loading file", EarlyExit::LoadFailed),
+            (1, "something new", EarlyExit::Unknown),
+        ];
+        for (code, err, want) in cases {
+            assert_eq!(classify_early_exit(&exit(*code), err), *want, "{err}");
+        }
+        // A signal death is a crash whatever was printed before it.
+        let sig = std::process::ExitStatus::from_raw(11);
+        assert_eq!(classify_early_exit(&sig, "[ERROR] Failed to init mpv"), EarlyExit::Signal);
+        for e in [EarlyExit::Linker, EarlyExit::Unknown, EarlyExit::MpvInit] {
+            assert!(e.code().starts_with("exited_early:"), "{}", e.code());
+            assert!(!e.code().contains('/'), "codes carry no paths");
+        }
     }
 
     fn have(bin: &str) -> bool {
@@ -780,13 +1067,65 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
             "spawn must fail gracefully when the backend binary is missing (T8)"
         );
 
+        // A renderer that dies at startup must be classified from what it
+        // printed, and "the compositor is gone" must not cost the supervisor a
+        // restart: it parks the output as if the display were away.
+        let id = std::process::id();
+        let dying = std::env::temp_dir().join(format!("fresco-fake-mpvpaper-dying-{id}.sh"));
+        std::fs::write(
+            &dying,
+            "#!/bin/sh\necho '[-] Unable to connect to the compositor.' >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&dying, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("FRESCO_MPVPAPER", &dying);
+        let Err(e) = WaylandPlayer::spawn(
+            "HEADLESS-1",
+            &wp,
+            Scaling::Balanced,
+            PowerSaving::Full,
+            &std::env::temp_dir().join("fresco-none.mp4"),
+        ) else {
+            panic!("a renderer that exits at once is a spawn failure");
+        };
+        assert_eq!(
+            SpawnFail::of(&e),
+            Some(SpawnFail::ExitedEarly(EarlyExit::CompositorUnreachable)),
+            "{e:#}"
+        );
+        {
+            let media = std::env::temp_dir().join(format!("fresco-fake-media-{id}.mp4"));
+            std::fs::write(&media, b"not really a video").unwrap();
+            const MAX: u32 = 5;
+            let mut o = crate::daemon::WlOutput::new(
+                "HEADLESS-1".into(),
+                Wallpaper {
+                    kind: Kind::Video,
+                    path: Some(media.clone()),
+                    ..Default::default()
+                },
+                Scaling::Balanced,
+                PowerSaving::Full,
+            );
+            for _ in 0..MAX * 2 {
+                // As the daemon loop does: a tick without a probe carries no
+                // news, so a parked output stays parked.
+                let here = !o.absent;
+                o.supervise(false, MAX, here);
+            }
+            assert!(o.absent, "an unreachable compositor parks the output");
+            assert_eq!(o.restarts, 0, "and never spends a restart");
+            assert!(!o.static_fallback, "nor reaches the give-up fallback");
+            let _ = std::fs::remove_file(&media);
+        }
+        let _ = std::fs::remove_file(&dying);
+
         // T6: detect the backend dying. Needs mpv (the engine mpvpaper wraps).
         if !have("mpv") {
             eprintln!("skip T6 death-detection: mpv not installed");
             std::env::remove_var("FRESCO_MPVPAPER");
             return;
         }
-        let id = std::process::id();
         let fake = std::env::temp_dir().join(format!("fresco-fake-mpvpaper-{id}.sh"));
         let pidfile = std::env::temp_dir().join(format!("fresco-fake-pid-{id}"));
         std::fs::write(&fake, FAKE_MPVPAPER).unwrap();

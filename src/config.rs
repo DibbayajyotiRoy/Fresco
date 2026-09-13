@@ -142,6 +142,141 @@ pub fn video_scalers(scaling: Scaling, power: PowerSaving, rotated: bool) -> Vid
     }
 }
 
+// ─── GPU detection + hardware-decoder choice ─────────────────────────────────
+
+/// PCI vendor id of Intel GPUs, as written in `/sys/class/drm/card*/device/vendor`.
+pub const PCI_VENDOR_INTEL: &str = "0x8086";
+/// PCI vendor id of NVIDIA GPUs.
+pub const PCI_VENDOR_NVIDIA: &str = "0x10de";
+/// PCI vendor id of AMD/ATI GPUs.
+pub const PCI_VENDOR_AMD: &str = "0x1002";
+
+/// Which GPU vendors the machine has. Hybrid laptops set more than one flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GpuVendors {
+    pub intel: bool,
+    pub nvidia: bool,
+    pub amd: bool,
+}
+
+impl GpuVendors {
+    /// Classify raw sysfs `vendor` file contents. Pure so it is unit-testable;
+    /// tolerant of the trailing newline sysfs writes and of case, and silently
+    /// ignores vendors we don't special-case (virtio, vmware, …).
+    pub fn from_vendor_ids<I, S>(ids: I) -> GpuVendors
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut v = GpuVendors::default();
+        for id in ids {
+            match id.as_ref().trim().to_ascii_lowercase().as_str() {
+                PCI_VENDOR_INTEL => v.intel = true,
+                PCI_VENDOR_NVIDIA => v.nvidia = true,
+                PCI_VENDOR_AMD => v.amd = true,
+                _ => {}
+            }
+        }
+        v
+    }
+
+    /// Scan `<drm_root>/card*/device/vendor` (normally `/sys/class/drm`).
+    /// Connector entries like `card0-eDP-1` also match the prefix; they either
+    /// lack a readable `device/vendor` or name their card's vendor, so they are
+    /// harmless (flags, not counts). Unreadable root → no vendors.
+    pub fn scan(drm_root: &std::path::Path) -> GpuVendors {
+        let Ok(dir) = std::fs::read_dir(drm_root) else {
+            return GpuVendors::default();
+        };
+        GpuVendors::from_vendor_ids(dir.flatten().filter_map(|entry| {
+            if !entry.file_name().to_string_lossy().starts_with("card") {
+                return None;
+            }
+            std::fs::read_to_string(entry.path().join("device/vendor")).ok()
+        }))
+    }
+
+    /// Short human list for logs, e.g. `"intel+nvidia"` (`"none"` if empty).
+    pub fn describe(self) -> String {
+        let names: Vec<&str> = [
+            (self.intel, "intel"),
+            (self.nvidia, "nvidia"),
+            (self.amd, "amd"),
+        ]
+        .into_iter()
+        .filter_map(|(on, n)| on.then_some(n))
+        .collect();
+        if names.is_empty() {
+            "none".into()
+        } else {
+            names.join("+")
+        }
+    }
+}
+
+/// GPU vendors of this machine, scanned from sysfs once and cached — GPUs do
+/// not appear or vanish while the daemon runs, and both renderers ask on every
+/// spawn / rotation change. The first call logs the result at info level.
+pub fn gpu_vendors() -> GpuVendors {
+    static CACHE: std::sync::OnceLock<GpuVendors> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let v = GpuVendors::scan(std::path::Path::new("/sys/class/drm"));
+        log::info!("GPU vendors detected: {}", v.describe());
+        v
+    })
+}
+
+/// Choose mpv's `hwdec` value. Pure: callers supply the detection result and
+/// the `FRESCO_HWDEC` value (see [`hwdec`] for the wrapper that reads both).
+///
+/// * `env_override` — `FRESCO_HWDEC`, if set and non-empty, is returned
+///   verbatim. It's a diagnostic lever: a reporter can try `nvdec`,
+///   `nvdec-copy`, `vaapi` or `no` without a rebuild.
+/// * NVIDIA present — try NVDEC first. On hybrid Intel+NVIDIA laptops `vo=gpu`
+///   renders on the NVIDIA GL context, and `auto-safe` alone lands on
+///   `vaapi-copy` (decode on the iGPU → read back to RAM → re-upload to NVIDIA),
+///   which is what cost a 1440p30 wallpaper ~25% CPU on an MX130. NVDEC
+///   surfaces interop directly with that GL context. The fallbacks keep
+///   NVIDIA-with-broken-CUDA setups decoding in hardware.
+/// * Rotated video always stays on a copy-back mode: native hw surfaces +
+///   `video-rotate` corrupt chroma on some driver stacks (see mpv/player.rs).
+///   `nvdec-copy` still decodes on the GPU; only the upload path changes.
+///
+/// Every value is an mpv comma-separated priority list, valid as-is both via
+/// libmpv/IPC property sets and on an mpv config-file line (`key=value`, where
+/// the value runs to end of line — see `build_mpv_opts` in mpvpaper.rs).
+pub fn select_hwdec(nvidia: bool, rotated: bool, env_override: Option<&str>) -> String {
+    if let Some(v) = env_override.map(str::trim).filter(|v| !v.is_empty()) {
+        return v.to_string();
+    }
+    match (nvidia, rotated) {
+        (true, false) => "nvdec,vaapi,auto-safe",
+        (true, true) => "nvdec-copy,auto-copy",
+        (false, false) => "auto-safe",
+        (false, true) => "auto-copy",
+    }
+    .to_string()
+}
+
+/// The `hwdec` value for this machine: cached GPU detection + `FRESCO_HWDEC`.
+/// The chosen values are logged once (per rotation state) at info level so a
+/// bug report's log shows what we asked mpv for, next to what it actually
+/// picked (`hwdec-current`, surfaced in the status badge).
+pub fn hwdec(rotated: bool) -> String {
+    let env = std::env::var("FRESCO_HWDEC").ok();
+    let choice = select_hwdec(gpu_vendors().nvidia, rotated, env.as_deref());
+    static LOGGED: [std::sync::Once; 2] = [std::sync::Once::new(), std::sync::Once::new()];
+    LOGGED[rotated as usize].call_once(|| {
+        let src = if env.as_deref().is_some_and(|e| !e.trim().is_empty()) {
+            " (FRESCO_HWDEC override)"
+        } else {
+            ""
+        };
+        log::info!("hwdec for {} video: {choice}{src}", if rotated { "rotated" } else { "unrotated" });
+    });
+    choice
+}
+
 /// How Fresco deals with Deepin DDE's covering desktop window (issue #2).
 /// `Auto` probes the desktop window's visual depth and picks for itself;
 /// `Transparent` forces the DBus transparent-wallpaper strategy; `Restack`
@@ -217,16 +352,37 @@ impl Crop {
     }
 }
 
-/// Transition effect played when a slideshow advances to the next image.
+/// Transition effect played when the wallpaper changes.
+///
+/// Applies to a slideshow advancing to its next image **and** to a change of
+/// wallpaper generally, video included. It used to be images only — not because
+/// video was hard, but because the state machine driving it lived inside
+/// `Slideshow`. Every effect here is a property change on the one running
+/// player (`gamma`, `video-zoom`, `video-pan-*`, a filter), so none of them
+/// needs a second decoder and none of them costs anything once it has finished.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Transition {
     #[default]
     None,
+    /// Dip through black. Historically distinct from [`Transition::Fade`] only
+    /// in taking more steps — mpv cannot cross-dissolve two files from one
+    /// decoder, so this has never been a true dissolve despite the name.
+    ///
+    /// Deprecated in the UI as of 1.2: the picker offers one honest "fade
+    /// through black" row, and `Config::migrate` rewrites a stored
+    /// `"crossfade"` to [`Transition::Fade`]. The variant stays so every
+    /// `transition = "crossfade"` already on disk keeps deserialising, and the
+    /// daemon keeps playing it for anyone who hand-writes it back.
     Crossfade,
     Fade,
     Slide,
     KenBurns,
+    /// Punch in on the outgoing frame, settle out on the incoming one.
+    Zoom,
+    /// Defocus out and back in, via a gaussian blur filter. The one effect here
+    /// that costs anything while it runs, and the reason it is opt-in.
+    Blur,
 }
 
 /// A set of images cycled on a timer. Either a `folder` (all images inside) or
@@ -239,6 +395,11 @@ pub struct Slideshow {
     pub paths: Vec<PathBuf>,
     #[serde(default = "default_interval")]
     pub interval_s: u64,
+    /// Where the transition used to live, back when only slideshows had one.
+    /// Superseded by [`Wallpaper::transition`], which applies to any wallpaper
+    /// change; `Config::migrate` lifts this up into it. Still parsed, still
+    /// written in step with the wallpaper-level value, so a config saved by
+    /// this version keeps working on an older daemon.
     #[serde(default)]
     pub transition: Transition,
 }
@@ -1129,6 +1290,13 @@ pub struct Wallpaper {
     /// Clockwise rotation in degrees: 0, 90, 180, or 270.
     #[serde(default)]
     pub rotation: u16,
+    /// Effect played when this wallpaper comes up — video included, not just a
+    /// slideshow advancing. Declared here rather than on [`Slideshow`] because
+    /// a transition is a property of the *change*, and every wallpaper kind now
+    /// gets one. Must stay above `crop`: TOML forbids a bare value after a
+    /// sub-table, and `crop`/`slideshow` both serialise as tables.
+    #[serde(default)]
+    pub transition: Transition,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
     #[serde(default = "default_true")]
@@ -1174,6 +1342,7 @@ impl Default for Wallpaper {
             shuffle: false,
             fit: Fit::default(),
             rotation: 0,
+            transition: Transition::default(),
             crop: None,
             mute: true,
             volume: default_volume(),
@@ -1352,6 +1521,37 @@ fn default_version() -> u32 {
     1
 }
 
+/// Bring one [`Wallpaper`]'s transition up to date.
+///
+/// Two changes in one pass, both of which have to survive a config written by
+/// an older release:
+///
+/// * The effect used to be stored on `slideshow.transition`. An explicit
+///   wallpaper-level value always wins; only a wallpaper still sitting on the
+///   default inherits the slideshow's.
+/// * `crossfade` never cross-dissolved anything — one decoder cannot show two
+///   files at once, so it was always a short dip through black. It is folded
+///   onto [`Transition::Fade`] so the file and the picker cannot disagree
+///   about which of the two identical effects is running. The dip gets
+///   marginally longer; nothing else about it changes.
+///
+/// The slideshow's own copy is kept in step rather than cleared, so a config
+/// saved by this version still reads correctly on a daemon that only knows
+/// about `slideshow.transition`.
+fn migrate_wallpaper(w: &mut Wallpaper) {
+    if w.transition == Transition::default() {
+        if let Some(ss) = w.slideshow.as_ref() {
+            w.transition = ss.transition;
+        }
+    }
+    if w.transition == Transition::Crossfade {
+        w.transition = Transition::Fade;
+    }
+    if let Some(ss) = w.slideshow.as_mut() {
+        ss.transition = w.transition;
+    }
+}
+
 /// Translate a deprecated 1.1.32 frame-rate cap into a power-saving level.
 /// Any cap meant "I want less load", which is what `Reduced` delivers — this
 /// time without making decode worse.
@@ -1469,6 +1669,26 @@ impl Config {
                 .and_then(power_saving_from_legacy_framerate);
         }
         self.wallpaper.framerate = None;
+        // Transitions moved off `Slideshow` and onto `Wallpaper` when the
+        // effect stopped being a slideshow-only feature. Lift the old key up
+        // and fold `crossfade` onto the fade it always actually was, wherever
+        // a Wallpaper can appear — the default, per-monitor overrides, the
+        // browser bridge's wallpaper, and both halves of a schedule.
+        migrate_wallpaper(&mut self.wallpaper);
+        for w in self.monitors.values_mut() {
+            migrate_wallpaper(w);
+        }
+        if let Some(w) = self.browser_wallpaper.as_mut() {
+            migrate_wallpaper(w);
+        }
+        if let Some(sched) = self.schedule.as_mut() {
+            for w in [sched.day.as_mut(), sched.night.as_mut()]
+                .into_iter()
+                .flatten()
+            {
+                migrate_wallpaper(w);
+            }
+        }
         // `widgets` needs nothing here: it has never shipped under another
         // name, so no released config can contain a deprecated spelling of it.
     }
@@ -1498,6 +1718,55 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_vendors_classify_sysfs_ids() {
+        // Hybrid laptop: sysfs writes a trailing newline; unknown vendors ignored.
+        let v = GpuVendors::from_vendor_ids(["0x8086\n", "0x10DE\n", "0x1af4"]);
+        assert_eq!(
+            v,
+            GpuVendors { intel: true, nvidia: true, amd: false }
+        );
+        assert_eq!(v.describe(), "intel+nvidia");
+        let none = GpuVendors::from_vendor_ids(Vec::<String>::new());
+        assert_eq!(none, GpuVendors::default());
+        assert_eq!(none.describe(), "none");
+        assert!(GpuVendors::from_vendor_ids(["0x1002"]).amd);
+    }
+
+    #[test]
+    fn gpu_vendors_scan_reads_card_dirs_only() {
+        let root = std::env::temp_dir().join(format!("fresco-drm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, vendor) in [("card0", "0x8086\n"), ("card1", "0x10de\n"), ("renderD128", "0x1002\n")] {
+            std::fs::create_dir_all(root.join(dir).join("device")).unwrap();
+            std::fs::write(root.join(dir).join("device/vendor"), vendor).unwrap();
+        }
+        let v = GpuVendors::scan(&root);
+        std::fs::remove_dir_all(&root).ok();
+        // renderD* is not a card entry, so AMD must not be reported.
+        assert_eq!(v, GpuVendors { intel: true, nvidia: true, amd: false });
+        assert_eq!(GpuVendors::scan(&root), GpuVendors::default());
+    }
+
+    #[test]
+    fn hwdec_selection_matrix() {
+        assert_eq!(select_hwdec(false, false, None), "auto-safe");
+        assert_eq!(select_hwdec(false, true, None), "auto-copy");
+        assert_eq!(select_hwdec(true, false, None), "nvdec,vaapi,auto-safe");
+        // Rotated stays copy-back even on NVIDIA (chroma corruption otherwise).
+        assert_eq!(select_hwdec(true, true, None), "nvdec-copy,auto-copy");
+        // A non-empty override wins verbatim for every combination.
+        for nv in [false, true] {
+            for rot in [false, true] {
+                assert_eq!(select_hwdec(nv, rot, Some("nvdec-copy")), "nvdec-copy");
+                assert_eq!(select_hwdec(nv, rot, Some("no")), "no");
+                // Empty / blank override is ignored.
+                assert_eq!(select_hwdec(nv, rot, Some("")), select_hwdec(nv, rot, None));
+                assert_eq!(select_hwdec(nv, rot, Some("  ")), select_hwdec(nv, rot, None));
+            }
+        }
+    }
 
     #[test]
     fn defaults_from_empty_toml() {
@@ -1589,6 +1858,84 @@ mod tests {
             toml::from_str("framerate = 30\npower_saving = \"minimum\"").unwrap();
         explicit.migrate();
         assert_eq!(explicit.power_saving, PowerSaving::Minimum);
+    }
+
+    /// A config that names the effect the old way must keep loading, and must
+    /// land on a value the picker can actually show.
+    #[test]
+    fn legacy_slideshow_transition_migrates_to_the_wallpaper() {
+        let mut cfg: Config = toml::from_str(
+            "[wallpaper]\nkind = \"slideshow\"\n[wallpaper.slideshow]\nfolder = \"/pics\"\ntransition = \"kenburns\"",
+        )
+        .unwrap();
+        cfg.migrate();
+        assert_eq!(cfg.wallpaper.transition, Transition::KenBurns);
+        // The slideshow's copy stays in step so an older daemon still reads it.
+        assert_eq!(
+            cfg.wallpaper.slideshow.as_ref().unwrap().transition,
+            Transition::KenBurns
+        );
+
+        // An explicit wallpaper-level value wins over the legacy one.
+        let mut explicit: Config = toml::from_str(
+            "[wallpaper]\ntransition = \"zoom\"\n[wallpaper.slideshow]\nfolder = \"/pics\"\ntransition = \"kenburns\"",
+        )
+        .unwrap();
+        explicit.migrate();
+        assert_eq!(explicit.wallpaper.transition, Transition::Zoom);
+    }
+
+    /// `transition = "crossfade"` is on disk for real users. It must still
+    /// parse — and then become the fade it always was, because it never
+    /// dissolved anything and the picker no longer offers the name.
+    #[test]
+    fn crossfade_still_parses_and_folds_onto_fade() {
+        let raw: Config = toml::from_str("[wallpaper]\ntransition = \"crossfade\"").unwrap();
+        assert_eq!(
+            raw.wallpaper.transition,
+            Transition::Crossfade,
+            "the key must keep deserialising, migration is a separate step"
+        );
+
+        let mut cfg = raw;
+        cfg.migrate();
+        assert_eq!(cfg.wallpaper.transition, Transition::Fade);
+
+        // Everywhere a Wallpaper can hide, not just the default one.
+        let mut nested: Config = toml::from_str(
+            "[monitors.\"HDMI-1\"]\ntransition = \"crossfade\"\n[browser_wallpaper]\ntransition = \"crossfade\"\n[schedule.day]\ntransition = \"crossfade\"\n[schedule.night]\ntransition = \"crossfade\"",
+        )
+        .unwrap();
+        nested.migrate();
+        assert_eq!(nested.monitors["HDMI-1"].transition, Transition::Fade);
+        assert_eq!(
+            nested.browser_wallpaper.as_ref().unwrap().transition,
+            Transition::Fade
+        );
+        let sched = nested.schedule.as_ref().unwrap();
+        assert_eq!(sched.day.as_ref().unwrap().transition, Transition::Fade);
+        assert_eq!(sched.night.as_ref().unwrap().transition, Transition::Fade);
+    }
+
+    /// Every variant must survive a TOML round trip — the picker writes them,
+    /// and a value that cannot be read back would silently reset on next load.
+    #[test]
+    fn every_transition_round_trips_through_toml() {
+        for t in [
+            Transition::None,
+            Transition::Crossfade,
+            Transition::Fade,
+            Transition::Slide,
+            Transition::KenBurns,
+            Transition::Zoom,
+            Transition::Blur,
+        ] {
+            let mut cfg = Config::default();
+            cfg.wallpaper.transition = t;
+            let text = toml::to_string_pretty(&cfg).unwrap();
+            let back: Config = toml::from_str(&text).unwrap();
+            assert_eq!(back.wallpaper.transition, t, "{t:?} did not round trip");
+        }
     }
 
     #[test]

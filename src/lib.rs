@@ -235,42 +235,75 @@ fn pick_newest(probed: Vec<Probed>) -> Option<Probed> {
         .reduce(|best, cand| if cand.1 > best.1 { cand } else { best })
 }
 
-/// The best bundled candidate that exists AND loads, with its version floor.
-/// Probed once per process (each probe spawns the binary with `--help`).
-fn mpvpaper_bundled() -> Option<&'static Probed> {
-    static FOUND: std::sync::OnceLock<Option<Probed>> = std::sync::OnceLock::new();
-    FOUND
-        .get_or_init(|| {
-            pick_newest(
-                mpvpaper_candidates()
-                    .into_iter()
-                    .filter(|c| c.is_file())
-                    .filter_map(|c| match mpvpaper_probe(&c) {
-                        Probe::Loads(v) => Some((c, v)),
-                        Probe::Unloadable => None,
-                    })
-                    .collect(),
-            )
-        })
-        .as_ref()
+/// How long a "nothing usable found" answer is trusted before scanning again.
+const MPVPAPER_RESCAN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A probe result cached for the life of the daemon — but never trusted past
+/// reality. frescod runs for weeks, so a one-shot cache went stale two ways,
+/// both reported as `renderer_giveup … cause=mpvpaper_missing`:
+///
+/// * a miss was permanent: installing mpvpaper — exactly what the error tells
+///   the user to do — changed nothing until the daemon was restarted;
+/// * a hit outlived its file: a package upgrade that renamed or removed the
+///   bundled binary left the old daemon spawning a path that no longer exists.
+///
+/// So a hit is re-checked with a `stat` (no spawn) and a miss is re-scanned at
+/// most every [`MPVPAPER_RESCAN`]; only a scan that finds files spawns probes.
+struct ProbeCache {
+    slot: std::sync::Mutex<Option<(Option<Probed>, std::time::Instant)>>,
 }
 
-/// A user-installed `mpvpaper` on `PATH`, with its version floor. Probed once
-/// per process, so preferring it costs no extra spawn per wallpaper change.
-fn mpvpaper_system() -> Option<&'static Probed> {
-    static FOUND: std::sync::OnceLock<Option<Probed>> = std::sync::OnceLock::new();
-    FOUND
-        .get_or_init(|| {
-            let paths = std::env::var_os("PATH")?;
-            std::env::split_paths(&paths)
-                .map(|dir| dir.join("mpvpaper"))
+impl ProbeCache {
+    const fn new() -> Self {
+        Self { slot: std::sync::Mutex::new(None) }
+    }
+
+    fn get(&self, scan: impl FnOnce() -> Option<Probed>) -> Option<Probed> {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let fresh = match slot.as_ref() {
+            Some((Some((path, _)), _)) => path.is_file(),
+            Some((None, at)) => at.elapsed() < MPVPAPER_RESCAN,
+            None => false,
+        };
+        if !fresh {
+            *slot = Some((scan(), std::time::Instant::now()));
+        }
+        slot.as_ref().and_then(|(p, _)| p.clone())
+    }
+}
+
+/// The best bundled candidate that exists AND loads, with its version floor.
+/// Cached (each probe spawns the binary with `--help`); see [`ProbeCache`].
+fn mpvpaper_bundled() -> Option<Probed> {
+    static FOUND: ProbeCache = ProbeCache::new();
+    FOUND.get(|| {
+        pick_newest(
+            mpvpaper_candidates()
+                .into_iter()
                 .filter(|c| c.is_file())
-                .find_map(|c| match mpvpaper_probe(&c) {
+                .filter_map(|c| match mpvpaper_probe(&c) {
                     Probe::Loads(v) => Some((c, v)),
                     Probe::Unloadable => None,
                 })
-        })
-        .as_ref()
+                .collect(),
+        )
+    })
+}
+
+/// A user-installed `mpvpaper` on `PATH`, with its version floor. Cached, so
+/// preferring it costs no extra spawn per wallpaper change; see [`ProbeCache`].
+fn mpvpaper_system() -> Option<Probed> {
+    static FOUND: ProbeCache = ProbeCache::new();
+    FOUND.get(|| {
+        let paths = std::env::var_os("PATH")?;
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join("mpvpaper"))
+            .filter(|c| c.is_file())
+            .find_map(|c| match mpvpaper_probe(&c) {
+                Probe::Loads(v) => Some((c, v)),
+                Probe::Unloadable => None,
+            })
+    })
 }
 
 /// A bundled mpvpaper that exists but cannot load (e.g. built against a libmpv
@@ -339,8 +372,8 @@ fn choose_mpvpaper(
 /// change it without restarting.
 pub fn mpvpaper_choice() -> Option<MpvpaperChoice> {
     choose_mpvpaper(
-        mpvpaper_bundled().cloned(),
-        mpvpaper_system().cloned(),
+        mpvpaper_bundled(),
+        mpvpaper_system(),
         std::env::var_os("FRESCO_MPVPAPER").map(std::path::PathBuf::from),
     )
 }
@@ -417,6 +450,41 @@ mod mpvpaper_tests {
             mpvpaper_version_from_help("bash: mpvpaper: not found"),
             None
         );
+    }
+
+    /// A miss must not be permanent, and a hit must not outlive its file —
+    /// the two ways a one-shot cache produced `cause=mpvpaper_missing`.
+    #[test]
+    fn probe_cache_rescans_misses_and_drops_vanished_hits() {
+        use std::cell::Cell;
+        let dir = std::env::temp_dir().join(format!("fresco-probe-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("mpvpaper");
+        let scans = Cell::new(0);
+        let scan = || {
+            scans.set(scans.get() + 1);
+            bin.is_file().then(|| (bin.clone(), Some((1, 9))))
+        };
+        let cache = ProbeCache::new();
+
+        // Miss, then within the rescan window the miss is served from cache.
+        assert_eq!(cache.get(scan), None);
+        assert_eq!(cache.get(scan), None);
+        assert_eq!(scans.get(), 1);
+
+        // Once the window has passed, a newly installed binary is found.
+        std::fs::write(&bin, "").unwrap();
+        cache.slot.lock().unwrap().as_mut().unwrap().1 -= MPVPAPER_RESCAN;
+        assert_eq!(cache.get(scan).map(|p| p.0), Some(bin.clone()));
+        // A hit whose file still exists costs no rescan.
+        assert!(cache.get(scan).is_some());
+        assert_eq!(scans.get(), 2);
+
+        // The file goes away (package upgrade renamed it): rescan at once.
+        std::fs::remove_file(&bin).unwrap();
+        assert_eq!(cache.get(scan), None);
+        assert_eq!(scans.get(), 3);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]

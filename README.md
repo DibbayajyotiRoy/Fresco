@@ -34,11 +34,13 @@ Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs
 | **Desktop widgets** | Synced lyrics, clock, audio visualiser, album-art disc — drawn into the wallpaper, all off by default |
 | **Price** | Free — GPL-3.0-or-later, no ads, no account |
 | **Built with** | Rust, GTK4 / libadwaita, libmpv |
-| **Install** | `.deb` package or one-line script |
+| **Install** | Deepin App Store, `.deb` package, or one-line script |
 | **Users** | 130+ worldwide |
 | **Latest version** | 1.1.39 |
 
 ## Install
+
+**Deepin 25 — App Store:** open **App Store**, search for **Fresco**, and click **Install**. Fresco is published on the deepin Community App Store, so there is nothing to download by hand and updates arrive through the store.
 
 **One-liner** (Debian, Ubuntu, Pop!_OS, Linux Mint, elementary OS, Deepin):
 
@@ -278,6 +280,9 @@ Run `killall dde-shell` (it restarts automatically) or log out and back in, and
 the entry appears permanently. Fresco itself installs correctly — it's listed by
 Deepin's own application manager, and its icon resolves in every installed
 theme. Being tracked in [docs/AUDIT.md](docs/AUDIT.md#deepin-launcher-hot-refresh-open-2026-07-26).
+If it happens on every reinstall on a machine that has had Fresco before, run
+`sh scripts/dde-launcher-diag.sh` — it is read-only and prints a log worth
+attaching to an issue.
 
 ### My desktop icons are hidden while the wallpaper plays on Deepin
 
@@ -321,6 +326,11 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 Log out and back in (systemd reads `environment.d` at session start), then
 confirm with `fresco doctor` that the `source:` line now says
 `FRESCO_MPVPAPER override`.
+
+Similarly, **`FRESCO_HWDEC`** overrides mpv's hardware decoder (e.g. `nvdec`,
+`nvdec-copy`, `vaapi`, `no`) — a diagnostic for high CPU use. By default Fresco
+picks `nvdec,vaapi,auto-safe` when an NVIDIA GPU is present, otherwise `auto-safe`
+(rotated video uses copy-back: `nvdec-copy,auto-copy` / `auto-copy`).
 
 ### How do I remove several wallpapers at once?
 

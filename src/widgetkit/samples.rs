@@ -290,6 +290,7 @@ fn sample_vis<'a>(
         opacity: 0.92,
         rounded: true,
         paint: BarPaint::Vertical,
+        style: SpectrumStyle::default(),
         variant,
         title: "Fatboy Slim — Ya Man",
         status: "4.8 MB · 1:34/3:52",
@@ -562,6 +563,56 @@ fn render_every_widget_over_both_hostile_backdrops() -> Result<()> {
     assert_eq!(written, 52, "the sample set changed size");
     eprintln!("widgetkit samples: {written} files in {}", dir.display());
     Ok(())
+}
+
+/// Every spectrum shape draws something, and no two draw the same thing.
+///
+/// The regression this exists for: `VisualizerData` carried no shape at all
+/// for several releases, so the picker offered five styles and the renderer
+/// drew bars for every one of them. Nothing failed — the widget rendered
+/// perfectly, just not as the thing that had been asked for. A test that only
+/// checked "the visualiser draws" passed throughout, which is why this one
+/// compares the shapes against *each other* rather than against a threshold.
+#[test]
+fn every_spectrum_style_draws_and_none_of_them_are_the_same_picture() {
+    let mut fonts = FontStack::system();
+    if fonts.face_count() == 0 {
+        return;
+    }
+    let t = Theme::for_accent(Mode::Dark, crate::config::Accent::Blue);
+    let b = bands(32, 1.1);
+    let p = peaks_from(&b);
+    let dir = out_dir();
+    let _ = std::fs::create_dir_all(&dir);
+
+    let mut seen: Vec<(&str, Vec<u8>)> = Vec::new();
+    for (shape, name) in [
+        (SpectrumStyle::Bars, "bars"),
+        (SpectrumStyle::Mirror, "mirror"),
+        (SpectrumStyle::Wave, "wave"),
+        (SpectrumStyle::Dots, "dots"),
+        (SpectrumStyle::Ring, "ring"),
+    ] {
+        let data = visualizer::VisualizerData {
+            style: shape,
+            ..sample_vis(&b, &p, visualizer::VisualizerVariant::Panel)
+        };
+        let size = visualizer::measure(&mut fonts, &t, &data, 2.0);
+        let mut c = Canvas::for_logical(size.buffer(), 2.0).expect("canvas");
+        visualizer::draw_at(&mut c, &mut fonts, &t, &data, size.card_rect());
+        let _ = c.save_png(dir.join(format!("spectrum-{name}.png")));
+        let px = c.into_bgra().data;
+        assert!(px.iter().any(|&v| v != 0), "{name} drew nothing at all");
+        for (other, prev) in &seen {
+            assert_ne!(
+                prev, &px,
+                "`{name}` and `{other}` rasterise identically — the shape is \
+                 being dropped somewhere between the config and the canvas"
+            );
+        }
+        seen.push((name, px));
+    }
+    assert_eq!(seen.len(), 5, "every shape must have been rendered");
 }
 
 /// The composition test: every primitive, both themes, one buffer reused

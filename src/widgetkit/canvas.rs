@@ -616,6 +616,44 @@ impl Canvas {
         self.stroke(&path, fill, width, tiny_skia::LineCap::Round);
     }
 
+    /// Stroke an open polyline through `pts`, smoothed into a curve.
+    ///
+    /// The midpoint-quadratic construction is what makes this usable for a
+    /// spectrum: a spectrum's points are one per band, so a straight-segment
+    /// polyline through them reads as a sawtooth of the band count rather than
+    /// as a waveform. Taking each segment's midpoint as an on-curve anchor and
+    /// the sample itself as the control point yields a C1-continuous curve
+    /// through every span without needing tangents, which a Catmull-Rom would,
+    /// and without overshooting past the data, which a Catmull-Rom does.
+    ///
+    /// Round caps and joins, for the same reason [`Canvas::arc`] uses them:
+    /// a waveform with mitred corners looks like a chart, not like audio.
+    pub fn polyline(&mut self, pts: &[Point], width: f32, fill: &Fill) {
+        if width <= 0.0 || fill.is_invisible() || pts.len() < 2 {
+            return;
+        }
+        let s = self.scale;
+        let mut pb = PathBuilder::new();
+        pb.move_to(pts[0].x * s, pts[0].y * s);
+        if pts.len() == 2 {
+            pb.line_to(pts[1].x * s, pts[1].y * s);
+        } else {
+            for w in pts.windows(2).take(pts.len() - 2) {
+                let (a, b) = (w[0], w[1]);
+                let mid = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+                pb.quad_to(a.x * s, a.y * s, mid.x * s, mid.y * s);
+            }
+            // The final span runs from the last midpoint to the last sample,
+            // so the curve actually ends on the data rather than short of it.
+            let (a, b) = (pts[pts.len() - 2], pts[pts.len() - 1]);
+            pb.quad_to(a.x * s, a.y * s, b.x * s, b.y * s);
+        }
+        let Some(path) = pb.finish() else {
+            return;
+        };
+        self.stroke_joined(&path, fill, width);
+    }
+
     /// Draw `run` with its **top-left** at `at`, returning the bounds it
     /// occupied.
     ///
@@ -967,6 +1005,28 @@ impl Canvas {
         let stroke = Stroke {
             width: (width * self.scale).max(f32::EPSILON),
             line_cap: cap,
+            ..Default::default()
+        };
+        self.pixmap
+            .stroke_path(path, &paint, &stroke, Transform::identity(), None);
+    }
+
+    /// As [`Canvas::stroke`], but with round *joins* as well as round caps.
+    ///
+    /// Only the polyline needs this. A mitred join on a waveform spikes
+    /// outward wherever two spans meet at a sharp angle — exactly where a loud
+    /// band sits — so the one place the data is most interesting is the one
+    /// place the default join draws an artefact.
+    fn stroke_joined(&mut self, path: &tiny_skia::Path, fill: &Fill, width: f32) {
+        let paint = Paint {
+            shader: fill.to_shader(self.scale),
+            anti_alias: true,
+            ..Default::default()
+        };
+        let stroke = Stroke {
+            width: (width * self.scale).max(f32::EPSILON),
+            line_cap: tiny_skia::LineCap::Round,
+            line_join: tiny_skia::LineJoin::Round,
             ..Default::default()
         };
         self.pixmap

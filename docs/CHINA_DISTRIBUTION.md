@@ -648,3 +648,10 @@ Ordered by how much they can derail the plan.
 - [ ] Add the mainland one-liner + Gitee link to the landing page and README
 - [ ] `lintian` check, then submit to Spark Store
 - [ ] Test the `.deb` on deepin 23 (and 20), then submit to the deepin app store
+- [ ] **Install via the Spark Store on a machine that has had Fresco before** —
+      the launcher-icon bug (docs/plan-dde-launcher-and-integration.md Part 1)
+      reproduces only on machines with a previous install, and the Store ships
+      the *same* `.deb`, so a Store install fixes nothing by itself. The Store's
+      PackageKit/lastore transaction is also a different process scope for the
+      postinst's detached re-announce than an interactive `apt` is, so this path
+      may behave *worse*. This is the exact path the first mainland users take.

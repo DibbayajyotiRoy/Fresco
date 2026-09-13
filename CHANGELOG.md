@@ -4,6 +4,95 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.42] — Unreleased
+
+### Fixed
+- **Cropping to the edge of the frame no longer crashes the app.** Dragging a
+  crop corner to or past the preview edge made the box wider than the frame,
+  and the bounds check that followed aborted the app (`f64::clamp` with
+  `min > max`) — reported on Deepin 25, but it happened on every desktop. The
+  frame edge now clips the dragged side, a locked aspect ratio shrinks to fit,
+  and an edge-to-edge crop is reachable. Dragging a top corner with the aspect
+  locked also no longer lets the bottom edge drift, which could collapse the
+  box into a sliver at the opposite corner.
+- **Linux Mint (Cinnamon) restores the wallpaper after a reboot.** Cinnamon
+  draws its own `org.cinnamon.desktop.background` and ignores the GNOME schema
+  the still-frame fallback wrote, so on a Cinnamon Wayland session the
+  wallpaper silently never appeared. The fallback now writes — and on Stop
+  restores — Cinnamon's schema there, and a Cinnamon Wayland session is
+  classified as static-frame rather than layer-shell when the registry probe
+  gives no answer.
+- **A daemon started too early at login recovers.** If the first renderer
+  build failed at login — no monitors reported yet, or a renderer that could
+  not start — `frescod` exited or sat with no wallpaper until the monitor
+  layout changed. It now keeps running and rebuilds every 2 seconds for the
+  first 30 seconds until every configured monitor has a renderer.
+- **A vanishing compositor no longer counts as a renderer failure.** When the
+  session was ending, or the compositor restarted on a new socket, `frescod`
+  kept trying to start mpvpaper against a Wayland display that was no longer
+  there, spent its five restarts within ten seconds, and gave up for good with
+  `renderer failed 5×` — which telemetry then blamed on the renderer. Both the
+  output-enumeration probe and a spawn that dies with "Unable to connect to
+  the compositor" now park the output as a display-away, with a full budget
+  waiting for the display's return.
+- **Installing mpvpaper starts the wallpaper without a restart.** Source
+  builds (Fedora, Arch, CachyOS, EndeavourOS) ship no bundled renderer, so
+  `frescod` spent its five restarts on a binary that did not exist and gave up
+  with `renderer failed 5×`. The lookup was also cached for the daemon's whole
+  life: installing mpvpaper, as the error advised, changed nothing until a
+  restart, and a package upgrade that renamed the bundled binary left a running
+  daemon spawning a path that was gone. A missing renderer now spends no
+  budget. The daemon names what to install, re-checks every 10 seconds, and
+  starts playback once mpvpaper appears; a remembered path is dropped when its
+  file vanishes. `docs/INSTALL.md` covers installing mpvpaper on those distros.
+- **Chinese: library folders are called categories.** The zh-CN interface said
+  "文件夹" (folder) for the library's own groupings, which read as file-system
+  directories — "移动到文件夹" is now "移动到指定分类". Real folders on disk
+  (slideshow, lyrics, "Add folder") still say 文件夹.
+- **A renderer that dies at startup now says why.** mpvpaper's stderr is
+  captured (it was inherited before, so nothing of it reached the log), the
+  last lines are written to the daemon log when it exits, and the failure is
+  classified into a content-free code — compositor unreachable, no
+  layer-shell, EGL failure, mpv init, mpv GL context, load failure, dynamic
+  linker, crash — for the status error the app shows and for the
+  `renderer_giveup` report. Every such report used to read just
+  `cause=exited_early`, which is not something anyone can act on.
+- **A bundled renderer that cannot load is reported as such**, not as
+  `mpvpaper_missing`: a `.deb` whose mpvpaper is linked against a libmpv this
+  distro does not ship is a packaging problem, not a user who never installed
+  the renderer, and the two now arrive under different codes.
+- **Laptops with Intel and NVIDIA graphics no longer burn CPU and GPU on
+  playback.** On such a machine Fresco forced Intel's VA-API driver, so video
+  was decoded on the Intel GPU, copied back into system memory, and uploaded
+  again to the NVIDIA GPU drawing the desktop — `vaapi-copy` in the status
+  badge. A 1440p30 wallpaper cost a GeForce MX130 about a quarter of a CPU and
+  half its GPU. The Intel driver is now pinned only when no NVIDIA GPU is
+  present, and NVIDIA machines try NVDEC first (`nvdec,vaapi,auto-safe`;
+  `nvdec-copy,auto-copy` for rotated video). A hybrid laptop whose desktop is
+  drawn on the Intel GPU still decodes with VA-API, as before. Other machines
+  are unchanged.
+- **The app window no longer uses CPU in the background.** A hover preview kept
+  decoding when the window lost focus or was minimised with the pointer still
+  on a card; it now stops until the next hover. The transition preview's 30fps
+  timer never stopped once hidden, and started even for video entries where
+  the preview is not shown; it now runs only while visible.
+- **Rotating a wallpaper a second time previews correctly.** The editor
+  previews from the library thumbnail, which after a rotation already has that
+  rotation in its pixels — and then turned it again by the saved angle. The
+  second edit therefore started from a wrong picture, and what was set no
+  longer matched what was shown. Each thumbnail now records the rotation baked
+  into it, and the preview applies only the difference.
+- **The decode badge tells the truth on Wayland.** It was read once, the moment
+  the renderer's control socket came up — before the video was even open, when
+  mpv always answers "no" — so every Wayland session showed "software" whatever
+  decoder was really in use, and a rotation change never updated it. It is now
+  read live on each status check.
+
+### Added
+- **`FRESCO_HWDEC` overrides the hardware decoder** (for example `nvdec`,
+  `vaapi` or `no`), so a decoding problem can be narrowed down without a
+  rebuild.
+
 ## [1.1.41] — 2026-08-21
 
 ### Changed

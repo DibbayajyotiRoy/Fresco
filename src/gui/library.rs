@@ -38,7 +38,10 @@ pub struct LibraryEntry {
     /// Slideshow cycle interval in seconds; only meaningful for Kind::Slideshow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_s: Option<u64>,
-    /// Slideshow transition effect; only meaningful for Kind::Slideshow.
+    /// Effect played when this wallpaper comes up. Was slideshow-only, back
+    /// when the daemon's animation machine lived inside `Slideshow`; it now
+    /// applies to every kind, video included. `None` means "never chosen",
+    /// which falls back to the wallpaper-level default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
     /// Remembered audio + orientation (video/playlist), so setting from the
@@ -49,6 +52,13 @@ pub struct LibraryEntry {
     pub volume: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<u16>,
+    /// Rotation baked into `thumbnail` when it was generated. The editor
+    /// previews from the thumbnail and applies `rotation` on top, so it must
+    /// subtract what the file already carries or a rotated entry shows turned
+    /// twice. `None` = a thumbnail from before this was recorded: rotated
+    /// thumbnails were only ever written on an edit, so assume `rotation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_rotation: Option<u16>,
     /// Per-wallpaper power-saving override; `None` inherits the global default.
     /// Remembered so a later gallery set keeps the chosen level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,6 +131,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            thumbnail_rotation: None,
             power_saving: None,
             catalog_id: None,
             width: None,
@@ -155,6 +166,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            thumbnail_rotation: None,
             power_saving: None,
             catalog_id: None,
             width: None,
@@ -196,6 +208,7 @@ impl LibraryEntry {
             mute: None,
             volume: None,
             rotation: None,
+            thumbnail_rotation: None,
             power_saving: None,
             catalog_id: None,
             width: None,
@@ -226,10 +239,11 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: Some(30),
-            transition: Some(Transition::Crossfade),
+            transition: Some(Transition::Fade),
             mute: None,
             volume: None,
             rotation: None,
+            thumbnail_rotation: None,
             power_saving: None,
             catalog_id: None,
             width: None,
@@ -258,10 +272,11 @@ impl LibraryEntry {
             broken: false,
             error: None,
             interval_s: Some(30),
-            transition: Some(Transition::Crossfade),
+            transition: Some(Transition::Fade),
             mute: None,
             volume: None,
             rotation: None,
+            thumbnail_rotation: None,
             power_saving: None,
             catalog_id: None,
             width: None,
@@ -359,6 +374,7 @@ impl LibraryEntry {
                 .unwrap_or(false);
             if ok {
                 self.thumbnail = Some(out);
+                self.thumbnail_rotation = Some(rotation);
                 return;
             }
         }
@@ -378,7 +394,15 @@ impl LibraryEntry {
             .unwrap_or(false);
         if ok {
             self.thumbnail = Some(out);
+            // ffmpegthumbnailer can't rotate: this frame is upright even when
+            // the rotated path above was wanted and failed.
+            self.thumbnail_rotation = Some(0);
         }
+    }
+
+    /// Rotation already present in the pixels of `thumbnail`.
+    pub fn thumbnail_baked_rotation(&self) -> u16 {
+        self.thumbnail_rotation.or(self.rotation).unwrap_or(0) % 360
     }
 
     /// The single media file that best represents this entry (used for
@@ -551,7 +575,7 @@ impl LibraryEntry {
             // A hand-picked slideshow still needs a cadence; keep whatever the
             // entry already had rather than resetting a tuned interval.
             self.interval_s.get_or_insert(30);
-            self.transition.get_or_insert(Transition::Crossfade);
+            self.transition.get_or_insert(Transition::Fade);
         }
     }
 
@@ -567,6 +591,8 @@ impl LibraryEntry {
             mute: self.mute.unwrap_or(true),
             volume: self.volume.unwrap_or(50),
             power_saving: self.power_saving,
+            // Applies to every kind now, not just the slideshow branch below.
+            transition: self.transition.unwrap_or_default(),
             framerate: None, // deprecated; see Config::migrate
             slideshow: if self.kind == Kind::Slideshow {
                 Some(Slideshow {

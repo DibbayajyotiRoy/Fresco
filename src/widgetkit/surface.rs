@@ -737,6 +737,253 @@ impl Default for BarStyle {
     }
 }
 
+/// Which *shape* a spectrum draws, as opposed to how it is coloured.
+///
+/// A mirror of `crate::visualizer::VisualStyle`, variant for variant, and kept
+/// separate for the reason every other widgetkit type is: the toolkit draws
+/// pictures and does not read the config. The colour settings live in
+/// [`BarStyle`] and compose with all five shapes — a spectrum ring is still
+/// subject to `accent_follow`, the gradient mode and the opacity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SpectrumStyle {
+    /// Bottom-aligned bars. The default and the only shape a well suits.
+    #[default]
+    Bars,
+    /// Bars growing from a centre line in both directions.
+    Mirror,
+    /// One continuous curve through the band tops.
+    Wave,
+    /// A column of discrete dots per band, lit up to that band's level.
+    Dots,
+    /// Bars radiating outward from a circle.
+    Ring,
+}
+
+/// Draw a spectrum of `shape` into `area`.
+///
+/// The single entry point every visualiser variant calls, so that adding a
+/// shape cannot leave one treatment behind: [`bars`] stays public because the
+/// chassis's three bezels each want a bar array specifically, but anything
+/// drawing *the user's chosen* spectrum comes through here.
+pub fn spectrum(
+    c: &mut Canvas,
+    area: Rect,
+    values: &[f32],
+    peaks: Option<&[f32]>,
+    t: &Theme,
+    style: BarStyle,
+    shape: SpectrumStyle,
+) {
+    match shape {
+        SpectrumStyle::Bars => bars(c, area, values, peaks, t, style),
+        SpectrumStyle::Mirror => mirror(c, area, values, t, style),
+        SpectrumStyle::Wave => wave(c, area, values, t, style),
+        SpectrumStyle::Dots => dots(c, area, values, t, style),
+        SpectrumStyle::Ring => ring(c, area, values, t, style),
+    }
+}
+
+/// The alpha a spectrum draws at, guarding a hand-edited non-finite opacity.
+fn spectrum_alpha(style: &BarStyle) -> f32 {
+    if style.opacity.is_finite() {
+        style.opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+/// How many bands a shape will draw, folded to the array's optical limit.
+fn spectrum_bands(values: &[f32]) -> usize {
+    values.len().min(*BAND_RANGE.end())
+}
+
+/// One band's magnitude, clamped and NaN-guarded.
+fn level(values: &[f32], i: usize) -> f32 {
+    match values.get(i) {
+        Some(v) if v.is_finite() => v.clamp(0.0, 1.0),
+        _ => 0.0,
+    }
+}
+
+/// Bars growing from a centre line in both directions.
+///
+/// Each half gets half the box, so a mirror at a given height is never taller
+/// than the bar array it replaces. The centre line is drawn whenever
+/// `baseline` is on — it is doing the same job the floor does under `bars`,
+/// which is to make silence read as silence.
+fn mirror(c: &mut Canvas, area: Rect, values: &[f32], t: &Theme, style: BarStyle) {
+    if area.is_empty() || values.is_empty() {
+        return;
+    }
+    let n = spectrum_bands(values);
+    let (bw, g) = bar_geometry(area.w, n);
+    if bw <= 0.0 {
+        return;
+    }
+    let alpha = spectrum_alpha(&style);
+    let radius = if style.rounded {
+        (bw / 2.0).min(3.0)
+    } else {
+        0.0
+    };
+    let mid = area.y + area.h / 2.0;
+    let half = area.h / 2.0;
+    for i in 0..n {
+        let v = level(values, i);
+        // The 1 lu floor is half the bar array's 2 lu, so a silent mirror is
+        // the same total thickness as a silent bar row rather than twice it.
+        let h = (half * v).max(1.0).min(half);
+        let x = area.x + i as f32 * (bw + g);
+        let span = Rect::new(x, mid - h, bw, h * 2.0);
+        let fill = bar_fill(span, i, n, v, t, style.paint, alpha);
+        if style.shadow {
+            elevation(c, span, radius, t, t.e1());
+        }
+        c.rounded_rect(span, radius, &fill);
+    }
+    if style.baseline {
+        c.rounded_rect(
+            Rect::new(area.x, mid, area.w, t.metrics.hairline),
+            0.0,
+            &Fill::solid(t.gridline),
+        );
+    }
+}
+
+/// One continuous curve through the band tops.
+///
+/// Stroked rather than filled: a filled waveform is a bar array with the gaps
+/// removed, and loses the one thing this shape has over `Bars`, which is that
+/// the *slope* between bands is visible. The curve is smoothed by
+/// [`Canvas::polyline`]; see there for why the smoothing is necessary at all.
+///
+/// The paint is sampled once at the array's midpoint rather than per-segment.
+/// A stroke takes one shader, and the alternative — a separate stroke per span
+/// so each can carry its own colour — is 160 stroked paths a frame in the one
+/// widget that repaints at frame rate.
+fn wave(c: &mut Canvas, area: Rect, values: &[f32], t: &Theme, style: BarStyle) {
+    if area.is_empty() || values.is_empty() {
+        return;
+    }
+    let n = spectrum_bands(values);
+    let alpha = spectrum_alpha(&style);
+    let w = (area.h * 0.05).clamp(1.5, 3.0);
+    // Inset by the stroke's half-width so a full-scale band's cap stays inside
+    // the box instead of being clipped in half by it.
+    let top = area.y + w / 2.0;
+    let base = area.bottom() - w / 2.0;
+    let travel = (base - top).max(0.0);
+    let mut pts: Vec<Point> = Vec::with_capacity(n);
+    for i in 0..n {
+        let x = if n > 1 {
+            area.x + area.w * (i as f32 / (n - 1) as f32)
+        } else {
+            area.center().x
+        };
+        pts.push(Point::new(x, base - travel * level(values, i)));
+    }
+    let probe = Rect::new(area.x, top, area.w, travel);
+    let fill = bar_fill(probe, n / 2, n, 0.5, t, style.paint, alpha);
+    if style.baseline {
+        c.rounded_rect(
+            Rect::new(area.x, area.bottom(), area.w, t.metrics.hairline),
+            0.0,
+            &Fill::solid(t.gridline),
+        );
+    }
+    c.polyline(&pts, w, &fill);
+}
+
+/// A column of discrete dots per band, lit to that band's level.
+///
+/// The unlit dots stay drawn, faintly: they are what makes the scale legible,
+/// and without them a quiet passage reads as a broken widget rather than as a
+/// quiet one. This is the shape whose cost grows with the box — rows × bands
+/// circles — so the row count is capped rather than derived from height alone.
+fn dots(c: &mut Canvas, area: Rect, values: &[f32], t: &Theme, style: BarStyle) {
+    if area.is_empty() || values.is_empty() {
+        return;
+    }
+    let n = spectrum_bands(values);
+    let (bw, g) = bar_geometry(area.w, n);
+    if bw <= 0.0 {
+        return;
+    }
+    let alpha = spectrum_alpha(&style);
+    let d = bw.min(10.0);
+    let pitch = d + (d * 0.55).max(2.0);
+    let rows = ((area.h / pitch).floor() as usize).clamp(3, 24);
+    let radius = d / 2.0;
+    let base = area.bottom() - d;
+    for i in 0..n {
+        let v = level(values, i);
+        let x = area.x + i as f32 * (bw + g) + (bw - d) / 2.0;
+        // `ceil`, so any audible band lights at least its bottom dot: a column
+        // that rounds down to nothing makes quiet bands look like dead ones.
+        let lit = (v * rows as f32).ceil() as usize;
+        for r in 0..rows {
+            let y = base - r as f32 * pitch;
+            if y < area.y {
+                break;
+            }
+            let cell = Rect::new(x, y, d, d);
+            let fill = if r < lit {
+                bar_fill(cell, i, n, v, t, style.paint, alpha)
+            } else {
+                Fill::solid(t.text_primary.with_alpha(0.10 * alpha))
+            };
+            c.rounded_rect(cell, radius, &fill);
+        }
+    }
+}
+
+/// Bars radiating outward from a circle.
+///
+/// The radius is taken from the shorter side, so a ring in a wide bare box is
+/// a circle in the middle of it rather than an ellipse spanning it — this
+/// shape is the one that ignores the box's aspect entirely, which is worth
+/// stating because it means `width_pct` stops controlling apparent size once
+/// the box is wider than it is tall.
+fn ring(c: &mut Canvas, area: Rect, values: &[f32], t: &Theme, style: BarStyle) {
+    if area.is_empty() || values.is_empty() {
+        return;
+    }
+    let n = spectrum_bands(values);
+    let alpha = spectrum_alpha(&style);
+    let centre = area.center();
+    // Half the box for the whole figure, 55% of that for the hub: the
+    // remaining 45% is the spoke travel, which keeps a full-scale spoke inside
+    // the box on every aspect.
+    let outer = area.min_side() / 2.0;
+    let r0 = outer * 0.55;
+    let travel = outer - r0;
+    if travel <= 0.0 {
+        return;
+    }
+    let w = (2.0 * std::f32::consts::PI * r0 / n as f32 * 0.62).clamp(1.0, 8.0);
+    if style.baseline {
+        c.arc(centre, r0, 0.0, 360.0, t.metrics.hairline, &Fill::solid(t.gridline));
+    }
+    for i in 0..n {
+        let v = level(values, i);
+        let len = (travel * v).max(1.0);
+        let a = (i as f32 / n as f32) * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+        let (sin, cos) = a.sin_cos();
+        let inner = Point::new(centre.x + cos * r0, centre.y + sin * r0);
+        let tip = Point::new(centre.x + cos * (r0 + len), centre.y + sin * (r0 + len));
+        // A spoke is coloured as if it were a bar of the same magnitude, so
+        // every paint mode means the same thing here as it does under `bars`.
+        let probe = Rect::new(
+            inner.x.min(tip.x),
+            inner.y.min(tip.y),
+            (tip.x - inner.x).abs().max(w),
+            (tip.y - inner.y).abs().max(w),
+        );
+        let fill = bar_fill(probe, i, n, v, t, style.paint, alpha);
+        c.polyline(&[inner, tip], w, &fill);
+    }
+}
+
 /// The widest and narrowest band counts a bar array will draw (spec §8.4).
 ///
 /// Above 160 the bar is thinner than the gap and the array reads as noise; the

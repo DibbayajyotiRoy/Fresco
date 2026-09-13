@@ -13,6 +13,7 @@ pub mod mpv;
 mod mpvpaper;
 mod notifier;
 mod overview;
+mod transition;
 mod wayland_outputs;
 mod webbridge;
 #[allow(dead_code)]
@@ -34,6 +35,7 @@ use crate::ipc::{MonitorInfo, Request, Response, StatusReply};
 use monitors::Monitor;
 use mpv::Player;
 use mpvpaper::WaylandPlayer;
+use transition::{Anim, Step, Surface};
 use x11win::{Atoms, WallpaperWindow, WindowKind};
 
 const TICK: Duration = Duration::from_millis(100);
@@ -53,6 +55,11 @@ const AUDIO_RETRY_MAX: u8 = 6;
 const HEAL_WINDOW: Duration = Duration::from_secs(60);
 const HEAL_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_HEALS: u32 = 5;
+// Startup renderer retry: when autostart launches us before RandR reports the
+// monitors (or before the WM can take our window), the first rebuild comes up
+// short. Keep rebuilding on this cadence for the first half-minute.
+const STARTUP_RETRY_WINDOW: Duration = Duration::from_secs(30);
+const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 // Wayland frozen-but-alive: consecutive SUPERVISE ticks (~2s each) with no
 // playback progress before treating a still-running mpvpaper as wedged. 3 ≈ 6s,
 // high enough that a normally looping clip never trips it.
@@ -66,57 +73,26 @@ const SYNC_TOLERANCE: f64 = 0.2;
 
 /// During a transition the loop ticks at ~60fps for buttery, eased motion.
 const ANIM_TICK: Duration = Duration::from_millis(16);
-/// Transition durations in ~16ms steps (≈ FADE 0.37s, CROSSFADE 0.2s, SLIDE 0.45s/side).
-const FADE_STEPS: u32 = 22;
-const CROSSFADE_STEPS: u32 = 12;
-const SLIDE_STEPS: u32 = 28;
-/// Ken Burns zoom travel (mpv `video-zoom` log2 units) over one interval.
-const KEN_BURNS_ZOOM: f64 = 0.16;
-/// Subtle scale "punch" layered onto slide/fade for cinematic depth (~4%).
-const SLIDE_PUNCH: f64 = 0.06;
 
-/// Premium ease-in-out (gentle acceleration + deceleration). Linear motion is
-/// the #1 tell of amateur animation; everything cinematic eases.
-fn ease_in_out_cubic(t: f64) -> f64 {
-    if t < 0.5 {
-        4.0 * t * t * t
-    } else {
-        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
-    }
-}
-
-/// Softer ease for the continuous Ken Burns drift.
-fn smoothstep(t: f64) -> f64 {
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// Animation phase of a slideshow's current transition.
-#[derive(Clone, Copy)]
-enum Phase {
-    Hold,
-    FadeOut { step: u32, total: u32 },
-    FadeIn { step: u32, total: u32 },
-    SlideOut { step: u32 },
-    SlideIn { step: u32 },
-}
-
+/// A slideshow's dwell bookkeeping: which image is up and when the next one is
+/// due. The animation between them belongs to [`transition::Anim`], which any
+/// wallpaper change can drive — a slideshow is one of its callers, not its
+/// owner.
 struct Slideshow {
     images: Vec<PathBuf>,
     idx: usize,
     interval: Duration,
     last_advance: Instant,
     transition: Transition,
-    phase: Phase,
-    /// Base zoom/pan from the configured crop; animations compose on top.
-    base_zoom: f64,
-    base_pan_x: f64,
-    base_pan_y: f64,
 }
 
 struct Renderer {
     window: WallpaperWindow,
     player: PlayerHandle,
     slideshow: Option<Slideshow>,
+    /// This output's transition. Independent per renderer: two monitors run
+    /// their own players and may be mid-transition at different phases.
+    anim: Anim,
     /// Last observed playback position — used to detect a cold-boot VO stall
     /// (a video whose position isn't advancing shortly after login).
     last_time_pos: std::cell::Cell<Option<f64>>,
@@ -126,6 +102,18 @@ struct Renderer {
     /// Last pause state actually applied — lets `reconcile_pause` talk to mpv
     /// only on change (mirrors `WlOutput::applied_paused`).
     applied_paused: std::cell::Cell<bool>,
+}
+
+impl Renderer {
+    /// One animation tick for this output. Returns true while animating.
+    fn advance(&mut self, now: Instant) -> bool {
+        match self.slideshow.as_mut() {
+            Some(s) => advance_slideshow(&self.player, s, &mut self.anim, now),
+            // No slideshow: the only thing that can be running is a wallpaper
+            // change (a scheduled swap), which steps identically.
+            None => self.anim.step(&self.player).animating(),
+        }
+    }
 }
 
 /// Backoff state for restoring a dropped audio track. mpv permanently
@@ -214,6 +202,15 @@ impl PlayerHandle {
             PlayerHandle::Wayland(p) => p.set_zoom_pan(zoom, pan_x, pan_y),
         }
     }
+    /// Defocus for a transition; `0.0` clears it. See
+    /// [`crate::daemon::mpvpaper::WaylandPlayer::set_blur`].
+    fn set_blur(&self, sigma: f64) {
+        match self {
+            PlayerHandle::X11(p) => p.set_blur(sigma),
+            PlayerHandle::Wayland(p) => p.set_blur(sigma),
+        }
+    }
+
     fn set_gamma(&self, gamma: i32) {
         match self {
             PlayerHandle::X11(p) => p.set_gamma(gamma),
@@ -330,6 +327,16 @@ impl PlayerHandle {
         }
     }
 
+    /// The renderer's last stderr lines, where there is a separate process
+    /// whose output could be captured. Logged when it dies so "renderer down
+    /// (dead)" says what mpv or the driver printed on the way out.
+    fn stderr_tail(&self) -> Option<String> {
+        match self {
+            PlayerHandle::X11(_) => None,
+            PlayerHandle::Wayland(p) => Some(p.stderr_tail()),
+        }
+    }
+
     /// Renderer pid, where there is a separate process to have one.
     ///
     /// `None` on X11, where mpv is embedded rather than spawned as a paper
@@ -356,6 +363,24 @@ impl PlayerHandle {
     }
 }
 
+/// The transition engine's view of a player. Both backends reach it through the
+/// same `PlayerHandle`, so an effect cannot behave differently on X11 and
+/// Wayland — and the engine itself stays testable against a fake.
+impl Surface for PlayerHandle {
+    fn load(&self, path: &std::path::Path) {
+        self.load_path(path);
+    }
+    fn gamma(&self, gamma: i32) {
+        self.set_gamma(gamma);
+    }
+    fn zoom_pan(&self, zoom: f64, pan_x: f64, pan_y: f64) {
+        self.set_zoom_pan(zoom, pan_x, pan_y);
+    }
+    fn blur(&self, sigma: f64) {
+        self.set_blur(sigma);
+    }
+}
+
 pub struct Daemon {
     conn: RustConnection,
     screen_num: usize,
@@ -378,6 +403,9 @@ pub struct Daemon {
     started_at: Instant,
     last_heal_check: Instant,
     heals: u32,
+    last_startup_retry: Instant,
+    /// Rebuilds attempted by `check_startup_renderers`; 0 = never needed.
+    startup_retries: u32,
     /// Deepin DDE quirk (issue #2): whether/how DDE's covering desktop window
     /// is being handled. `Inactive` on every other desktop.
     dde_mode: dde::Mode,
@@ -420,6 +448,8 @@ impl Daemon {
             started_at: Instant::now(),
             last_heal_check: Instant::now(),
             heals: 0,
+            last_startup_retry: Instant::now(),
+            startup_retries: 0,
             dde_mode: dde::Mode::Inactive,
             dde_self_checked: false,
             dde_peek: dde::IconPeek::default(),
@@ -610,6 +640,7 @@ impl Daemon {
             window,
             player,
             slideshow,
+            anim: Anim::new(transition::crop_base(wallpaper)),
             last_time_pos: std::cell::Cell::new(None),
             audio_heal: AudioHeal::new(),
             cache_raised: std::cell::Cell::new(false),
@@ -620,7 +651,11 @@ impl Daemon {
     /// Main event loop. Returns when a Stop command (or signal) is received.
     pub fn run(&mut self) -> Result<()> {
         let commands = control::start_server()?;
-        self.rebuild()?;
+        // Not fatal: right after login RandR can still be unavailable, and
+        // `check_startup_renderers` retries for the first half-minute.
+        if let Err(e) = self.rebuild() {
+            log::warn!("initial renderer build failed: {e:#}");
+        }
         overview::apply(&self.config.wallpaper);
         log::info!("frescod started with {} renderer(s)", self.renderers.len());
         crate::telemetry::heartbeat(
@@ -676,9 +711,10 @@ impl Daemon {
                 self.check_sync();
                 self.last_sync_check = now;
             }
+            self.check_startup_renderers(now);
             self.check_cold_boot_stall(now);
             self.push_widgets();
-            let animating = self.advance_slideshows(now);
+            let animating = self.advance_transitions(now);
 
             // Smart Sleep: the engine knows when the next lyric line, minute
             // boundary or animation frame is due, and this is the only loop
@@ -932,7 +968,8 @@ impl Daemon {
             "schedule: switching default wallpaper to {}",
             path.display()
         );
-        for r in &self.renderers {
+        let effect = want.transition;
+        for r in &mut self.renderers {
             if !self.config.monitors.contains_key(&r.window.connector) {
                 // Rotation, scalers (power-saving), and crop are per-wallpaper
                 // state on the mpv instance; without resetting them here the
@@ -945,7 +982,10 @@ impl Daemon {
                     want.rotation,
                 );
                 r.player.apply_crop(&want);
-                r.player.load_path(&path);
+                // The new crop is where the transition must come to rest, so
+                // teach the machine about it before it starts easing anywhere.
+                r.anim.set_base(transition::crop_base(&want));
+                r.anim.start(effect, path.clone(), &r.player);
                 r.cache_raised.set(false); // re-check resolution for the new media
             }
         }
@@ -1021,6 +1061,61 @@ impl Daemon {
         }
     }
 
+    /// How many renderers the current config and monitor layout call for —
+    /// mirrors `rebuild`'s skip condition. With no monitors reported yet, the
+    /// global wallpaper stands in for "at least one", so an empty RandR answer
+    /// at login still counts as short.
+    fn expected_renderers(&self) -> usize {
+        let wants = |w: &Wallpaper| w.effective_path().is_some() || w.kind == Kind::Slideshow;
+        if self.monitors.is_empty() {
+            let any = wants(&self.config.wallpaper) || self.config.monitors.values().any(wants);
+            return usize::from(any);
+        }
+        self.monitors
+            .iter()
+            .filter(|m| wants(self.config.wallpaper_for(&m.connector)))
+            .count()
+    }
+
+    /// Retry a short startup build. Autostart runs us a few seconds after login,
+    /// when RandR may report no monitors yet or `make_renderer` can fail, and
+    /// neither hotplug (fires only on a layout *change*) nor the stall heal
+    /// (looks only at existing renderers) would ever recover from that — the
+    /// desktop would stay on the native wallpaper until the user reselected.
+    fn check_startup_renderers(&mut self, now: Instant) {
+        if now.duration_since(self.started_at) > STARTUP_RETRY_WINDOW
+            || now.duration_since(self.last_startup_retry) < STARTUP_RETRY_INTERVAL
+            || self.user_paused
+        {
+            return;
+        }
+        self.last_startup_retry = now;
+
+        let expected = self.expected_renderers();
+        if expected == 0 || self.renderers.len() >= expected {
+            return; // nothing configured, or already complete
+        }
+        self.startup_retries += 1;
+        log::warn!(
+            "only {}/{expected} renderer(s) after start; rebuilding (attempt {})",
+            self.renderers.len(),
+            self.startup_retries
+        );
+        if let Err(e) = self.rebuild() {
+            log::warn!("startup rebuild failed: {e:#}");
+            return;
+        }
+        // Re-count: the rebuild may have discovered monitors it lacked before.
+        let expected = self.expected_renderers();
+        if !self.renderers.is_empty() && self.renderers.len() >= expected {
+            log::info!(
+                "startup rebuild succeeded after {} attempt(s): {} renderer(s)",
+                self.startup_retries,
+                self.renderers.len()
+            );
+        }
+    }
+
     /// Recover from the cold-boot VO stall. Right after login the X server / WM
     /// may not have the wallpaper window paint-ready when mpv starts, so a video
     /// can freeze on its first frame and stay static until the user re-selects it.
@@ -1071,14 +1166,13 @@ impl Daemon {
         }
     }
 
-    /// Advance every renderer's slideshow. Returns true while any is mid-
-    /// animation, so the caller can tick faster (~30fps).
-    fn advance_slideshows(&mut self, now: Instant) -> bool {
+    /// Advance every renderer's animation — a slideshow's dwell, or a plain
+    /// wallpaper change mid-transition. Returns true while any is animating, so
+    /// the caller can tick faster (~60fps).
+    fn advance_transitions(&mut self, now: Instant) -> bool {
         let mut animating = false;
         for r in &mut self.renderers {
-            if let Some(s) = r.slideshow.as_mut() {
-                animating |= advance_slideshow(&r.player, s, now);
-            }
+            animating |= r.advance(now);
         }
         animating
     }
@@ -1096,146 +1190,54 @@ impl Daemon {
     }
 }
 
-/// One slideshow's per-tick step — the shared transition state machine. Both
+/// One slideshow's per-tick step: run the animation if one is going, otherwise
+/// decide whether the dwell is up and hand the next image to [`Anim`]. Both
 /// backends call this with their own `PlayerHandle`, so the engine is written
 /// once. Returns true while mid-animation.
-fn advance_slideshow(player: &PlayerHandle, s: &mut Slideshow, now: Instant) -> bool {
+fn advance_slideshow<S: Surface>(
+    player: &S,
+    s: &mut Slideshow,
+    anim: &mut Anim,
+    now: Instant,
+) -> bool {
+    // A transition already in flight owns the player until it settles; the
+    // dwell only restarts once it has.
+    if anim.running() {
+        let step = anim.step(player);
+        if step == Step::Finished {
+            s.last_advance = now;
+        }
+        return step.animating();
+    }
     if s.images.len() <= 1 {
         return false;
     }
-    let next = (s.idx + 1) % s.images.len();
     let due = now.duration_since(s.last_advance) >= s.interval;
-    let mut animating = false;
-    {
-        match s.phase {
-            Phase::Hold => match s.transition {
-                Transition::KenBurns => {
-                    // Continuous eased zoom + gentle diagonal drift that
-                    // alternates direction each image, so it never feels
-                    // mechanical. (smoothstep gives a soft start and finish.)
-                    let frac = (now.duration_since(s.last_advance).as_secs_f64()
-                        / s.interval.as_secs_f64())
-                    .clamp(0.0, 1.0);
-                    let e = smoothstep(frac);
-                    let dir = if s.idx.is_multiple_of(2) { 1.0 } else { -1.0 };
-                    player.set_zoom_pan(
-                        s.base_zoom + KEN_BURNS_ZOOM * e,
-                        s.base_pan_x + dir * 0.10 * (e - 0.5),
-                        s.base_pan_y + dir * 0.05 * (e - 0.5),
-                    );
-                    animating = true;
-                    if due {
-                        s.idx = next;
-                        player.load_path(&s.images[s.idx]);
-                        player.set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
-                        s.last_advance = now;
-                    }
-                }
-                Transition::None => {
-                    if due {
-                        s.idx = next;
-                        player.load_path(&s.images[s.idx]);
-                        s.last_advance = now;
-                    }
-                }
-                Transition::Fade | Transition::Crossfade => {
-                    if due {
-                        let total = if matches!(s.transition, Transition::Crossfade) {
-                            CROSSFADE_STEPS
-                        } else {
-                            FADE_STEPS
-                        };
-                        s.phase = Phase::FadeOut { step: 0, total };
-                        animating = true;
-                    }
-                }
-                Transition::Slide => {
-                    if due {
-                        s.phase = Phase::SlideOut { step: 0 };
-                        animating = true;
-                    }
-                }
-            },
-            Phase::FadeOut { step, total } => {
-                animating = true;
-                let e = ease_in_out_cubic(step as f64 / total as f64);
-                player.set_gamma((-100.0 * e) as i32);
-                // Subtle inward "breath" while dimming — cinematic depth.
-                player.set_zoom_pan(s.base_zoom + SLIDE_PUNCH * e, s.base_pan_x, s.base_pan_y);
-                if step >= total {
-                    s.idx = next;
-                    player.load_path(&s.images[s.idx]);
-                    s.phase = Phase::FadeIn { step: 0, total };
-                } else {
-                    s.phase = Phase::FadeOut {
-                        step: step + 1,
-                        total,
-                    };
-                }
-            }
-            Phase::FadeIn { step, total } => {
-                animating = true;
-                let e = ease_in_out_cubic(step as f64 / total as f64);
-                player.set_gamma((-100.0 * (1.0 - e)) as i32);
-                // Settle the breath back to base as it brightens.
-                player.set_zoom_pan(
-                    s.base_zoom + SLIDE_PUNCH * (1.0 - e),
-                    s.base_pan_x,
-                    s.base_pan_y,
-                );
-                if step >= total {
-                    player.set_gamma(0);
-                    player.set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
-                    s.phase = Phase::Hold;
-                    s.last_advance = now;
-                } else {
-                    s.phase = Phase::FadeIn {
-                        step: step + 1,
-                        total,
-                    };
-                }
-            }
-            Phase::SlideOut { step } => {
-                animating = true;
-                // Eased push out with a slight zoom — a "push", not a flat slide.
-                let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
-                player.set_zoom_pan(
-                    s.base_zoom + SLIDE_PUNCH * e,
-                    s.base_pan_x - e,
-                    s.base_pan_y,
-                );
-                if step >= SLIDE_STEPS {
-                    s.idx = next;
-                    player.load_path(&s.images[s.idx]);
-                    player.set_zoom_pan(
-                        s.base_zoom + SLIDE_PUNCH,
-                        s.base_pan_x + 1.0,
-                        s.base_pan_y,
-                    );
-                    s.phase = Phase::SlideIn { step: 0 };
-                } else {
-                    s.phase = Phase::SlideOut { step: step + 1 };
-                }
-            }
-            Phase::SlideIn { step } => {
-                animating = true;
-                let e = ease_in_out_cubic(step as f64 / SLIDE_STEPS as f64);
-                player.set_zoom_pan(
-                    s.base_zoom + SLIDE_PUNCH * (1.0 - e),
-                    s.base_pan_x + (1.0 - e),
-                    s.base_pan_y,
-                );
-                if step >= SLIDE_STEPS {
-                    player.set_zoom_pan(s.base_zoom, s.base_pan_x, s.base_pan_y);
-                    s.phase = Phase::Hold;
-                    s.last_advance = now;
-                } else {
-                    s.phase = Phase::SlideIn { step: step + 1 };
-                }
-            }
+    let next = (s.idx + 1) % s.images.len();
+
+    // Ken Burns is the one effect with no out/in halves: it drifts continuously
+    // across the dwell itself, so the dwell — not the machine — drives it.
+    if s.transition == Transition::KenBurns {
+        let frac = now.duration_since(s.last_advance).as_secs_f64() / s.interval.as_secs_f64();
+        anim.ken_burns(player, frac, s.idx.is_multiple_of(2));
+        if due {
+            s.idx = next;
+            anim.start(Transition::KenBurns, s.images[s.idx].clone(), player);
+            s.last_advance = now;
         }
+        return true;
     }
-    animating
+
+    if !due {
+        return false;
+    }
+    s.idx = next;
+    let step = anim.start(s.transition, s.images[s.idx].clone(), player);
+    if step == Step::Idle {
+        // A hard cut is over the instant it happens; start the next dwell now.
+        s.last_advance = now;
+    }
+    step.animating()
 }
 
 /// Build a `Slideshow` state machine for a slideshow wallpaper, loading its
@@ -1250,21 +1252,14 @@ fn build_slideshow(wallpaper: &Wallpaper, player: &PlayerHandle) -> Option<Slide
     if let Some(first) = images.first() {
         player.load_path(first);
     }
-    let (base_zoom, base_pan_x, base_pan_y) = wallpaper
-        .crop
-        .and_then(|c| c.sanitized())
-        .map(|c| c.to_mpv_zoom_pan())
-        .unwrap_or((0.0, 0.0, 0.0));
     Some(Slideshow {
         images,
         idx: 0,
         interval: Duration::from_secs(s.interval_s.max(2)),
         last_advance: Instant::now(),
-        transition: s.transition,
-        phase: Phase::Hold,
-        base_zoom,
-        base_pan_x,
-        base_pan_y,
+        // The wallpaper-level field is the canonical one; `slideshow.transition`
+        // is the legacy copy `Config::migrate` keeps in step with it.
+        transition: wallpaper.transition,
     })
 }
 
@@ -1459,26 +1454,23 @@ fn statm_rss_pages(path: &str) -> u64 {
 /// which is what makes the wallpaper eat CPU and RAM. If an Intel GPU is present
 /// and no driver is pinned, force the Intel media driver so hardware decode
 /// works. No-op on single-GPU / AMD / NVIDIA-only systems.
+///
+/// NOT when an NVIDIA GPU is also present: `vo=gpu` then renders on the NVIDIA
+/// GL context, and pinning iHD pushed decode onto the iGPU, whose surfaces mpv
+/// can't share with that context — it fell back to `vaapi-copy` (decode →
+/// readback to RAM → re-upload), ~25% CPU for 1440p30 on an MX130. On those
+/// machines [`crate::config::hwdec`] prefers NVDEC instead.
 fn setup_vaapi_env() {
     if std::env::var_os("LIBVA_DRIVER_NAME").is_some() {
         return;
     }
-    let Ok(dir) = std::fs::read_dir("/sys/class/drm") else {
-        return;
-    };
-    for entry in dir.flatten() {
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("card") {
-            continue;
-        }
-        let vendor =
-            std::fs::read_to_string(entry.path().join("device/vendor")).unwrap_or_default();
-        if vendor.trim() == "0x8086" {
-            // Intel: iHD (Gen8+/Broadwell and newer, incl. Alder Lake).
-            std::env::set_var("LIBVA_DRIVER_NAME", "iHD");
-            log::info!("VA-API: pinned Intel iHD driver for hardware decode");
-            return;
-        }
+    let gpus = crate::config::gpu_vendors();
+    if gpus.intel && !gpus.nvidia {
+        // Intel: iHD (Gen8+/Broadwell and newer, incl. Alder Lake).
+        std::env::set_var("LIBVA_DRIVER_NAME", "iHD");
+        log::info!("VA-API: pinned Intel iHD driver for hardware decode");
+    } else if gpus.intel {
+        log::info!("VA-API: Intel+NVIDIA hybrid, not pinning iHD (NVDEC preferred)");
     }
 }
 
@@ -1889,7 +1881,10 @@ fn run_wayland_layershell() -> Result<()> {
                                     want.rotation,
                                 );
                                 pl.apply_crop(&want);
-                                pl.load_path(&path);
+                                // The new crop is where the transition rests.
+                                o.anim.set_base(transition::crop_base(&want));
+                                o.animating =
+                                    o.anim.start(want.transition, path.clone(), pl).animating();
                             }
                             o.wallpaper.path = Some(path.clone());
                             o.wallpaper.rotation = want.rotation;
@@ -1924,17 +1919,33 @@ fn run_wayland_layershell() -> Result<()> {
             let present: Option<HashSet<String>> =
                 if outputs.values().any(|o| o.renderer_down()) && now >= next_output_probe {
                     probed = true;
-                    wayland_outputs::list_outputs()
-                        .ok()
-                        .map(|m| m.into_iter().map(|x| x.connector).collect())
+                    match wayland_outputs::list_outputs() {
+                        Ok(m) => Some(m.into_iter().map(|x| x.connector).collect()),
+                        // No compositor at the other end of WAYLAND_DISPLAY:
+                        // every display is away, so every output parks. Before
+                        // this, a session ending (or a compositor restarting on
+                        // a new socket) read as "assume present", and the
+                        // restart budget was spent on spawns that could only
+                        // fail — a `renderer_giveup` blamed on the renderer.
+                        Err(e) if wayland_outputs::is_unreachable(&e) => {
+                            log::warn!("compositor unreachable ({e:#}); parking all outputs");
+                            Some(HashSet::new())
+                        }
+                        Err(_) => None,
+                    }
                 } else {
                     None
                 };
             for (connector, o) in outputs.iter_mut() {
-                // No probe this tick, or enumeration failed → assume present,
-                // i.e. exactly the behaviour before the display check existed.
+                // No probe this tick, or enumeration failed → no news: an
+                // output keeps the state it has. For one that is not parked
+                // that is "assume present", exactly the behaviour before the
+                // display check existed; for a parked one it means staying
+                // parked until a probe actually sees the display again, rather
+                // than un-parking on every probe-less tick and re-spawning
+                // into a compositor that just refused us.
                 let here = connector == ALL_OUTPUTS
-                    || present.as_ref().is_none_or(|s| s.contains(connector));
+                    || present.as_ref().map_or(!o.absent, |s| s.contains(connector));
                 o.supervise(paused, MAX_RESTARTS, here);
             }
             if probed {
@@ -2140,6 +2151,9 @@ struct WlOutput {
     power_saving: PowerSaving,
     player: Option<PlayerHandle>,
     slideshow: Option<Slideshow>,
+    /// This output's transition. Per output, never shared: outputs run
+    /// independent renderers and may be mid-transition at different phases.
+    anim: Anim,
     restarts: u32,
     static_fallback: bool,
     error: Option<String>,
@@ -2169,6 +2183,11 @@ struct WlOutput {
     /// unreadable slideshow folder, media that moved). Latched so the reason is
     /// logged once rather than on every supervise tick.
     no_media: bool,
+    /// Parked because no mpvpaper binary exists anywhere; cleared as soon as
+    /// one is installed. Not a renderer failure, so it spends no budget.
+    no_renderer: bool,
+    /// `renderer_missing` already reported for this output (once per daemon).
+    missing_reported: bool,
     /// Why the last renderer went down ("dead"/"frozen") and, if respawning also
     /// failed, its content-free [`SpawnFail`] code — reported with `renderer_giveup`
     /// so a warning in the field says what actually broke.
@@ -2215,6 +2234,7 @@ impl WlOutput {
         power_saving: PowerSaving,
     ) -> WlOutput {
         WlOutput {
+            anim: Anim::new(transition::crop_base(&wallpaper)),
             connector,
             wallpaper,
             scaling,
@@ -2232,6 +2252,8 @@ impl WlOutput {
             audio_heal: AudioHeal::new(),
             absent: false,
             no_media: false,
+            no_renderer: false,
+            missing_reported: false,
             last_down: "never_started",
             last_spawn_fail: None,
             generation: 0,
@@ -2272,6 +2294,10 @@ impl WlOutput {
         self.generation = self.generation.wrapping_add(1);
         drop(self.player.take());
         self.slideshow = None;
+        // The gamma, zoom and filter all died with that process, so the
+        // transition is over — and must be dropped without IPC to a socket
+        // nobody is reading any more.
+        self.anim.forget();
         self.animating = false;
         self.stall_strikes = 0;
         self.last_pos = None;
@@ -2337,13 +2363,20 @@ impl WlOutput {
             && new.crop == self.wallpaper.crop
             && new.kind == self.wallpaper.kind
             && new.kind != Kind::Slideshow;
+        let effect = new.transition;
         self.wallpaper = new;
         self.scaling = scaling;
         self.power_saving = power_saving;
         self.audio_heal = AudioHeal::new();
+        self.anim.set_base(transition::crop_base(&self.wallpaper));
         if media_only {
+            // The switch a video wallpaper actually takes: same player, new
+            // file. Running it through the machine is what gives video the
+            // transitions that used to be a slideshow's alone — and `start`
+            // settles any animation still in flight from the last change.
             if let (Some(p), Some(path)) = (self.player.as_ref(), self.wallpaper.effective_path()) {
-                p.load_path(path);
+                let path = path.to_path_buf();
+                self.animating = self.anim.start(effect, path, p).animating();
             }
         } else {
             self.restarts = 0;
@@ -2380,10 +2413,19 @@ impl WlOutput {
         }
     }
 
+    /// One animation tick for this output: a slideshow's dwell, or a wallpaper
+    /// change still easing.
     fn advance(&mut self, now: Instant) {
-        if let (Some(player), Some(s)) = (self.player.as_ref(), self.slideshow.as_mut()) {
-            self.animating = advance_slideshow(player, s, now);
-        }
+        let Some(player) = self.player.as_ref() else {
+            // Nothing to animate on, and nothing left holding an effect.
+            self.anim.forget();
+            self.animating = false;
+            return;
+        };
+        self.animating = match self.slideshow.as_mut() {
+            Some(s) => advance_slideshow(player, s, &mut self.anim, now),
+            None => self.anim.step(player).animating(),
+        };
     }
 
     fn set_paused(&self, paused: bool) {
@@ -2442,6 +2484,7 @@ impl WlOutput {
         }
         drop(self.player.take());
         self.slideshow = None;
+        self.anim.forget();
         self.animating = false;
         self.stall_strikes = 0;
         self.last_pos = None;
@@ -2479,8 +2522,15 @@ impl WlOutput {
             );
             self.last_down = "frozen";
             // fall through to the restart path below
-        } else if self.player.is_some() {
+        } else if let Some(p) = self.player.as_ref() {
             self.last_down = "dead";
+            match p.stderr_tail() {
+                Some(tail) if !tail.is_empty() => log::warn!(
+                    "[{}] renderer exited; its last output was:\n{tail}",
+                    self.connector
+                ),
+                _ => {}
+            }
         }
         // Renderer is dead, never started, or frozen.
         if !output_present {
@@ -2529,6 +2579,18 @@ impl WlOutput {
             return;
         }
         self.no_media = false;
+        if self.no_renderer {
+            // Waiting for mpvpaper to be installed. Resolution re-scans on its
+            // own (see lib.rs ProbeCache), so this is a stat, not a spawn.
+            if crate::mpvpaper_resolved().is_none() {
+                return;
+            }
+            log::info!("[{}] mpvpaper is available now; starting playback", self.connector);
+            self.no_renderer = false;
+            self.restarts = 0;
+            self.static_fallback = false;
+            self.error = None;
+        }
         if self.restarts < max {
             self.restarts += 1;
             log::warn!(
@@ -2538,14 +2600,45 @@ impl WlOutput {
                 self.restarts
             );
             self.respawn(paused, false);
+            if self.last_spawn_fail == Some(COMPOSITOR_UNREACHABLE) {
+                // mpvpaper could not even open the Wayland display: the
+                // session is ending, or the compositor restarted on a new
+                // socket. That is the display being away, not the renderer
+                // failing — the budget must survive it, exactly as it does
+                // when the output-enumeration probe sees the same thing.
+                self.restarts -= 1;
+                self.park_absent();
+            } else if self.last_spawn_fail == Some(MPVPAPER_MISSING) {
+                // No renderer binary anywhere. Retrying cannot conjure one, and
+                // spending the budget ended in "renderer failed 5×", which hid
+                // the cause. Say what to install and wait for it to appear.
+                self.restarts -= 1;
+                self.no_renderer = true;
+                self.error = Some(format!(
+                    "{}: {}",
+                    self.connector,
+                    spawn_fail_hint(MPVPAPER_MISSING)
+                ));
+                if !self.missing_reported {
+                    self.missing_reported = true;
+                    crate::telemetry::error(
+                        "renderer_missing",
+                        &format!("{}: kind={:?}", self.connector, self.wallpaper.kind),
+                    );
+                }
+            }
         } else if self.restarts == max {
             // Crossed the cap once: try to hold a paused static frame, then stop
             // retrying (anti-flap). If even that can't spawn, the compositor's own
             // background shows — Fresco never paints black itself.
             self.restarts += 1; // sentinel — no further attempts
             self.static_fallback = true;
+            let why = match self.last_spawn_fail {
+                Some(code) => format!(" ({})", spawn_fail_hint(code)),
+                None => String::new(),
+            };
             self.error = Some(format!(
-                "{}: renderer failed {max}× — held a static frame (or fell back to the compositor background)",
+                "{}: renderer failed {max}×{why} — held a static frame (or fell back to the compositor background)",
                 self.connector
             ));
             log::error!(
@@ -2568,6 +2661,42 @@ impl WlOutput {
             self.respawn(true, true);
         }
         // restarts > max → given up; do nothing (anti-flap). Error stays in Status.
+    }
+}
+
+/// The spawn-failure code for "mpvpaper could not open the Wayland display".
+const COMPOSITOR_UNREACHABLE: &str =
+    crate::daemon::mpvpaper::EarlyExit::CompositorUnreachable.code();
+
+/// The spawn-failure code for "no mpvpaper binary anywhere".
+const MPVPAPER_MISSING: &str = crate::daemon::mpvpaper::SpawnFail::Missing.code();
+
+/// A human line for a spawn-failure code, for the status error a user reads.
+fn spawn_fail_hint(code: &str) -> String {
+    use crate::daemon::mpvpaper::EarlyExit as E;
+    let all = [
+        E::CompositorUnreachable,
+        E::NoLayerShell,
+        E::NoOutput,
+        E::Egl,
+        E::MpvInit,
+        E::MpvGl,
+        E::LoadFailed,
+        E::Linker,
+        E::Signal,
+        E::Unknown,
+    ];
+    if let Some(e) = all.iter().find(|e| e.code() == code) {
+        return e.hint().to_string();
+    }
+    match code {
+        "mpvpaper_missing" => "no mpvpaper renderer found — install your distro's mpvpaper package (or build it with scripts/build-mpvpaper.sh); playback starts on its own once it is there".into(),
+        "mpvpaper_unloadable" => {
+            "the bundled renderer cannot load this system's libmpv — run `fresco doctor`".into()
+        }
+        "ipc_timeout" => "the renderer started but never answered".into(),
+        "no_file" => "no playable file".into(),
+        other => other.into(),
     }
 }
 
@@ -3175,6 +3304,171 @@ mod tests {
         assert_eq!(o.generation, 1);
         o.respawn(true, true);
         assert_eq!(o.generation, 2, "the static-frame path counts too");
+    }
+
+    /// The slideshow is now a *caller* of the transition machine rather than
+    /// its owner, so the seam between the two has to hold: it hands over at the
+    /// end of a dwell, keeps its hands off the player until the animation
+    /// settles, and only then starts timing the next image.
+    #[test]
+    fn a_slideshow_hands_its_dwell_to_the_transition_and_takes_it_back() {
+        use super::transition::{Anim, Recorder};
+        use crate::config::Transition;
+
+        for effect in [
+            Transition::Fade,
+            Transition::Slide,
+            Transition::Zoom,
+            Transition::Blur,
+        ] {
+            let r = Recorder::default();
+            let mut anim = Anim::new((0.0, 0.0, 0.0));
+            let start = Instant::now();
+            let mut s = super::Slideshow {
+                images: vec!["/pics/a.png".into(), "/pics/b.png".into()],
+                idx: 0,
+                interval: Duration::from_secs(10),
+                last_advance: start,
+                transition: effect,
+            };
+
+            // Mid-dwell: nothing happens at all, and nothing is animating.
+            let now = start + Duration::from_secs(1);
+            assert!(!super::advance_slideshow(&r, &mut s, &mut anim, now));
+            assert!(r.loads().is_empty(), "{effect:?} advanced early");
+
+            // The dwell is up: the machine takes over.
+            let due = start + Duration::from_secs(10);
+            assert!(
+                super::advance_slideshow(&r, &mut s, &mut anim, due),
+                "{effect:?} must animate once due"
+            );
+            assert_eq!(s.idx, 1);
+
+            // Run it out. The dwell must not restart until it settles.
+            let mut ticks = 0;
+            while anim.running() {
+                assert!(ticks < 500, "{effect:?} never finished");
+                assert_eq!(
+                    s.last_advance, start,
+                    "{effect:?} restarted the dwell early"
+                );
+                let t = due + Duration::from_millis(16 * ticks);
+                assert!(super::advance_slideshow(&r, &mut s, &mut anim, t));
+                ticks += 1;
+            }
+            assert_ne!(
+                s.last_advance, start,
+                "{effect:?} never restarted the dwell"
+            );
+            assert_eq!(r.loads(), vec![std::path::PathBuf::from("/pics/b.png")]);
+            assert!(
+                r.is_neutral((0.0, 0.0, 0.0)),
+                "{effect:?} left the player dirty"
+            );
+            // And the next image is a full interval away, not instantly due.
+            let soon = s.last_advance + Duration::from_secs(1);
+            assert!(!super::advance_slideshow(&r, &mut s, &mut anim, soon));
+        }
+    }
+
+    /// A slideshow with no transition must behave exactly as it always has: a
+    /// hard cut that never puts the loop into animation cadence.
+    #[test]
+    fn a_hard_cut_slideshow_never_animates() {
+        use super::transition::{Anim, Recorder};
+        use crate::config::Transition;
+
+        let r = Recorder::default();
+        let mut anim = Anim::new((0.0, 0.0, 0.0));
+        let start = Instant::now();
+        let mut s = super::Slideshow {
+            images: vec!["/pics/a.png".into(), "/pics/b.png".into()],
+            idx: 0,
+            interval: Duration::from_secs(10),
+            last_advance: start,
+            transition: Transition::None,
+        };
+        let due = start + Duration::from_secs(10);
+        assert!(
+            !super::advance_slideshow(&r, &mut s, &mut anim, due),
+            "a hard cut must not hold the loop at 60fps"
+        );
+        assert_eq!(s.idx, 1);
+        assert_eq!(s.last_advance, due, "the next dwell starts immediately");
+        assert_eq!(r.loads(), vec![std::path::PathBuf::from("/pics/b.png")]);
+        assert!(!anim.running());
+
+        // A one-image slideshow has nothing to advance to, ever.
+        let mut single = super::Slideshow {
+            images: vec!["/pics/a.png".into()],
+            idx: 0,
+            interval: Duration::from_secs(1),
+            last_advance: start,
+            transition: Transition::Fade,
+        };
+        assert!(!super::advance_slideshow(
+            &r,
+            &mut single,
+            &mut anim,
+            start + Duration::from_secs(60)
+        ));
+        assert!(!anim.running());
+    }
+
+    /// The wallpaper changing on top of a running slideshow transition — an
+    /// Apply landing mid-fade. The new wallpaper wins, and none of the old
+    /// effect may outlive it: a dimmed or blurred desktop *persists*, which is
+    /// strictly worse than never having animated at all.
+    #[test]
+    fn a_wallpaper_change_mid_transition_leaves_no_effect_behind() {
+        use super::transition::{Anim, Recorder};
+        use crate::config::Transition;
+
+        for effect in [
+            Transition::Fade,
+            Transition::Slide,
+            Transition::Zoom,
+            Transition::Blur,
+        ] {
+            let r = Recorder::default();
+            let base = (0.2, -0.1, 0.05);
+            let mut anim = Anim::new(base);
+            let start = Instant::now();
+            let mut s = super::Slideshow {
+                images: vec!["/pics/a.png".into(), "/pics/b.png".into()],
+                idx: 0,
+                interval: Duration::from_secs(10),
+                last_advance: start,
+                transition: effect,
+            };
+            let due = start + Duration::from_secs(10);
+            super::advance_slideshow(&r, &mut s, &mut anim, due);
+            for i in 0..4 {
+                super::advance_slideshow(
+                    &r,
+                    &mut s,
+                    &mut anim,
+                    due + Duration::from_millis(16 * i),
+                );
+            }
+            assert!(anim.running(), "staging: {effect:?} is mid-flight");
+
+            // The user picks a video instead. This is the exact call the
+            // Wayland apply path makes.
+            anim.start(Transition::None, "/videos/new.mp4".into(), &r);
+            assert!(
+                r.is_neutral(base),
+                "{effect:?} survived the change: gamma {} zoom {:?} sigma {}",
+                r.gamma(),
+                r.zoom(),
+                r.sigma()
+            );
+            assert_eq!(
+                r.loads().last(),
+                Some(&std::path::PathBuf::from("/videos/new.mp4"))
+            );
+        }
     }
 
     #[test]

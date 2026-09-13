@@ -177,7 +177,7 @@ pub use cards::{
 pub use color::{linear_to_srgb, srgb_to_linear, Color};
 pub use geom::{HAlign, Point, Rect, Size, Stack, VAlign};
 pub use paint::{sample_stops, Fill, Stop};
-pub use surface::{BarPaint, BarStyle, ScrimSpec, ScrimZone, WidgetSize};
+pub use surface::{BarPaint, BarStyle, ScrimSpec, ScrimZone, SpectrumStyle, WidgetSize};
 pub use text::{FontStack, FontSystem, TextAlign, TextMetrics, TextRun};
 pub use theme::{Elevation, Metrics, Mode, Shadow, Theme};
 pub use typo::{Script, Step};

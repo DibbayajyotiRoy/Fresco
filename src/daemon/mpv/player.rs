@@ -30,6 +30,7 @@ impl Player {
         }
 
         // ── Options that must be set before initialize ──
+        let hwdec = crate::config::hwdec(!wallpaper.rotation.is_multiple_of(360));
         let opts: &[(&str, &str)] = &[
             ("wid", &wid.to_string()),
             ("vo", "gpu"),
@@ -38,14 +39,8 @@ impl Player {
             // Rotated video + NATIVE hw surfaces (vaapi/nvdec) hits driver
             // bugs that corrupt chroma on some stacks; copy-back keeps decode
             // on the GPU but rotates ordinary uploaded textures instead.
-            (
-                "hwdec",
-                if wallpaper.rotation.is_multiple_of(360) {
-                    "auto-safe"
-                } else {
-                    "auto-copy"
-                },
-            ),
+            // config::hwdec keeps that invariant and prefers NVDEC on NVIDIA.
+            ("hwdec", &hwdec),
             ("profile", "low-latency"), // small demuxer queues; we override caches below
             ("image-display-duration", "inf"),
             ("osc", "no"),
@@ -213,6 +208,20 @@ impl Player {
         }
     }
 
+    /// Defocus the video by `sigma` logical pixels; `0.0` clears the filter.
+    /// The X11 twin of `WaylandPlayer::set_blur` on the Wayland backend.
+    pub fn set_blur(&self, sigma: f64) {
+        if let Ok(f) = fns() {
+            let vf = if sigma <= 0.0 {
+                String::new()
+            } else {
+                format!("lavfi=[gblur=sigma={sigma:.2}]")
+            };
+            // SAFETY: `self.handle` is valid for the lifetime of this Player.
+            unsafe { f.set_property(self.handle, "vf", &vf) };
+        }
+    }
+
     /// Draw an ASS overlay on the OSD layer; empty `ass` clears it.
     ///
     /// Verified against libmpv 2.2.0: this renders even though we set
@@ -313,11 +322,7 @@ impl Player {
         // SAFETY: `self.handle` is valid for the lifetime of this Player.
         unsafe {
             f.set_property(self.handle, "video-rotate", &(rotation % 360).to_string());
-            f.set_property(
-                self.handle,
-                "hwdec",
-                if rotated { "auto-copy" } else { "auto-safe" },
-            );
+            f.set_property(self.handle, "hwdec", &crate::config::hwdec(rotated));
         }
     }
 

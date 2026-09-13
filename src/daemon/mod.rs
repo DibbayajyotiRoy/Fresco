@@ -1945,7 +1945,9 @@ fn run_wayland_layershell() -> Result<()> {
                 // than un-parking on every probe-less tick and re-spawning
                 // into a compositor that just refused us.
                 let here = connector == ALL_OUTPUTS
-                    || present.as_ref().map_or(!o.absent, |s| s.contains(connector));
+                    || present
+                        .as_ref()
+                        .map_or(!o.absent, |s| s.contains(connector));
                 o.supervise(paused, MAX_RESTARTS, here);
             }
             if probed {
@@ -2585,7 +2587,10 @@ impl WlOutput {
             if crate::mpvpaper_resolved().is_none() {
                 return;
             }
-            log::info!("[{}] mpvpaper is available now; starting playback", self.connector);
+            log::info!(
+                "[{}] mpvpaper is available now; starting playback",
+                self.connector
+            );
             self.no_renderer = false;
             self.restarts = 0;
             self.static_fallback = false;

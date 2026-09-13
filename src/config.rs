@@ -272,7 +272,10 @@ pub fn hwdec(rotated: bool) -> String {
         } else {
             ""
         };
-        log::info!("hwdec for {} video: {choice}{src}", if rotated { "rotated" } else { "unrotated" });
+        log::info!(
+            "hwdec for {} video: {choice}{src}",
+            if rotated { "rotated" } else { "unrotated" }
+        );
     });
     choice
 }
@@ -1725,7 +1728,11 @@ mod tests {
         let v = GpuVendors::from_vendor_ids(["0x8086\n", "0x10DE\n", "0x1af4"]);
         assert_eq!(
             v,
-            GpuVendors { intel: true, nvidia: true, amd: false }
+            GpuVendors {
+                intel: true,
+                nvidia: true,
+                amd: false
+            }
         );
         assert_eq!(v.describe(), "intel+nvidia");
         let none = GpuVendors::from_vendor_ids(Vec::<String>::new());
@@ -1738,14 +1745,25 @@ mod tests {
     fn gpu_vendors_scan_reads_card_dirs_only() {
         let root = std::env::temp_dir().join(format!("fresco-drm-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        for (dir, vendor) in [("card0", "0x8086\n"), ("card1", "0x10de\n"), ("renderD128", "0x1002\n")] {
+        for (dir, vendor) in [
+            ("card0", "0x8086\n"),
+            ("card1", "0x10de\n"),
+            ("renderD128", "0x1002\n"),
+        ] {
             std::fs::create_dir_all(root.join(dir).join("device")).unwrap();
             std::fs::write(root.join(dir).join("device/vendor"), vendor).unwrap();
         }
         let v = GpuVendors::scan(&root);
         std::fs::remove_dir_all(&root).ok();
         // renderD* is not a card entry, so AMD must not be reported.
-        assert_eq!(v, GpuVendors { intel: true, nvidia: true, amd: false });
+        assert_eq!(
+            v,
+            GpuVendors {
+                intel: true,
+                nvidia: true,
+                amd: false
+            }
+        );
         assert_eq!(GpuVendors::scan(&root), GpuVendors::default());
     }
 
@@ -1763,7 +1781,10 @@ mod tests {
                 assert_eq!(select_hwdec(nv, rot, Some("no")), "no");
                 // Empty / blank override is ignored.
                 assert_eq!(select_hwdec(nv, rot, Some("")), select_hwdec(nv, rot, None));
-                assert_eq!(select_hwdec(nv, rot, Some("  ")), select_hwdec(nv, rot, None));
+                assert_eq!(
+                    select_hwdec(nv, rot, Some("  ")),
+                    select_hwdec(nv, rot, None)
+                );
             }
         }
     }

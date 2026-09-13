@@ -14,10 +14,10 @@
 //! both backends with no per-call-site branching.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::collections::VecDeque;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -132,7 +132,9 @@ impl EarlyExit {
             EarlyExit::MpvInit => "mpv refused to initialise (run `fresco doctor`)",
             EarlyExit::MpvGl => "mpv could not use the OpenGL context (graphics driver problem)",
             EarlyExit::LoadFailed => "mpv could not open the media file",
-            EarlyExit::Linker => "the renderer cannot load this system's libmpv (run `fresco doctor`)",
+            EarlyExit::Linker => {
+                "the renderer cannot load this system's libmpv (run `fresco doctor`)"
+            }
             EarlyExit::Signal => "the renderer crashed",
             EarlyExit::Unknown => "the renderer exited at startup (run `fresco doctor`)",
         }
@@ -155,8 +157,14 @@ pub fn classify_early_exit(status: &std::process::ExitStatus, stderr: &str) -> E
         return EarlyExit::Linker;
     }
     const RULES: &[(&str, EarlyExit)] = &[
-        ("Unable to connect to the compositor", EarlyExit::CompositorUnreachable),
-        ("Missing a required Wayland interface", EarlyExit::NoLayerShell),
+        (
+            "Unable to connect to the compositor",
+            EarlyExit::CompositorUnreachable,
+        ),
+        (
+            "Missing a required Wayland interface",
+            EarlyExit::NoLayerShell,
+        ),
         ("can't seem to find any output", EarlyExit::NoOutput),
         ("Failed to initialize mpv GL context", EarlyExit::MpvGl),
         ("Failed to init mpv", EarlyExit::MpvInit),
@@ -289,10 +297,12 @@ impl WaylandPlayer {
                     "[{connector}] mpvpaper exited at startup ({status}, {}); its last output was:\n{tail}",
                     why.code()
                 );
-                return Err(anyhow::Error::new(SpawnFail::ExitedEarly(why)).context(format!(
-                    "mpvpaper for {connector} exited immediately ({status}): {}",
-                    why.hint()
-                )));
+                return Err(
+                    anyhow::Error::new(SpawnFail::ExitedEarly(why)).context(format!(
+                        "mpvpaper for {connector} exited immediately ({status}): {}",
+                        why.hint()
+                    )),
+                );
             }
             if ipc.connect_retry(1).is_ok() {
                 connected = true;
@@ -672,8 +682,14 @@ fn build_mpv_opts_with_hwdec(
     // through an mpv config file, where `#` begins a comment, so the value is
     // truncated and mpv rejects it. mpv's default letterbox background is black.
     let hwdec = if hwdec.contains([' ', '#', '\t', '\n']) {
-        log::warn!("hwdec {hwdec:?} can't be passed through mpvpaper -o; using auto-safe/auto-copy");
-        if w.rotation.is_multiple_of(360) { "auto-safe" } else { "auto-copy" }
+        log::warn!(
+            "hwdec {hwdec:?} can't be passed through mpvpaper -o; using auto-safe/auto-copy"
+        );
+        if w.rotation.is_multiple_of(360) {
+            "auto-safe"
+        } else {
+            "auto-copy"
+        }
     } else {
         hwdec
     };
@@ -875,12 +891,18 @@ mod tests {
                 build_mpv_opts_with_hwdec(&w, Scaling::Balanced, PowerSaving::Full, sock, &hw);
             // Exactly one space-separated token (= one config-file line) holds
             // the whole priority list.
-            let tokens: Vec<&str> = opts.split(' ').filter(|t| t.starts_with("hwdec=")).collect();
+            let tokens: Vec<&str> = opts
+                .split(' ')
+                .filter(|t| t.starts_with("hwdec="))
+                .collect();
             assert_eq!(tokens, [format!("hwdec={hw}").as_str()], "{opts}");
             assert!(!opts.contains('#'));
         }
         // An override with a space would split into bogus options → dropped.
-        let w = Wallpaper { kind: Kind::Video, ..Default::default() };
+        let w = Wallpaper {
+            kind: Kind::Video,
+            ..Default::default()
+        };
         let opts = build_mpv_opts_with_hwdec(
             &w,
             Scaling::Balanced,
@@ -953,7 +975,10 @@ mod tests {
         }
         // A signal death is a crash whatever was printed before it.
         let sig = std::process::ExitStatus::from_raw(11);
-        assert_eq!(classify_early_exit(&sig, "[ERROR] Failed to init mpv"), EarlyExit::Signal);
+        assert_eq!(
+            classify_early_exit(&sig, "[ERROR] Failed to init mpv"),
+            EarlyExit::Signal
+        );
         for e in [EarlyExit::Linker, EarlyExit::Unknown, EarlyExit::MpvInit] {
             assert!(e.code().starts_with("exited_early:"), "{}", e.code());
             assert!(!e.code().contains('/'), "codes carry no paths");

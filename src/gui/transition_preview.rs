@@ -503,11 +503,23 @@ mod tests {
     /// size — the old ordering let the size check swallow that and spin forever.
     #[test]
     fn a_hidden_or_detached_stage_stops_the_timer_whatever_its_size() {
-        assert_eq!(gate(true, false, false, 0, 0), Gate::Stop, "hidden stage kept ticking");
-        assert_eq!(gate(false, false, false, 0, 0), Gate::Stop, "detached stage kept ticking");
+        assert_eq!(
+            gate(true, false, false, 0, 0),
+            Gate::Stop,
+            "hidden stage kept ticking"
+        );
+        assert_eq!(
+            gate(false, false, false, 0, 0),
+            Gate::Stop,
+            "detached stage kept ticking"
+        );
         assert_eq!(gate(false, true, false, 640, 360), Gate::Stop);
         assert_eq!(gate(true, false, false, 640, 360), Gate::Stop);
-        assert_eq!(gate(true, true, true, 640, 360), Gate::Idle, "minimised window animated");
+        assert_eq!(
+            gate(true, true, true, 640, 360),
+            Gate::Idle,
+            "minimised window animated"
+        );
         assert_eq!(gate(true, true, false, 0, 360), Gate::Idle);
         assert_eq!(gate(true, true, false, 640, 360), Gate::Animate);
     }

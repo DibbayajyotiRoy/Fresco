@@ -255,7 +255,9 @@ struct ProbeCache {
 
 impl ProbeCache {
     const fn new() -> Self {
-        Self { slot: std::sync::Mutex::new(None) }
+        Self {
+            slot: std::sync::Mutex::new(None),
+        }
     }
 
     fn get(&self, scan: impl FnOnce() -> Option<Probed>) -> Option<Probed> {

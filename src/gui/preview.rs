@@ -409,7 +409,12 @@ mod tests {
     /// stay inside the frame (Deepin 25 crash report).
     #[test]
     fn drag_past_every_edge_stays_inside() {
-        let start = Crop { x: 0.3, y: 0.3, w: 0.4, h: 0.4 };
+        let start = Crop {
+            x: 0.3,
+            y: 0.3,
+            w: 0.4,
+            h: 0.4,
+        };
         let deltas = [-2.0, -0.7, -0.3, 0.0, 0.3, 0.7, 2.0];
         for aspect in [None, Some(16.0 / 9.0), Some(9.0 / 16.0)] {
             for handle in HANDLES {
@@ -428,7 +433,12 @@ mod tests {
 
     #[test]
     fn edge_to_edge_crop_is_reachable() {
-        let mut c = Crop { x: 0.2, y: 0.2, w: 0.5, h: 0.5 };
+        let mut c = Crop {
+            x: 0.2,
+            y: 0.2,
+            w: 0.5,
+            h: 0.5,
+        };
         apply_handle(&mut c, Handle::BottomRight, 1.0, 1.0, None);
         let out = clamp_crop(c, Handle::BottomRight, None).unwrap();
         assert!((out.x - 0.2).abs() < 1e-9 && (out.y - 0.2).abs() < 1e-9);
@@ -440,19 +450,32 @@ mod tests {
     #[test]
     fn locked_top_left_drag_past_corner_grows() {
         let ar = Some(16.0 / 9.0);
-        let start = Crop { x: 0.3, y: 0.3, w: 0.7, h: 0.7 / (16.0 / 9.0) };
+        let start = Crop {
+            x: 0.3,
+            y: 0.3,
+            w: 0.7,
+            h: 0.7 / (16.0 / 9.0),
+        };
         let mut c = start;
         apply_handle(&mut c, Handle::TopLeft, -0.33, -0.88, ar);
         let out = clamp_crop(c, Handle::TopLeft, ar).unwrap();
         assert!(out.w > start.w, "{out:?}");
         // The held corner (bottom-right) stays put.
         assert!((out.x + out.w - 1.0).abs() < 1e-9, "{out:?}");
-        assert!((out.y + out.h - (start.y + start.h)).abs() < 1e-9, "{out:?}");
+        assert!(
+            (out.y + out.h - (start.y + start.h)).abs() < 1e-9,
+            "{out:?}"
+        );
     }
 
     #[test]
     fn non_finite_drag_keeps_previous_crop() {
-        let c = Crop { x: f64::NAN, y: 0.0, w: 0.5, h: 0.5 };
+        let c = Crop {
+            x: f64::NAN,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+        };
         assert!(clamp_crop(c, Handle::Move, None).is_none());
     }
 }

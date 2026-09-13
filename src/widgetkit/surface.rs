@@ -962,7 +962,14 @@ fn ring(c: &mut Canvas, area: Rect, values: &[f32], t: &Theme, style: BarStyle) 
     }
     let w = (2.0 * std::f32::consts::PI * r0 / n as f32 * 0.62).clamp(1.0, 8.0);
     if style.baseline {
-        c.arc(centre, r0, 0.0, 360.0, t.metrics.hairline, &Fill::solid(t.gridline));
+        c.arc(
+            centre,
+            r0,
+            0.0,
+            360.0,
+            t.metrics.hairline,
+            &Fill::solid(t.gridline),
+        );
     }
     for i in 0..n {
         let v = level(values, i);

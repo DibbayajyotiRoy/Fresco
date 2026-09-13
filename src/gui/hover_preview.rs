@@ -341,7 +341,11 @@ fn watch_window(window: &gtk4::Window) {
     let fresh = PREVIEWS.with(|previews| {
         let mut previews = previews.borrow_mut();
         previews.watched.retain(|w| w.upgrade().is_some());
-        if previews.watched.iter().any(|w| w.upgrade().as_ref() == Some(window)) {
+        if previews
+            .watched
+            .iter()
+            .any(|w| w.upgrade().as_ref() == Some(window))
+        {
             return false;
         }
         previews.watched.push(window.downgrade());

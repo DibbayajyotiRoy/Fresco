@@ -40,6 +40,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   CPU up and dropped frames. The raise is now sent only when DDE's desktop is
   actually above the wallpaper, or when the stacking order can't be read.
 
+- **The app icon no longer has black corners.** The rounded logo was exported
+  onto an opaque black square, so every launcher that draws it on a light
+  panel showed four dark notches around it. The corners are transparent now,
+  in the SVG and in all five PNG sizes. Thanks to
+  [@hualet](https://github.com/hualet) (#19).
+
 ### Added
 - **`FRESCO_MPV_LOG=1` writes mpv's own log** to
   `~/.local/state/fresco/mpv-<output>.log`. The decode badge shows which

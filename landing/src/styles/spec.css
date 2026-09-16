@@ -1,0 +1,76 @@
+/*
+ * SPEC AREA: features, how it works, compare, at a glance. Clean light:
+ * tokens only, 1px hairlines for structure, one soft STATIC shadow for the
+ * cards that float (feature visuals, steps). Every class is prefixed
+ * `spec-`. Nothing animates here: entrances come from the page-level
+ * data-reveal orchestrator, so the SSR markup is always final.
+ */
+
+/* ---- Floating card ---------------------------------------------------- */
+.spec-card {
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background-color: var(--surface);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 12px 32px -12px rgb(0 0 0 / 0.12);
+}
+/* Shadows vanish on a near-black ground, so the edge carries the lift. */
+.dark .spec-card {
+  border-color: var(--hairline-strong);
+}
+
+/* ---- Features: the full capability list (<details>) ------------------- */
+.spec-summary {
+  list-style: none;
+  cursor: pointer;
+}
+.spec-summary::-webkit-details-marker {
+  display: none;
+}
+.spec-chevron {
+  transition: transform 200ms var(--ease-house);
+}
+details[open] > .spec-summary .spec-chevron {
+  transform: rotate(180deg);
+}
+
+/* Small screens: each capability becomes a block (title, description,
+   status). Explicit ARIA roles in the markup keep the table semantics that
+   some engines drop once display changes. */
+@media (max-width: 767.98px) {
+  .spec-manifest,
+  .spec-manifest > tbody,
+  .spec-manifest > tbody > tr,
+  .spec-manifest > tbody > tr > * {
+    display: block;
+    width: auto;
+  }
+  .spec-manifest > thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .spec-manifest > tbody > tr {
+    padding: 1rem 1.25rem;
+  }
+  .spec-manifest > tbody > tr > * {
+    padding: 0;
+    text-align: left;
+  }
+  .spec-manifest > tbody > tr > * + * {
+    padding-top: 0.375rem;
+  }
+}
+
+/* ---- Compare: the feature column stays put while the tools scroll ------ */
+.spec-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--surface);
+  box-shadow: inset -1px 0 0 var(--hairline);
+}

@@ -32,6 +32,7 @@ export const zhCn: Dictionary = {
     cta: "获取 Fresco",
     star: "在 GitHub 上为 Fresco 点星",
     starWithCount: (n: string) => `在 GitHub 上为 Fresco 点星（${n} 颗星）`,
+    menu: "菜单",
   },
 
   language: {
@@ -53,20 +54,40 @@ export const zhCn: Dictionary = {
     body: "把任意视频、GIF 或图片设为 Linux 桌面背景。硬件加速播放让 CPU 占用几乎为零，X11 与 Wayland 都可用。关掉应用，守护进程会继续播放。",
     install: "安装 Fresco",
     star: "在 GitHub 点星",
+    newUsers24h: (n: string) => `过去 24 小时有 ${n} 人开始使用 Fresco`,
+    builtBy: "开发者",
+    activeToday: (n: string) => `过去 24 小时有 ${n} 人使用了 Fresco`,
+    newToday: (n: string) => `其中新用户 ${n} 人`,
   },
 
   stats: {
     ariaLabel: "项目数据",
     downloads: "累计下载量",
-    downloadsUnknown: "github 下载量",
-    stars: "github 星标",
+    downloadsUnknown: "GitHub 下载量",
+    stars: "GitHub 星标",
     version: "最新版本",
     license: "免费开源",
+    users: "用户",
+    countries: "个国家和地区",
+    cohortNote: "用户数和国家/地区数统计自同意匿名遥测的安装。",
+    active24h: "过去 24 小时活跃",
+  },
+
+  testimonials: {
+    kicker: "用户反馈",
+    title: (users: string, countries: string) =>
+      `已在 ${countries} 个国家和地区的 ${users} 台 Linux 桌面上运行。`,
+    lead: "来自 Fresco 用户在应用内发送的原始反馈，未经编辑。匿名反馈仅标注国家或地区。",
+    fromCountry: (country: string) => `来自${country}的 Fresco 用户`,
+    anonymous: "Fresco 用户",
+    namedLabel: "实测报告",
+    pause: "暂停用户反馈",
+    play: "播放用户反馈",
   },
 
   glance: {
     ariaLabel: "Fresco 概览",
-    caption: "fresco 概览",
+    caption: "Fresco 概览",
     labelWhat: "这是什么",
     labelPlatforms: "支持平台",
     labelWidgets: "桌面组件",
@@ -85,7 +106,7 @@ export const zhCn: Dictionary = {
   features: {
     kicker: "功能",
     title: "任意媒体，任意显示器，CPU 毫无压力。",
-    lead: "Fresco 可在 X11 与 Wayland 上设置视频、GIF、图片、幻灯片和播放列表壁纸，解码全部交给 GPU，因此动态壁纸的开销与静态壁纸相差无几。完整规格如下：",
+    lead: "Fresco 可在 X11 与 Wayland 上设置视频、GIF、图片、幻灯片和播放列表壁纸，解码全部交给 GPU，因此动态壁纸的开销与静态壁纸相差无几。",
     manifest: (n: number) => `功能清单：${n} 项`,
     /** Sentence-final mark after each row title. */
     titleSuffix: "。",
@@ -93,7 +114,7 @@ export const zhCn: Dictionary = {
     thWhatYouGet: "具体内容",
     thStatus: "状态",
     footnote:
-      "gnome wayland：回退为静态画面（mutter 未提供动态绘制面），桌面组件同样需要这个绘制面，因此在该环境下不可用。上表其余功能均可正常使用。",
+      "GNOME Wayland：回退为静态画面（Mutter 未提供动态绘制面），桌面组件同样需要这个绘制面，因此在该环境下不可用。上表其余功能均可正常使用。",
     tally: (shipping: number, total: number, soon: number) =>
       `${total} 项中已发布 ${shipping} 项 · ${soon} 项预览中 · 0 项已废弃`,
     rows: {
@@ -102,14 +123,14 @@ export const zhCn: Dictionary = {
         title: "硬件加速播放",
         description:
           "解码通过 mpv 在 GPU 上完成（VA-API 或 NVDEC）。一段 4K 视频壁纸的 CPU 开销与静态图片相当。",
-        status: "cpu 近乎为零",
+        status: "CPU 近乎为零",
       },
       sessions: {
         tag: "会话",
         title: "X11 与 Wayland",
         description:
           "在任意 X11 桌面上使用桌面窗口后端，并为 COSMIC、Hyprland、Sway 和 KDE Plasma 6 提供 layer-shell 后端。GNOME Wayland 会回退为静态画面。",
-        status: "x11 · layer-shell",
+        status: "X11 · layer-shell",
       },
       catalog: {
         tag: "壁纸库",
@@ -119,7 +140,7 @@ export const zhCn: Dictionary = {
         status: "应用内",
       },
       video: {
-        tag: "视频 · gif",
+        tag: "视频 · GIF",
         title: "视频与 GIF 壁纸",
         description: "把任意 mp4、webm、mkv 或动态 GIF 循环播放为桌面背景。",
         status: "mp4 webm mkv gif",
@@ -311,7 +332,7 @@ export const zhCn: Dictionary = {
   supported: {
     kicker: "已验证环境",
     title: "Fresco 能在哪里运行。",
-    lead: "支持任意 X11 桌面（包括 Deepin 25 的 DDE），以及支持 layer-shell 的 Wayland 合成器（COSMIC、Hyprland、Sway 和 KDE Plasma 6），覆盖主流的 Debian 与 Ubuntu 发行版。GNOME Wayland 下会回退为静态画面。",
+    lead: "支持任意 X11 桌面（包括 deepin 25 的 DDE），以及支持 layer-shell 的 Wayland 合成器（COSMIC、Hyprland、Sway 和 KDE Plasma 6），覆盖主流的 Debian 与 Ubuntu 发行版。GNOME Wayland 下会回退为静态画面。",
     deployed: (distros: number, formats: number) =>
       `已验证：6 个动态合成器 · 1 个静态回退 · ${distros} 个发行版 · ${formats} 种格式`,
     sessionsTitle: "会话与合成器",
@@ -327,7 +348,7 @@ export const zhCn: Dictionary = {
       deepin: {
         label: "Deepin 25（DDE，X11）",
         detail:
-          "自动适配 DDE，桌面图标保持可见。已由社区在 Deepin 25 社区版 build1 上验证。",
+          "自动适配 DDE，桌面图标保持可见。已由社区在 deepin 25 社区版 build1 上验证。已上架 deepin 应用商店。",
       },
       wayland: {
         label: "Wayland layer-shell",
@@ -347,13 +368,13 @@ export const zhCn: Dictionary = {
       gpu: "显卡",
     },
     footnote:
-      "deepin 25 默认使用 x11，fresco 在该系统上也正是在这个会话下通过验证的。deepin 自研的 wayland 合成器 treeland 仍在开发中，因此 fresco 目前不对 deepin 的 wayland 环境作任何承诺。",
+      "deepin 25 默认使用 X11，Fresco 在该系统上也正是在这个会话下通过验证的。deepin 自研的 Wayland 合成器 Treeland 仍在开发中，因此 Fresco 目前不对 deepin 的 Wayland 环境作任何承诺。",
   },
 
   download: {
     kicker: "下载",
     title: "可部署在 Debian、Ubuntu、Pop!_OS 与 Mint 上。",
-    badge: "x11 · wayland",
+    badge: "X11 · Wayland",
     lead: "官方一行安装命令，或直接下载 .deb 安装包。两种方式都能一键复制到剪贴板并立即执行。关闭窗口后 Fresco 仍会继续播放。",
     cardTitle: "一行命令安装",
     cardBody:
@@ -363,6 +384,9 @@ export const zhCn: Dictionary = {
     releases: "查看全部版本",
     gpuNote:
       "为了把 CPU 占用降到最低，请安装显卡对应的硬件解码驱动（Intel media VA 驱动、Mesa VA 驱动，或用于 NVDEC 的 NVIDIA 专有驱动）。",
+    storeLabel: "已上架 deepin 应用商店",
+    storeBody:
+      "在 deepin 25 中打开应用商店，搜索 Fresco 并点击安装。更新会通过应用商店推送。",
     copy: "复制",
     copied: "已复制",
   },
@@ -445,6 +469,10 @@ export const zhCn: Dictionary = {
         a: "可以。Fresco 的音频可视化会随系统正在播放的声音起伏，提供五种风格（Bars、Mirror、Wave、Dots、Ring），并支持取色器、双色渐变或彩虹配色。它默认关闭，首次启用时会征求你的同意，因为它需要监听音频输出。在播放音乐且四个组件全部开启的情况下，实测开销为单个 CPU 核心的 0.8%，其中绝大部分来自音频采集，因为内容没有变化时不会重绘。",
       },
       {
+        q: "Fresco 上架 deepin 应用商店了吗？",
+        a: "上架了。在 deepin 25 中打开应用商店，搜索 Fresco 并点击安装。它发布在 deepin 社区应用商店中，因此更新会通过应用商店推送。.deb 安装包和一行安装命令同样可用。",
+      },
+      {
         q: "Fresco 免费吗？",
         a: "免费。Fresco 基于 GPL-3.0 协议完全免费且开源，没有任何付费版本。",
       },
@@ -454,7 +482,7 @@ export const zhCn: Dictionary = {
   footer: {
     github: "GitHub",
     license: "许可协议",
-    tagline: "rust + gtk4 + mpv",
+    tagline: "Rust + GTK4 + mpv",
     sound: "开关音效",
   },
 

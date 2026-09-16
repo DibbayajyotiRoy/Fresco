@@ -239,7 +239,17 @@ impl WaylandPlayer {
         let socket_path = dir.join(format!("mpv-{}.sock", sanitize(connector)));
         std::fs::remove_file(&socket_path).ok();
 
-        let opts = build_mpv_opts(wallpaper, scaling, power_saving, &socket_path);
+        let mut opts = build_mpv_opts(wallpaper, scaling, power_saving, &socket_path);
+        // Same `-o` encoding limits as hwdec: no spaces or `#` in the value.
+        if let Some(log) = crate::config::mpv_log_file(connector) {
+            let log = log.to_string_lossy().into_owned();
+            if log.contains([' ', '#', '\t', '\n']) {
+                log::warn!("mpv log path {log:?} can't be passed to mpvpaper; skipping");
+            } else {
+                log::info!("[{connector}] mpv log: {log}");
+                opts.push_str(&format!(" log-file={log}"));
+            }
+        }
         let bin = crate::mpvpaper_command();
         log::info!(
             "[{connector}] spawning {} -o \"{opts}\" {connector} {}",

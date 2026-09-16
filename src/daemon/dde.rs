@@ -80,6 +80,11 @@ pub enum Mode {
     /// Our windows are raised above dde-shell's desktop window (icons hidden
     /// until the desktop is clicked — see [`IconPeek`]).
     Restack,
+    /// MATE: our windows sit above Caja's desktop window, which a mirror
+    /// thread keeps below them and whose icons it copies onto the wallpaper —
+    /// see `caja_mirror`. Icons stay visible and every click still reaches
+    /// Caja.
+    CajaMirror,
 }
 
 /// The user's original DDE wallpaper per monitor, persisted so a crash or a
@@ -298,6 +303,13 @@ pub fn window_kind<C: Connection>(
     root: Window,
     config_pref: DdeMode,
 ) -> WindowKind {
+    // MATE always raises: Caja's desktop window covers everything below it,
+    // and there is no transparency service to fall back on. Deciding before
+    // Caja has even mapped (a login race) is fine — the raised kind simply
+    // sits above the root window until Caja arrives.
+    if crate::capability::is_mate() {
+        return WindowKind::DdeRaised;
+    }
     if !crate::capability::is_deepin_dde() {
         return WindowKind::Desktop;
     }
@@ -319,6 +331,9 @@ pub fn apply<C: Connection>(
     windows: &[Window],
     config_pref: DdeMode,
 ) -> Mode {
+    if crate::capability::is_mate() {
+        return apply_mate(conn, atoms, root, windows);
+    }
     let pref = effective_pref(config_pref);
     let depth = desktop_window_depth(conn, atoms, root);
     match depth {
@@ -373,6 +388,47 @@ pub fn apply<C: Connection>(
     } else {
         log::warn!("DDE: neither DBus transparency nor restack worked; wallpaper may be covered");
         Mode::Inactive
+    }
+}
+
+/// MATE (issue #18): raise the wallpaper above Caja's desktop window and push
+/// that window down. Deepin's DBus transparency has no MATE counterpart.
+///
+/// Returns [`Mode::CajaMirror`] when the server can redirect and track Caja's
+/// window (Composite + Damage), so the daemon then mirrors Caja's icons over
+/// the wallpaper; otherwise [`Mode::Restack`], where the icons are hidden
+/// until the desktop is clicked.
+fn apply_mate<C: Connection>(conn: &C, atoms: &Atoms, root: Window, windows: &[Window]) -> Mode {
+    let caja = find_dde_desktop_windows(conn, atoms, root);
+    if caja.is_empty() {
+        log::info!("MATE: Caja's desktop window not found (desktop icons off, or Caja not up yet)");
+    } else {
+        log::info!("MATE: found {} Caja desktop window(s)", caja.len());
+    }
+    if !restack_above_desktop(conn, windows, &caja) {
+        log::warn!("MATE: raise failed; wallpaper may be covered by Caja's desktop");
+        return Mode::Inactive;
+    }
+    let mirrorable = [
+        x11rb::protocol::composite::X11_EXTENSION_NAME,
+        x11rb::protocol::damage::X11_EXTENSION_NAME,
+    ]
+    .iter()
+    .all(|name| {
+        x11rb::connection::RequestConnection::extension_information(conn, name)
+            .ok()
+            .flatten()
+            .is_some()
+    });
+    if mirrorable {
+        Mode::CajaMirror
+    } else {
+        log::warn!(
+            "MATE: the X server has no Composite/Damage, so Caja's icons cannot be drawn \
+             over the wallpaper — they are hidden while it plays; clicking the desktop \
+             brings them back for `dde_icon_peek_secs` seconds"
+        );
+        Mode::Restack
     }
 }
 
@@ -465,12 +521,36 @@ static RAISE_LOGGED: AtomicBool = AtomicBool::new(false);
 /// daemon's periodic stacking pass, since DDE restacks its desktop whenever the
 /// stack changes.
 pub fn restack_above_dde_desktop<C: Connection>(conn: &C, windows: &[Window]) -> bool {
+    restack_above_desktop(conn, windows, &[])
+}
+
+/// [`restack_above_dde_desktop`], and then **lower** each of `covering` — the
+/// desktop's own icon window — to the bottom as well.
+///
+/// That second half exists for MATE's window manager, Marco. Like the
+/// Metacity it forks, Marco ignores a stacking request from any application
+/// that is not the active one once the user has touched something newer — so
+/// after a click on Caja's desktop (which makes Caja active) every raise of
+/// ours is dropped, and a pager-flagged `_NET_RESTACK_WINDOW` is too. Lowering
+/// Caja's window *is* honoured, because it is a request about the active
+/// application's own window. Measured on a Linux Mint 22 MATE desktop; Deepin
+/// passes nothing here and is unchanged.
+pub fn restack_above_desktop<C: Connection>(
+    conn: &C,
+    windows: &[Window],
+    covering: &[Window],
+) -> bool {
     if windows.is_empty() {
         return false;
     }
     let mut ok = true;
     for &w in windows {
         if x11win::raise(conn, w).is_err() {
+            ok = false;
+        }
+    }
+    for &w in covering {
+        if x11win::lower(conn, w).is_err() {
             ok = false;
         }
     }
@@ -621,11 +701,27 @@ impl IconPeek {
         if windows.is_empty() {
             return;
         }
-        let above = !peek.is_zero() && self.dde_above(conn, atoms, root, windows);
+        let position = self.dde_position(conn, atoms, root, windows);
+        let above = !peek.is_zero() && position == Some(true);
         let was_idle = self.state == PeekState::Idle;
         match self.step(Instant::now(), above, peek) {
+            // Only send the raise when it would change something. Every
+            // sibling-less ConfigureWindow makes KWin restack a full-screen
+            // window and re-announce the stacking order, which dde-shell and
+            // the dock react to; issued blindly every two seconds it lands in
+            // the middle of window-switch animations (reported on Deepin 25 as
+            // CPU rising and animations stuttering on every switch). When the
+            // stack can't be read, keep raising as before.
+            PeekAction::Raise if position == Some(false) => {}
             PeekAction::Raise => {
-                restack_above_dde_desktop(conn, windows);
+                // On MATE a raise alone is ignored once Caja is the active
+                // application — see `restack_above_desktop`.
+                let covering: &[Window] = if crate::capability::is_mate() {
+                    &self.dde_windows
+                } else {
+                    &[]
+                };
+                restack_above_desktop(conn, windows, covering);
             }
             PeekAction::Yield if was_idle => {
                 if self.logged {
@@ -643,28 +739,30 @@ impl IconPeek {
         }
     }
 
-    /// Whether any DDE desktop window currently sits above our wallpaper.
-    fn dde_above<C: Connection>(
+    /// Whether a DDE desktop window currently sits above our wallpaper:
+    /// `Some(true)` / `Some(false)` when the stack shows it, `None` when it
+    /// can't be told (unreadable stack, no DDE window found, ours not listed).
+    fn dde_position<C: Connection>(
         &mut self,
         conn: &C,
         atoms: &Atoms,
         root: Window,
         windows: &[Window],
-    ) -> bool {
+    ) -> Option<bool> {
         let stack = client_list_stacking(conn, atoms, root);
         if stack.is_empty() {
-            return false;
+            return None;
         }
         if !self.dde_windows.iter().any(|w| stack.contains(w)) {
             let now = Instant::now();
             match self.last_scan {
-                Some(t) if now.duration_since(t) < RESCAN_AFTER => return false,
+                Some(t) if now.duration_since(t) < RESCAN_AFTER => return None,
                 _ => {}
             }
             self.last_scan = Some(now);
             self.dde_windows = find_dde_desktop_windows(conn, atoms, root);
         }
-        dde_above_in_stack(&stack, windows, &self.dde_windows)
+        dde_stack_position(&stack, windows, &self.dde_windows)
     }
 }
 
@@ -674,12 +772,26 @@ impl IconPeek {
 /// False whenever either side is absent from the list: an unreadable stack is
 /// not evidence that the icons are in use, and the caller must then keep doing
 /// what it did before — raising.
+#[cfg(test)]
 fn dde_above_in_stack(stack: &[Window], ours: &[Window], dde: &[Window]) -> bool {
+    dde_stack_position(stack, ours, dde) == Some(true)
+}
+
+/// Tri-state form of [`dde_above_in_stack`]: `None` unless every one of our
+/// windows and at least one DDE desktop window appear in `stack`, so "already
+/// above DDE" is only ever concluded from a stack that actually shows it.
+fn dde_stack_position(stack: &[Window], ours: &[Window], dde: &[Window]) -> Option<bool> {
     let pos = |w: &Window| stack.iter().position(|s| s == w);
-    let Some(lowest_ours) = ours.iter().filter_map(pos).min() else {
-        return false;
-    };
-    dde.iter().filter_map(pos).any(|p| p > lowest_ours)
+    let ours_pos: Vec<usize> = ours.iter().filter_map(pos).collect();
+    if ours.is_empty() || ours_pos.len() != ours.len() {
+        return None;
+    }
+    let dde_pos: Vec<usize> = dde.iter().filter_map(pos).collect();
+    if dde_pos.is_empty() {
+        return None;
+    }
+    let lowest_ours = *ours_pos.iter().min()?;
+    Some(dde_pos.iter().any(|&p| p > lowest_ours))
 }
 
 /// `_NET_CLIENT_LIST_STACKING` on `root`, bottom-most window first. Empty when
@@ -734,7 +846,7 @@ fn find_dde_desktop_windows<C: Connection>(conn: &C, atoms: &Atoms, root: Window
             w,
             String::from_utf8_lossy(&prop.value)
         );
-        if wm_class_is_dde_desktop(&prop.value) {
+        if wm_class_is_dde_desktop(&prop.value) || wm_class_is_caja_desktop(&prop.value) {
             found.push(w);
         }
     }
@@ -747,6 +859,17 @@ fn find_dde_desktop_window<C: Connection>(conn: &C, atoms: &Atoms, root: Window)
     find_dde_desktop_windows(conn, atoms, root)
         .into_iter()
         .next()
+}
+
+/// Caja's desktop window on MATE. Read off a Linux Mint 22 MATE desktop: the
+/// property is `"desktop_window\0Caja\0"`. Matched part by part, exactly —
+/// Caja's ordinary file-manager windows share the class but never the
+/// instance.
+pub(super) fn wm_class_is_caja_desktop(value: &[u8]) -> bool {
+    let mut parts = value.split(|&b| b == 0);
+    let instance = parts.next().unwrap_or_default();
+    let class = parts.next().unwrap_or_default();
+    instance.eq_ignore_ascii_case(b"desktop_window") && class.eq_ignore_ascii_case(b"caja")
 }
 
 /// WM_CLASS is two NUL-terminated strings: instance, class.
@@ -939,6 +1062,24 @@ mod tests {
     }
 
     #[test]
+    fn raise_is_skipped_only_when_the_stack_proves_we_are_already_on_top() {
+        // Stack is bottom-most first; 10 = DDE desktop, 1/2 = ours, 50 = an app.
+        assert_eq!(
+            dde_stack_position(&[10, 1, 2, 50], &[1, 2], &[10]),
+            Some(false)
+        );
+        assert_eq!(
+            dde_stack_position(&[1, 10, 2, 50], &[1, 2], &[10]),
+            Some(true)
+        );
+        // Unknowns must never read as "already on top", or we'd stop raising.
+        assert_eq!(dde_stack_position(&[], &[1], &[10]), None);
+        assert_eq!(dde_stack_position(&[10, 1, 50], &[1, 2], &[10]), None);
+        assert_eq!(dde_stack_position(&[1, 50], &[1], &[10]), None);
+        assert_eq!(dde_stack_position(&[1, 50], &[1], &[]), None);
+    }
+
+    #[test]
     fn peek_seconds_parsing() {
         assert_eq!(parse_peek_secs("10"), Some(10));
         assert_eq!(parse_peek_secs(" 30\n"), Some(30));
@@ -966,6 +1107,21 @@ mod tests {
         assert!(!dde_above_in_stack(&[10, 20], &[], &[10]));
         assert!(!dde_above_in_stack(&[10, 20], &[20], &[]));
         assert!(!dde_above_in_stack(&[10, 20], &[99], &[10]));
+    }
+
+    #[test]
+    fn caja_desktop_matching() {
+        assert!(wm_class_is_caja_desktop(b"desktop_window\0Caja\0"));
+        // A Caja file-manager window, our own window, and Deepin's desktop.
+        assert!(!wm_class_is_caja_desktop(b"caja\0Caja\0"));
+        assert!(!wm_class_is_caja_desktop(
+            b"fresco-wallpaper\0fresco-wallpaper\0"
+        ));
+        assert!(!wm_class_is_caja_desktop(
+            b"dde-shell/desktop\0org.deepin.dde-shell\0"
+        ));
+        assert!(!wm_class_is_caja_desktop(b"desktop_window\0Nemo\0"));
+        assert!(!wm_class_is_caja_desktop(b""));
     }
 
     #[test]

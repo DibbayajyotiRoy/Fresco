@@ -6,6 +6,12 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+/*
+ * Radix accordion (FAQ). Radix owns keyboard behaviour (Enter/Space toggle,
+ * arrow keys between triggers, Home/End). Visuals: hairline separators, a
+ * 16px question, a chevron that turns over when open. No height animation:
+ * the answer rises in with transform/opacity only (`animate-rise-in`).
+ */
 const Accordion = AccordionPrimitive.Root;
 
 const AccordionItem = React.forwardRef<
@@ -14,7 +20,7 @@ const AccordionItem = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AccordionPrimitive.Item
     ref={ref}
-    className={cn("border-b", className)}
+    className={cn("border-b border-hairline", className)}
     {...props}
   />
 ));
@@ -28,13 +34,16 @@ const AccordionTrigger = React.forwardRef<
     <AccordionPrimitive.Trigger
       ref={ref}
       className={cn(
-        "flex flex-1 items-center justify-between py-4 text-left text-sm font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180",
-        className
+        "group/trigger flex flex-1 cursor-pointer items-center justify-between gap-6 py-5 text-left text-lg font-medium text-ink",
+        className,
       )}
       {...props}
     >
       {children}
-      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200" />
+      <ChevronDown
+        aria-hidden
+        className="size-4 shrink-0 text-ink-faint transition-[transform,color] duration-200 ease-out group-hover/trigger:text-ink group-data-[state=open]/trigger:rotate-180 group-data-[state=open]/trigger:text-ink motion-reduce:transition-none"
+      />
     </AccordionPrimitive.Trigger>
   </AccordionPrimitive.Header>
 ));
@@ -44,12 +53,15 @@ const AccordionContent = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Content
-    ref={ref}
-    className="overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
-    {...props}
-  >
-    <div className={cn("pb-4 pt-0", className)}>{children}</div>
+  <AccordionPrimitive.Content ref={ref} className="overflow-hidden" {...props}>
+    <div
+      className={cn(
+        "animate-rise-in max-w-2xl pb-6 pr-2 text-base leading-6 text-ink-subtle sm:pr-10",
+        className,
+      )}
+    >
+      {children}
+    </div>
   </AccordionPrimitive.Content>
 ));
 AccordionContent.displayName = AccordionPrimitive.Content.displayName;

@@ -1,0 +1,184 @@
+/*
+ * What's new (components/whats-new.tsx + components/showcase/*).
+ *
+ * Two layers with two rule sets. The frame is page chrome and follows the
+ * site tokens. The desk inside it is a replica of Fresco's own widget layer
+ * and keeps the app's dark widget palette in both site themes, exactly as
+ * the real widgets keep it on any wallpaper (`WidgetTheme::Auto` is dark).
+ */
+
+/* ---- chrome ------------------------------------------------------------- */
+
+.sc-frame {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 12px 32px -12px rgb(0 0 0 / 0.12);
+}
+.dark .sc-frame {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.4),
+    0 16px 40px -16px rgb(0 0 0 / 0.7);
+}
+
+.sc-screen {
+  container-type: inline-size;
+  isolation: isolate;
+  background-color: #0b0d12;
+}
+
+/* ---- the desk: one lu is 1/1920 of the screen --------------------------- */
+
+.sc-desk {
+  --lu: calc(100cqw / 1920);
+  --hair: max(0.5px, var(--lu));
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sc-line {
+  position: absolute;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-hair {
+  height: var(--hair);
+}
+
+/* The glass card (`surface::card`): 160deg gradient at 0.72, the perimeter
+   hairline, and the E2 shadow. The shadow is painted under the translucent
+   body as well as around it, so the body composites over it: that inner
+   share is folded into the fill (0.72 over 0.64 black = 0.90). */
+.sc-card {
+  position: absolute;
+  inset: 0;
+  border: var(--hair) solid rgb(255 255 255 / 0.14);
+  background: linear-gradient(160deg, rgb(18 22 29 / 0.9), rgb(8 10 14 / 0.9));
+  box-shadow:
+    0 calc(10 * var(--lu)) calc(28 * var(--lu)) rgb(0 0 0 / 0.46),
+    0 var(--lu) calc(2 * var(--lu)) rgb(0 0 0 / 0.34);
+}
+/* Top edge light: white 0.34 along the top edge only, fading at both ends. */
+.sc-card::after {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--hair));
+  border-radius: inherit;
+  border-top: var(--hair) solid rgb(255 255 255 / 0.34);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+}
+
+.sc-e2 {
+  box-shadow:
+    0 calc(10 * var(--lu)) calc(28 * var(--lu)) rgb(0 0 0 / 0.46),
+    0 var(--lu) calc(2 * var(--lu)) rgb(0 0 0 / 0.34);
+}
+.sc-e3 {
+  box-shadow:
+    0 calc(16 * var(--lu)) calc(40 * var(--lu)) rgb(0 0 0 / 0.52),
+    0 calc(2 * var(--lu)) calc(4 * var(--lu)) rgb(0 0 0 / 0.36);
+}
+
+/* A well with an E1 shadow under it (art tile, source badge). */
+.sc-well-e1 {
+  border: var(--hair) solid rgb(255 255 255 / 0.14);
+  background: rgb(3 5 8 / 0.68);
+  box-shadow: 0 var(--lu) calc(3 * var(--lu)) rgb(0 0 0 / 0.28);
+}
+
+/* The visualiser bed (`surface::well`): pressed-in top, lifted bottom. */
+.sc-well {
+  background: rgb(4 6 10 / 0.55);
+  box-shadow:
+    inset 0 var(--lu) 0 rgb(0 0 0 / 0.5),
+    inset 0 calc(2 * var(--lu)) 0 rgb(0 0 0 / 0.14),
+    inset 0 calc(3 * var(--lu)) 0 rgb(0 0 0 / 0.08),
+    inset 0 calc(-1 * var(--lu)) 0 rgb(255 255 255 / 0.06);
+}
+
+/* NOS micro-label: `fit_micro` in CSS. The date comes first in the DOM and
+   the row runs right to left, so "WEEKDAY · DATE" reads normally; when both
+   do not fit the chord the weekday wraps to a second line that is clipped. */
+.sc-nos-micro {
+  display: flex;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  justify-content: center;
+  height: 1em;
+  overflow: hidden;
+  white-space: pre;
+}
+
+/* The disc's artwork: an abstract cover (a dusk sky, a hill, a low sun),
+   directional so the turn reads, with the spindle hole punched through. */
+.sc-disc-art {
+  background:
+    radial-gradient(circle at 68% 30%, rgb(255 238 204) 0 5%, rgb(255 214 150 / 0) 18%),
+    linear-gradient(205deg, transparent 0 57%, #5b3a87 57.5% 71%, #1d2046 71.5%),
+    linear-gradient(170deg, #ffd49a 0%, #f59a64 34%, #c95b7a 58%, #6b3c8c 100%);
+  -webkit-mask-image: radial-gradient(circle closest-side, transparent 4.3%, #000 4.7%);
+  mask-image: radial-gradient(circle closest-side, transparent 4.3%, #000 4.7%);
+}
+
+/* ---- continuous motion --------------------------------------------------
+   Compositor-only loops. Paused unless the screen is on screen, the tab is
+   visible and motion is allowed ([data-playing], set by viewscreen.tsx).
+   Negative delays park every bar at a different height, so the paused frame
+   still reads as a spectrum. */
+
+.sc-bar,
+.sc-cap {
+  position: absolute;
+  transform: translateY(var(--k0));
+  animation: sc-level var(--d, 1.6s) cubic-bezier(0.45, 0, 0.55, 1)
+    var(--dl, 0s) infinite both;
+}
+.sc-bar {
+  top: 0;
+  height: 100%;
+}
+.sc-cap {
+  bottom: 0;
+  background: rgb(255 255 255 / 0.475);
+}
+
+/* The record turns at 33 1/3 rpm. */
+.sc-disc-art {
+  animation: sc-spin 1.8s linear infinite both;
+}
+
+.sc-screen:not([data-playing]) .sc-anim {
+  animation-play-state: paused;
+}
+
+@keyframes sc-level {
+  0%,
+  100% {
+    transform: translateY(var(--k0));
+  }
+  25% {
+    transform: translateY(var(--k1));
+  }
+  50% {
+    transform: translateY(var(--k2));
+  }
+  75% {
+    transform: translateY(var(--k3));
+  }
+}
+
+@keyframes sc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-desk .sc-anim {
+    animation: none;
+  }
+}

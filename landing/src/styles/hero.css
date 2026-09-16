@@ -1,0 +1,300 @@
+/*
+ * Hero (classes prefixed `hero-`) and the first-visit brand intro (classes
+ * prefixed `brand-intro`). Imported by components/game/boot-console.tsx and
+ * components/intro/brand-intro.tsx; both render on the home page only.
+ *
+ * Choreography, all CSS so nothing waits on hydration:
+ *   1. First visit per session (html.intro-pending, set by the head script):
+ *      the brand intro covers the page for about one second, then lifts.
+ *   2. When intro-pending drops (or at once on later visits) the hero copy
+ *      settles in with a short stagger and the product frame rises and
+ *      scales in. The headline is never hidden: it only settles (transform),
+ *      so it is readable from first paint.
+ * Reduced motion: no intro, no entrances, no pulse.
+ */
+
+.hero {
+  --hero-ease: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* ---- Headline ----------------------------------------------------------- */
+
+/* CJK falls back to a system face: a calmer ceiling and real leading. */
+.hero-title:lang(ja),
+.hero-title:lang(zh) {
+  font-size: clamp(2.25rem, 5vw, 4.5rem);
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+/* ---- Pressables --------------------------------------------------------- */
+
+.hero-press {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    transform 120ms var(--hero-ease);
+}
+.hero-press:active {
+  transform: scale(0.98);
+}
+
+/* ---- Telemetry asterisk (toggletip) ------------------------------------- */
+
+/* The asterisk is a real, focusable button; its tip is positioned against
+   the proof row (the button itself is static), so it sits centred under the
+   whole row and can never run off a phone's edge. Hover shows it on
+   pointers, focus shows it on keyboard and on tap. */
+.hero-note {
+  margin-left: 1px;
+  padding: 0 2px;
+  border-radius: 4px;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 500;
+  line-height: 1;
+  cursor: help;
+}
+.hero-note-tip {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  z-index: 10;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: center;
+  white-space: normal;
+  opacity: 0;
+  transform: translate(-50%, -4px);
+  pointer-events: none;
+  transition:
+    opacity 150ms ease,
+    transform 150ms var(--hero-ease);
+}
+.hero-note:focus .hero-note-tip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+@media (hover: hover) and (pointer: fine) {
+  .hero-note:hover .hero-note-tip {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ---- Live "started using" dot ------------------------------------------ */
+
+.hero-live-dot {
+  position: relative;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--ok);
+}
+.hero-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ok);
+  opacity: 0;
+}
+
+/* ---- Product frame ------------------------------------------------------ */
+
+/* Soft, static, indigo-tinted elevation. Never animated itself: the frame
+   moves once on entrance, the shadow just rides along. */
+.hero-frame {
+  box-shadow:
+    0 1px 2px rgb(15 17 40 / 0.05),
+    0 32px 72px -32px rgb(30 34 110 / 0.28);
+}
+.dark .hero-frame {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.45),
+    0 32px 72px -32px rgb(0 0 0 / 0.9);
+}
+
+/* A soft accent wash behind the frame: a static radial gradient, not a glow
+   on anything that moves. */
+.hero-glow {
+  position: absolute;
+  /* No horizontal bleed on phones, where the frame is already full width:
+     nothing in the hero may reach past the viewport. */
+  inset: -14% 0 6%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    transparent
+  );
+}
+.dark .hero-glow {
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    transparent
+  );
+}
+
+/* ---- Entrances ---------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* While the intro covers the page, everything waits in its from-state so
+     the lift reveals it arriving rather than already there. */
+  html.intro-pending .hero-in:not(.hero-title) {
+    opacity: 0;
+  }
+  html.intro-pending .hero-title {
+    transform: translateY(10px);
+  }
+  html.intro-pending .hero-stage {
+    opacity: 0;
+    transform: translateY(48px) scale(0.96);
+  }
+
+  html:not(.intro-pending) .hero-in {
+    animation: hero-in 0.6s var(--hero-ease) both;
+    animation-delay: calc(60ms + var(--i, 0) * 60ms);
+  }
+  html:not(.intro-pending) .hero-title {
+    animation-name: hero-settle;
+  }
+  html:not(.intro-pending) .hero-stage {
+    animation: hero-stage-in 1s var(--hero-ease) 0.3s both;
+  }
+
+  /* The one loop in the hero: compositor-only, paused (by DemoVideo's
+     data-paused flag) whenever the hero is offscreen or the tab hidden. */
+  .hero-live-dot::after {
+    animation: hero-pulse 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .hero[data-paused] .hero-live-dot::after {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes hero-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes hero-settle {
+  from {
+    transform: translateY(10px);
+  }
+}
+@keyframes hero-stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(48px) scale(0.96);
+  }
+}
+@keyframes hero-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  75%,
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+/* ---- Brand intro -------------------------------------------------------- */
+
+/* Shown only while the head script's html.intro-pending is set (first visit
+   per session, JS on, motion allowed; it clears itself after 2.5s at most).
+   With `allow-discrete`, the overlay also fades out if the class is dropped
+   from outside, instead of vanishing mid-frame. */
+.brand-intro {
+  position: fixed;
+  inset: 0;
+  /* Above every fixed element, including the "Made by" badge (z 1000). */
+  z-index: 1100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--brand-intro-exit, 240ms) cubic-bezier(0.4, 0, 1, 1),
+    display var(--brand-intro-exit, 240ms) allow-discrete;
+}
+html.js-motion.intro-pending .brand-intro {
+  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+}
+html.js-motion.intro-pending .brand-intro.brand-intro-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.brand-intro-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform var(--brand-intro-exit, 240ms) cubic-bezier(0.4, 0, 1, 1);
+}
+.brand-intro-out .brand-intro-inner {
+  transform: translateY(-10px);
+}
+
+.brand-intro-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  animation: brand-intro-mark 420ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.brand-intro-track {
+  width: 8.5rem;
+  height: 2px;
+  margin-top: 1.25rem;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--hairline);
+}
+.brand-intro-line {
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: brand-intro-fill 700ms cubic-bezier(0.65, 0, 0.35, 1) 100ms both;
+}
+
+@keyframes brand-intro-mark {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes brand-intro-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Belt and braces: the head script never sets intro-pending under reduced
+   motion, but a preference flipped mid-session must not show it either. */
+@media (prefers-reduced-motion: reduce) {
+  .brand-intro {
+    display: none !important;
+  }
+}

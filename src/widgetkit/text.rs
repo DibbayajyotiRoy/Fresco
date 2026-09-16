@@ -478,6 +478,44 @@ impl FontStack {
         self.with_buffer(|fonts, buf| measure_in(fonts, buf, run, scale))
     }
 
+    /// Where `run` actually puts paint, in logical units relative to the
+    /// top-left [`super::Canvas::text`] draws it at. `None` when nothing inks.
+    ///
+    /// [`Self::measure`] reports line boxes, which is what stacking card rows
+    /// wants, but says nothing about where a particular face puts its cap tops
+    /// and descenders inside that box — and a large display cut set at a tight
+    /// line height does not put them where the text-size ratios in
+    /// `super::typo` expect. A layout that must place ink against ink (a date's
+    /// descenders a set distance above a time's figures) asks this instead.
+    ///
+    /// It rasterises the run once, so call it when the text changes, not per
+    /// frame.
+    pub fn ink_bounds(&mut self, run: &TextRun, scale: f32) -> Option<super::geom::Rect> {
+        let s = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        // Coverage only: a translucent run inks exactly where an opaque one does.
+        let solid = run.clone().color(Color::WHITE);
+        let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        self.draw(&solid, s, |x, y, _| {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        });
+        if x0 > x1 || y0 > y1 {
+            return None;
+        }
+        Some(super::geom::Rect::new(
+            x0 as f32 / s,
+            y0 as f32 / s,
+            (x1 - x0 + 1) as f32 / s,
+            (y1 - y0 + 1) as f32 / s,
+        ))
+    }
+
     /// Lay `run` out at `scale` and emit its coverage.
     ///
     /// `emit` receives one call per **pixel** — `(x, y, colour)` in device
@@ -876,5 +914,36 @@ mod tests {
             .family(Some("Inter"))
             .family(None::<String>);
         assert_eq!(r.family, None);
+    }
+}
+
+#[cfg(test)]
+mod ink_tests {
+    use super::*;
+
+    #[test]
+    fn ink_bounds_see_x_heights_and_descenders() {
+        let mut f = FontStack::system();
+        if !f.has_fonts() {
+            return;
+        }
+        let ink = |f: &mut FontStack, text: &str| {
+            f.ink_bounds(&TextRun::new(text, 40.0), 1.0)
+                .unwrap_or_else(|| panic!("{text:?} inked nothing"))
+        };
+        let (caps, lower, desc) = (ink(&mut f, "HX"), ink(&mut f, "xo"), ink(&mut f, "po"));
+        assert!(
+            lower.y > caps.y,
+            "an x-height starts below a cap top: {lower:?} {caps:?}"
+        );
+        assert!(
+            desc.y + desc.h > lower.y + lower.h,
+            "a descender reaches below the baseline: {desc:?} {lower:?}"
+        );
+        assert!(f.ink_bounds(&TextRun::new("   ", 40.0), 1.0).is_none());
+        // Logical units: the same run at scale 2 inks the same logical box,
+        // give or take the pixel either edge rounds to.
+        let at2 = f.ink_bounds(&TextRun::new("HX", 40.0), 2.0).unwrap();
+        assert!((at2.h - caps.h).abs() <= 1.0, "{at2:?} vs {caps:?}");
     }
 }

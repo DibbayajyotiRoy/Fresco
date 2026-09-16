@@ -263,6 +263,40 @@ pub fn select_hwdec(nvidia: bool, rotated: bool, env_override: Option<&str>) -> 
 /// bug report's log shows what we asked mpv for, next to what it actually
 /// picked (`hwdec-current`, surfaced in the status badge).
 pub fn hwdec(rotated: bool) -> String {
+    hwdec_logged(rotated)
+}
+
+/// Where mpv should write its own log for renderer `tag`, when `FRESCO_MPV_LOG`
+/// is set (to anything but empty or `0`). Off by default: the file is verbose.
+///
+/// It exists for decoder reports. The badge says which decoder mpv ended up
+/// on, but not why it skipped the ones before it in the `hwdec` list — a
+/// missing CUDA library, a libmpv built without NVDEC, an interop the GL
+/// context can't do. mpv only says that in its own log, which the embedded
+/// X11 renderer otherwise never writes anywhere.
+pub fn mpv_log_file(tag: &str) -> Option<std::path::PathBuf> {
+    let on = std::env::var("FRESCO_MPV_LOG").ok()?;
+    if matches!(on.trim(), "" | "0") {
+        return None;
+    }
+    let dir = dirs::state_dir()
+        .or_else(dirs::data_local_dir)?
+        .join("fresco");
+    std::fs::create_dir_all(&dir).ok()?;
+    let safe: String = tag
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    Some(dir.join(format!("mpv-{safe}.log")))
+}
+
+fn hwdec_logged(rotated: bool) -> String {
     let env = std::env::var("FRESCO_HWDEC").ok();
     let choice = select_hwdec(gpu_vendors().nvidia, rotated, env.as_deref());
     static LOGGED: [std::sync::Once; 2] = [std::sync::Once::new(), std::sync::Once::new()];
@@ -875,14 +909,19 @@ pub enum ClockThemeCfg {
     /// looks: an upgrade that repainted every user's clock into a new shape is
     /// not a design decision, it is an unrequested change to someone's desktop.
     ///
-    /// It is nonetheless the **only** theme the picker offers for now, and the
-    /// default: the other six are being reworked into this design language, and
-    /// offering looks that are mid-rework would ship a picker whose entries
-    /// disagree with each other. The renderer still carries all seven — see
-    /// `clock::ClockTheme::ALL` — so restoring them is a one-line change to
-    /// `CLOCK_THEMES_SHOWN`, not a re-implementation.
+    /// It is the default, and one of the two themes the picker offers: the
+    /// other six are being reworked, and offering looks that are mid-rework
+    /// would ship a picker whose entries disagree with each other. The renderer
+    /// still carries them all — see `clock::ClockTheme::ALL` — so restoring one
+    /// is a line in `CLOCK_THEMES_SHOWN`, not a re-implementation.
     #[default]
     Nos,
+    /// **Lock screen** — the date above a large, centred time, with no card,
+    /// the way a phone or laptop lock screen shows it. The date is part of the
+    /// look, so it is shown whatever [`Clock::show_date`] says. Spelled
+    /// `"lockscreen"` in `config.toml`, the label with its space removed.
+    #[serde(rename = "lockscreen")]
+    Lock,
 }
 
 /// Audio-spectrum overlay settings.

@@ -25,11 +25,16 @@ export const AUTHOR_NAME = "Dibbayajyoti Roy";
 export const PORTFOLIO_URL = "https://dibbayajyoti.com/";
 
 /**
- * Honest cohort telemetry surfaced in the operator HUD. Hand-maintained (no
- * analytics on the static site) — bump alongside releases. Rendered as mono
- * uppercase tallies, em-dash for an unknown value per the data-honisty rule.
+ * Opt-in telemetry cohort, shown in the stats band as "1,000+" / "100+".
+ * Hand-maintained floors (the static site reads no analytics): distinct
+ * install ids and distinct countries in the `installs` table, counted the way
+ * the admin Usage page counts them. Floors stay true as the numbers grow;
+ * raise them when the next round threshold is crossed.
+ *
+ * Snapshot 2026-09-15: 1,015 installs all-time (933 active in the last 30
+ * days), 101 countries.
  */
 export const COHORT = {
-  users: "120+",
-  deploys: "350+",
+  users: 1000,
+  countries: 100,
 } as const;

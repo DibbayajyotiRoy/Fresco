@@ -1,20 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { usePlaySound } from "@/hooks/use-play-sound";
 
+/**
+ * Sun/moon icon button. Toggles html.dark, sets color-scheme, persists
+ * `fresco.theme` and plays interaction.toggle. The icon is chosen by CSS
+ * from html.dark (which the head script sets before paint), so it is right
+ * on first paint with no hydration flash: sun in light, moon in dark.
+ */
 export function ThemeToggle({ label }: { label: string }) {
-  const [dark, setDark] = useState<boolean | null>(null);
   const { play } = usePlaySound({ sound: "interaction.toggle" });
 
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-  }, []);
-
   function toggle() {
-    const next = !(dark ?? false);
     const root = document.documentElement;
+    const next = !root.classList.contains("dark");
     root.classList.toggle("dark", next);
     root.style.colorScheme = next ? "dark" : "light";
     try {
@@ -22,7 +22,6 @@ export function ThemeToggle({ label }: { label: string }) {
     } catch {
       /* ignore */
     }
-    setDark(next);
     play();
   }
 
@@ -31,17 +30,10 @@ export function ThemeToggle({ label }: { label: string }) {
       type="button"
       onClick={toggle}
       aria-label={label}
-      className="flex size-8 items-center justify-center rounded-sm border border-hairline text-ink-subtle transition-colors hover:bg-raised hover:text-ink"
+      className="nav-press inline-flex size-9 items-center justify-center rounded-lg border border-hairline text-ink-subtle hover:border-hairline-strong hover:text-ink"
     >
-      {dark === null ? (
-        <span className="font-mono text-meta text-ink-faint" aria-hidden>
-          ◐
-        </span>
-      ) : dark ? (
-        <Sun className="size-4" aria-hidden />
-      ) : (
-        <Moon className="size-4" aria-hidden />
-      )}
+      <Sun className="size-4 dark:hidden" aria-hidden />
+      <Moon className="hidden size-4 dark:block" aria-hidden />
     </button>
   );
 }

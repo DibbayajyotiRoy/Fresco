@@ -40,6 +40,8 @@ export const en = {
     cta: "Get Fresco",
     star: "Star Fresco on GitHub",
     starWithCount: (n: string) => `Star Fresco on GitHub (${n} stars)`,
+    /** Mobile menu toggle (icon-only button). */
+    menu: "Menu",
   },
 
   language: {
@@ -61,25 +63,51 @@ export const en = {
     body: "Set any video, GIF, or image as your Linux desktop. Hardware-accelerated playback keeps CPU near zero, on X11 and Wayland. Close the app; the daemon keeps it playing.",
     install: "Install Fresco",
     star: "Star on GitHub",
+    /** Live social proof beside the CTAs (installs first seen in 24h). */
+    newUsers24h: (n: string) =>
+      `${n} people started using Fresco in the last 24 hours`,
+    /** Creator credit under the product preview; the name follows. */
+    builtBy: "Built by",
+    /** Live pill: installs active in 24h, then installs first seen in 24h. */
+    activeToday: (n: string) => `${n} people used Fresco in the last 24 hours`,
+    newToday: (n: string) => `${n} new`,
   },
 
   stats: {
     ariaLabel: "Project stats",
     downloads: "total downloads",
-    downloadsUnknown: "downloads on github",
-    stars: "github stars",
-    version: "latest release",
+    downloadsUnknown: "downloads on GitHub",
+    stars: "GitHub stars",
+    version: "Latest release",
     license: "free and open source",
+    users: "users",
+    countries: "countries",
+    cohortNote:
+      "Users and countries are counted from installs that opted in to anonymous telemetry.",
+    active24h: "active in the last 24h",
+  },
+
+  testimonials: {
+    kicker: "Field reports",
+    title: (users: string, countries: string) =>
+      `Running on ${users} Linux desktops in ${countries} countries.`,
+    lead: "Unedited notes from people running Fresco, sent from inside the app. Anonymous feedback is attributed by country only.",
+    fromCountry: (country: string) => `Fresco user · ${country}`,
+    anonymous: "Fresco user",
+    namedLabel: "Field report",
+    /** Visible marquee toggle (WCAG 2.2.2 pause control). */
+    pause: "Pause testimonials",
+    play: "Play testimonials",
   },
 
   glance: {
     ariaLabel: "Fresco at a glance",
-    caption: "fresco at a glance",
-    labelWhat: "what it is",
-    labelPlatforms: "platforms",
-    labelWidgets: "desktop widgets",
-    labelLicense: "license",
-    labelInstall: "install",
+    caption: "Fresco at a glance",
+    labelWhat: "What it is",
+    labelPlatforms: "Platforms",
+    labelWidgets: "Desktop widgets",
+    labelLicense: "License",
+    labelInstall: "Install",
     what: "Fresco is a free, open-source live wallpaper app for Linux: it sets video, GIF, image, slideshow, and playlist wallpapers as your animated desktop background, with GPU hardware decoding. A free Wallpaper Engine alternative and a GUI for mpvpaper on Wayland.",
     platforms:
       "Any X11 desktop (Ubuntu, Pop!_OS, Linux Mint, Debian), plus Wayland layer-shell compositors: COSMIC, Hyprland, Sway, KDE Plasma 6. GNOME Wayland falls back to a static frame.",
@@ -91,118 +119,118 @@ export const en = {
   },
 
   features: {
-    kicker: "features",
+    kicker: "Features",
     title: "Any media. Any monitor. No CPU drama.",
-    lead: "Fresco sets video, GIF, image, slideshow, and playlist wallpapers on X11 and Wayland, decoded on the GPU so a live wallpaper costs about as much as a static one. The full spec sheet:",
-    manifest: (n: number) => `manifest: ${n} capabilities`,
+    lead: "Fresco sets video, GIF, image, slideshow, and playlist wallpapers on X11 and Wayland, decoded on the GPU so a live wallpaper costs about as much as a static one.",
+    manifest: (n: number) => `Manifest: ${n} capabilities`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
     thCapability: "Capability",
     thWhatYouGet: "What you get",
     thStatus: "Status",
     footnote:
-      "gnome wayland: static-frame fallback (mutter exposes no live surface), and widgets need that surface too, so they are unavailable there. everything else above is live.",
+      "GNOME Wayland: static-frame fallback (Mutter exposes no live surface), and widgets need that surface too, so they are unavailable there. Everything else above is live.",
     tally: (shipping: number, total: number, soon: number) =>
       `${shipping} of ${total} shipping · ${soon} in-preview · 0 deprecated`,
     rows: {
       hwDecode: {
-        tag: "hw decode",
+        tag: "HW decode",
         title: "Hardware-accelerated playback",
         description:
           "Decoding runs on the GPU through mpv (VA-API or NVDEC). A 4K video wallpaper costs about as much CPU as a static image.",
-        status: "near-zero cpu",
+        status: "Near-zero CPU",
       },
       sessions: {
-        tag: "sessions",
+        tag: "Sessions",
         title: "X11 and Wayland",
         description:
           "A desktop-window backend on any X11 desktop, plus a layer-shell backend for COSMIC, Hyprland, Sway, and KDE Plasma 6. GNOME Wayland gets a static-frame fallback.",
-        status: "x11 · layer-shell",
+        status: "X11 · layer-shell",
       },
       catalog: {
-        tag: "catalog",
+        tag: "Catalog",
         title: "Built-in wallpaper catalog",
         description:
           "Browse curated, licensed wallpapers in-app (menu, then Browse wallpapers) and set one in two clicks. You can also paste a direct link.",
-        status: "in-app",
+        status: "In-app",
       },
       video: {
-        tag: "video · gif",
+        tag: "Video · GIF",
         title: "Video & GIF wallpapers",
         description: "Loop any mp4, webm, mkv, or animated GIF as your desktop.",
         status: "mp4 webm mkv gif",
       },
       slideshow: {
-        tag: "slideshow",
+        tag: "Slideshow",
         title: "Slideshows with transitions",
         description:
           "Rotate a folder of images with crossfade, fade, or Ken Burns.",
         status: "4 transitions",
       },
       playlist: {
-        tag: "playlist",
+        tag: "Playlist",
         title: "Video playlists",
         description: "Queue several clips and let Fresco cycle through them.",
-        status: "auto-cycle",
+        status: "Auto-cycle",
       },
       lyrics: {
-        tag: "lyrics · clock",
+        tag: "Lyrics · clock",
         title: "Lyrics and clock widgets",
         description:
           "Time-synced song lyrics for whatever is playing over MPRIS (local .lrc first, then LRCLIB), and a clock in one of six themes. Drawn into the wallpaper, so nothing floats over your windows. Off by default.",
-        status: "off by default",
+        status: "Off by default",
       },
       visualiser: {
-        tag: "visualiser",
+        tag: "Visualiser",
         title: "Audio visualiser and album art",
         description:
           "Five visualiser styles (Bars, Mirror, Wave, Dots, Ring) with a colour picker, blend, or rainbow, plus the current track's cover on a turning record. The visualiser asks before it listens to your audio.",
         status: "0.8% of one core",
       },
       editor: {
-        tag: "editor",
+        tag: "Editor",
         title: "Crop and rotate",
         description:
           "Drag a frame to pick the region, rotate 90 degrees to fix sideways clips. Both stay zero-copy on the GPU.",
-        status: "zero-copy",
+        status: "Zero-copy",
       },
       audio: {
-        tag: "audio",
+        tag: "Audio",
         title: "Per-wallpaper sound",
         description:
           "Unmute a video and set its volume. Fresco remembers the choice for that wallpaper.",
-        status: "per-wallpaper",
+        status: "Per-wallpaper",
       },
       displays: {
-        tag: "displays",
+        tag: "Displays",
         title: "Per-display wallpapers",
         description:
           "Right-click any wallpaper and Set on a specific display. Each monitor can run its own.",
-        status: "per-monitor",
+        status: "Per-monitor",
       },
       schedule: {
-        tag: "schedule",
+        tag: "Schedule",
         title: "Day and night schedules",
         description:
           "Two wallpapers, two switch times, swapped automatically by the daemon. Time slots and solar switching via config.",
-        status: "automatic",
+        status: "Automatic",
       },
       power: {
-        tag: "power",
+        tag: "Power",
         title: "Power-aware",
         description:
           "Pause on battery, and auto-pause per monitor when a window there goes fullscreen.",
-        status: "auto-pause",
+        status: "Auto-pause",
       },
       newTab: {
-        tag: "browser new tab",
+        tag: "Browser new tab",
         title: "Your wallpaper on every new tab",
         description:
           "A companion browser extension (Chrome, Brave, Edge, Firefox) mirrors your desktop wallpaper, or a browser-specific pick, on the new-tab page via a local bridge that talks only to 127.0.0.1. In the repo today; store listings pending.",
-        status: "coming soon",
+        status: "Coming soon",
       },
       themes: {
-        tag: "themes",
+        tag: "Themes",
         title: "Themes and accents",
         description: "Light, dark, or follow the system, with six accent palettes.",
         status: "6 palettes",
@@ -211,11 +239,11 @@ export const en = {
   },
 
   compare: {
-    kicker: "compare",
+    kicker: "Compare",
     title: "Fresco vs the Linux wallpaper field.",
     lead: "Fresco is the only actively maintained Linux live-wallpaper app in this table that combines a GUI, hardware decoding, X11 and Wayland support, and a built-in catalog, free. Here is the full comparison with Hidamari, Komorebi, mpvpaper, and Wallpaper Engine.",
     meter: (tools: number, caps: number) =>
-      `compare · ${tools} tools · ${caps} capabilities`,
+      `Compare · ${tools} tools · ${caps} capabilities`,
     thFeature: "Feature",
     yes: "Yes",
     no: "No",
@@ -247,12 +275,12 @@ export const en = {
   },
 
   whatsNew: {
-    kicker: (version: string) => `what's new · v${version}`,
+    kicker: (version: string) => `What's new · v${version}`,
     title: "Four desktop widgets, painted into the wallpaper.",
     lead: (version: string) =>
       `What shipped in v${version}. No extra window, nothing to click through, identical on X11 and layer-shell. All four are off by default, and with music playing and every one of them on the measured cost was 0.8% of one CPU core. Each entry here is reproduced in the CHANGELOG on GitHub.`,
     changelog: "Full changelog",
-    patch: (n: string) => `patch ${n}`,
+    patch: (n: string) => `Patch ${n}`,
     items: {
       lyrics: {
         title: "Synced song lyrics",
@@ -274,10 +302,10 @@ export const en = {
   },
 
   howItWorks: {
-    kicker: "how it works",
+    kicker: "How it works",
     title: "Three clicks, then forget about it.",
     lead: "Open Fresco, click add, click set, close. The daemon keeps the wallpaper running, even after you reboot.",
-    step: (n: string) => `step ${n}`,
+    step: (n: string) => `Step ${n}`,
     steps: {
       pick: {
         title: "Pick your media",
@@ -298,20 +326,20 @@ export const en = {
   },
 
   videos: {
-    kicker: "watch it run",
+    kicker: "Watch it run",
     title: "Under a minute each. No narration required.",
     lead: "Short screen recordings of Fresco on a real desktop. Nothing loads from YouTube until you press play.",
     more: "More on YouTube",
-    inDevelopment: "in development",
+    inDevelopment: "In development",
     play: (title: string) => `Play: ${title}`,
     items: {
       "YWzD3-xkCEc": {
-        tag: "add from link",
+        tag: "Add from link",
         blurb:
           "Copy a Pinterest link, paste it into Fresco, set it as your wallpaper. No download step, no file juggling.",
       },
       C1MqrhGkovQ: {
-        tag: "lyrics widgets",
+        tag: "Lyrics widgets",
         blurb:
           "Synchronized lyrics and a clock drawn into a live wallpaper on Wayland and X11. Shipped in v1.1.36, along with an audio visualiser and an album-art disc.",
       },
@@ -319,14 +347,14 @@ export const en = {
   },
 
   supported: {
-    kicker: "deployed environments",
+    kicker: "Deployed environments",
     title: "Where Fresco runs.",
-    lead: "On any X11 desktop, including Deepin 25's DDE, and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, and KDE Plasma 6) across the popular Debian and Ubuntu distributions. GNOME Wayland gets a static-frame fallback.",
+    lead: "On any X11 desktop, including deepin 25's DDE, and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, and KDE Plasma 6) across the popular Debian and Ubuntu distributions. GNOME Wayland gets a static-frame fallback.",
     deployed: (distros: number, formats: number) =>
-      `deployed: 6 live compositors · 1 static fallback · ${distros} distros · ${formats} formats`,
-    sessionsTitle: "sessions and compositors",
-    distrosTitle: (n: number) => `tested distributions · ${n}`,
-    formatsTitle: (n: number) => `supported formats · ${n}`,
+      `Deployed: 6 live compositors · 1 static fallback · ${distros} distros · ${formats} formats`,
+    sessionsTitle: "Sessions and compositors",
+    distrosTitle: (n: number) => `Tested distributions · ${n}`,
+    formatsTitle: (n: number) => `Supported formats · ${n}`,
     live: "Live wallpaper",
     fallback: "Static fallback",
     sessions: {
@@ -337,7 +365,7 @@ export const en = {
       deepin: {
         label: "Deepin 25 (DDE, X11)",
         detail:
-          "Automatic DDE adaptation, icons stay visible. Community-verified on Deepin 25 Community build1.",
+          "Automatic DDE adaptation, icons stay visible. Community-verified on deepin 25 Community build1. Also in the deepin App Store.",
       },
       wayland: {
         label: "Wayland layer-shell",
@@ -348,37 +376,40 @@ export const en = {
         detail: "Static-frame fallback (Mutter has no live surface)",
       },
     },
-    fieldReport: "field report · deepin 25",
-    verifiedEnv: "verified environment",
+    fieldReport: "Field report · deepin 25",
+    verifiedEnv: "Verified environment",
     testimonialRole: "Deepin community tester",
     envLabels: {
-      session: "session",
-      os: "os",
-      gpu: "gpu",
+      session: "Session",
+      os: "OS",
+      gpu: "GPU",
     },
     footnote:
-      "deepin 25 defaults to x11, and that is the session fresco is verified on there. deepin's own wayland compositor, treeland, is still under development, so fresco makes no claim about deepin on wayland yet.",
+      "Deepin 25 defaults to X11, and that is the session Fresco is verified on there. Deepin's own Wayland compositor, Treeland, is still under development, so Fresco makes no claim about deepin on Wayland yet.",
   },
 
   download: {
-    kicker: "download",
+    kicker: "Download",
     title: "Deploy on Debian, Ubuntu, Pop!_OS, and Mint.",
-    badge: "x11 · wayland",
+    badge: "X11 · Wayland",
     lead: "The official one-line installer or the .deb release. Either path copies to your clipboard and runs instantly. Fresco keeps playing after you close the window.",
-    cardTitle: "one-line install",
+    cardTitle: "One-line install",
     cardBody:
       "Run this in a terminal. It downloads and installs the latest .deb for you, always the newest release:",
     terminalTitle: "fresco install",
-    aptComment: "already have the .deb downloaded?",
+    aptComment: "Already have the .deb downloaded?",
     releases: "Browse all releases",
     gpuNote:
       "For the lowest CPU usage, install your GPU's hardware-decode driver (Intel media VA driver, Mesa VA drivers, or the NVIDIA proprietary driver for NVDEC).",
+    storeLabel: "Also on the deepin App Store",
+    storeBody:
+      "On deepin 25, open App Store, search for Fresco and click Install. Updates arrive through the store.",
     copy: "Copy",
     copied: "Copied",
   },
 
   faq: {
-    kicker: "faq",
+    kicker: "FAQ",
     title: "Questions, answered.",
     lead: "Everything you need to know before setting your first live wallpaper on Linux.",
     /** Q&A written from real user phrasings (AskUbuntu, Mint forums, Reddit, HN). */
@@ -456,6 +487,10 @@ export const en = {
         a: "Yes. Fresco's audio visualiser reacts to whatever your system is playing, in one of five styles (Bars, Mirror, Wave, Dots, Ring) with a colour picker, a two-colour blend, or rainbow. It is off by default and asks for consent the first time you enable it, because it has to listen to your audio output. With music playing and all four widgets on, the measured cost was 0.8% of one CPU core, nearly all of it the audio capture, because nothing repaints unless its content changed.",
       },
       {
+        q: "Is Fresco in the deepin App Store?",
+        a: "Yes. On deepin 25, open App Store, search for Fresco, and click Install. It is published on the deepin Community App Store, so updates arrive through the store. The .deb and the one-line installer work too.",
+      },
+      {
         q: "Is Fresco free?",
         a: "Yes. Fresco is completely free and open source under the GPL-3.0 license. There is no paid tier.",
       },
@@ -465,7 +500,7 @@ export const en = {
   footer: {
     github: "GitHub",
     license: "License",
-    tagline: "rust + gtk4 + mpv",
+    tagline: "Rust + GTK4 + mpv",
     sound: "Toggle sound",
   },
 

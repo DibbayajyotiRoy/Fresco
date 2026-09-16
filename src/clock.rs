@@ -64,7 +64,7 @@ use crate::lyrics::Anchor;
 /// `config::LyricStylePreset` makes for lyrics.
 ///
 /// TOML spellings are the variant names lowercased: `"digital"`, `"minimal"`,
-/// `"segment"`, `"stacked"`, `"wordy"`, `"card"`.
+/// `"segment"`, `"stacked"`, `"wordy"`, `"card"`, `"nos"`, `"lockscreen"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ClockTheme {
@@ -104,12 +104,22 @@ pub enum ClockTheme {
     /// language into the palette key would have made "dark" and "NOS" mutually
     /// exclusive, which they are not.
     Nos,
+    /// **Lock screen** — the time the way a phone or laptop lock screen shows
+    /// it: the date in one small semibold line, and beneath it a large, tightly
+    /// set time, both centred, with no card at all. Maps to
+    /// [`crate::widgetkit::ClockVariant::Lock`].
+    ///
+    /// No card means no scrim, so legibility comes from a real Gaussian shadow
+    /// cast by the glyphs themselves — see `cards::lock`. The date is half of
+    /// the look, so it is always shown.
+    #[serde(rename = "lockscreen")]
+    Lock,
 }
 
 impl ClockTheme {
     /// Every theme, in the order a picker should list them — cheapest look
     /// first — so a GUI does not hand-list the variants a second time.
-    pub const ALL: [ClockTheme; 7] = [
+    pub const ALL: [ClockTheme; 8] = [
         ClockTheme::Digital,
         ClockTheme::Minimal,
         ClockTheme::Segment,
@@ -117,6 +127,7 @@ impl ClockTheme {
         ClockTheme::Wordy,
         ClockTheme::Card,
         ClockTheme::Nos,
+        ClockTheme::Lock,
     ];
 
     /// Display name for a picker. Kept here rather than in the GUI so the
@@ -130,6 +141,7 @@ impl ClockTheme {
             ClockTheme::Wordy => "Wordy",
             ClockTheme::Card => "Card",
             ClockTheme::Nos => "NOS",
+            ClockTheme::Lock => "Lock screen",
         }
     }
 }
@@ -245,13 +257,14 @@ pub fn shows_seconds(s: &ClockStyle) -> bool {
 
 /// Whether the rendered string carries a date line.
 ///
-/// Two themes overrule the switch on purpose: `Stacked` *is* "time with the
+/// Three themes overrule the switch on purpose: `Stacked` *is* "time with the
 /// date beneath it", so turning the date off would leave it indistinguishable
-/// from `Digital`; `Minimal` is defined as time only. A GUI can call this to
+/// from `Digital`; `Lock` is the date over the time, the same way round;
+/// `Minimal` is defined as time only. A GUI can call this to
 /// grey the switch out rather than letting it silently do nothing.
 pub fn shows_date(s: &ClockStyle) -> bool {
     match s.theme {
-        ClockTheme::Stacked => true,
+        ClockTheme::Stacked | ClockTheme::Lock => true,
         ClockTheme::Minimal => false,
         _ => s.show_date,
     }
@@ -518,6 +531,10 @@ const fn size_pct(theme: ClockTheme) -> u32 {
         // hero against the ring's inner chord, so the setting arrives
         // unscaled and `cards::nos` does the rest.
         ClockTheme::Nos => 100,
+        // As loud as Stacked and no louder: the look *is* a big time, but
+        // Stacked is pinned as the largest (`the_themes_are_visibly_different`)
+        // and `font_size_pt` is there for anyone who wants more.
+        ClockTheme::Lock => 130,
     }
 }
 
@@ -756,6 +773,7 @@ pub fn card_variant(theme: ClockTheme) -> crate::widgetkit::ClockVariant {
         ClockTheme::Stacked => V::Standard,
         ClockTheme::Card => V::Expanded,
         ClockTheme::Nos => V::Nos,
+        ClockTheme::Lock => V::Lock,
         _ => V::Auto,
     }
 }
@@ -834,7 +852,7 @@ mod tests {
         assert!(!s.accent_follow);
         assert_eq!(tick_secs(&s), 60);
         // ALL must stay in step with the enum and start at the default.
-        assert_eq!(ClockTheme::ALL.len(), 7);
+        assert_eq!(ClockTheme::ALL.len(), 8);
         assert_eq!(ClockTheme::ALL[0], ClockTheme::default());
         let mut labels: Vec<&str> = ClockTheme::ALL.iter().map(|t| t.label()).collect();
         labels.sort_unstable();
@@ -1508,7 +1526,9 @@ mod tests {
         let sparse: ClockStyle = serde_json::from_str("{}").expect("an empty table");
         assert_eq!(sparse, ClockStyle::default());
         for theme in ClockTheme::ALL {
-            let name = format!("\"{}\"", theme.label().to_lowercase());
+            // Labels are words for people; the serde name is that label with
+            // the spaces taken out, so "Lock screen" is spelled `lockscreen`.
+            let name = format!("\"{}\"", theme.label().to_lowercase().replace(' ', ""));
             let back: ClockTheme = serde_json::from_str(&name).expect(&name);
             assert_eq!(back, theme);
         }

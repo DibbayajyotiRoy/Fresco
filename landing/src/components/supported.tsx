@@ -1,188 +1,100 @@
-import { DISTROS, FORMATS, TESTIMONIAL } from "@/lib/content";
+import { SplitWords } from "@/components/motion/split-words";
+import { DISTROS } from "@/lib/content";
 import type { Dictionary } from "@/lib/i18n";
 
-/** Session rows, in order, with whether each gets a live wallpaper. */
-const SESSIONS = [
-  { id: "x11", ok: true },
-  { id: "deepin", ok: true },
-  { id: "wayland", ok: true },
-  { id: "gnome", ok: false },
-] as const;
-
-/** Compositor health strip. Names are proper nouns, identical in every locale. */
-const COMPOSITORS: { name: string; live: boolean }[] = [
-  { name: "cosmic", live: true },
-  { name: "hyprland", live: true },
-  { name: "sway", live: true },
-  { name: "kde plasma 6", live: true },
-  { name: "x11", live: true },
-  { name: "deepin dde", live: true },
-  { name: "gnome wayland", live: false },
-];
-
-function HealthDot({
-  name,
-  live,
-  liveLabel,
-  fallbackLabel,
-}: {
-  name: string;
-  live: boolean;
-  liveLabel: string;
-  fallbackLabel: string;
-}) {
+function Dot({ live }: { live: boolean }) {
   return (
-    <span className="inline-flex items-center gap-1.5 font-mono text-meta uppercase tracking-widest text-ink-subtle">
-      <span
-        aria-hidden
-        className={`size-1.5 rounded-full ${live ? "bg-ok" : "bg-warn"}`}
-      />
-      {name}
-      <span className="sr-only">: {live ? liveLabel : fallbackLabel}</span>
-    </span>
+    <span
+      aria-hidden
+      className={`size-2 shrink-0 rounded-full ${live ? "bg-ok" : "bg-warn"}`}
+    />
   );
 }
 
+/**
+ * Where Fresco runs, as a compact band: title and lead, one row of compositor
+ * chips (green live, amber fallback, each with an sr-only status), and the
+ * tested distros on one muted line. Sessions, formats and the Deepin/Treeland
+ * caveat live in At a glance and the FAQ.
+ */
 export function Supported({ dict }: { dict: Dictionary }) {
+  const s = dict.supported;
+
+  /** Proper nouns, identical in every locale, except the translated X11 row. */
+  const compositors: { name: string; live: boolean }[] = [
+    { name: "COSMIC", live: true },
+    { name: "Hyprland", live: true },
+    { name: "Sway", live: true },
+    { name: "KDE Plasma 6", live: true },
+    { name: s.sessions.x11.label, live: true },
+    { name: "Deepin DDE", live: true },
+    { name: "GNOME Wayland", live: false },
+  ];
+
   return (
-    <section id="supported" className="border-b border-hairline py-20 sm:py-28">
-      <div className="mx-auto max-w-6xl px-5">
-        <div className="max-w-2xl">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <p className="instrument-label !text-ink-faint">
-              {dict.supported.kicker}
+    <section
+      id="supported"
+      aria-labelledby="supported-title"
+      className="border-b border-hairline py-20 sm:py-24"
+    >
+      <div className="wrap">
+        <div className="mx-auto max-w-6xl">
+          <header className="grid gap-5 lg:grid-cols-12 lg:items-end lg:gap-12">
+            <h2
+              id="supported-title"
+              data-reveal="words"
+              className="font-display text-section text-ink lg:col-span-5"
+            >
+              <SplitWords text={s.title} />
+            </h2>
+            <p
+              data-reveal="fade"
+              data-delay="0.15"
+              className="text-lg text-ink-subtle lg:col-span-7"
+            >
+              {s.lead}
             </p>
-          </div>
-          <h2 className="mt-3 font-serif text-display-sm text-ink">
-            {dict.supported.title}
-          </h2>
-          <p className="mt-4 max-w-2xl text-pretty text-ink-subtle">
-            {dict.supported.lead}
-          </p>
-          <p className="mt-3 font-mono text-meta uppercase tracking-widest text-ink-faint">
-            {dict.supported.deployed(DISTROS.length, FORMATS.length)}
-          </p>
-        </div>
+          </header>
 
-        <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-sm border border-hairline bg-surface px-4 py-3">
-          {COMPOSITORS.map((c) => (
-            <HealthDot
-              key={c.name}
-              {...c}
-              liveLabel={dict.supported.live}
-              fallbackLabel={dict.supported.fallback}
-            />
-          ))}
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-md border border-hairline bg-surface p-7">
-            <h3 className="instrument-label">{dict.supported.sessionsTitle}</h3>
-            <ul className="mt-5 flex flex-col gap-4">
-              {SESSIONS.map((s) => {
-                const copy = dict.supported.sessions[s.id];
-                return (
-                  <li key={s.id} className="flex gap-3">
-                    <span
-                      aria-hidden
-                      className={`mt-1 font-mono text-sm leading-none ${
-                        s.ok ? "text-ok" : "text-ink-faint"
-                      }`}
-                    >
-                      {s.ok ? "✓" : "—"}
-                    </span>
-                    <span>
-                      <span className="text-sm font-medium text-ink">
-                        {copy.label}
-                      </span>
-                      <span className="block text-sm text-ink-subtle">
-                        {copy.detail}
-                      </span>
-                      <span className="sr-only">
-                        {s.ok ? dict.supported.live : dict.supported.fallback}
-                      </span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div className="rounded-md border border-hairline bg-surface p-7">
-            <p className="instrument-label mt-0">
-              {dict.supported.distrosTitle(DISTROS.length)}
-            </p>
-            <ul className="mt-5 flex flex-wrap gap-2">
-              {DISTROS.map((d) => (
+          <div className="mt-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
+            <ul className="flex flex-wrap gap-2">
+              {compositors.map((c) => (
                 <li
-                  key={d}
-                  className="rounded-sm border border-hairline bg-raised px-2 py-0.5 font-mono text-meta text-ink-muted"
+                  key={c.name}
+                  className="inline-flex items-center gap-2 rounded-full border border-hairline bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted"
                 >
-                  {d}
+                  <Dot live={c.live} />
+                  {c.name}
+                  <span className="sr-only">
+                    : {c.live ? s.live : s.fallback}
+                  </span>
                 </li>
               ))}
             </ul>
-
-            <p className="instrument-label mt-7">
-              {dict.supported.formatsTitle(FORMATS.length)}
+            {/* Visible key for the dots; each chip already announces its own
+                status, so this is hidden from assistive tech. */}
+            <p
+              aria-hidden
+              className="flex shrink-0 items-center gap-4 text-sm text-ink-subtle"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Dot live />
+                {s.live}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Dot live={false} />
+                {s.fallback}
+              </span>
             </p>
-            <ul className="mt-5 flex flex-wrap gap-2">
-              {FORMATS.map((f) => (
-                <li
-                  key={f}
-                  className="rounded-sm border border-hairline bg-raised px-2 py-0.5 font-mono text-meta text-ink-muted"
-                >
-                  {f}
-                </li>
-              ))}
-            </ul>
           </div>
+
+          <p className="mt-5 text-sm text-ink-faint">
+            <span className="mr-3 inline-block font-medium text-ink-subtle first-letter:uppercase">
+              {s.distrosTitle(DISTROS.length)}
+            </span>
+            {DISTROS.join(" · ")}
+          </p>
         </div>
-
-        {/* The quote itself is reproduced verbatim, in the language the
-            reviewer wrote it in, on every locale. Translating a testimonial
-            would misquote a named person. */}
-        <figure className="mt-4 rounded-md border border-hairline bg-surface">
-          <figcaption className="instrument-label border-b border-hairline px-4 py-2.5">
-            {dict.supported.fieldReport}
-          </figcaption>
-          <div className="grid gap-6 p-7 lg:grid-cols-[1fr_260px] lg:gap-8">
-            <blockquote>
-              <p
-                lang="en"
-                className="text-pretty font-serif text-xl leading-snug text-ink sm:text-2xl"
-              >
-                &ldquo;{TESTIMONIAL.quote}&rdquo;
-              </p>
-              <p className="mt-4 text-sm text-ink-muted">
-                {TESTIMONIAL.author}
-                <span className="block text-ink-subtle">
-                  {dict.supported.testimonialRole}
-                </span>
-              </p>
-            </blockquote>
-
-            <dl className="self-start rounded-sm border border-hairline bg-raised px-4 py-3">
-              <p className="instrument-label">{dict.supported.verifiedEnv}</p>
-              <div className="mt-3 flex flex-col gap-2">
-                {TESTIMONIAL.environment.map((row) => (
-                  <div key={row.id} className="flex flex-col gap-0.5">
-                    <dt className="font-mono text-meta uppercase tracking-wide text-ink-faint">
-                      {dict.supported.envLabels[row.id]}
-                    </dt>
-                    <dd className="font-mono text-meta text-ink-muted">
-                      {row.value}
-                    </dd>
-                  </div>
-                ))}
-              </div>
-            </dl>
-          </div>
-        </figure>
-
-        <p className="mt-4 font-mono text-meta tracking-wide text-ink-faint">
-          {dict.supported.footnote}
-        </p>
       </div>
     </section>
   );

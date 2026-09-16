@@ -4,6 +4,49 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.43] — Unreleased
+
+### Fixed
+- **The wallpaper now appears on MATE, with the desktop icons still on it**
+  (issue #18). On MATE, Caja draws the desktop icons and its own copy of the
+  background into one opaque window covering the whole screen, and Fresco
+  stacked its wallpaper underneath it — so setting a wallpaper, GIF or video
+  alike, visibly did nothing. While Fresco runs, it now sets MATE's desktop
+  background to a solid near-black key colour (`#010101`), redirects Caja's
+  window offscreen with X Composite, and copies everything that isn't the key
+  colour — the icons — onto the wallpaper, redrawing when Caja does (X
+  Damage). Caja stays full-size underneath and Fresco's windows ignore input,
+  so every click still reaches it: double-clicking icons, the right-click
+  menu, rubber-band selection, drag and drop. MATE's window manager raises
+  Caja when the desktop is clicked; Fresco pushes it straight back under the
+  wallpaper. Your own background is saved and put back when Fresco stops or
+  is disabled; after a crash the desktop shows the key colour until Fresco
+  next starts and restores it. On an X server without Composite or Damage,
+  Fresco falls back to raising the wallpaper above Caja with the icons hidden,
+  as on Deepin, and a click on the desktop shows them for
+  `dde_icon_peek_secs` seconds.
+- **Logging out or killing the daemon now puts your desktop back.** A
+  logout, `pkill frescod` or Ctrl+C ends `frescod` with a signal, and it
+  handled none, so it died on the spot and skipped the shutdown that restores
+  the desktop — Fresco's still frame on GNOME and Cinnamon, the transparent
+  wallpaper on Deepin, and the key colour on MATE. SIGTERM, SIGINT and SIGHUP
+  now stop it the same way the app's Stop does; a second signal still ends it
+  at once.
+- **Switching windows on Deepin no longer stutters because of the wallpaper.**
+  To stay above DDE's desktop, Fresco sent the window manager a raise request
+  every two seconds whether or not anything had moved. Each one makes KWin
+  restack a full-screen window and announce the new order to the dock and
+  desktop, and landing in the middle of a window-switch animation it pushed
+  CPU up and dropped frames. The raise is now sent only when DDE's desktop is
+  actually above the wallpaper, or when the stacking order can't be read.
+
+### Added
+- **`FRESCO_MPV_LOG=1` writes mpv's own log** to
+  `~/.local/state/fresco/mpv-<output>.log`. The decode badge shows which
+  decoder mpv settled on but not why it passed over the others — a missing
+  CUDA library, a build without NVDEC, an unsupported interop — and only
+  mpv's log says that.
+
 ## [1.1.42] — Unreleased
 
 ### Fixed

@@ -746,3 +746,52 @@ fn peek_media() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+#[ignore]
+fn peek_lock() -> Result<()> {
+    let mut fonts = FontStack::system();
+    let dir = out_dir();
+    std::fs::create_dir_all(&dir)?;
+    let cases: [(&str, &str, &str, &str, &str); 5] = [
+        ("plain", "09:41", "00:00", "Tuesday", "15 September"),
+        (
+            "seconds",
+            "23:55:38",
+            "00:00:00",
+            "Wednesday",
+            "28 September",
+        ),
+        ("12h", "9:41 AM", "00:00 AM", "Tuesday", "15 September"),
+        ("nodate", "14:32", "00:00", "", ""),
+        ("cjk", "23:55", "00:00", "星期四", "八月二十日"),
+    ];
+    for (mode, name) in [(Mode::Dark, "dark"), (Mode::Light, "light")] {
+        let t = Theme::for_accent(mode, crate::config::Accent::Blue);
+        for kind in [Backdrop::Hostile, Backdrop::Night] {
+            for (tag, time, widest_time, weekday, date) in cases {
+                let d = clock::ClockData {
+                    time,
+                    widest_time,
+                    weekday,
+                    date,
+                    secondary: "9h 27m left today",
+                    font_size: 83.0,
+                    variant: clock::ClockVariant::Lock,
+                    accent_follow: false,
+                    day_fraction: 0.605,
+                };
+                let size = clock::measure(&mut fonts, &t, &d, 1.0);
+                let buf = size.buffer();
+                let mut c = Canvas::for_logical(Size::new(buf.w + 48.0, buf.h + 48.0), 2.0)?;
+                backdrop(&mut c, kind);
+                let at = size.card_in(c.bounds());
+                clock::draw_at(&mut c, &mut fonts, &t, &d, at);
+                let path = dir.join(format!("peek-lock-{name}-{}-{tag}.png", kind.name()));
+                c.save_png(&path)?;
+                println!("{}", path.display());
+            }
+        }
+    }
+    Ok(())
+}

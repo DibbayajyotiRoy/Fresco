@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
-import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
-import { SmoothScroll } from "@/components/smooth-scroll";
+import { MotionProvider } from "@/components/motion/motion-provider";
 import { SoundProvider } from "@/components/sound-provider";
 import { SiteNav } from "@/components/site-nav";
 import { MadeBy } from "@roy-ui/ui/made-by";
@@ -22,20 +22,23 @@ const inter = Inter({
   subsets: ["latin"],
 });
 
-const instrumentSerif = Instrument_Serif({
-  variable: "--font-instrument-serif",
-  weight: "400",
-  style: ["normal", "italic"],
-  subsets: ["latin"],
-});
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
 });
 
-/* Applied before CSS paints: html.dark + colorScheme, no flash. */
-const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("fresco.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
+/* Applied before CSS paints, no flash:
+   1. html.dark + colorScheme: the visitor's pick, else the system preference.
+      Light is the light side, dark is the dark side; both are authored.
+   2. html.js-motion, only when motion is allowed: hides [data-reveal] blocks
+      until the orchestrator wires them. Failsafe: if it has not booted within
+      4s (script error, slow network), the class is dropped and everything
+      shows in its final state.
+   3. html.intro-pending, first visit per session only (with motion + JS):
+      shows the 1-second brand intro. Hard cap: cleared after 2.5s no matter
+      what, with the same event the intro fires (components/intro/intro-signal.ts). */
+const THEME_SCRIPT = `(function(){var r=document.documentElement;try{var t=localStorage.getItem("fresco.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}try{if(!window.matchMedia("(prefers-reduced-motion: reduce)").matches){r.classList.add("js-motion");var seen=null;try{seen=sessionStorage.getItem("fresco.intro");}catch(e){}if(!seen){r.classList.add("intro-pending");setTimeout(function(){if(r.classList.contains("intro-pending")){r.classList.remove("intro-pending");window.dispatchEvent(new Event("fresco:intro-done"));}},2500);}setTimeout(function(){if(!r.classList.contains("motion-ready"))r.classList.remove("js-motion");},4000);}}catch(e){}})();`;
 
 const SITE_URL = process.env.SITE_URL ?? "https://fresco.dibbayajyoti.com";
 
@@ -152,8 +155,8 @@ export async function generateMetadata({
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafaf9" },
-    { media: "(prefers-color-scheme: dark)", color: "#0c0a09" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f8fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#05060a" },
   ],
 };
 
@@ -175,11 +178,11 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body
-        className={`${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <SoundProvider>
           <SiteNav locale={typed} dict={dict} />
-          <SmoothScroll>{children}</SmoothScroll>
+          <MotionProvider>{children}</MotionProvider>
         </SoundProvider>
         <MadeBy
           name="Dibbayajyoti Roy"

@@ -686,6 +686,79 @@ impl Canvas {
         Rect::at(at, metrics.size())
     }
 
+    /// A soft Gaussian shadow cast by text: the glyphs' own coverage, blurred
+    /// and filled with `color`, drawn beneath where the text will go.
+    ///
+    /// Every run shares one mask and one blur, so a stack of rows costs one
+    /// blur rather than one each — and overlapping shadows merge instead of
+    /// stacking into a darker patch. Only coverage is read: a run drawn
+    /// translucent still casts a full shadow, because the shadow's strength is
+    /// `color`'s decision. `dy` drops the shadow in logical units; `blur` is
+    /// in the same units as [`Canvas::drop_shadow`]'s.
+    pub fn text_shadow(
+        &mut self,
+        fonts: &mut FontStack,
+        runs: &[(&TextRun, Point)],
+        blur: f32,
+        dy: f32,
+        color: Color,
+    ) {
+        if runs.is_empty() || color.a <= 0.0 {
+            return;
+        }
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        if self.shadow_mask.is_none() {
+            self.shadow_mask = Mask::new(w, h);
+        }
+        let s = self.scale;
+        let Some(mask) = self.shadow_mask.as_mut() else {
+            return;
+        };
+        mask.clear();
+        let (wi, hi, stride) = (w as i32, h as i32, w as usize);
+        {
+            let data = mask.data_mut();
+            for (run, at) in runs {
+                if run.text.is_empty() || run.size <= 0.0 {
+                    continue;
+                }
+                let solid = (*run).clone().color(Color::WHITE);
+                let (ox, oy) = ((at.x * s).round() as i32, ((at.y + dy) * s).round() as i32);
+                fonts.draw(&solid, s, |x, y, c| {
+                    let (px, py) = (ox + x, oy + y);
+                    if px < 0 || py < 0 || px >= wi || py >= hi {
+                        return;
+                    }
+                    let i = py as usize * stride + px as usize;
+                    let a = (c.a.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    data[i] = data[i].max(a);
+                });
+            }
+        }
+        let sigma = if blur.is_finite() && blur > 0.0 {
+            blur * s / 2.0
+        } else {
+            0.0
+        };
+        blur_alpha(
+            mask.data_mut(),
+            w as usize,
+            h as usize,
+            sigma,
+            &mut self.blur_scratch,
+        );
+        let Some(all) = tiny_skia::Rect::from_xywh(0.0, 0.0, w as f32, h as f32) else {
+            return;
+        };
+        let paint = Paint {
+            shader: tiny_skia::Shader::SolidColor(color.to_tiny()),
+            anti_alias: false,
+            ..Default::default()
+        };
+        self.pixmap
+            .fill_rect(all, &paint, Transform::identity(), Some(mask));
+    }
+
     /// Draw `img` into `dst`, scaled to fill it, with rounded corners.
     ///
     /// The source is resampled bilinearly and **not** aspect-corrected: pass a
@@ -1939,5 +2012,72 @@ mod tests {
         assert_eq!(px(&one, 4, 4).3, px(&two, 8, 8).3);
         assert_eq!((two.width_px(), two.height_px()), (128, 128));
         assert_eq!(one.bounds(), two.bounds());
+    }
+}
+
+#[cfg(test)]
+mod text_shadow_tests {
+    use super::*;
+
+    fn lit(c: &Canvas) -> (u32, u32) {
+        let (mut count, mut sum) = (0u32, 0u32);
+        for y in 0..c.pixmap.height() {
+            for x in 0..c.pixmap.width() {
+                let a = c.pixmap.pixel(x, y).map_or(0, |p| p.alpha());
+                if a > 0 {
+                    count += 1;
+                    sum += u32::from(a);
+                }
+            }
+        }
+        (count, sum)
+    }
+
+    #[test]
+    fn a_text_shadow_spreads_past_the_glyphs_it_is_cast_by() {
+        let mut fonts = FontStack::system();
+        if !fonts.has_fonts() {
+            return;
+        }
+        let run = TextRun::new("I", 48.0).color(Color::WHITE);
+        let at = Point::new(50.0, 20.0);
+        let mut c = Canvas::new(128, 128, 1.0).unwrap();
+        c.text(&mut fonts, &run, at);
+        let (glyph_px, _) = lit(&c);
+        c.reset();
+        c.text_shadow(
+            &mut fonts,
+            &[(&run, at)],
+            8.0,
+            2.0,
+            Color::BLACK.with_alpha(0.5),
+        );
+        let (shadow_px, _) = lit(&c);
+        assert!(glyph_px > 0, "the glyph drew nothing");
+        assert!(
+            shadow_px > glyph_px * 2,
+            "a blurred shadow must cover well past the glyph: {shadow_px} vs {glyph_px}"
+        );
+    }
+
+    #[test]
+    fn a_translucent_run_still_casts_a_full_shadow() {
+        let mut fonts = FontStack::system();
+        if !fonts.has_fonts() {
+            return;
+        }
+        let at = Point::new(20.0, 20.0);
+        let shadow_of = |fonts: &mut FontStack, ink: Color| {
+            let run = TextRun::new("88", 40.0).color(ink);
+            let mut c = Canvas::new(128, 96, 1.0).unwrap();
+            c.text_shadow(fonts, &[(&run, at)], 6.0, 1.0, Color::BLACK.with_alpha(0.5));
+            lit(&c)
+        };
+        let solid = shadow_of(&mut fonts, Color::WHITE);
+        let faint = shadow_of(&mut fonts, Color::WHITE.with_alpha(0.1));
+        assert_eq!(
+            solid, faint,
+            "the shadow's strength is its colour's, not the ink's"
+        );
     }
 }

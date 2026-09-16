@@ -107,6 +107,10 @@ impl Player {
             {
                 f.set_option(handle, k, v);
             }
+            if let Some(log) = crate::config::mpv_log_file(&format!("x11-{wid}")) {
+                log::info!("mpv log: {}", log.display());
+                f.set_option(handle, "log-file", &log.to_string_lossy());
+            }
 
             // Fit mode.
             apply_fit_options(f, handle, wallpaper.fit);

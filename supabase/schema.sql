@@ -1006,3 +1006,44 @@ revoke all on function public.register_install_minimal(text, text, text) from pu
 grant execute on function public.register_install_minimal(text, text, text) to anon;
 
 create index if not exists installs_city_idx on public.installs (city);
+
+-- ── Public aggregate stats (landing page) ───────────────────────────────────
+-- The landing page's stats band reads these numbers server-side, revalidated
+-- hourly: POST /rest/v1/rpc/public_stats with the anon key.
+--
+-- Exposes aggregate COUNTS only. anon still has no SELECT on public.installs
+-- (revoked above) and still cannot read a single install row; this
+-- security-definer function is the one read-only window, and all it returns
+-- is four integers: no install id, version, country list, city or timestamp.
+--
+--   users       every install row
+--   countries   distinct non-null countries
+--   active_24h  installs whose last_seen is within the last 24 hours
+--   active_30d  the same, within the last 30 days
+--   new_24h     installs first seen within the last 24 hours (hero "started using")
+--
+-- Minimal-tier installs store last_seen truncated to the day, so the active
+-- counts can slightly undercount them; they never overcount.
+--
+-- Run this section in the Supabase SQL editor before the site can show live
+-- numbers. Until it exists the RPC returns 404 and the site falls back to the
+-- hand-maintained floors (COHORT in landing/src/lib/site.ts), shown with a "+".
+create or replace function public.public_stats()
+returns json
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+    select json_build_object(
+        'users',      count(*),
+        'countries',  count(distinct i.country) filter (where i.country is not null),
+        'active_24h', count(*) filter (where i.last_seen >= now() - interval '24 hours'),
+        'active_30d', count(*) filter (where i.last_seen >= now() - interval '30 days'),
+        'new_24h',    count(*) filter (where i.first_seen >= now() - interval '24 hours')
+    )
+    from public.installs i;
+$$;
+
+revoke all on function public.public_stats() from public;
+grant execute on function public.public_stats() to anon;

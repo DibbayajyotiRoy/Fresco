@@ -1,11 +1,14 @@
 "use client";
 
+import { Volume2, VolumeX } from "lucide-react";
 import { useFrescoSound } from "@/components/sound-provider";
 
-/** Persisted sound toggle ("fresco.sound", default on). Silent by design:
- *  flipping it plays nothing — sound only ever confirms semantic events. */
+/** Persisted sound toggle ("fresco.sound", default on). Icon-only: the
+ *  translated label names it, aria-pressed carries the state. Silent by
+ *  design: flipping it plays nothing, sound only confirms semantic events. */
 export function SoundToggle({ label }: { label: string }) {
   const { on, setOn } = useFrescoSound();
+  const Icon = on ? Volume2 : VolumeX;
 
   return (
     <button
@@ -13,9 +16,10 @@ export function SoundToggle({ label }: { label: string }) {
       onClick={() => setOn(!on)}
       aria-pressed={on}
       aria-label={label}
-      className="font-mono text-meta uppercase tracking-widest text-ink-faint transition-colors hover:text-ink"
+      title={label}
+      className="inline-flex size-9 items-center justify-center rounded-lg border border-hairline text-ink-subtle transition-colors duration-150 hover:border-hairline-strong hover:bg-raised hover:text-ink"
     >
-      sound: {on ? "on" : "off"}
+      <Icon className="size-4" aria-hidden />
     </button>
   );
 }

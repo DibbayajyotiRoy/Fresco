@@ -1,0 +1,63 @@
+/*
+ * Site nav. Every class here is prefixed `nav-`.
+ * Imported by components/site-nav.tsx (also covers the theme toggle, the
+ * language switcher and the mobile menu, which only render inside the nav).
+ */
+
+/* Pressable chrome: named properties only, and a small press-in on :active
+   so every control acknowledges the click. */
+.nav-press {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.nav-press:active {
+  transform: scale(0.97);
+}
+
+/* Mobile panel drops in when opened. */
+.nav-panel:not([hidden]) {
+  animation: nav-drop 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@keyframes nav-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Language popover: scales from its trigger (top right). */
+.nav-pop:not([hidden]) {
+  transform-origin: top right;
+  animation: nav-pop 150ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@keyframes nav-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.97);
+  }
+}
+
+/* Soft static elevation for the popover (menus float; bars do not). */
+.nav-float {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 12px 32px -12px rgb(0 0 0 / 0.18);
+}
+.dark .nav-float {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.4),
+    0 16px 40px -12px rgb(0 0 0 / 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-press:active {
+    transform: none;
+  }
+  .nav-panel:not([hidden]),
+  .nav-pop:not([hidden]) {
+    animation: none;
+  }
+}

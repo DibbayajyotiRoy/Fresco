@@ -1,0 +1,216 @@
+/*
+ * TESTIMONIALS: clean light cards. Every class is prefixed `tm-`. Tokens
+ * only, so dark mode is a remap. One elevation language: a 1px hairline
+ * plus a soft, static shadow on every card; no glows, no gradients, no
+ * text effects. Inter only (the page's sans).
+ *
+ * Perf: the only loop is the marquee, a CSS animation on transform
+ * (compositor), paused via animation-play-state. Card shadows are static
+ * and ride inside the moving layer, so nothing repaints per frame. SSR
+ * markup is always final; PageMotion applies any hidden entrance state.
+ */
+
+/* ---- Quote marks ------------------------------------------------------ */
+/* Generated, so the DOM text stays exactly the stored quote; they follow
+   the blockquote's `lang` (“ ” for en and zh). */
+.tm-q::before {
+  content: open-quote;
+}
+.tm-q::after {
+  content: close-quote;
+}
+
+/* ---- Cards ------------------------------------------------------------ */
+.tm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  height: 100%;
+  padding: 1.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background-color: var(--surface);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 12px 32px -12px rgb(0 0 0 / 0.12);
+}
+.tm-card-body {
+  flex: 1;
+}
+.tm-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* The tip quote: the largest card on the page's proof strip. */
+.tm-card--tip {
+  padding: 2rem;
+}
+@media (min-width: 640px) {
+  .tm-card--tip,
+  .tm-card--report {
+    padding: 2.5rem;
+  }
+}
+.tm-tip-q {
+  max-width: 22ch;
+  font-size: clamp(1.75rem, 3.4vw, 3rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.tm-card--report {
+  padding: 2rem;
+}
+.tm-report-q {
+  font-size: clamp(1.125rem, 1.5vw, 1.3125rem);
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+/* Marquee cards: scale follows length, so short quotes carry the row. */
+.tm-item-q {
+  color: var(--ink);
+  font-weight: 500;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.tm-item-q--md {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+.tm-item-q--lg {
+  font-size: 1.375rem;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+.tm-item-q--xl {
+  font-size: 2.5rem;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+/* ---- The marquee ------------------------------------------------------ */
+/* Default (no JS, reduced motion, motion failsafe): a static wrapped grid
+   inside the page gutter, and no loop copy. */
+.tm-row {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: clamp(1rem, 4vw, 3rem);
+}
+.tm-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: 1.25rem;
+}
+.tm-group[data-dup] {
+  display: none;
+}
+
+/* Live: from first paint when the head script confirmed motion is allowed
+   (html.js-motion), and in any case once MarqueeRow has claimed the row
+   (data-tm-live). One full-bleed, clipped line; block padding leaves room
+   for the card shadows. Item width and gap must match ITEM_REM / GAP_REM in
+   testimonials.tsx. */
+@media (prefers-reduced-motion: no-preference) {
+  html.js-motion .tm-row,
+  .tm-row[data-tm-live] {
+    --tm-gap: 1.5rem;
+    max-width: none;
+    padding: 0.5rem 0 2.5rem;
+    overflow: clip;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
+  }
+  html.js-motion .tm-track,
+  .tm-row[data-tm-live] .tm-track {
+    display: flex;
+    width: max-content;
+  }
+  /* Each group carries its trailing gap, so the track is exactly
+     (1 + copies) equal periods and --tm-shift loops it seamlessly. */
+  html.js-motion .tm-group,
+  html.js-motion .tm-group[data-dup],
+  .tm-row[data-tm-live] .tm-group,
+  .tm-row[data-tm-live] .tm-group[data-dup] {
+    display: flex;
+    gap: var(--tm-gap);
+    padding-inline-end: var(--tm-gap);
+  }
+  html.js-motion .tm-group > *,
+  .tm-row[data-tm-live] .tm-group > * {
+    width: clamp(16rem, 76vw, 22rem);
+    flex-shrink: 0;
+  }
+  .tm-row[data-tm-live] .tm-track {
+    animation: tm-drift var(--tm-dur, 90s) linear infinite;
+    animation-play-state: paused;
+  }
+  .tm-row[data-tm-live][data-dir="right"] .tm-track {
+    animation-direction: reverse;
+  }
+  /* Runs only while on screen and the tab is visible (data-tm-run, set by
+     MarqueeRow), never while hovered or holding focus, and never once the
+     visitor has pressed pause (data-tm-paused wins over every resume). */
+  .tm-row[data-tm-run]:not([data-tm-paused]):not(:hover):not(:focus-within) .tm-track {
+    animation-play-state: running;
+    will-change: transform;
+  }
+  /* The pause toggle exists only beside a live row. */
+  .tm-row[data-tm-live] + .tm-controls {
+    display: flex;
+  }
+}
+
+/* ---- Pause / play toggle (WCAG 2.2.2) ---------------------------------- */
+/* Hidden by default: no JS and reduced motion leave the row static, so
+   there is nothing to pause. Sits in the row's shadow gutter, right side. */
+.tm-controls {
+  display: none;
+  justify-content: flex-end;
+  margin-top: -1rem;
+}
+.tm-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 9999px;
+  background-color: var(--surface);
+  color: var(--ink-subtle);
+  cursor: pointer;
+  transition:
+    color 150ms ease-out,
+    border-color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+.tm-toggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tm-toggle:hover {
+    color: var(--ink);
+    border-color: var(--ink-faint);
+  }
+}
+.tm-toggle:active {
+  background-color: var(--raised);
+}
+
+@keyframes tm-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(var(--tm-shift, -50%), 0, 0);
+  }
+}

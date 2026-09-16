@@ -1,14 +1,23 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Star } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Github, Star } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { MobileMenu } from "@/components/nav/mobile-menu";
 import { getGitHubStats } from "@/lib/github";
-import { GITHUB_URL, RELEASES_URL } from "@/lib/site";
+import { GITHUB_URL } from "@/lib/site";
 import type { Dictionary } from "@/lib/i18n";
 import { LOCALE_META, localePath, type Locale } from "@/lib/i18n/config";
+import "@/styles/nav.css";
 
+/**
+ * Sticky, solid bar (paper in both themes, no blur): mark + wordmark left,
+ * section links centred, then GitHub stars, language, theme and the one
+ * filled "Get Fresco" action on the right. Inline links from lg; below that
+ * they move into an accessible disclosure menu. Rendered by the locale
+ * layout, so it also serves the /alternatives pages (links carry the locale
+ * base so they resolve back to the home page from there).
+ */
 export async function SiteNav({
   locale,
   dict,
@@ -31,37 +40,40 @@ export async function SiteNav({
       : stats.stars.toLocaleString(LOCALE_META[locale].numberLocale);
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-hairline bg-paper/95 backdrop-blur">
-      <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-6 px-5">
+    <header className="sticky top-0 z-50 w-full border-b border-hairline bg-paper">
+      <nav className="wrap relative grid h-16 grid-cols-[1fr_auto] items-center gap-4 lg:grid-cols-[1fr_auto_1fr]">
         <Link
           href={home}
-          className="flex items-center gap-2.5 rounded-sm"
           aria-label={dict.nav.home}
+          className="flex items-center gap-2.5 justify-self-start rounded-md"
         >
           <Image
             src="/logo.png"
-            width={26}
-            height={26}
+            width={28}
+            height={28}
             alt=""
             priority
-            className="rounded-[6px]"
+            className="rounded-[7px]"
           />
-          <span className="font-serif text-xl text-ink">Fresco</span>
+          <span className="hidden font-display text-[1.0625rem] leading-none text-ink min-[380px]:inline">
+            Fresco
+          </span>
         </Link>
 
-        <div className="hidden items-center gap-6 md:flex">
+        <ul className="hidden items-center gap-1 lg:flex">
           {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="text-sm text-ink-subtle transition-colors hover:text-ink"
-            >
-              {link.label}
-            </Link>
+            <li key={link.href}>
+              <Link
+                href={link.href}
+                className="rounded-md px-3 py-2 text-[14px] font-medium text-ink-subtle transition-colors duration-150 hover:text-ink"
+              >
+                {link.label}
+              </Link>
+            </li>
           ))}
-        </div>
+        </ul>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 justify-self-end">
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -69,22 +81,25 @@ export async function SiteNav({
             aria-label={
               stars === null ? dict.nav.star : dict.nav.starWithCount(stars)
             }
-            className="hidden h-8 items-center gap-1.5 rounded-sm border border-hairline px-2.5 font-mono text-meta tabular-nums text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink sm:inline-flex"
+            className="nav-press hidden h-9 items-center gap-2 rounded-lg border border-hairline px-3 text-[13px] font-medium tabular-nums text-ink-subtle hover:border-hairline-strong hover:text-ink sm:inline-flex"
           >
-            <Star className="size-3.5" aria-hidden />
-            {stars === null ? (
-              <span className="text-ink-faint">—</span>
-            ) : (
-              stars
+            <Github className="size-4" aria-hidden />
+            {stars === null ? null : (
+              <span className="flex items-center gap-1">
+                <Star className="size-3.5 fill-current" aria-hidden />
+                {stars}
+              </span>
             )}
           </a>
           <LanguageSwitcher locale={locale} label={dict.language.change} />
           <ThemeToggle label={dict.theme.toggle} />
-          <Button asChild size="sm" className="font-medium">
-            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-              {dict.nav.cta}
-            </a>
-          </Button>
+          <a
+            href={`${base}/#download`}
+            className="nav-press inline-flex h-9 items-center whitespace-nowrap rounded-lg bg-primary px-4 text-[14px] font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            {dict.nav.cta}
+          </a>
+          <MobileMenu links={links} label={dict.nav.menu} />
         </div>
       </nav>
     </header>

@@ -35,6 +35,7 @@ export const ja: Dictionary = {
     star: "GitHub で Fresco にスターを付ける",
     starWithCount: (n: string) =>
       `GitHub で Fresco にスターを付ける（スター ${n} 件）`,
+    menu: "メニュー",
   },
 
   language: {
@@ -56,20 +57,41 @@ export const ja: Dictionary = {
     body: "動画・GIF・画像を、そのまま Linux のデスクトップに設定できます。ハードウェア再生なので CPU 使用率はほぼゼロ、X11 でも Wayland でも動作します。アプリを閉じてもデーモンが再生を続けます。",
     install: "Fresco をインストール",
     star: "GitHub でスター",
+    newUsers24h: (n: string) => `過去24時間で${n}人が Fresco を使い始めました`,
+    builtBy: "開発",
+    activeToday: (n: string) => `過去24時間で${n}人が Fresco を使いました`,
+    newToday: (n: string) => `うち新規 ${n}人`,
   },
 
   stats: {
     ariaLabel: "プロジェクトの統計",
     downloads: "累計ダウンロード数",
-    downloadsUnknown: "github のダウンロード数",
-    stars: "github スター",
+    downloadsUnknown: "GitHub のダウンロード数",
+    stars: "GitHub スター",
     version: "最新リリース",
     license: "無料・オープンソース",
+    users: "ユーザー",
+    countries: "か国",
+    cohortNote:
+      "ユーザー数と国数は、匿名テレメトリーに同意したインストールから集計しています。",
+    active24h: "過去24時間のアクティブ",
+  },
+
+  testimonials: {
+    kicker: "ユーザーの声",
+    title: (users: string, countries: string) =>
+      `${countries}か国、${users}台のLinuxデスクトップで稼働中。`,
+    lead: "Fresco を使う人たちがアプリ内から送ってくれた、未編集のフィードバックです。匿名のフィードバックは国名のみで表記しています。",
+    fromCountry: (country: string) => `${country}の Fresco ユーザー`,
+    anonymous: "Fresco ユーザー",
+    namedLabel: "フィールドレポート",
+    pause: "ユーザーの声を一時停止",
+    play: "ユーザーの声を再生",
   },
 
   glance: {
     ariaLabel: "Fresco の概要",
-    caption: "fresco の概要",
+    caption: "Fresco の概要",
     labelWhat: "概要",
     labelPlatforms: "対応環境",
     labelWidgets: "ウィジェット",
@@ -88,7 +110,7 @@ export const ja: Dictionary = {
   features: {
     kicker: "機能",
     title: "どんなメディアも。どのモニターでも。CPU は静かなまま。",
-    lead: "Fresco は動画・GIF・画像・スライドショー・プレイリストを X11 と Wayland の壁紙に設定します。デコードは GPU が担当するため、ライブ壁紙のコストは静止画とほぼ同じです。仕様の全体像はこちら:",
+    lead: "Fresco は動画・GIF・画像・スライドショー・プレイリストを X11 と Wayland の壁紙に設定します。デコードは GPU が担当するため、ライブ壁紙のコストは静止画とほぼ同じです。",
     manifest: (n: number) => `マニフェスト: ${n} 機能`,
     /** Sentence-final mark after each row title. */
     titleSuffix: "。",
@@ -96,23 +118,23 @@ export const ja: Dictionary = {
     thWhatYouGet: "内容",
     thStatus: "ステータス",
     footnote:
-      "gnome wayland: 静止フレームへのフォールバック（mutter がライブ サーフェスを公開しないため）。ウィジェットも同じサーフェスを必要とするので、ここでは利用できません。上記のそれ以外はすべて動作します。",
+      "GNOME Wayland: 静止フレームへのフォールバック（Mutter がライブ サーフェスを公開しないため）。ウィジェットも同じサーフェスを必要とするので、ここでは利用できません。上記のそれ以外はすべて動作します。",
     tally: (shipping: number, total: number, soon: number) =>
       `${total} 件中 ${shipping} 件がリリース済み · ${soon} 件がプレビュー · 廃止 0 件`,
     rows: {
       hwDecode: {
-        tag: "hw デコード",
+        tag: "HW デコード",
         title: "ハードウェア アクセラレーション再生",
         description:
           "デコードは mpv 経由で GPU 上（VA-API または NVDEC）。4K の動画壁紙でも、CPU 負荷は静止画とほぼ変わりません。",
-        status: "cpu ほぼゼロ",
+        status: "CPU ほぼゼロ",
       },
       sessions: {
         tag: "セッション",
         title: "X11 と Wayland",
         description:
           "あらゆる X11 デスクトップ向けのデスクトップ ウィンドウ バックエンドに加えて、COSMIC・Hyprland・Sway・KDE Plasma 6 向けの layer-shell バックエンド。GNOME Wayland は静止フレームにフォールバックします。",
-        status: "x11 · layer-shell",
+        status: "X11 · layer-shell",
       },
       catalog: {
         tag: "カタログ",
@@ -122,7 +144,7 @@ export const ja: Dictionary = {
         status: "アプリ内",
       },
       video: {
-        tag: "動画 · gif",
+        tag: "動画 · GIF",
         title: "動画と GIF の壁紙",
         description:
           "mp4、webm、mkv、アニメーション GIF をループ再生してデスクトップに。",
@@ -334,7 +356,7 @@ export const ja: Dictionary = {
       deepin: {
         label: "Deepin 25（DDE、X11）",
         detail:
-          "DDE に自動で適応し、アイコンは表示されたまま。Deepin 25 Community build1 でコミュニティ検証済み。",
+          "DDE に自動で適応し、アイコンは表示されたまま。Deepin 25 Community build1 でコミュニティ検証済み。deepin アプリストアでも配信中。",
       },
       wayland: {
         label: "Wayland layer-shell",
@@ -350,17 +372,17 @@ export const ja: Dictionary = {
     testimonialRole: "Deepin コミュニティのテスター",
     envLabels: {
       session: "セッション",
-      os: "os",
-      gpu: "gpu",
+      os: "OS",
+      gpu: "GPU",
     },
     footnote:
-      "deepin 25 の既定は x11 で、fresco が検証されているのもそのセッションです。deepin 独自の wayland コンポジタ treeland はまだ開発中のため、fresco は deepin の wayland 環境については現時点で何も主張していません。",
+      "deepin 25 の既定は X11 で、Fresco が検証されているのもそのセッションです。deepin 独自の Wayland コンポジタ Treeland はまだ開発中のため、Fresco は deepin の Wayland 環境については現時点で何も主張していません。",
   },
 
   download: {
     kicker: "ダウンロード",
     title: "Debian、Ubuntu、Pop!_OS、Mint に導入。",
-    badge: "x11 · wayland",
+    badge: "X11 · Wayland",
     lead: "公式のワンライナー インストーラー、または .deb リリースのどちらでも。クリップボードにコピーすればすぐ実行できます。ウィンドウを閉じても Fresco は再生を続けます。",
     cardTitle: "ワンライナー インストール",
     cardBody:
@@ -370,6 +392,9 @@ export const ja: Dictionary = {
     releases: "すべてのリリースを見る",
     gpuNote:
       "CPU 使用率を最小にするには、GPU のハードウェア デコード ドライバー（Intel media VA ドライバー、Mesa VA ドライバー、または NVDEC 用の NVIDIA プロプライエタリ ドライバー）をインストールしてください。",
+    storeLabel: "deepin アプリストアでも配信中",
+    storeBody:
+      "deepin 25 ではアプリストアを開き、Fresco を検索して「インストール」をクリックするだけ。アップデートはストア経由で届きます。",
     copy: "コピー",
     copied: "コピーしました",
   },
@@ -452,6 +477,10 @@ export const ja: Dictionary = {
         a: "できます。Fresco のオーディオ ビジュアライザーはシステムで再生中の音に反応し、5 つのスタイル（Bars、Mirror、Wave、Dots、Ring）から選べます。カラー ピッカー、2 色ブレンド、レインボーにも対応します。既定ではオフで、音声出力を聴く必要があるため、初回に有効化するときは必ず同意を求めます。音楽を再生して 4 つのウィジェットをすべてオンにした状態での実測値は CPU 1 コアの 0.8% で、そのほとんどは音声キャプチャです。内容が変わらない限り再描画しないためです。",
       },
       {
+        q: "Fresco は deepin アプリストアにありますか？",
+        a: "あります。deepin 25 ではアプリストアを開き、Fresco を検索して「インストール」をクリックしてください。deepin コミュニティ アプリストアで公開されているため、アップデートはストア経由で届きます。.deb やワンライナー インストーラーも使えます。",
+      },
+      {
         q: "Fresco は無料ですか？",
         a: "無料です。Fresco は GPL-3.0 ライセンスの完全に無料なオープンソース ソフトウェアです。有料プランはありません。",
       },
@@ -461,7 +490,7 @@ export const ja: Dictionary = {
   footer: {
     github: "GitHub",
     license: "ライセンス",
-    tagline: "rust + gtk4 + mpv",
+    tagline: "Rust + GTK4 + mpv",
     sound: "サウンドを切り替え",
   },
 

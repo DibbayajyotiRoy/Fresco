@@ -86,7 +86,8 @@ The wallpaper keeps playing after the window closes and comes back automatically
 
 | Environment | Live wallpaper | Notes |
 |---|---|---|
-| X11 (GNOME, Cinnamon, XFCE, MATE, …) | ✅ | Embedded renderer |
+| X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Embedded renderer |
+| MATE (X11) | ✅ | Desktop icons stay visible and clickable over the wallpaper |
 | Deepin 25 (DDE, X11) | ✅ | Automatic DDE adaptation — community-verified on Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
@@ -294,6 +295,18 @@ wallpaper returns after that, and another click buys another ten seconds. To
 change the delay, set `dde_icon_peek_secs` in `~/.config/fresco/config.toml`
 (`0` keeps the wallpaper on top always). Deepin's own wallpaper still shows
 whenever Fresco is off or paused.
+
+### Why does my MATE desktop background look dark after a crash?
+
+To keep Caja's desktop icons on top of the live wallpaper, Fresco sets MATE's
+desktop background to a near-black key colour (`#010101`) while it runs and
+copies everything that isn't that colour — the icons — onto the wallpaper. Your
+own background is saved first and put back when Fresco stops or is disabled. If
+Fresco crashes before it can do that, the desktop stays dark; **start Fresco
+again and it restores your background**. On an X server without the Composite
+and Damage extensions, Fresco instead works as it does on
+[Deepin](#my-desktop-icons-are-hidden-while-the-wallpaper-plays-on-deepin):
+icons hidden, a click on the desktop brings them back.
 
 ### My wallpaper is black on Wayland (NVIDIA, COSMIC, Hyprland, Sway)
 

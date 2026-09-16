@@ -5461,14 +5461,17 @@ fn add_lyrics_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
 /// GUI's words against the renderer's, which is the guard that catches a theme
 /// being renamed in one place and not the other. This list is only about what
 /// is *shown*, and re-adding a look is a line here rather than a re-wiring.
-const CLOCK_THEMES_SHOWN: [(ClockThemeCfg, &str); 1] = [(ClockThemeCfg::Nos, "NOS")];
+const CLOCK_THEMES_SHOWN: [(ClockThemeCfg, &str); 2] = [
+    (ClockThemeCfg::Nos, "NOS"),
+    (ClockThemeCfg::Lock, "Lock screen"),
+];
 
 /// Only the tests read this now that the picker is driven by
 /// [`CLOCK_THEMES_SHOWN`]; it is kept because
 /// `clock_theme_labels_match_the_renderer` is the guard that catches a theme
 /// renamed in `clock.rs` and not here, and that guard has to see all seven.
 #[cfg(test)]
-const CLOCK_THEMES: [(ClockThemeCfg, &str); 7] = [
+const CLOCK_THEMES: [(ClockThemeCfg, &str); 8] = [
     (ClockThemeCfg::Digital, "Digital"),
     (ClockThemeCfg::Minimal, "Minimal"),
     (ClockThemeCfg::Segment, "Segment"),
@@ -5476,6 +5479,7 @@ const CLOCK_THEMES: [(ClockThemeCfg, &str); 7] = [
     (ClockThemeCfg::Wordy, "Wordy"),
     (ClockThemeCfg::Card, "Card"),
     (ClockThemeCfg::Nos, "NOS"),
+    (ClockThemeCfg::Lock, "Lock screen"),
 ];
 
 /// The clock settings currently in force — the defaults when `config.widgets`
@@ -5555,7 +5559,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let theme_row = adw::ComboRow::new();
     theme_row.set_title(t!("Theme"));
     theme_row.set_subtitle(t!(
-        "Digital reads at a glance; Wordy spells the time out, like \"half past ten\""
+        "NOS draws the day as a ring of dots; Lock screen sets a large time under the date"
     ));
     theme_row.set_model(Some(&gtk4::StringList::new(&table_labels(
         &CLOCK_THEMES_SHOWN,

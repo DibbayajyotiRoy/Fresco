@@ -135,6 +135,84 @@ export type DataResult<T> =
 
 const SUPABASE_MISSING = "Set SUPABASE_SERVICE_ROLE_KEY in .env.local";
 
+/**
+ * Rows asked for per request. Supabase caps every response at the project's
+ * `max_rows` (1000 by default) whatever `.limit()` says, and it truncates
+ * silently — a normal 200 with fewer rows. `getInstalls` used to ask for
+ * `.limit(10000)`, get exactly 1000 back, and the dashboard reported 1000
+ * installs while the table held more. Anything that can outgrow one page goes
+ * through `selectAll` instead.
+ */
+const PAGE_SIZE = 1000;
+
+/**
+ * Refuse rather than truncate past this many rows. It only exists so a runaway
+ * table cannot turn one render into hundreds of parallel requests; hitting it
+ * surfaces as an error on the page, never as a number quietly clipped to the
+ * cap — that silent under-report is exactly what `selectAll` removes.
+ */
+const MAX_ROWS = 50_000;
+
+type QueryError = { message: string; code?: string };
+
+type PageResult = {
+  data: unknown[] | null;
+  error: QueryError | null;
+  count: number | null;
+};
+
+/**
+ * Fetch every row a query matches, one page at a time.
+ *
+ * `page(from, to, withCount)` builds the query fresh, ends it with
+ * `.range(from, to)`, and passes `{ count: "exact" }` to `.select()` when
+ * `withCount` is set. Only the first page asks for the count; the rest go out
+ * in parallel once the total is known, so any table size costs two round trips
+ * rather than one per page. The step is whatever the first page actually
+ * returned, which keeps this correct on a project whose `max_rows` is set
+ * below PAGE_SIZE.
+ *
+ * The query MUST be ordered on keys that never change, with new rows sorting
+ * last (an ascending identity id, or creation time plus a unique tiebreaker).
+ * The pages are separate requests: ordering on something that moves —
+ * `last_seen`, or anything newest-first — lets a row written mid-fetch shift
+ * the page boundaries, duplicating or skipping rows. Callers restore their
+ * display order after the fetch.
+ */
+async function selectAll<T>(
+  page: (from: number, to: number, withCount: boolean) => PromiseLike<PageResult>
+): Promise<{ data: T[]; error: QueryError | null }> {
+  const first = await page(0, PAGE_SIZE - 1, true);
+  if (first.error) return { data: [], error: first.error };
+
+  const rows = (first.data ?? []) as T[];
+  const total = first.count ?? rows.length;
+
+  if (total > MAX_ROWS) {
+    return {
+      data: [],
+      error: {
+        message: `${total} rows match, over the ${MAX_ROWS}-row cap in selectAll — aggregate this query in SQL or raise MAX_ROWS.`,
+      },
+    };
+  }
+
+  const step = rows.length;
+  if (step === 0 || step >= total) return { data: rows, error: null };
+
+  const pending: PromiseLike<PageResult>[] = [];
+  for (let from = step; from < total; from += step) {
+    pending.push(page(from, from + step - 1, false));
+  }
+
+  for (const res of await Promise.all(pending)) {
+    if (res.error) return { data: [], error: res.error };
+    rows.push(...((res.data ?? []) as T[]));
+  }
+
+  return { data: rows, error: null };
+}
+
 /** Fetch all feedback rows, newest first. Deduped per render. */
 export const getFeedback = cache(async (): Promise<DataResult<Feedback[]>> => {
   const supabase = getSupabaseAdmin();
@@ -364,19 +442,26 @@ export const getInstalls = cache(async (): Promise<DataResult<Install[]>> => {
     return { ok: false, error: SUPABASE_MISSING };
   }
 
-  const { data, error } = await supabase
-    .from("installs")
-    .select(
-      "install_id, version, distro, compositor, session, backend, decode, source, channel, country, city, region, minimal, monitor_count, first_seen, last_seen"
-    )
-    .order("last_seen", { ascending: false })
-    .limit(10000);
+  // Paged on (first_seen, install_id) — `last_seen` moves on every check-in,
+  // so paging on it would shuffle rows between pages. See `selectAll`.
+  const { data, error } = await selectAll<Install>((from, to, withCount) =>
+    supabase
+      .from("installs")
+      .select(
+        "install_id, version, distro, compositor, session, backend, decode, source, channel, country, city, region, minimal, monitor_count, first_seen, last_seen",
+        { count: withCount ? "exact" : undefined }
+      )
+      .order("first_seen", { ascending: true })
+      .order("install_id", { ascending: true })
+      .range(from, to)
+  );
 
   if (error) {
     return { ok: false, error: error.message };
   }
 
-  return { ok: true, data: (data ?? []) as Install[] };
+  data.sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen));
+  return { ok: true, data };
 });
 
 /**
@@ -396,18 +481,24 @@ export const getEventsSince = cache(
       return { ok: false, error: SUPABASE_MISSING };
     }
 
-    const { data, error } = await supabase
-      .from("events")
-      .select("install_id, name, created_at")
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false })
-      .limit(10000);
+    // Paged oldest-first on the identity id, then reversed. See `selectAll`.
+    const { data, error } = await selectAll<TelemetryEvent>(
+      (from, to, withCount) =>
+        supabase
+          .from("events")
+          .select("install_id, name, created_at", {
+            count: withCount ? "exact" : undefined,
+          })
+          .gte("created_at", sinceIso)
+          .order("id", { ascending: true })
+          .range(from, to)
+    );
 
     if (error) {
       return { ok: false, error: error.message };
     }
 
-    return { ok: true, data: (data ?? []) as TelemetryEvent[] };
+    return { ok: true, data: data.reverse() };
   }
 );
 
@@ -433,19 +524,24 @@ export const getFeatureEventsSince = cache(
       return { ok: false, error: SUPABASE_MISSING };
     }
 
-    const { data, error } = await supabase
-      .from("events")
-      .select("install_id, name, props, created_at")
-      .in("name", names)
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false })
-      .limit(10000);
+    const { data, error } = await selectAll<FeatureEvent>(
+      (from, to, withCount) =>
+        supabase
+          .from("events")
+          .select("install_id, name, props, created_at", {
+            count: withCount ? "exact" : undefined,
+          })
+          .in("name", names)
+          .gte("created_at", sinceIso)
+          .order("id", { ascending: true })
+          .range(from, to)
+    );
 
     if (error) {
       return { ok: false, error: error.message };
     }
 
-    return { ok: true, data: (data ?? []) as FeatureEvent[] };
+    return { ok: true, data: data.reverse() };
   }
 );
 
@@ -460,18 +556,23 @@ export const getErrorsSince = cache(
       return { ok: false, error: SUPABASE_MISSING };
     }
 
-    const { data, error } = await supabase
-      .from("errors")
-      .select("id, install_id, kind, detail, version, created_at")
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false })
-      .limit(10000);
+    const { data, error } = await selectAll<TelemetryError>(
+      (from, to, withCount) =>
+        supabase
+          .from("errors")
+          .select("id, install_id, kind, detail, version, created_at", {
+            count: withCount ? "exact" : undefined,
+          })
+          .gte("created_at", sinceIso)
+          .order("id", { ascending: true })
+          .range(from, to)
+    );
 
     if (error) {
       return { ok: false, error: error.message };
     }
 
-    return { ok: true, data: (data ?? []) as TelemetryError[] };
+    return { ok: true, data: data.reverse() };
   }
 );
 
@@ -515,12 +616,21 @@ export const getDailyCountrySince = cache(
       return { ok: false, error: SUPABASE_MISSING };
     }
 
-    const { data, error } = await supabase
-      .from("daily_country")
-      .select("day, country, version, channel, pings")
-      .gte("day", sinceDate)
-      .order("day", { ascending: false })
-      .limit(10000);
+    // Paged on the full primary key, then reversed to newest day first.
+    const { data, error } = await selectAll<DailyCountry>(
+      (from, to, withCount) =>
+        supabase
+          .from("daily_country")
+          .select("day, country, version, channel, pings", {
+            count: withCount ? "exact" : undefined,
+          })
+          .gte("day", sinceDate)
+          .order("day", { ascending: true })
+          .order("country", { ascending: true })
+          .order("version", { ascending: true })
+          .order("channel", { ascending: true })
+          .range(from, to)
+    );
 
     if (error) {
       // 42P01 = undefined_table: the migration has not been run yet.
@@ -530,7 +640,7 @@ export const getDailyCountrySince = cache(
       return { ok: false, error: error.message };
     }
 
-    return { ok: true, data: (data ?? []) as DailyCountry[] };
+    return { ok: true, data: data.reverse() };
   }
 );
 

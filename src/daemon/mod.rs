@@ -1,9 +1,11 @@
 //! Fresco wallpaper daemon: owns X11 desktop windows and embedded mpv players,
 //! reconciles them against the config, and serves IPC control commands.
 
+mod caja_mirror;
 mod control;
 mod dde;
 mod fullscreen;
+mod signals;
 // Public so the widget engine's API stays visible while the daemon-loop call
 // sites are being built out; the module is otherwise internal.
 #[allow(dead_code)]
@@ -415,6 +417,15 @@ pub struct Daemon {
     /// after the user clicks the desktop, instead of burying them again on the
     /// next stacking pass.
     dde_peek: dde::IconPeek,
+    /// MATE (issue #18), [`dde::Mode::CajaMirror`] only: the thread that copies
+    /// Caja's desktop icons onto the wallpaper windows and keeps Caja below
+    /// them. `None` in every other mode, and before the first rebuild.
+    caja_mirror: Option<caja_mirror::Mirror>,
+    /// Set once the icon mirror has failed (a Caja it cannot copy, such as a
+    /// 32-bit desktop window). Every later rebuild then stays in restack mode
+    /// instead of re-trying — each retry would repaint the user's desktop in
+    /// the key colour and back again just to fail the same way.
+    caja_mirror_gave_up: bool,
     /// On-wallpaper widgets (lyrics, clock). Owns its own worker thread and
     /// hands back only overlays whose content actually changed, so an idle
     /// desktop costs nothing (see docs/WIDGETS_ROADMAP.md "Power model").
@@ -453,6 +464,8 @@ impl Daemon {
             dde_mode: dde::Mode::Inactive,
             dde_self_checked: false,
             dde_peek: dde::IconPeek::default(),
+            caja_mirror: None,
+            caja_mirror_gave_up: false,
             widgets,
         })
     }
@@ -591,8 +604,11 @@ impl Daemon {
         self.reconcile_pause();
 
         // Deepin DDE (issue #2): dde-shell's own opaque desktop window covers
-        // ours. Make DDE's wallpaper transparent (or restack above it).
-        if crate::capability::is_deepin_dde() && !self.renderers.is_empty() {
+        // ours. Make DDE's wallpaper transparent (or restack above it). MATE
+        // (issue #18): Caja's desktop window does the same, and is restacked.
+        if (crate::capability::is_deepin_dde() || crate::capability::is_mate())
+            && !self.renderers.is_empty()
+        {
             let monitors: Vec<String> = self.monitors.iter().map(|m| m.connector.clone()).collect();
             let windows: Vec<x11rb::protocol::xproto::Window> =
                 self.renderers.iter().map(|r| r.window.window).collect();
@@ -611,7 +627,95 @@ impl Daemon {
                 dde::render_self_check(&self.conn, &windows);
             }
         }
+        self.sync_caja_mirror();
         Ok(())
+    }
+
+    /// MATE (issue #18): bring the Caja icon mirror in line with `dde_mode`
+    /// and the freshly built renderers. Runs after every rebuild.
+    ///
+    /// Outside [`dde::Mode::CajaMirror`] (and with no renderers, where there is
+    /// nothing to draw the icons on) any running mirror is stopped and the
+    /// user's MATE background put back. That restore is a no-op when nothing
+    /// was saved, so it is also what cleans up the key colour a crashed run
+    /// left behind when this run does not mirror.
+    fn sync_caja_mirror(&mut self) {
+        if self.dde_mode == dde::Mode::CajaMirror && self.caja_mirror_gave_up {
+            // `dde::apply` re-offers the mirror on every rebuild; it already
+            // failed once in this session, and nothing about it has changed.
+            // The windows are raised above Caja already (restack is the first
+            // half of the mirror mode), so restack just takes over from here.
+            self.dde_mode = dde::Mode::Restack;
+        }
+        if self.dde_mode != dde::Mode::CajaMirror || self.renderers.is_empty() {
+            if let Some(m) = self.caja_mirror.take() {
+                m.stop(&self.conn);
+            }
+            caja_mirror::restore_background();
+            return;
+        }
+        // Each wallpaper window with its monitor's rectangle, in root
+        // coordinates: that is where Caja's pixels for it come from.
+        let parents: Vec<caja_mirror::Parent> = self
+            .renderers
+            .iter()
+            .filter_map(|r| {
+                let m = self
+                    .monitors
+                    .iter()
+                    .find(|m| m.connector == r.window.connector)?;
+                Some(caja_mirror::Parent {
+                    window: r.window.window,
+                    x: m.x,
+                    y: m.y,
+                    width: m.width,
+                    height: m.height,
+                })
+            })
+            .collect();
+        if self.caja_mirror.is_none() {
+            // The restack fallback, or a previous run, may have put our still
+            // frame into `org.mate.background`. Put the user's own picture
+            // back first, so the "original" `apply_key` saves is theirs and
+            // not a Fresco frame that Stop would then leave behind.
+            overview::restore();
+            if !caja_mirror::apply_key() {
+                self.fall_back_to_restack(
+                    "the MATE background settings (org.mate.background) cannot be changed",
+                );
+                return;
+            }
+            match caja_mirror::Mirror::start() {
+                Ok(m) => self.caja_mirror = Some(m),
+                Err(e) => {
+                    self.fall_back_to_restack(&format!("{e:#}"));
+                    return;
+                }
+            }
+        }
+        if let Some(m) = &self.caja_mirror {
+            m.set_parents(&self.conn, parents);
+        }
+    }
+
+    /// The icon mirror cannot run: stop it, give Caja the user's background
+    /// back, and hide the icons behind the wallpaper the verified way —
+    /// [`dde::Mode::Restack`], where a click on the desktop peeks at them.
+    /// The still frame goes back into `org.mate.background` too, since Caja
+    /// shows that background during every peek.
+    fn fall_back_to_restack(&mut self, reason: &str) {
+        log::warn!(
+            "MATE: cannot draw Caja's desktop icons over the wallpaper ({reason}); they are \
+             hidden while it plays — clicking the desktop brings them back for \
+             `dde_icon_peek_secs` seconds"
+        );
+        if let Some(m) = self.caja_mirror.take() {
+            m.stop(&self.conn);
+        }
+        self.caja_mirror_gave_up = true;
+        self.dde_mode = dde::Mode::Restack;
+        caja_mirror::restore_background();
+        overview::apply(&self.config.wallpaper);
     }
 
     // The X11 primitives (conn/screen/atoms/monitor) plus wallpaper, render
@@ -868,6 +972,18 @@ impl Daemon {
     /// raise waits out `dde_icon_peek_secs` before taking the stack back (see
     /// [`dde::IconPeek`]).
     fn reassert_stacking(&mut self) {
+        if self.dde_mode == dde::Mode::CajaMirror {
+            // The mirror thread owns stacking here: it lowers Caja the moment
+            // Marco raises it, on its own connection, within milliseconds. No
+            // icon peek (the icons are always visible), and lowering our
+            // windows would put them under Caja's key-coloured window.
+            if self.caja_mirror.as_ref().is_some_and(|m| m.failed()) {
+                // The thread has already logged why. Our windows are still
+                // above Caja, so from the next pass on restack keeps them there.
+                self.fall_back_to_restack("the icon mirror stopped");
+            }
+            return;
+        }
         if self.dde_mode == dde::Mode::Restack {
             let windows: Vec<x11rb::protocol::xproto::Window> =
                 self.renderers.iter().map(|r| r.window.window).collect();
@@ -1184,6 +1300,15 @@ impl Daemon {
         if crate::capability::is_deepin_dde() {
             dde::restore();
         }
+        // MATE: stop copying Caja's icons (closing the thread's connection
+        // undoes the redirect, so Caja renders on screen again), then swap the
+        // key colour back for the user's own background. After
+        // `overview::restore`, so the last word in `org.mate.background` is
+        // the user's saved picture; a no-op when the mirror never ran.
+        if let Some(m) = self.caja_mirror.take() {
+            m.stop(&self.conn);
+        }
+        caja_mirror::restore_background();
         self.teardown_renderers();
         std::fs::remove_file(crate::ipc::socket_path()).ok();
         log::info!("frescod stopped");
@@ -1476,6 +1601,9 @@ fn setup_vaapi_env() {
 
 pub fn run() -> Result<()> {
     use crate::capability::{detect, Capability};
+    // First, before any thread exists: termination signals become a clean
+    // Stop, so a logout or `pkill` still puts the user's desktop back.
+    signals::install();
     // Event-driven admin notifications + update prompts over Supabase Realtime.
     // Background thread; never blocks the wallpaper loop.
     notifier::spawn();
@@ -1533,6 +1661,10 @@ fn run_x11() -> Result<()> {
         if crate::capability::is_deepin_dde() {
             dde::restore();
         }
+        // And for MATE: a crashed icon-mirror run leaves Caja painting the
+        // key colour, with the user's background saved on disk (no-op
+        // otherwise, so it needs no desktop check).
+        caja_mirror::restore_background();
         log::info!("wallpaper disabled (enabled=false) — exiting");
         return Ok(());
     }
@@ -3091,6 +3223,7 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
                 ClockThemeCfg::Wordy => ClockTheme::Wordy,
                 ClockThemeCfg::Card => ClockTheme::Card,
                 ClockThemeCfg::Nos => ClockTheme::Nos,
+                ClockThemeCfg::Lock => ClockTheme::Lock,
             },
             anchor: match c.anchor {
                 LyricAnchor::TopLeft => Anchor::TopLeft,

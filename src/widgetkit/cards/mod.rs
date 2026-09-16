@@ -39,6 +39,7 @@
 
 pub mod clock;
 pub mod disc;
+pub mod lock;
 pub mod media;
 pub mod nos;
 pub mod nowplaying;

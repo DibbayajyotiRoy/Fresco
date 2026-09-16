@@ -36,6 +36,7 @@ export const de: Dictionary = {
     star: "Fresco auf GitHub einen Stern geben",
     starWithCount: (n: string) =>
       `Fresco auf GitHub einen Stern geben (${n} Sterne)`,
+    menu: "Menü",
   },
 
   language: {
@@ -57,25 +58,48 @@ export const de: Dictionary = {
     body: "Mach jedes Video, GIF oder Bild zu deinem Linux-Desktop. Hardwarebeschleunigte Wiedergabe hält die CPU nahe null, unter X11 und Wayland. Schließ die App: Der Daemon spielt weiter.",
     install: "Fresco installieren",
     star: "Stern auf GitHub",
+    newUsers24h: (n: string) =>
+      `${n} Menschen haben in den letzten 24 Stunden mit Fresco angefangen`,
+    builtBy: "Entwickelt von",
+    activeToday: (n: string) =>
+      `${n} Menschen haben Fresco in den letzten 24 Stunden genutzt`,
+    newToday: (n: string) => `${n} neu`,
   },
 
   stats: {
     ariaLabel: "Projektstatistik",
-    downloads: "downloads gesamt",
-    downloadsUnknown: "downloads auf github",
-    stars: "github-sterne",
-    version: "neueste version",
+    downloads: "Downloads gesamt",
+    downloadsUnknown: "Downloads auf GitHub",
+    stars: "GitHub-Sterne",
+    version: "Neueste Version",
     license: "kostenlos und quelloffen",
+    users: "Nutzer",
+    countries: "Länder",
+    cohortNote:
+      "Nutzer und Länder werden aus Installationen gezählt, die der anonymen Telemetrie zugestimmt haben.",
+    active24h: "aktiv in den letzten 24 h",
+  },
+
+  testimonials: {
+    kicker: "Stimmen",
+    title: (users: string, countries: string) =>
+      `Läuft auf ${users} Linux-Desktops in ${countries} Ländern.`,
+    lead: "Unbearbeitete Rückmeldungen von Menschen, die Fresco nutzen, direkt aus der App gesendet. Anonymes Feedback wird nur mit dem Land angegeben.",
+    fromCountry: (country: string) => `Fresco-Nutzer · ${country}`,
+    anonymous: "Fresco-Nutzer",
+    namedLabel: "Erfahrungsbericht",
+    pause: "Stimmen pausieren",
+    play: "Stimmen abspielen",
   },
 
   glance: {
     ariaLabel: "Fresco auf einen Blick",
-    caption: "fresco auf einen blick",
-    labelWhat: "was es ist",
-    labelPlatforms: "plattformen",
-    labelWidgets: "widgets",
-    labelLicense: "lizenz",
-    labelInstall: "installation",
+    caption: "Fresco auf einen Blick",
+    labelWhat: "Was es ist",
+    labelPlatforms: "Plattformen",
+    labelWidgets: "Widgets",
+    labelLicense: "Lizenz",
+    labelInstall: "Installation",
     what: "Fresco ist eine kostenlose Open-Source-App für animierte Hintergründe unter Linux: Sie setzt Videos, GIFs, Bilder, Diashows und Playlists als bewegten Desktophintergrund, mit Hardware-Dekodierung auf der GPU. Eine kostenlose Wallpaper-Engine-Alternative und unter Wayland zugleich eine Oberfläche für mpvpaper.",
     platforms:
       "Jeder X11-Desktop (Ubuntu, Pop!_OS, Linux Mint, Debian) sowie Wayland-Compositoren mit layer-shell: COSMIC, Hyprland, Sway, KDE Plasma 6. Unter GNOME mit Wayland wird auf ein Standbild zurückgegriffen.",
@@ -87,134 +111,134 @@ export const de: Dictionary = {
   },
 
   features: {
-    kicker: "funktionen",
+    kicker: "Funktionen",
     title: "Jedes Medium. Jeder Monitor. Kein CPU-Drama.",
-    lead: "Fresco setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe unter X11 und Wayland, dekodiert auf der GPU, sodass ein bewegter Hintergrund etwa so viel kostet wie ein statischer. Das vollständige Datenblatt:",
-    manifest: (n: number) => `manifest: ${n} funktionen`,
+    lead: "Fresco setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe unter X11 und Wayland, dekodiert auf der GPU, sodass ein bewegter Hintergrund etwa so viel kostet wie ein statischer.",
+    manifest: (n: number) => `Manifest: ${n} Funktionen`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
     thCapability: "Funktion",
     thWhatYouGet: "Was du bekommst",
     thStatus: "Status",
     footnote:
-      "gnome wayland: standbild als rückfalllösung (mutter stellt keine animierte fläche bereit), und die widgets brauchen dieselbe fläche, sind dort also nicht verfügbar. alles andere oben läuft.",
+      "GNOME Wayland: Standbild als Rückfalllösung (Mutter stellt keine animierte Fläche bereit), und die Widgets brauchen dieselbe Fläche, sind dort also nicht verfügbar. Alles andere oben läuft.",
     tally: (shipping: number, total: number, soon: number) =>
-      `${shipping} von ${total} veröffentlicht · ${soon} in der vorschau · 0 eingestellt`,
+      `${shipping} von ${total} veröffentlicht · ${soon} in der Vorschau · 0 eingestellt`,
     rows: {
       hwDecode: {
-        tag: "hw-dekodierung",
+        tag: "HW-Dekodierung",
         title: "Hardwarebeschleunigte Wiedergabe",
         description:
           "Die Dekodierung läuft über mpv auf der GPU (VA-API oder NVDEC). Ein 4K-Videohintergrund kostet etwa so viel CPU wie ein Standbild.",
-        status: "nahezu null cpu",
+        status: "Nahezu null CPU",
       },
       sessions: {
-        tag: "sitzungen",
+        tag: "Sitzungen",
         title: "X11 und Wayland",
         description:
           "Ein Desktopfenster-Backend auf jedem X11-Desktop, dazu ein layer-shell-Backend für COSMIC, Hyprland, Sway und KDE Plasma 6. GNOME mit Wayland bekommt ein Standbild.",
-        status: "x11 · layer-shell",
+        status: "X11 · layer-shell",
       },
       catalog: {
-        tag: "katalog",
+        tag: "Katalog",
         title: "Eingebauter Hintergrundkatalog",
         description:
           "Kuratierte, lizenzierte Hintergründe direkt in der App durchsuchen (Menü, dann Hintergründe durchsuchen) und mit zwei Klicks setzen. Ein direkter Link lässt sich ebenfalls einfügen.",
-        status: "in der app",
+        status: "In der App",
       },
       video: {
-        tag: "video · gif",
+        tag: "Video · GIF",
         title: "Video- und GIF-Hintergründe",
         description:
           "Jedes mp4, webm, mkv oder animierte GIF als Desktop in Schleife abspielen.",
         status: "mp4 webm mkv gif",
       },
       slideshow: {
-        tag: "diashow",
+        tag: "Diashow",
         title: "Diashows mit Übergängen",
         description:
           "Einen Bildordner mit Überblendung, Ausblenden oder Ken Burns durchwechseln.",
-        status: "4 übergänge",
+        status: "4 Übergänge",
       },
       playlist: {
-        tag: "playlist",
+        tag: "Playlist",
         title: "Video-Playlists",
         description:
           "Mehrere Clips einreihen und Fresco der Reihe nach abspielen lassen.",
-        status: "auto-wechsel",
+        status: "Auto-Wechsel",
       },
       lyrics: {
-        tag: "songtext · uhr",
+        tag: "Songtext · Uhr",
         title: "Songtext- und Uhr-Widget",
         description:
           "Zeitsynchroner Songtext zu allem, was über MPRIS läuft (zuerst lokale .lrc, dann LRCLIB), und eine Uhr in einem von sechs Designs. In den Hintergrund gezeichnet, also schwebt nichts über deinen Fenstern. Standardmäßig aus.",
-        status: "standardmäßig aus",
+        status: "Standardmäßig aus",
       },
       visualiser: {
-        tag: "visualizer",
+        tag: "Visualizer",
         title: "Audio-Visualizer und Albumcover",
         description:
           "Fünf Stile (Bars, Mirror, Wave, Dots, Ring) mit Farbwähler, Zweifarbverlauf oder Regenbogen, dazu das Cover des laufenden Titels auf einer drehenden Schallplatte. Der Visualizer fragt, bevor er dein Audio mithört.",
-        status: "0,8 % eines kerns",
+        status: "0,8 % eines Kerns",
       },
       editor: {
-        tag: "editor",
+        tag: "Editor",
         title: "Zuschneiden und drehen",
         description:
           "Zieh einen Rahmen für den Ausschnitt, dreh um 90 Grad, um querliegende Clips zu richten. Beides bleibt zero-copy auf der GPU.",
-        status: "zero-copy",
+        status: "Zero-Copy",
       },
       audio: {
-        tag: "audio",
+        tag: "Audio",
         title: "Ton pro Hintergrund",
         description:
           "Ein Video lauter stellen und die Lautstärke festlegen. Fresco merkt sich die Wahl für diesen Hintergrund.",
-        status: "pro hintergrund",
+        status: "Pro Hintergrund",
       },
       displays: {
-        tag: "bildschirme",
+        tag: "Bildschirme",
         title: "Hintergrund pro Bildschirm",
         description:
           "Rechtsklick auf einen Hintergrund, dann Auf einem bestimmten Bildschirm setzen. Jeder Monitor kann seinen eigenen haben.",
-        status: "pro monitor",
+        status: "Pro Monitor",
       },
       schedule: {
-        tag: "zeitplan",
+        tag: "Zeitplan",
         title: "Tag- und Nachtzeitpläne",
         description:
           "Zwei Hintergründe, zwei Wechselzeiten, automatisch vom Daemon getauscht. Zeitfenster und Sonnenstandswechsel über die Konfiguration.",
-        status: "automatisch",
+        status: "Automatisch",
       },
       power: {
-        tag: "energie",
+        tag: "Energie",
         title: "Energiebewusst",
         description:
           "Pausiert im Akkubetrieb und pausiert pro Monitor automatisch, sobald dort ein Fenster in den Vollbildmodus geht.",
-        status: "auto-pause",
+        status: "Auto-Pause",
       },
       newTab: {
-        tag: "neuer tab",
+        tag: "Neuer Tab",
         title: "Dein Hintergrund in jedem neuen Tab",
         description:
           "Eine begleitende Browsererweiterung (Chrome, Brave, Edge, Firefox) spiegelt deinen Desktophintergrund oder eine eigene Browserauswahl auf die Neuer-Tab-Seite, über eine lokale Brücke, die nur mit 127.0.0.1 spricht. Heute im Repository; die Store-Veröffentlichung steht aus.",
-        status: "bald verfügbar",
+        status: "Bald verfügbar",
       },
       themes: {
-        tag: "designs",
+        tag: "Designs",
         title: "Designs und Akzente",
         description:
           "Hell, dunkel oder dem System folgend, mit sechs Akzentpaletten.",
-        status: "6 paletten",
+        status: "6 Paletten",
       },
     },
   },
 
   compare: {
-    kicker: "vergleich",
+    kicker: "Vergleich",
     title: "Fresco gegen das Linux-Hintergrundfeld.",
     lead: "Fresco ist die einzige aktiv gepflegte Linux-App für animierte Hintergründe in dieser Tabelle, die grafische Oberfläche, Hardware-Dekodierung, X11- und Wayland-Unterstützung und einen eingebauten Katalog vereint, und das kostenlos. Hier der vollständige Vergleich mit Hidamari, Komorebi, mpvpaper und Wallpaper Engine.",
     meter: (tools: number, caps: number) =>
-      `vergleich · ${tools} programme · ${caps} funktionen`,
+      `Vergleich · ${tools} Programme · ${caps} Funktionen`,
     thFeature: "Funktion",
     yes: "Ja",
     no: "Nein",
@@ -246,12 +270,12 @@ export const de: Dictionary = {
   },
 
   whatsNew: {
-    kicker: (version: string) => `neu · v${version}`,
+    kicker: (version: string) => `Neu · v${version}`,
     title: "Vier Desktop-Widgets, in den Hintergrund gezeichnet.",
     lead: (version: string) =>
       `Was in v${version} erschienen ist. Kein zusätzliches Fenster, nichts zum Durchklicken, identisch unter X11 und layer-shell. Alle vier sind standardmäßig aus, und mit laufender Musik und allen aktiviert lag der gemessene Aufwand bei 0,8 % eines CPU-Kerns. Jeder Eintrag hier steht auch im CHANGELOG auf GitHub.`,
     changelog: "Vollständiges Changelog",
-    patch: (n: string) => `patch ${n}`,
+    patch: (n: string) => `Patch ${n}`,
     items: {
       lyrics: {
         title: "Synchroner Songtext",
@@ -273,10 +297,10 @@ export const de: Dictionary = {
   },
 
   howItWorks: {
-    kicker: "so funktioniert es",
+    kicker: "So funktioniert es",
     title: "Drei Klicks, dann vergiss es einfach.",
     lead: "Fresco öffnen, hinzufügen klicken, setzen klicken, schließen. Der Daemon hält den Hintergrund am Laufen, auch nach einem Neustart.",
-    step: (n: string) => `schritt ${n}`,
+    step: (n: string) => `Schritt ${n}`,
     steps: {
       pick: {
         title: "Medium auswählen",
@@ -297,20 +321,20 @@ export const de: Dictionary = {
   },
 
   videos: {
-    kicker: "in aktion",
+    kicker: "In Aktion",
     title: "Jeweils unter einer Minute. Kein Kommentar nötig.",
     lead: "Kurze Bildschirmaufnahmen von Fresco auf einem echten Desktop. Von YouTube wird nichts geladen, bis du auf Play drückst.",
     more: "Mehr auf YouTube",
-    inDevelopment: "in entwicklung",
+    inDevelopment: "In Entwicklung",
     play: (title: string) => `Abspielen: ${title}`,
     items: {
       "YWzD3-xkCEc": {
-        tag: "per link hinzufügen",
+        tag: "Per Link hinzufügen",
         blurb:
           "Pinterest-Link kopieren, in Fresco einfügen, als Hintergrund setzen. Kein Download, kein Hantieren mit Dateien.",
       },
       C1MqrhGkovQ: {
-        tag: "songtext-widgets",
+        tag: "Songtext-Widgets",
         blurb:
           "Synchroner Songtext und eine Uhr, gezeichnet in einen bewegten Hintergrund unter Wayland und X11. Erschienen in v1.1.36, zusammen mit einem Audio-Visualizer und einer Albumcover-Scheibe.",
       },
@@ -318,14 +342,14 @@ export const de: Dictionary = {
   },
 
   supported: {
-    kicker: "getestete umgebungen",
+    kicker: "Getestete Umgebungen",
     title: "Wo Fresco läuft.",
-    lead: "Auf jedem X11-Desktop, einschließlich DDE von Deepin 25, und auf Wayland-Compositoren mit layer-shell (COSMIC, Hyprland, Sway und KDE Plasma 6), quer durch die verbreiteten Debian- und Ubuntu-Distributionen. GNOME mit Wayland bekommt ein Standbild.",
+    lead: "Auf jedem X11-Desktop, einschließlich DDE von deepin 25, und auf Wayland-Compositoren mit layer-shell (COSMIC, Hyprland, Sway und KDE Plasma 6), quer durch die verbreiteten Debian- und Ubuntu-Distributionen. GNOME mit Wayland bekommt ein Standbild.",
     deployed: (distros: number, formats: number) =>
-      `getestet: 6 animierte compositoren · 1 standbild-rückfall · ${distros} distributionen · ${formats} formate`,
-    sessionsTitle: "sitzungen und compositoren",
-    distrosTitle: (n: number) => `getestete distributionen · ${n}`,
-    formatsTitle: (n: number) => `unterstützte formate · ${n}`,
+      `Getestet: 6 animierte Compositoren · 1 Standbild-Rückfall · ${distros} Distributionen · ${formats} Formate`,
+    sessionsTitle: "Sitzungen und Compositoren",
+    distrosTitle: (n: number) => `Getestete Distributionen · ${n}`,
+    formatsTitle: (n: number) => `Unterstützte Formate · ${n}`,
     live: "Animierter Hintergrund",
     fallback: "Standbild",
     sessions: {
@@ -336,7 +360,7 @@ export const de: Dictionary = {
       deepin: {
         label: "Deepin 25 (DDE, X11)",
         detail:
-          "Automatische DDE-Anpassung, Symbole bleiben sichtbar. Von der Community auf Deepin 25 Community build1 bestätigt.",
+          "Automatische DDE-Anpassung, Symbole bleiben sichtbar. Von der Community auf deepin 25 Community build1 bestätigt. Auch im deepin App Store.",
       },
       wayland: {
         label: "Wayland layer-shell",
@@ -347,37 +371,40 @@ export const de: Dictionary = {
         detail: "Standbild (Mutter hat keine animierte Fläche)",
       },
     },
-    fieldReport: "praxisbericht · deepin 25",
-    verifiedEnv: "bestätigte umgebung",
-    testimonialRole: "Tester aus der Deepin-Community",
+    fieldReport: "Praxisbericht · deepin 25",
+    verifiedEnv: "Bestätigte Umgebung",
+    testimonialRole: "Tester aus der deepin-Community",
     envLabels: {
-      session: "sitzung",
-      os: "os",
-      gpu: "gpu",
+      session: "Sitzung",
+      os: "OS",
+      gpu: "GPU",
     },
     footnote:
-      "deepin 25 nutzt standardmäßig x11, und genau in dieser sitzung ist fresco dort bestätigt. treeland, deepins eigener wayland-compositor, ist noch in entwicklung, deshalb macht fresco zu deepin unter wayland vorerst keine aussage.",
+      "Deepin 25 nutzt standardmäßig X11, und genau in dieser Sitzung ist Fresco dort bestätigt. Treeland, deepins eigener Wayland-Compositor, ist noch in Entwicklung, deshalb macht Fresco zu deepin unter Wayland vorerst keine Aussage.",
   },
 
   download: {
-    kicker: "download",
+    kicker: "Download",
     title: "Installieren unter Debian, Ubuntu, Pop!_OS und Mint.",
-    badge: "x11 · wayland",
+    badge: "X11 · Wayland",
     lead: "Der offizielle Einzeiler-Installer oder das .deb-Release. Beide Wege landen in deiner Zwischenablage und laufen sofort. Fresco spielt weiter, nachdem du das Fenster geschlossen hast.",
-    cardTitle: "installation in einer zeile",
+    cardTitle: "Installation in einer Zeile",
     cardBody:
       "Führ das in einem Terminal aus. Es lädt und installiert das neueste .deb für dich, immer die aktuellste Version:",
     terminalTitle: "fresco install",
-    aptComment: "das .deb schon heruntergeladen?",
+    aptComment: "Das .deb schon heruntergeladen?",
     releases: "Alle Releases ansehen",
     gpuNote:
       "Für die geringste CPU-Last installiere den Hardware-Dekodierungstreiber deiner GPU (Intel media VA driver, Mesa VA drivers oder den proprietären NVIDIA-Treiber für NVDEC).",
+    storeLabel: "Auch im deepin App Store",
+    storeBody:
+      "Unter deepin 25 den App Store öffnen, nach Fresco suchen und auf Installieren klicken. Updates kommen über den Store.",
     copy: "Kopieren",
     copied: "Kopiert",
   },
 
   faq: {
-    kicker: "faq",
+    kicker: "FAQ",
     title: "Fragen, beantwortet.",
     lead: "Alles, was du wissen musst, bevor du deinen ersten animierten Hintergrund unter Linux setzt.",
     items: [
@@ -454,6 +481,10 @@ export const de: Dictionary = {
         a: "Ja. Frescos Audio-Visualizer reagiert auf alles, was dein System abspielt, in einem von fünf Stilen (Bars, Mirror, Wave, Dots, Ring) mit Farbwähler, Zweifarbverlauf oder Regenbogen. Er ist standardmäßig aus und fragt beim ersten Aktivieren um Zustimmung, weil er deine Audioausgabe mithören muss. Mit laufender Musik und allen vier aktivierten Widgets lag der gemessene Aufwand bei 0,8 % eines CPU-Kerns, fast vollständig durch die Audioaufnahme, denn neu gezeichnet wird nur, was sich inhaltlich geändert hat.",
       },
       {
+        q: "Gibt es Fresco im deepin App Store?",
+        a: "Ja. Öffne unter deepin 25 den App Store, suche nach Fresco und klicke auf Installieren. Fresco ist im deepin Community App Store veröffentlicht, daher kommen Updates über den Store. Das .deb und der Einzeiler-Installer funktionieren ebenfalls.",
+      },
+      {
         q: "Ist Fresco kostenlos?",
         a: "Ja. Fresco ist vollständig kostenlos und quelloffen unter der GPL-3.0-Lizenz. Es gibt keine kostenpflichtige Variante.",
       },
@@ -463,7 +494,7 @@ export const de: Dictionary = {
   footer: {
     github: "GitHub",
     license: "Lizenz",
-    tagline: "rust + gtk4 + mpv",
+    tagline: "Rust + GTK4 + mpv",
     sound: "Ton umschalten",
   },
 

@@ -4,49 +4,98 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * WARM TERMINAL — marketing translation.
- * Warm stone paper, exactly one sky accent, three type families in three
- * lanes (Instrument Serif display / Inter body / JetBrains Mono instrument),
- * 1px stone hairlines, 6/8/12 radii. Light is authored; dark is a wholesale
- * remap of the same semantic variables under html.dark (applied by an inline
- * head script before CSS paints).
+ * HYPERSPACE TERMINAL.
+ * Deep-space black, one amber-phosphor accent (the colour of an old tty and
+ * of an opening crawl), hologram cyan used sparingly, terminal green for
+ * status only. Three type lanes: Syncopate display / Inter body / JetBrains
+ * Mono instrument. Dark is the authored look and the default; light is a
+ * remap for visitors who explicitly pick it. Cinematic scenes (hero, crawl)
+ * wear `.scene-dark` and stay dark in both themes.
  */
+/* CLEAN LIGHT. White paper, neutral greys, one indigo accent (the same
+   periwinkle family as Fresco's own desktop widgets). Dark mode is the same
+   tokens remapped. Contrast: every ink and accent value passes 4.5:1 on its
+   paper; `blade`/`star` are decorative only and never carry text. */
 :root {
   /* Surfaces */
-  --paper: #fafaf9; /* stone-50 */
+  --paper: #ffffff;
   --surface: #ffffff;
-  --raised: #f5f5f4; /* stone-100 */
-  --terminal: #0c0a09; /* stone-950 — the house terminal card, both themes */
+  --raised: #f6f6f7;
+  --terminal: #0b0b0d; /* the install-command card, both themes */
 
   /* Ink ramp */
-  --ink: #1c1917; /* stone-900 */
-  --ink-muted: #44403c; /* stone-700 */
-  --ink-subtle: #78716c; /* stone-500 */
-  --ink-faint: #a8a29e; /* stone-400 */
+  --ink: #0a0a0b;
+  --ink-muted: #3f3f46;
+  --ink-subtle: #52525b;
+  --ink-faint: #71717a;
 
   /* Hairlines */
-  --hairline: #e7e5e4; /* stone-200 */
-  --hairline-strong: #d6d3d1; /* stone-300 */
+  --hairline: #ececee;
+  --hairline-strong: #d9d9de;
 
-  /* The one accent: sky. Interactivity only. */
-  --accent: #0284c7; /* sky-600 */
-  --accent-strong: #0369a1; /* sky-700 */
-  --link: #0369a1;
+  /* The one accent. 5.8:1 on white. */
+  --accent: #4f56d6;
+  --accent-strong: #3b41b8;
+  --link: #3b41b8;
+  --holo: #6b72e8;
+  /* Decorative light only (soft glows behind the product), never text. */
+  --blade: #8b93ff;
+  --blade-core: #e0e3ff;
+  --star: #c7cad6;
+  --star-glint: #8b93ff;
 
-  /* Status (status atoms only — never chrome) */
-  --ok: #059669; /* emerald-600 */
-  --warn: #d97706; /* amber-600 */
+  /* Status (status atoms only, never chrome) */
+  --ok: #15803d;
+  --warn: #b45309;
   --danger: #dc2626;
 
-  /* shadcn semantic aliases used by ui primitives */
+  --primary: #4f56d6;
+  --primary-foreground: #ffffff;
+}
+
+.dark {
+  --paper: #0a0a0b;
+  --surface: #111113;
+  --raised: #18181b;
+  --terminal: #0a0a0b;
+
+  --ink: #fafafa;
+  --ink-muted: #d4d4d8;
+  --ink-subtle: #a1a1aa;
+  --ink-faint: #8b8b94;
+
+  --hairline: #1f1f23;
+  --hairline-strong: #2e2e33;
+
+  --accent: #9ea3ff;
+  --accent-strong: #c3c6ff;
+  --link: #c3c6ff;
+  --holo: #9ea3ff;
+  --blade: #7c83ff;
+  --blade-core: #e0e3ff;
+  --star: #3a3a44;
+  --star-glint: #7c83ff;
+
+  --ok: #3fb950;
+  --warn: #fbbf24;
+  --danger: #f87171;
+
+  /* Filled buttons: white label text on this passes 4.9:1. */
+  --primary: #5e66f0;
+  --primary-foreground: #ffffff;
+}
+
+/* shadcn aliases recomputed in every scope, so a .scene-dark island inside
+   the light theme resolves them against its own dark values. */
+:root,
+.dark,
+.scene-dark {
   --background: var(--paper);
   --foreground: var(--ink);
   --card: var(--surface);
   --card-foreground: var(--ink);
   --popover: var(--surface);
   --popover-foreground: var(--ink);
-  --primary: var(--accent);
-  --primary-foreground: #ffffff;
   --secondary: var(--raised);
   --secondary-foreground: var(--ink);
   --muted: var(--raised);
@@ -58,36 +107,13 @@
   --ring: var(--accent);
 }
 
-/* Dark remap: same variables, warm stone dark values. Accent lifts to sky-400. */
-.dark {
-  --paper: #0c0a09; /* stone-950 */
-  --surface: #1c1917; /* stone-900 */
-  --raised: #292524; /* stone-800 */
-  --terminal: #0c0a09;
-
-  --ink: #e5e5e5;
-  --ink-muted: #d4d4d4;
-  --ink-subtle: #a1a1a1;
-  --ink-faint: #8a8a8a;
-
-  --hairline: #292524; /* stone-800 */
-  --hairline-strong: #44403c; /* stone-700 */
-
-  --accent: #38bdf8; /* sky-400 */
-  --accent-strong: #7dd3fc; /* sky-300 */
-  --link: #7dd3fc;
-
-  --ok: #34d399;
-  --warn: #fbbf24;
-  --danger: #f87171;
-
-  --primary: #0284c7; /* bg-accent stays sky-600 in dark (readable white ink) */
-  --primary-foreground: #ffffff;
-  --input: var(--hairline-strong);
+/* Cinematic scene surface. Follows the theme: light side or dark side. */
+.scene-dark {
+  color: var(--ink);
+  background-color: var(--paper);
 }
 
 @theme inline {
-  /* Semantic palette */
   --color-paper: var(--paper);
   --color-surface: var(--surface);
   --color-raised: var(--raised);
@@ -101,11 +127,15 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-link: var(--link);
+  --color-holo: var(--holo);
+  --color-blade: var(--blade);
+  --color-blade-core: var(--blade-core);
+  --color-star: var(--star);
+  --color-star-glint: var(--star-glint);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
 
-  /* shadcn aliases */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -124,8 +154,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Type scale — tokenized. meta/sm/base/lg/xl/2xl per spec, plus two
-     marketing display tokens (still tokens, never arbitrary sizes). */
+  /* Type scale. Body tokens unchanged; display tokens are cinematic. */
   --text-meta: 0.6875rem; /* 11px */
   --text-meta--line-height: 1rem;
   --text-sm: 0.8125rem; /* 13px */
@@ -133,35 +162,43 @@
   --text-base: 0.875rem; /* 14px */
   --text-base--line-height: 1.25rem;
   --text-lg: 1rem; /* 16px */
-  --text-lg--line-height: 1.375rem;
+  --text-lg--line-height: 1.5rem;
   --text-xl: 1.25rem; /* 20px */
-  --text-xl--line-height: 1.625rem;
+  --text-xl--line-height: 1.75rem;
   --text-2xl: 1.75rem; /* 28px */
-  --text-2xl--line-height: 2rem;
-  --text-display-sm: clamp(1.75rem, 4vw, 2.25rem);
-  --text-display-sm--line-height: 1.12;
-  --text-display: clamp(2.25rem, 5.5vw, 3.375rem);
-  --text-display--line-height: 1.06;
+  --text-2xl--line-height: 2.125rem;
+  --text-display-sm: clamp(1.75rem, 4vw, 2.5rem);
+  --text-display-sm--line-height: 1.1;
+  --text-display: clamp(2.25rem, 5.5vw, 3.75rem);
+  --text-display--line-height: 1.04;
+  /* Section titles: ~56px max */
+  --text-section: clamp(2rem, 4.2vw, 3.5rem);
+  --text-section--line-height: 1.06;
+  /* Hero: ~84px max */
+  --text-hero: clamp(2.5rem, 6vw, 5.25rem);
+  --text-hero--line-height: 1.02;
 
-  /* Radius scale: 6 / 8 / 12 + full. Nothing else. */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 12px;
   --radius-2xl: 12px;
 
-  /* Three families, three lanes */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  /* One family. Display = Inter semibold with slight negative tracking. */
+  --font-display: var(--font-inter), ui-sans-serif, system-ui,
+    "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
+  /* Legacy lane name: existing `font-serif` usages resolve to the display face. */
+  --font-serif: var(--font-inter), ui-sans-serif, system-ui,
+    "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, "JetBrains Mono",
     monospace;
 
-  /* Motion — house curve, entrances ≤180ms */
   --ease-house: cubic-bezier(0.16, 1, 0.3, 1);
   --animate-fade-in: fade-in 120ms ease-out both;
   --animate-rise-in: rise-in 160ms var(--ease-house) both;
-  --animate-accordion-down: accordion-down 160ms var(--ease-house);
-  --animate-accordion-up: accordion-up 160ms var(--ease-house);
+  --animate-accordion-down: accordion-down 200ms var(--ease-house);
+  --animate-accordion-up: accordion-up 200ms var(--ease-house);
 
   @keyframes fade-in {
     from {
@@ -204,8 +241,10 @@
     border-color: var(--border);
   }
   html {
-    scroll-behavior: smooth;
     scroll-padding-top: 5rem;
+  }
+  html:not(.lenis) {
+    scroll-behavior: smooth;
   }
   html,
   body {
@@ -216,16 +255,15 @@
     color: var(--ink);
     font-size: var(--text-base);
     line-height: var(--text-base--line-height);
-    letter-spacing: -0.15px;
     font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  /* Serif is display-only and resets the Inter tracking. */
-  .font-serif {
-    letter-spacing: normal;
-    font-feature-settings: normal;
-    font-weight: 400;
+  .font-serif,
+  .font-display {
+    font-feature-settings: "cv11", "ss01";
+    font-weight: 600;
+    letter-spacing: -0.03em;
   }
   .font-mono {
     font-variant-numeric: tabular-nums;
@@ -237,15 +275,17 @@
   h4 {
     text-wrap: balance;
   }
+  p {
+    text-wrap: pretty;
+  }
   *:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
     border-radius: 6px;
   }
   ::selection {
-    background-color: color-mix(in srgb, var(--accent) 25%, transparent);
+    background-color: color-mix(in srgb, var(--accent) 30%, transparent);
   }
-  /* 6px stone pill scrollbars, transparent track */
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--hairline-strong) transparent;
@@ -266,7 +306,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     html {
-      scroll-behavior: auto;
+      scroll-behavior: auto !important;
     }
     *,
     *::before,
@@ -278,7 +318,7 @@
   }
 }
 
-/* Instrument label — the signature texture: 10–11px mono uppercase. */
+/* Instrument label: 11px mono uppercase, the terminal texture. */
 .instrument-label {
   font-family: var(--font-mono);
   font-size: var(--text-meta);
@@ -287,4 +327,32 @@
   text-transform: uppercase;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
+}
+
+/* Page gutter + max width, shared by every section. */
+.wrap {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: clamp(1rem, 4vw, 3rem);
+}
+
+/* ---- Reveal primitives (see components/motion) ---------------------- */
+
+/* Hidden only when the head script has confirmed motion is allowed; the
+   orchestrator makes each container visible as it wires it. */
+html.js-motion [data-reveal] {
+  opacity: 0;
+}
+
+/* <SplitWords />: each word is a mask; its inner span rises into it. */
+.sw {
+  display: inline-block;
+  overflow: clip;
+  vertical-align: top;
+  padding-block: 0.08em;
+  margin-block: -0.08em;
+}
+.sw-i {
+  display: inline-block;
 }

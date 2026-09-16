@@ -1,0 +1,35 @@
+/*
+ * The close of the page: demos, supported, download, faq, footer.
+ * Clean light. Tokens only, every class prefixed `finale-`. Nothing loops and
+ * nothing glows: elevation is a hairline plus one soft static shadow, and the
+ * only hover motion is a transform.
+ */
+
+/* Download band: a flat accent tint over the paper, in both themes. */
+.finale-band {
+  background-color: color-mix(in srgb, var(--accent) 5%, var(--paper));
+}
+
+/* Card elevation. Static: never transitioned, never animated. */
+.finale-card {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 12px 32px -12px rgb(0 0 0 / 0.12);
+}
+
+.dark .finale-card {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+}
+
+/* Demo cards lift on hover or keyboard focus. Transform only. Lives on an
+   inner element: the stagger reveal leaves an inline transform on the <li>. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .finale-lift {
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .finale-lift:hover,
+  .finale-lift:focus-within {
+    transform: translateY(-4px);
+  }
+}

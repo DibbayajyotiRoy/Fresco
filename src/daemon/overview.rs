@@ -18,18 +18,63 @@ const GNOME_SCHEMA: &str = "org.gnome.desktop.background";
 /// the GNOME schema, so writing only GNOME's key is an invisible wallpaper.
 const CINNAMON_SCHEMA: &str = "org.cinnamon.desktop.background";
 
-/// The background schema this session actually draws, and the keys it has.
-/// Cinnamon has no `picture-uri-dark`.
-fn schema() -> (&'static str, &'static [&'static str]) {
-    if crate::capability::is_cinnamon() {
-        (CINNAMON_SCHEMA, &["picture-uri"])
+/// MATE forked them again, and differently: `org.mate.background` keeps the
+/// picture in `picture-filename` as a plain path, not a URI. Caja draws it —
+/// which is what shows while its desktop is peeked at above the wallpaper.
+const MATE_SCHEMA: &str = "org.mate.background";
+
+/// A desktop's background settings: where they live, which keys hold the
+/// picture (the first is the one probed for availability), and whether those
+/// keys take a `file://` URI or a bare path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Schema {
+    name: &'static str,
+    keys: &'static [&'static str],
+    uri: bool,
+}
+
+/// The background schema this session actually draws.
+fn schema() -> Schema {
+    schema_for(
+        crate::capability::is_cinnamon(),
+        crate::capability::is_mate(),
+    )
+}
+
+/// Pure form of [`schema`]. Cinnamon has no `picture-uri-dark`.
+fn schema_for(cinnamon: bool, mate: bool) -> Schema {
+    if mate {
+        Schema {
+            name: MATE_SCHEMA,
+            keys: &["picture-filename"],
+            uri: false,
+        }
+    } else if cinnamon {
+        Schema {
+            name: CINNAMON_SCHEMA,
+            keys: &["picture-uri"],
+            uri: true,
+        }
     } else {
-        (GNOME_SCHEMA, &["picture-uri", "picture-uri-dark"])
+        Schema {
+            name: GNOME_SCHEMA,
+            keys: &["picture-uri", "picture-uri-dark"],
+            uri: true,
+        }
     }
 }
 
 /// Set a still frame of `wallpaper` as the desktop background.
+///
+/// Skipped while the MATE icon mirror has Caja painting its key colour
+/// (`caja_mirror`): the still frame would replace the key, the mirror would
+/// then find no key pixels to cut away, and the whole photograph — not just
+/// the icons — would be copied over the video. The still is not needed there
+/// anyway: Caja never shows its background while the mirror runs.
 pub fn apply(wallpaper: &Wallpaper) {
+    if super::caja_mirror::key_active() {
+        return;
+    }
     if !gnome_available() {
         return;
     }
@@ -37,10 +82,16 @@ pub fn apply(wallpaper: &Wallpaper) {
         return;
     };
     save_original_once();
-    // GVariant string literal: 'file:///path'. Our frame path is a safe cache
-    // location (no spaces/quotes), so simple single-quoting is sufficient.
-    let gv = format!("'file://{}'", frame.display());
-    for key in schema().1 {
+    // GVariant string literal: 'file:///path' (or '/path' for MATE). Our frame
+    // path is a safe cache location (no spaces/quotes), so simple
+    // single-quoting is sufficient.
+    let s = schema();
+    let gv = if s.uri {
+        format!("'file://{}'", frame.display())
+    } else {
+        format!("'{}'", frame.display())
+    };
+    for key in s.keys {
         gset(key, &gv);
     }
     log::info!("overview background set to {}", frame.display());
@@ -52,7 +103,7 @@ pub fn restore() {
     let Ok(text) = std::fs::read_to_string(&sf) else {
         return;
     };
-    for (key, v) in schema().1.iter().zip(text.lines()) {
+    for (key, v) in schema().keys.iter().zip(text.lines()) {
         if !v.is_empty() {
             gset(key, v);
         }
@@ -175,7 +226,7 @@ fn save_original_once() {
     if sf.exists() {
         return;
     }
-    let values: Vec<String> = schema().1.iter().map(|k| gget(k)).collect();
+    let values: Vec<String> = schema().keys.iter().map(|k| gget(k)).collect();
     if values.iter().all(String::is_empty) {
         return;
     }
@@ -196,8 +247,9 @@ fn save_original_once() {
 /// the binary and the package once, at `warn`, rather than returning `false`
 /// the way a KDE session does.
 fn gnome_available() -> bool {
+    let s = schema();
     match Command::new("gsettings")
-        .args(["get", schema().0, "picture-uri"])
+        .args(["get", s.name, s.keys[0]])
         .output()
     {
         Ok(out) => out.status.success(),
@@ -224,7 +276,7 @@ fn gnome_available() -> bool {
 
 fn gget(key: &str) -> String {
     Command::new("gsettings")
-        .args(["get", schema().0, key])
+        .args(["get", schema().name, key])
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -233,6 +285,29 @@ fn gget(key: &str) -> String {
 
 fn gset(key: &str, gvariant: &str) {
     let _ = Command::new("gsettings")
-        .args(["set", schema().0, key, gvariant])
+        .args(["set", schema().name, key, gvariant])
         .status();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_desktop_gets_the_background_keys_it_draws() {
+        let gnome = schema_for(false, false);
+        assert_eq!(gnome.name, GNOME_SCHEMA);
+        assert!(gnome.uri && gnome.keys.contains(&"picture-uri-dark"));
+        let cinnamon = schema_for(true, false);
+        assert_eq!(
+            (cinnamon.name, cinnamon.keys),
+            (CINNAMON_SCHEMA, &["picture-uri"][..])
+        );
+        // MATE takes a bare path; a URI there is a picture Caja cannot find.
+        let mate = schema_for(false, true);
+        assert_eq!(
+            (mate.name, mate.keys, mate.uri),
+            (MATE_SCHEMA, &["picture-filename"][..], false)
+        );
+    }
 }

@@ -1,6 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Dev only: lets other devices on the LAN (or tailnet) load `next dev` by
+  // IP. Comma-separated hosts in ALLOWED_DEV_ORIGINS, e.g. in .env.local.
+  ...(process.env.ALLOWED_DEV_ORIGINS
+    ? {
+        allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS.split(",").map((h) =>
+          h.trim(),
+        ),
+      }
+    : {}),
   experimental: {
     optimizePackageImports: ["lucide-react"],
   },

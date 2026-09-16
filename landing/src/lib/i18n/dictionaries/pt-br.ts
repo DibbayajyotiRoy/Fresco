@@ -36,6 +36,7 @@ export const ptBr: Dictionary = {
     star: "Dar uma estrela ao Fresco no GitHub",
     starWithCount: (n: string) =>
       `Dar uma estrela ao Fresco no GitHub (${n} estrelas)`,
+    menu: "Menu",
   },
 
   language: {
@@ -57,25 +58,48 @@ export const ptBr: Dictionary = {
     body: "Coloque qualquer vídeo, GIF ou imagem na sua área de trabalho Linux. A reprodução acelerada por hardware mantém a CPU perto de zero, no X11 e no Wayland. Feche o app: o daemon continua reproduzindo.",
     install: "Instalar o Fresco",
     star: "Dar estrela no GitHub",
+    newUsers24h: (n: string) =>
+      `${n} pessoas começaram a usar o Fresco nas últimas 24 horas`,
+    builtBy: "Criado por",
+    activeToday: (n: string) =>
+      `${n} pessoas usaram o Fresco nas últimas 24 horas`,
+    newToday: (n: string) => `${n} novas`,
   },
 
   stats: {
     ariaLabel: "Estatísticas do projeto",
     downloads: "downloads totais",
-    downloadsUnknown: "downloads no github",
-    stars: "estrelas no github",
-    version: "versão mais recente",
+    downloadsUnknown: "downloads no GitHub",
+    stars: "estrelas no GitHub",
+    version: "Versão mais recente",
     license: "gratuito e de código aberto",
+    users: "usuários",
+    countries: "países",
+    cohortNote:
+      "Usuários e países são contados a partir de instalações que aceitaram a telemetria anônima.",
+    active24h: "ativos nas últimas 24 h",
+  },
+
+  testimonials: {
+    kicker: "Relatos",
+    title: (users: string, countries: string) =>
+      `Rodando em ${users} desktops Linux em ${countries} países.`,
+    lead: "Recados sem edição de quem usa o Fresco, enviados de dentro do app. Feedback anônimo é identificado apenas pelo país.",
+    fromCountry: (country: string) => `Usuário do Fresco · ${country}`,
+    anonymous: "Usuário do Fresco",
+    namedLabel: "Relato de campo",
+    pause: "Pausar relatos",
+    play: "Reproduzir relatos",
   },
 
   glance: {
     ariaLabel: "Fresco em resumo",
-    caption: "fresco em resumo",
-    labelWhat: "o que é",
-    labelPlatforms: "plataformas",
-    labelWidgets: "widgets",
-    labelLicense: "licença",
-    labelInstall: "instalação",
+    caption: "Fresco em resumo",
+    labelWhat: "O que é",
+    labelPlatforms: "Plataformas",
+    labelWidgets: "Widgets",
+    labelLicense: "Licença",
+    labelInstall: "Instalação",
     what: "O Fresco é um app gratuito e de código aberto de papel de parede animado para Linux: ele define vídeos, GIFs, imagens, apresentações de slides e playlists como plano de fundo animado, com decodificação por hardware na GPU. Uma alternativa gratuita ao Wallpaper Engine e uma interface gráfica para o mpvpaper no Wayland.",
     platforms:
       "Qualquer área de trabalho X11 (Ubuntu, Pop!_OS, Linux Mint, Debian), além dos compositores Wayland com layer-shell: COSMIC, Hyprland, Sway e KDE Plasma 6. No GNOME com Wayland ele recorre a um quadro estático.",
@@ -87,120 +111,120 @@ export const ptBr: Dictionary = {
   },
 
   features: {
-    kicker: "recursos",
+    kicker: "Recursos",
     title: "Qualquer mídia. Qualquer monitor. Sem drama de CPU.",
-    lead: "O Fresco define papéis de parede em vídeo, GIF, imagem, apresentação de slides e playlist no X11 e no Wayland, decodificados na GPU, de modo que um papel de parede animado custa quase o mesmo que um estático. A ficha técnica completa:",
-    manifest: (n: number) => `manifesto: ${n} recursos`,
+    lead: "O Fresco define papéis de parede em vídeo, GIF, imagem, apresentação de slides e playlist no X11 e no Wayland, decodificados na GPU, de modo que um papel de parede animado custa quase o mesmo que um estático.",
+    manifest: (n: number) => `Manifesto: ${n} recursos`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
     thCapability: "Recurso",
     thWhatYouGet: "O que você ganha",
     thStatus: "Status",
     footnote:
-      "gnome wayland: recorre a um quadro estático (o mutter não expõe superfície animada), e os widgets também precisam dessa superfície, então não estão disponíveis ali. todo o resto acima funciona.",
+      "GNOME Wayland: recorre a um quadro estático (o Mutter não expõe superfície animada), e os widgets também precisam dessa superfície, então não estão disponíveis ali. Todo o resto acima funciona.",
     tally: (shipping: number, total: number, soon: number) =>
       `${shipping} de ${total} disponíveis · ${soon} em prévia · 0 descontinuados`,
     rows: {
       hwDecode: {
-        tag: "decodif. hw",
+        tag: "Decodif. HW",
         title: "Reprodução acelerada por hardware",
         description:
           "A decodificação roda na GPU através do mpv (VA-API ou NVDEC). Um papel de parede em 4K custa quase a mesma CPU que uma imagem estática.",
-        status: "cpu quase zero",
+        status: "CPU quase zero",
       },
       sessions: {
-        tag: "sessões",
+        tag: "Sessões",
         title: "X11 e Wayland",
         description:
           "Um backend de janela de área de trabalho em qualquer sessão X11, mais um backend layer-shell para COSMIC, Hyprland, Sway e KDE Plasma 6. O GNOME com Wayland recebe um quadro estático.",
-        status: "x11 · layer-shell",
+        status: "X11 · layer-shell",
       },
       catalog: {
-        tag: "catálogo",
+        tag: "Catálogo",
         title: "Catálogo de papéis de parede embutido",
         description:
           "Navegue por papéis de parede selecionados e licenciados dentro do app (menu, depois Procurar papéis de parede) e defina um em dois cliques. Você também pode colar um link direto.",
-        status: "no app",
+        status: "No app",
       },
       video: {
-        tag: "vídeo · gif",
+        tag: "Vídeo · GIF",
         title: "Papéis de parede em vídeo e GIF",
         description:
           "Reproduza em loop qualquer mp4, webm, mkv ou GIF animado na sua área de trabalho.",
         status: "mp4 webm mkv gif",
       },
       slideshow: {
-        tag: "slides",
+        tag: "Slides",
         title: "Apresentações com transições",
         description:
           "Alterne uma pasta de imagens com crossfade, fade ou Ken Burns.",
         status: "4 transições",
       },
       playlist: {
-        tag: "playlist",
+        tag: "Playlist",
         title: "Playlists de vídeo",
         description:
           "Enfileire vários clipes e deixe o Fresco alternar entre eles.",
-        status: "ciclo automático",
+        status: "Ciclo automático",
       },
       lyrics: {
-        tag: "letras · relógio",
+        tag: "Letras · relógio",
         title: "Widgets de letra e relógio",
         description:
           "Letras sincronizadas com o que estiver tocando via MPRIS (primeiro o .lrc local, depois o LRCLIB) e um relógio em um de seis temas. Desenhados no papel de parede, então nada flutua sobre as suas janelas. Desativados por padrão.",
-        status: "desativado por padrão",
+        status: "Desativado por padrão",
       },
       visualiser: {
-        tag: "visualizador",
+        tag: "Visualizador",
         title: "Visualizador de áudio e capa do álbum",
         description:
           "Cinco estilos (Bars, Mirror, Wave, Dots, Ring) com seletor de cor, mistura de duas cores ou arco-íris, mais a capa da faixa atual em um disco girando. O visualizador pede permissão antes de escutar o seu áudio.",
         status: "0,8% de um núcleo",
       },
       editor: {
-        tag: "editor",
+        tag: "Editor",
         title: "Recortar e girar",
         description:
           "Arraste um quadro para escolher a região e gire 90 graus para corrigir clipes deitados. Ambos continuam zero-copy na GPU.",
-        status: "zero-copy",
+        status: "Zero-copy",
       },
       audio: {
-        tag: "áudio",
+        tag: "Áudio",
         title: "Som por papel de parede",
         description:
           "Ative o som de um vídeo e ajuste o volume. O Fresco lembra a escolha para aquele papel de parede.",
-        status: "por papel de parede",
+        status: "Por papel de parede",
       },
       displays: {
-        tag: "monitores",
+        tag: "Monitores",
         title: "Papel de parede por monitor",
         description:
           "Clique com o botão direito em qualquer papel de parede e escolha Definir em uma tela específica. Cada monitor pode rodar o seu.",
-        status: "por monitor",
+        status: "Por monitor",
       },
       schedule: {
-        tag: "agenda",
+        tag: "Agenda",
         title: "Agendamento de dia e noite",
         description:
           "Dois papéis de parede, dois horários de troca, alternados automaticamente pelo daemon. Faixas de horário e troca solar pelo arquivo de configuração.",
-        status: "automático",
+        status: "Automático",
       },
       power: {
-        tag: "energia",
+        tag: "Energia",
         title: "Consciente de energia",
         description:
           "Pausa na bateria e pausa automaticamente por monitor quando uma janela ali entra em tela cheia.",
-        status: "pausa automática",
+        status: "Pausa automática",
       },
       newTab: {
-        tag: "nova aba",
+        tag: "Nova aba",
         title: "Seu papel de parede em toda nova aba",
         description:
           "Uma extensão de navegador (Chrome, Brave, Edge, Firefox) espelha o papel de parede da área de trabalho, ou uma escolha só do navegador, na página de nova aba, através de uma ponte local que fala apenas com 127.0.0.1. Já está no repositório; a publicação nas lojas está pendente.",
-        status: "em breve",
+        status: "Em breve",
       },
       themes: {
-        tag: "temas",
+        tag: "Temas",
         title: "Temas e cores de destaque",
         description:
           "Claro, escuro ou seguindo o sistema, com seis paletas de destaque.",
@@ -210,11 +234,11 @@ export const ptBr: Dictionary = {
   },
 
   compare: {
-    kicker: "comparar",
+    kicker: "Comparar",
     title: "Fresco frente aos papéis de parede do Linux.",
     lead: "O Fresco é o único app de papel de parede animado para Linux nesta tabela que combina interface gráfica, decodificação por hardware, suporte a X11 e Wayland e um catálogo embutido, de graça e com manutenção ativa. Aqui está a comparação completa com Hidamari, Komorebi, mpvpaper e Wallpaper Engine.",
     meter: (tools: number, caps: number) =>
-      `comparação · ${tools} ferramentas · ${caps} recursos`,
+      `Comparação · ${tools} ferramentas · ${caps} recursos`,
     thFeature: "Recurso",
     yes: "Sim",
     no: "Não",
@@ -246,12 +270,12 @@ export const ptBr: Dictionary = {
   },
 
   whatsNew: {
-    kicker: (version: string) => `novidades · v${version}`,
+    kicker: (version: string) => `Novidades · v${version}`,
     title: "Quatro widgets, pintados no papel de parede.",
     lead: (version: string) =>
       `O que chegou na v${version}. Sem janela extra, sem nada para clicar, idêntico no X11 e no layer-shell. Os quatro vêm desativados e, com música tocando e todos ligados, o custo medido foi de 0,8% de um núcleo de CPU. Cada item aqui está reproduzido no CHANGELOG no GitHub.`,
     changelog: "Changelog completo",
-    patch: (n: string) => `patch ${n}`,
+    patch: (n: string) => `Patch ${n}`,
     items: {
       lyrics: {
         title: "Letras sincronizadas",
@@ -273,10 +297,10 @@ export const ptBr: Dictionary = {
   },
 
   howItWorks: {
-    kicker: "como funciona",
+    kicker: "Como funciona",
     title: "Três cliques e pode esquecer.",
     lead: "Abra o Fresco, clique em adicionar, clique em definir, feche. O daemon mantém o papel de parede rodando, mesmo depois de reiniciar.",
-    step: (n: string) => `passo ${n}`,
+    step: (n: string) => `Passo ${n}`,
     steps: {
       pick: {
         title: "Escolha a mídia",
@@ -297,20 +321,20 @@ export const ptBr: Dictionary = {
   },
 
   videos: {
-    kicker: "veja funcionando",
+    kicker: "Veja funcionando",
     title: "Menos de um minuto cada. Sem narração.",
     lead: "Gravações curtas de tela do Fresco em uma área de trabalho real. Nada é carregado do YouTube até você apertar play.",
     more: "Mais no YouTube",
-    inDevelopment: "em desenvolvimento",
+    inDevelopment: "Em desenvolvimento",
     play: (title: string) => `Reproduzir: ${title}`,
     items: {
       "YWzD3-xkCEc": {
-        tag: "adicionar por link",
+        tag: "Adicionar por link",
         blurb:
           "Copie um link do Pinterest, cole no Fresco e defina como papel de parede. Sem download, sem malabarismo com arquivos.",
       },
       C1MqrhGkovQ: {
-        tag: "widgets de letra",
+        tag: "Widgets de letra",
         blurb:
           "Letras sincronizadas e um relógio desenhados em um papel de parede animado no Wayland e no X11. Lançados na v1.1.36, junto com o visualizador de áudio e o disco com a capa do álbum.",
       },
@@ -318,14 +342,14 @@ export const ptBr: Dictionary = {
   },
 
   supported: {
-    kicker: "ambientes testados",
+    kicker: "Ambientes testados",
     title: "Onde o Fresco roda.",
-    lead: "Em qualquer área de trabalho X11, incluindo o DDE do Deepin 25, e nos compositores Wayland com layer-shell (COSMIC, Hyprland, Sway e KDE Plasma 6), nas distribuições Debian e Ubuntu mais populares. O GNOME com Wayland recebe um quadro estático.",
+    lead: "Em qualquer área de trabalho X11, incluindo o DDE do deepin 25, e nos compositores Wayland com layer-shell (COSMIC, Hyprland, Sway e KDE Plasma 6), nas distribuições Debian e Ubuntu mais populares. O GNOME com Wayland recebe um quadro estático.",
     deployed: (distros: number, formats: number) =>
-      `testado: 6 compositores com animação · 1 fallback estático · ${distros} distros · ${formats} formatos`,
-    sessionsTitle: "sessões e compositores",
-    distrosTitle: (n: number) => `distribuições testadas · ${n}`,
-    formatsTitle: (n: number) => `formatos suportados · ${n}`,
+      `Testado: 6 compositores com animação · 1 fallback estático · ${distros} distros · ${formats} formatos`,
+    sessionsTitle: "Sessões e compositores",
+    distrosTitle: (n: number) => `Distribuições testadas · ${n}`,
+    formatsTitle: (n: number) => `Formatos suportados · ${n}`,
     live: "Papel de parede animado",
     fallback: "Quadro estático",
     sessions: {
@@ -336,7 +360,7 @@ export const ptBr: Dictionary = {
       deepin: {
         label: "Deepin 25 (DDE, X11)",
         detail:
-          "Adaptação automática ao DDE, os ícones continuam visíveis. Verificado pela comunidade no Deepin 25 Community build1.",
+          "Adaptação automática ao DDE, os ícones continuam visíveis. Verificado pela comunidade no deepin 25 Community build1. Também na loja de apps do deepin.",
       },
       wayland: {
         label: "Wayland layer-shell",
@@ -347,37 +371,40 @@ export const ptBr: Dictionary = {
         detail: "Quadro estático (o Mutter não tem superfície animada)",
       },
     },
-    fieldReport: "relato de campo · deepin 25",
-    verifiedEnv: "ambiente verificado",
-    testimonialRole: "Testador da comunidade Deepin",
+    fieldReport: "Relato de campo · deepin 25",
+    verifiedEnv: "Ambiente verificado",
+    testimonialRole: "Testador da comunidade deepin",
     envLabels: {
-      session: "sessão",
-      os: "so",
-      gpu: "gpu",
+      session: "Sessão",
+      os: "SO",
+      gpu: "GPU",
     },
     footnote:
-      "o deepin 25 usa x11 por padrão, e é nessa sessão que o fresco foi verificado ali. o treeland, o compositor wayland do próprio deepin, ainda está em desenvolvimento, então o fresco não faz nenhuma afirmação sobre o deepin no wayland por enquanto.",
+      "O deepin 25 usa X11 por padrão, e é nessa sessão que o Fresco foi verificado ali. O Treeland, o compositor Wayland do próprio deepin, ainda está em desenvolvimento, então o Fresco não faz nenhuma afirmação sobre o deepin no Wayland por enquanto.",
   },
 
   download: {
-    kicker: "baixar",
+    kicker: "Baixar",
     title: "Instale no Debian, Ubuntu, Pop!_OS e Mint.",
-    badge: "x11 · wayland",
+    badge: "X11 · Wayland",
     lead: "O instalador oficial de uma linha ou o pacote .deb. Os dois caminhos vão para a sua área de transferência e rodam na hora. O Fresco continua reproduzindo depois que você fecha a janela.",
-    cardTitle: "instalação em uma linha",
+    cardTitle: "Instalação em uma linha",
     cardBody:
       "Execute isto em um terminal. Ele baixa e instala o .deb mais recente para você, sempre a versão mais nova:",
     terminalTitle: "fresco install",
-    aptComment: "já baixou o .deb?",
+    aptComment: "Já baixou o .deb?",
     releases: "Ver todas as versões",
     gpuNote:
       "Para o menor uso de CPU, instale o driver de decodificação por hardware da sua GPU (driver Intel media VA, drivers VA do Mesa ou o driver proprietário da NVIDIA para NVDEC).",
+    storeLabel: "Também na loja de apps do deepin",
+    storeBody:
+      "No deepin 25, abra a loja de apps, pesquise por Fresco e clique em Instalar. As atualizações chegam pela loja.",
     copy: "Copiar",
     copied: "Copiado",
   },
 
   faq: {
-    kicker: "perguntas frequentes",
+    kicker: "Perguntas frequentes",
     title: "Perguntas, respondidas.",
     lead: "Tudo o que você precisa saber antes de definir o seu primeiro papel de parede animado no Linux.",
     items: [
@@ -454,6 +481,10 @@ export const ptBr: Dictionary = {
         a: "Dá. O visualizador de áudio do Fresco reage ao que o seu sistema estiver tocando, em um de cinco estilos (Bars, Mirror, Wave, Dots, Ring) com seletor de cor, mistura de duas cores ou arco-íris. Ele vem desativado e pede consentimento na primeira vez que você o liga, porque precisa escutar a sua saída de áudio. Com música tocando e os quatro widgets ligados, o custo medido foi de 0,8% de um núcleo de CPU, quase tudo por causa da captura de áudio, já que nada é redesenhado a menos que o conteúdo mude.",
       },
       {
+        q: "O Fresco está na loja de apps do deepin?",
+        a: "Está. No deepin 25, abra a loja de apps, pesquise por Fresco e clique em Instalar. Ele é publicado na loja de apps da comunidade do deepin, então as atualizações chegam pela loja. O .deb e o instalador de uma linha também funcionam.",
+      },
+      {
         q: "O Fresco é gratuito?",
         a: "É. O Fresco é totalmente gratuito e de código aberto sob a licença GPL-3.0. Não existe versão paga.",
       },
@@ -463,7 +494,7 @@ export const ptBr: Dictionary = {
   footer: {
     github: "GitHub",
     license: "Licença",
-    tagline: "rust + gtk4 + mpv",
+    tagline: "Rust + GTK4 + mpv",
     sound: "Alternar som",
   },
 

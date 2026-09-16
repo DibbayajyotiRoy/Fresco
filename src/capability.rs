@@ -114,6 +114,30 @@ fn classify_deepin_dde(current_desktop: Option<&str>, session_desktop: Option<&s
         })
 }
 
+/// Is this session MATE? Caja, MATE's file manager, draws the desktop — its
+/// icons and its own copy of the background — into one opaque full-screen
+/// window that covers any other DESKTOP-type window, so a wallpaper stacked the
+/// ordinary way is never seen (issue #18). The X11 backend raises the wallpaper
+/// above that window instead; see `daemon::dde`.
+pub fn is_mate() -> bool {
+    classify_mate(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+    )
+}
+
+/// Pure MATE classification. A whole segment of the colon-separated list must
+/// be `MATE`, so no desktop whose name merely *contains* those letters matches.
+fn classify_mate(current_desktop: Option<&str>, session_desktop: Option<&str>) -> bool {
+    [current_desktop, session_desktop]
+        .into_iter()
+        .flatten()
+        .any(|v| {
+            v.split(':')
+                .any(|seg| seg.trim().eq_ignore_ascii_case("mate"))
+        })
+}
+
 /// Is this session Cinnamon (Linux Mint)? Its muffin compositor has no
 /// layer-shell on Wayland and reads its own background schema.
 pub fn is_cinnamon() -> bool {
@@ -250,6 +274,18 @@ mod tests {
         assert!(!classify_deepin_dde(None, None));
         // Second var still detected when the first is a non-DDE desktop.
         assert!(classify_deepin_dde(Some("GNOME"), Some("dde")));
+    }
+
+    #[test]
+    fn mate_detection() {
+        for d in ["MATE", "mate", "X-Generic:MATE"] {
+            assert!(classify_mate(Some(d), None), "current {d}");
+            assert!(classify_mate(None, Some(d)), "session {d}");
+        }
+        for d in ["GNOME", "X-Cinnamon", "ultimate", "mate-ish", "Deepin", ""] {
+            assert!(!classify_mate(Some(d), None), "current {d}");
+        }
+        assert!(!classify_mate(None, None));
     }
 
     #[test]

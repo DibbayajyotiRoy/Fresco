@@ -59,6 +59,10 @@ pub enum ClockVariant {
     /// dotted progress ring. A different form language, not a density step —
     /// see [`crate::widgetkit::cards::nos`].
     Nos,
+    /// The **Lock screen** look: no card, the date over a large centred time,
+    /// kept legible by a shadow cast by the glyphs — see
+    /// [`crate::widgetkit::cards::lock`].
+    Lock,
 }
 
 /// What a clock card draws. Plain data: a mirror of what `crate::clock`
@@ -120,7 +124,7 @@ const ACCENT_MIN: f32 = 24.0;
 /// The gauge column is dropped entirely below this card width.
 const GAUGE_MIN_CARD_W: f32 = 260.0;
 
-fn hero_size(d: &ClockData) -> f32 {
+pub(super) fn hero_size(d: &ClockData) -> f32 {
     if d.font_size.is_finite() && d.font_size > 0.0 {
         d.font_size.clamp(6.0, 400.0)
     } else {
@@ -155,7 +159,7 @@ fn micro_text(d: &ClockData) -> String {
 }
 
 /// The string the card is *sized* from — never the one it currently shows.
-fn sizing_time<'a>(d: &'a ClockData<'a>) -> &'a str {
+pub(super) fn sizing_time<'a>(d: &'a ClockData<'a>) -> &'a str {
     if d.widest_time.is_empty() {
         d.time
     } else {
@@ -273,8 +277,10 @@ fn layout(fonts: &mut FontStack, t: &Theme, d: &ClockData, scale: f32) -> Layout
 
 /// How big this clock card is, and how much shadow margin it needs.
 pub fn measure(fonts: &mut FontStack, t: &Theme, d: &ClockData, scale: f32) -> WidgetSize {
-    if variant_for(d) == ClockVariant::Nos {
-        return super::nos::measure(fonts, t, d, scale);
+    match variant_for(d) {
+        ClockVariant::Nos => return super::nos::measure(fonts, t, d, scale),
+        ClockVariant::Lock => return super::lock::measure(fonts, t, d, scale),
+        _ => {}
     }
     let l = layout(fonts, t, d, scale);
     let e = if l.variant == ClockVariant::Bare {
@@ -297,9 +303,10 @@ pub fn draw_at(c: &mut Canvas, fonts: &mut FontStack, t: &Theme, d: &ClockData, 
     if card.is_empty() {
         return;
     }
-    if variant_for(d) == ClockVariant::Nos {
-        super::nos::draw_at(c, fonts, t, d, card);
-        return;
+    match variant_for(d) {
+        ClockVariant::Nos => return super::nos::draw_at(c, fonts, t, d, card),
+        ClockVariant::Lock => return super::lock::draw_at(c, fonts, t, d, card),
+        _ => {}
     }
     let l = layout(fonts, t, d, c.scale());
     if l.variant == ClockVariant::Bare {

@@ -80,6 +80,15 @@ const SYNC_TOLERANCE: f64 = 0.2;
 /// is long enough that a genuinely broken renderer doesn't retry-spam.
 const RENDERER_REARM_DELAY: Duration = Duration::from_secs(5 * 60);
 
+/// How often the long-running daemon loops re-offer a telemetry heartbeat.
+/// `telemetry::heartbeat`/`minimal_heartbeat` self-throttle to roughly once a
+/// day via their own marker file (`heartbeat_due`), so calling this often is
+/// cheap and harmless — it exists so a daemon that runs for days without a
+/// restart still checks in, instead of looking inactive to anyone watching
+/// usage. Well under the marker's 20h window so a long session never misses a
+/// day.
+const HEARTBEAT_RECHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
 /// During a transition the loop ticks at ~60fps for buttery, eased motion.
 const ANIM_TICK: Duration = Duration::from_millis(16);
 
@@ -437,6 +446,10 @@ pub struct Daemon {
     /// hands back only overlays whose content actually changed, so an idle
     /// desktop costs nothing (see docs/WIDGETS_ROADMAP.md "Power model").
     widgets: widgets::WidgetEngine,
+    /// Last time this loop re-offered a telemetry heartbeat — see
+    /// [`HEARTBEAT_RECHECK_INTERVAL`]. The heartbeat itself self-throttles to
+    /// roughly daily, so this only needs to be "often enough", not precise.
+    last_heartbeat_check: Instant,
 }
 
 impl Daemon {
@@ -474,6 +487,9 @@ impl Daemon {
             caja_mirror: None,
             caja_mirror_gave_up: false,
             widgets,
+            // Due immediately at startup would just repeat `run()`'s own
+            // heartbeat call a moment later; start the clock instead.
+            last_heartbeat_check: Instant::now(),
         })
     }
 
@@ -821,6 +837,21 @@ impl Daemon {
             if now.duration_since(self.last_sync_check) >= SYNC_INTERVAL {
                 self.check_sync();
                 self.last_sync_check = now;
+            }
+            if now.duration_since(self.last_heartbeat_check) >= HEARTBEAT_RECHECK_INTERVAL {
+                self.last_heartbeat_check = now;
+                // Same arguments as the startup call below; `heartbeat`
+                // itself throttles to roughly once a day via its marker
+                // file, so a daemon that runs for days without a restart
+                // still checks in instead of going quiet after the first one.
+                crate::telemetry::heartbeat(
+                    Some("x11"),
+                    self.renderers
+                        .first()
+                        .and_then(|r| r.player.hwdec_current())
+                        .as_deref(),
+                    Some(self.renderers.len() as u32),
+                );
             }
             self.check_startup_renderers(now);
             self.check_cold_boot_stall(now);
@@ -1707,7 +1738,20 @@ fn run_gnome_static() -> Result<()> {
     log::info!("frescod started (GNOME Wayland static-frame mode)");
     crate::telemetry::heartbeat(Some("gnome-static"), None, None);
 
-    while let Ok((req, reply)) = commands.recv() {
+    // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
+    // never wakes on its own, so a daemon left running for days without an
+    // Apply would only ever have sent the one startup heartbeat above and
+    // then gone quiet in the usage numbers. `heartbeat` self-throttles to
+    // roughly once a day via its own marker file either way.
+    loop {
+        let (req, reply) = match commands.recv_timeout(HEARTBEAT_RECHECK_INTERVAL) {
+            Ok(pair) => pair,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                crate::telemetry::heartbeat(Some("gnome-static"), None, None);
+                continue;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let is_stop = matches!(req, Request::Stop);
         let resp = match req {
             Request::Apply => {
@@ -1836,6 +1880,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut user_paused = false;
     let mut battery_paused = false;
     let mut last_supervise = Instant::now() - SUPERVISE;
+    let mut last_heartbeat_check = Instant::now();
     // Display-presence probe: due immediately, then paced by whether anything is
     // still restarting (see the supervise block).
     let mut next_output_probe = Instant::now();
@@ -2002,6 +2047,14 @@ fn run_wayland_layershell() -> Result<()> {
         }
 
         let now = Instant::now();
+
+        if now.duration_since(last_heartbeat_check) >= HEARTBEAT_RECHECK_INTERVAL {
+            last_heartbeat_check = now;
+            // Same arguments as the startup call above; `heartbeat` itself
+            // throttles to roughly once a day via its marker file, so a
+            // daemon that runs for days without a restart still checks in.
+            crate::telemetry::heartbeat(Some("wayland"), None, Some(outputs.len() as u32));
+        }
 
         // Slideshow engine (shared with the X11 path via advance_slideshow).
         for o in outputs.values_mut() {

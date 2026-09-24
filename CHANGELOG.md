@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [1.1.43] — Unreleased
 
 ### Fixed
+- **Renaming a card from its context menu now shows a proper check mark,
+  applies on Enter, and survives clicking an IME candidate** (issue #21).
+  The rename box was a popover, and its autohide grabbed the pointer: a
+  click on an fcitx5/ibus candidate window counted as "outside" and silently
+  closed it, dropping whatever had been typed, and Enter tore the popover
+  down without committing the name. Its confirm button also used an icon
+  (`emblem-ok-symbolic`) that only ships in the Adwaita icon theme, so
+  themes without it — deepin's, notably — showed a broken-image slash
+  instead of a check mark. The rename box is now an inline editor added
+  directly on the card, with no grab: Enter or the confirm button applies
+  the rename, Esc cancels, and clicking an IME candidate no longer closes
+  it.
 - **The wallpaper now appears on MATE, with the desktop icons still on it**
   (issue #18). On MATE, Caja draws the desktop icons and its own copy of the
   background into one opaque window covering the whole screen, and Fresco

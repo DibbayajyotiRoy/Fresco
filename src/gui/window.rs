@@ -1464,7 +1464,7 @@ fn choice_menu<T: Clone + PartialEq + 'static>(
         lbl.set_halign(gtk4::Align::Start);
         lbl.set_hexpand(true);
         lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        let check = gtk4::Image::from_icon_name("emblem-ok-symbolic");
+        let check = gtk4::Image::from_icon_name("object-select-symbolic");
         check.set_visible(value == current);
         row.append(&lbl);
         row.append(&check);
@@ -2158,7 +2158,13 @@ fn build_library_card(
     {
         let state_c = state.clone();
         let stack_c = stack.clone();
+        let overlay_c = overlay.clone();
         click.connect_released(move |_, n_press, _, _| {
+            // Inline rename editor is up on this card (#21) — don't let the
+            // click fall through to apply/open underneath it.
+            if overlay_c.has_css_class("renaming") {
+                return;
+            }
             if n_press == 1 {
                 apply_entry_by_idx(state_c.clone(), idx);
             } else if n_press == 2 {
@@ -2177,6 +2183,9 @@ fn build_library_card(
         let stack_c = stack.clone();
         let overlay_c = overlay.clone();
         rclick.connect_pressed(move |_, _, x, y| {
+            if overlay_c.has_css_class("renaming") {
+                return;
+            }
             show_card_menu(
                 &overlay_c,
                 state_c.clone(),
@@ -2958,71 +2967,150 @@ fn confirm_remove_selected(
     dialog.present();
 }
 
-/// Small inline popover to rename a library entry.
+/// Trims `input` and hands back the new name to apply, or `None` when there
+/// is nothing to do — blank input, or unchanged from `current` once both are
+/// trimmed. Shared by the card and folder rename UIs so "is this rename worth
+/// doing" is answered in exactly one place.
+fn normalized_rename(current: &str, input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed == current.trim() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Applies a rename by entry id — not index, since the grid this was opened
+/// from may have been rebuilt (a refresh, a filter change) by the time the
+/// user confirms. Returns whether anything actually changed.
+///
+/// The refresh is deferred to the next idle turn rather than run inline:
+/// this is called from `Entry::activate` while that signal is still firing,
+/// and `populate_library` rebuilding the grid underneath it would tear down
+/// the very overlay/controllers that called us (#21).
+fn commit_rename(state: &Rc<RefCell<AppState>>, id: &str, input: &str) -> bool {
+    let changed = {
+        let mut s = state.borrow_mut();
+        let Some(entry) = s.entries.iter_mut().find(|e| e.id == id) else {
+            return false;
+        };
+        match normalized_rename(&entry.name, input) {
+            Some(name) => {
+                entry.name = name;
+                save_entries(&s.entries).ok();
+                true
+            }
+            None => false,
+        }
+    };
+    if changed {
+        let refresh = state.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            glib::idle_add_local_once(move || r());
+        }
+    }
+    changed
+}
+
+/// Inline rename editor for a library card (#21). This is an overlay layer
+/// added straight onto the card — not a popover — precisely because a
+/// popover's autohide grabs the pointer: clicking an IME candidate window
+/// (fcitx5/ibus, a separate client) then reads as "outside" and silently
+/// dismisses it, discarding whatever was typed. An overlay has no grab, so
+/// nothing closes it but the buttons below and Esc.
 fn rename_entry(parent: &gtk4::Overlay, state: Rc<RefCell<AppState>>, idx: usize) {
-    let current = state
+    let Some((id, current)) = state
         .borrow()
         .entries
         .get(idx)
-        .map(|e| e.name.clone())
-        .unwrap_or_default();
+        .map(|e| (e.id.clone(), e.name.clone()))
+    else {
+        return;
+    };
 
-    let pop = gtk4::Popover::new();
-    pop.set_parent(parent);
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    row.set_margin_top(6);
-    row.set_margin_bottom(6);
-    row.set_margin_start(6);
-    row.set_margin_end(6);
+    row.add_css_class("osd");
+    row.add_css_class("wp-rename");
+    row.set_valign(gtk4::Align::Center);
+    row.set_margin_top(8);
+    row.set_margin_bottom(8);
+    row.set_margin_start(8);
+    row.set_margin_end(8);
 
     let entry = gtk4::Entry::new();
     entry.set_text(&current);
+    entry.select_region(0, -1);
     entry.set_hexpand(true);
-    let save = gtk4::Button::from_icon_name("emblem-ok-symbolic");
-    save.add_css_class("suggested-action");
+
+    // `object-select-symbolic` is bundled with libgtk itself. The checkmark
+    // icon this replaced only ships in the Adwaita icon theme, so a theme
+    // without it (deepin's, notably) rendered this as the image-missing
+    // slash (#21).
+    let confirm = gtk4::Button::from_icon_name("object-select-symbolic");
+    confirm.add_css_class("suggested-action");
+    confirm.set_tooltip_text(Some(t!("Rename…")));
+    confirm.update_property(&[gtk4::accessible::Property::Label(t!("Rename…"))]);
+
+    let cancel = gtk4::Button::from_icon_name("window-close-symbolic");
+    cancel.add_css_class("flat");
+    cancel.set_tooltip_text(Some(t!("Cancel")));
+    cancel.update_property(&[gtk4::accessible::Property::Label(t!("Cancel"))]);
+
     row.append(&entry);
-    row.append(&save);
-    pop.set_child(Some(&row));
+    row.append(&confirm);
+    row.append(&cancel);
 
-    {
-        let state = state.clone();
-        let entry = entry.clone();
-        let pop = pop.clone();
-        save.connect_clicked(move |_| {
-            commit_rename(&state, idx, &entry.text());
-            pop.popdown();
-        });
-    }
-    {
-        let state = state.clone();
-        let pop = pop.clone();
-        entry.connect_activate(move |e| {
-            commit_rename(&state, idx, &e.text());
-            pop.popdown();
-        });
-    }
-
-    pop.connect_closed(|p| p.unparent());
-    pop.popup();
+    parent.add_overlay(&row);
+    parent.add_css_class("renaming");
     entry.grab_focus();
-}
 
-fn commit_rename(state: &Rc<RefCell<AppState>>, idx: usize, name: &str) {
-    let name = name.trim();
-    if name.is_empty() {
-        return;
+    // Every way out — commit, cancel, Esc — funnels through here so the
+    // overlay is torn down exactly once no matter which fires first.
+    let done = Rc::new(Cell::new(false));
+    let finish: Rc<dyn Fn(bool)> = {
+        let parent = parent.clone();
+        let row = row.clone();
+        let entry = entry.clone();
+        let state = state.clone();
+        Rc::new(move |commit: bool| {
+            if done.replace(true) {
+                return;
+            }
+            parent.remove_css_class("renaming");
+            parent.remove_overlay(&row);
+            if commit {
+                commit_rename(&state, &id, &entry.text());
+            }
+        })
+    };
+
+    {
+        let finish = finish.clone();
+        entry.connect_activate(move |_| finish(true));
     }
     {
-        let mut s = state.borrow_mut();
-        if let Some(e) = s.entries.get_mut(idx) {
-            e.name = name.to_string();
+        let finish = finish.clone();
+        confirm.connect_clicked(move |_| finish(true));
+    }
+    {
+        let finish = finish.clone();
+        cancel.connect_clicked(move |_| finish(false));
+    }
+
+    // Left at the default (bubble) phase deliberately: the input method gets
+    // first look at Esc, so dismissing an open IME candidate list takes one
+    // Esc and only a second one closes the editor, rather than Esc always
+    // killing the editor mid-composition.
+    let keys = gtk4::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk4::gdk::Key::Escape {
+            finish(false);
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
         }
-        save_entries(&s.entries).ok();
-    }
-    let refresh = state.borrow().refresh.clone();
-    if let Some(r) = refresh {
-        r();
-    }
+    });
+    entry.add_controller(keys);
 }
 
 // ─── Folders (collections) ───────────────────────────────────────────────────
@@ -3266,8 +3354,11 @@ fn show_collections_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<Ap
     dialog.present();
 }
 
-/// Inline rename prompt for a folder — the same popover shape as
-/// [`rename_entry`], parented to the pencil button that opened it.
+/// Inline rename prompt for a folder, parented to the pencil button that
+/// opened it. Folders are edited one at a time from a settings-style list
+/// rather than a hovered card, so the popover-grab issues that pushed
+/// [`rename_entry`] off popovers (#21) don't apply here — this one stays as
+/// it was.
 fn rename_collection_popover(
     anchor: &gtk4::Button,
     state: Rc<RefCell<AppState>>,
@@ -3285,20 +3376,25 @@ fn rename_collection_popover(
     let entry = gtk4::Entry::new();
     entry.set_text(current);
     entry.set_hexpand(true);
-    let save = gtk4::Button::from_icon_name("emblem-ok-symbolic");
+    let save = gtk4::Button::from_icon_name("object-select-symbolic");
     save.add_css_class("suggested-action");
     row.append(&entry);
     row.append(&save);
     pop.set_child(Some(&row));
 
+    let current = current.to_string();
     let commit = {
         let state = state.clone();
         let id = id.clone();
         let after = after.clone();
         Rc::new(move |text: String| {
+            // Skip the save+refresh entirely when nothing actually changed.
+            let Some(name) = normalized_rename(&current, &text) else {
+                return;
+            };
             {
                 let mut s = state.borrow_mut();
-                if !library::rename_collection(&mut s.collections, &id, &text) {
+                if !library::rename_collection(&mut s.collections, &id, &name) {
                     return;
                 }
                 library::save_collections(&s.collections).ok();
@@ -6937,7 +7033,7 @@ fn build_language_row(state: Rc<RefCell<AppState>>) -> gtk4::Box {
         lbl.set_xalign(0.0);
         lbl.set_halign(gtk4::Align::Start);
         lbl.set_hexpand(true);
-        let check = gtk4::Image::from_icon_name("emblem-ok-symbolic");
+        let check = gtk4::Image::from_icon_name("object-select-symbolic");
         check.set_visible(lang == current);
         row.append(&lbl);
         row.append(&check);
@@ -8930,6 +9026,47 @@ fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supab
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// The rename box (#21) should never write back blank, whitespace-only,
+    /// or effectively-unchanged names — those are all "nothing to do", not
+    /// tiny renames worth a save+refresh.
+    #[test]
+    fn normalized_rename_rejects_blank_input() {
+        assert_eq!(normalized_rename("Sunset", ""), None);
+    }
+
+    #[test]
+    fn normalized_rename_rejects_whitespace_only_input() {
+        assert_eq!(normalized_rename("Sunset", "   "), None);
+    }
+
+    #[test]
+    fn normalized_rename_rejects_the_unchanged_name() {
+        assert_eq!(normalized_rename("Sunset", "Sunset"), None);
+    }
+
+    #[test]
+    fn normalized_rename_rejects_the_unchanged_name_once_trimmed() {
+        assert_eq!(normalized_rename("Sunset", "  Sunset  "), None);
+    }
+
+    #[test]
+    fn normalized_rename_accepts_and_trims_a_real_change() {
+        assert_eq!(
+            normalized_rename("Sunset", "  Ocean view  "),
+            Some("Ocean view".to_string())
+        );
+    }
+
+    /// Renames arrive in whatever script the user is typing in — CJK input
+    /// must round-trip untouched, not be mangled by byte-oriented trimming.
+    #[test]
+    fn normalized_rename_accepts_cjk_input() {
+        assert_eq!(
+            normalized_rename("Sunset", "夕焼け"),
+            Some("夕焼け".to_string())
+        );
+    }
 
     #[test]
     fn release_announcements_are_filtered_but_others_toast() {

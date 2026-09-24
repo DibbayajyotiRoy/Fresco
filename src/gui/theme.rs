@@ -236,6 +236,12 @@ window.glass .background {{ background: transparent; }}
 /* Hover action cluster (heart / edit / menu), bottom-right. */
 .wp-actions {{ margin: 8px; }}
 
+/* Inline rename editor (#21): an overlay row, not a popover — see
+   `rename_entry` in window.rs. `.osd` already gives it a dark, translucent
+   background with light text, which keeps the entry legible over light
+   thumbnails; this just rounds it to match the card. */
+.wp-rename {{ border-radius: 10px; box-shadow: 0 2px 8px {shadow_md}; }}
+
 /* ===== Compact layout (narrow window; see LayoutBucket in window.rs) ===== */
 .compact-layout .wp-scrim {{ padding: 16px 8px 6px 8px; }}
 .compact-layout .wp-badge, .compact-layout .wp-active-pill {{ margin: 6px; }}

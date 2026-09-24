@@ -53,25 +53,175 @@ pub enum Language {
     /// Russian (Русский).
     #[serde(rename = "ru")]
     Russian,
+    /// Hindi (हिन्दी).
+    #[serde(rename = "hi")]
+    Hindi,
+    /// Brazilian Portuguese (Português do Brasil) — the only Portuguese
+    /// catalog, so every Portuguese locale (`pt_PT` included) resolves here.
+    #[serde(rename = "pt-BR")]
+    PortugueseBrazil,
+    /// Spanish (Español).
+    #[serde(rename = "es")]
+    Spanish,
+    /// German (Deutsch).
+    #[serde(rename = "de")]
+    German,
+    /// Indonesian (Bahasa Indonesia).
+    #[serde(rename = "id")]
+    Indonesian,
+    /// French (Français).
+    #[serde(rename = "fr")]
+    French,
+    /// Vietnamese (Tiếng Việt).
+    #[serde(rename = "vi")]
+    Vietnamese,
+    /// Turkish (Türkçe).
+    #[serde(rename = "tr")]
+    Turkish,
+    /// Romanian (Română).
+    #[serde(rename = "ro")]
+    Romanian,
+    /// Bengali (বাংলা).
+    #[serde(rename = "bn")]
+    Bengali,
 }
 
+/// One row of [`REGISTRY`]: everything about a language that is not the
+/// `Language` variant itself or its `#[serde(rename)]`.
+///
+/// Keeping this data in one table rather than one `match` per method is what
+/// makes adding a language a single new row instead of an edit scattered
+/// across `code`, `display_name`, `resolve` and `catalog_source` — the kind
+/// of split edit that is easy to do three-quarters of and ship broken.
+struct LangInfo {
+    lang: Language,
+    /// The BCP-47-ish tag used in `config.toml` and `FRESCO_LANG`. Must match
+    /// the variant's `#[serde(rename)]` exactly — `serde_rename_matches_code`
+    /// checks that.
+    code: &'static str,
+    /// The name shown in the language menu, written in its own language. Not
+    /// used for `System`, whose entry in [`Language::display_name`] goes
+    /// through [`tr`] instead.
+    endonym: &'static str,
+    /// The compiled-in catalog JSON, or `None` for `System`/`English`, which
+    /// have no catalog of their own.
+    source: Option<&'static str>,
+}
+
+/// Every language offered in Settings, in menu order: System, English, then
+/// the rest in the order they were added.
+const REGISTRY: [LangInfo; 14] = [
+    LangInfo {
+        lang: Language::System,
+        code: "system",
+        endonym: "",
+        source: None,
+    },
+    LangInfo {
+        lang: Language::English,
+        code: "en",
+        endonym: "English",
+        source: None,
+    },
+    LangInfo {
+        lang: Language::ChineseSimplified,
+        code: "zh-CN",
+        endonym: "简体中文",
+        source: Some(include_str!("../i18n/zh-CN.json")),
+    },
+    LangInfo {
+        lang: Language::Russian,
+        code: "ru",
+        endonym: "Русский",
+        source: Some(include_str!("../i18n/ru.json")),
+    },
+    LangInfo {
+        lang: Language::Hindi,
+        code: "hi",
+        endonym: "हिन्दी",
+        source: Some(include_str!("../i18n/hi.json")),
+    },
+    LangInfo {
+        lang: Language::PortugueseBrazil,
+        code: "pt-BR",
+        endonym: "Português (Brasil)",
+        source: Some(include_str!("../i18n/pt-BR.json")),
+    },
+    LangInfo {
+        lang: Language::Spanish,
+        code: "es",
+        endonym: "Español",
+        source: Some(include_str!("../i18n/es.json")),
+    },
+    LangInfo {
+        lang: Language::German,
+        code: "de",
+        endonym: "Deutsch",
+        source: Some(include_str!("../i18n/de.json")),
+    },
+    LangInfo {
+        lang: Language::Indonesian,
+        code: "id",
+        endonym: "Bahasa Indonesia",
+        source: Some(include_str!("../i18n/id.json")),
+    },
+    LangInfo {
+        lang: Language::French,
+        code: "fr",
+        endonym: "Français",
+        source: Some(include_str!("../i18n/fr.json")),
+    },
+    LangInfo {
+        lang: Language::Vietnamese,
+        code: "vi",
+        endonym: "Tiếng Việt",
+        source: Some(include_str!("../i18n/vi.json")),
+    },
+    LangInfo {
+        lang: Language::Turkish,
+        code: "tr",
+        endonym: "Türkçe",
+        source: Some(include_str!("../i18n/tr.json")),
+    },
+    LangInfo {
+        lang: Language::Romanian,
+        code: "ro",
+        endonym: "Română",
+        source: Some(include_str!("../i18n/ro.json")),
+    },
+    LangInfo {
+        lang: Language::Bengali,
+        code: "bn",
+        endonym: "বাংলা",
+        source: Some(include_str!("../i18n/bn.json")),
+    },
+];
+
 impl Language {
-    /// Every language offered in Settings, in menu order.
-    pub const ALL: [Language; 4] = [
-        Language::System,
-        Language::English,
-        Language::ChineseSimplified,
-        Language::Russian,
-    ];
+    /// Every language offered in Settings, in menu order. Kept as a plain
+    /// array of variants — not `REGISTRY` itself — because call sites (the
+    /// language menu, the test walk below) iterate it by value and have no
+    /// business seeing the registry's internals.
+    pub const ALL: [Language; REGISTRY.len()] = {
+        let mut out = [Language::System; REGISTRY.len()];
+        let mut i = 0;
+        while i < REGISTRY.len() {
+            out[i] = REGISTRY[i].lang;
+            i += 1;
+        }
+        out
+    };
+
+    fn info(self) -> &'static LangInfo {
+        REGISTRY
+            .iter()
+            .find(|row| row.lang == self)
+            .expect("every Language variant has a REGISTRY row")
+    }
 
     /// The BCP-47-ish tag used in `config.toml` and `FRESCO_LANG`.
     pub fn code(self) -> &'static str {
-        match self {
-            Language::System => "system",
-            Language::English => "en",
-            Language::ChineseSimplified => "zh-CN",
-            Language::Russian => "ru",
-        }
+        self.info().code
     }
 
     /// The name shown in the language menu.
@@ -84,14 +234,28 @@ impl Language {
     pub fn display_name(self) -> &'static str {
         match self {
             Language::System => tr("System"),
-            Language::English => "English",
-            Language::ChineseSimplified => "简体中文",
-            Language::Russian => "Русский",
+            other => other.info().endonym,
         }
     }
 
+    /// Case-insensitive so `FRESCO_LANG=pt-br` (or `PT-BR`) matches the
+    /// canonical `pt-BR` the same way a shell env var would be typed.
     fn from_code(code: &str) -> Option<Language> {
-        Language::ALL.iter().copied().find(|l| l.code() == code)
+        REGISTRY
+            .iter()
+            .find(|row| row.code.eq_ignore_ascii_case(code))
+            .map(|row| row.lang)
+    }
+
+    /// [`Language::from_code`], but an unrecognised code becomes `System`
+    /// instead of `None`. Used by [`crate::config`] to deserialize
+    /// `config.toml`, where a code this build has never heard of — a newer
+    /// Fresco's language, or a typo — must not fail the whole file.
+    pub(crate) fn from_code_lenient(code: &str) -> Language {
+        Language::from_code(code).unwrap_or_else(|| {
+            log::warn!("i18n: unknown language {code:?} in config.toml, falling back to System");
+            Language::System
+        })
     }
 
     /// The catalog to load, with `System` resolved against the desktop locale.
@@ -99,9 +263,8 @@ impl Language {
     fn resolve(self) -> Option<Language> {
         match self {
             Language::English => None,
-            Language::ChineseSimplified => Some(Language::ChineseSimplified),
-            Language::Russian => Some(Language::Russian),
             Language::System => detect_locale_language(),
+            other => Some(other),
         }
     }
 }
@@ -132,6 +295,21 @@ fn language_for_subtag(lang: &str) -> Option<Language> {
     match lang {
         "zh" => Some(Language::ChineseSimplified),
         "ru" => Some(Language::Russian),
+        "hi" => Some(Language::Hindi),
+        // `pt-BR` is the only Portuguese catalog: every Portuguese locale,
+        // including `pt_PT`, gets it rather than falling back to English.
+        "pt" => Some(Language::PortugueseBrazil),
+        "es" => Some(Language::Spanish),
+        "de" => Some(Language::German),
+        // "in" is the obsolete ISO 639 code for Indonesian, still seen in the
+        // wild (glibc shipped it as `in_ID` for years before `id_ID`).
+        "id" | "in" => Some(Language::Indonesian),
+        "fr" => Some(Language::French),
+        "vi" => Some(Language::Vietnamese),
+        "tr" => Some(Language::Turkish),
+        "ro" => Some(Language::Romanian),
+        "bn" => Some(Language::Bengali),
+        // Ukrainian is not Russian: deliberately not mapped to `ru`.
         _ => None,
     }
 }
@@ -149,13 +327,9 @@ fn detect_locale_language() -> Option<Language> {
 static CATALOG: OnceLock<Option<&'static HashMap<&'static str, &'static str>>> = OnceLock::new();
 
 /// Compiled-in catalog sources. Adding a language means adding a `Language`
-/// variant, a JSON file, and one line here.
+/// variant and one [`REGISTRY`] row.
 fn catalog_source(lang: Language) -> Option<&'static str> {
-    match lang {
-        Language::ChineseSimplified => Some(include_str!("../i18n/zh-CN.json")),
-        Language::Russian => Some(include_str!("../i18n/ru.json")),
-        _ => None,
-    }
+    lang.info().source
 }
 
 /// Parse a catalog once and leak it, so lookups can hand out `&'static str`.
@@ -563,7 +737,27 @@ mod tests {
             ("ru_UA.UTF-8", Some(Language::Russian)),
             ("ru", Some(Language::Russian)),
             ("ru-RU", Some(Language::Russian)),
+            ("hi_IN.UTF-8", Some(Language::Hindi)),
+            ("pt_BR.UTF-8", Some(Language::PortugueseBrazil)),
+            ("pt_PT", Some(Language::PortugueseBrazil)),
+            ("es_MX", Some(Language::Spanish)),
+            ("es_ES", Some(Language::Spanish)),
+            ("es_AR", Some(Language::Spanish)),
+            ("de_DE", Some(Language::German)),
+            ("id_ID", Some(Language::Indonesian)),
+            ("in_ID", Some(Language::Indonesian)),
+            ("fr_FR", Some(Language::French)),
+            ("fr_CA", Some(Language::French)),
+            ("vi_VN", Some(Language::Vietnamese)),
+            ("tr_TR", Some(Language::Turkish)),
+            ("ro_RO", Some(Language::Romanian)),
+            ("bn_BD", Some(Language::Bengali)),
+            ("bn_IN", Some(Language::Bengali)),
+            ("uk_UA", None),
+            ("ur_PK", None),
+            ("fil_PH", None),
             ("en_US.UTF-8", None),
+            ("en_US", None),
             ("C.UTF-8", None),
             ("", None),
         ] {
@@ -571,6 +765,22 @@ mod tests {
                 language_for_subtag(&locale_subtag(raw)),
                 want,
                 "locale {raw:?}"
+            );
+        }
+    }
+
+    /// Every `REGISTRY` row's `code` must match its variant's
+    /// `#[serde(rename)]` exactly — `code()` and config-file (de)serialization
+    /// must always agree on the same spelling.
+    #[test]
+    fn serde_rename_matches_code() {
+        for lang in Language::ALL {
+            let serialized = serde_json::to_string(&lang).unwrap();
+            assert_eq!(
+                serialized,
+                format!("{:?}", lang.code()),
+                "Language::{lang:?} serializes as {serialized}, but code() says {}",
+                lang.code()
             );
         }
     }

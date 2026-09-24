@@ -294,12 +294,12 @@ pub(crate) fn show_add_link_dialog(
                                     "kind": if library::is_video(&path) { "video" } else { "image" },
                                 }),
                             );
-                            let mut e = if library::is_video(&path) {
+                            let e = if library::is_video(&path) {
                                 library::LibraryEntry::new_video(path)
                             } else {
                                 library::LibraryEntry::new_image(path)
                             };
-                            e.generate_thumbnail();
+                            let id = e.id.clone();
                             let name = e.name.clone();
                             let idx = {
                                 let mut s = state.borrow_mut();
@@ -307,6 +307,11 @@ pub(crate) fn show_add_link_dialog(
                                 save_entries(&s.entries).ok();
                                 s.entries.len() - 1
                             };
+                            // Thumbnail shells out to ffmpeg; the editor we
+                            // land in below loads its preview from the
+                            // entry's path, not the thumbnail, so it doesn't
+                            // need to wait for this.
+                            super::window::spawn_thumbnail_batch(&state, vec![id]);
                             show_toast(
                                 &state,
                                 &tf!(

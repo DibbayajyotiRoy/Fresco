@@ -232,12 +232,16 @@ fn install(
                     };
                     e.name = item.title.clone();
                     e.catalog_id = Some(item.id.clone());
-                    e.generate_thumbnail();
+                    let id = e.id.clone();
                     let idx = {
                         let mut s = state.borrow_mut();
                         s.entries.push(e);
                         s.entries.len() - 1
                     };
+                    // Thumbnail shells out to ffmpeg; `apply_entry_by_idx`
+                    // applies from the entry's path, not its thumbnail, so it
+                    // doesn't need to wait for this.
+                    crate::gui::window::spawn_thumbnail_batch(&state, vec![id]);
                     crate::gui::window::apply_entry_by_idx(state.clone(), idx);
                     progress.set_visible(false);
                     btn.set_label(t!("Set ✓"));

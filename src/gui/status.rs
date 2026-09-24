@@ -1,14 +1,29 @@
 //! Live "now playing" status pill + pause/resume toggle, backed by
 //! `ipc::request(&Request::Status)`.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gtk4::prelude::*;
 use gtk4::{glib, glib::ControlFlow};
 
-use crate::ipc::{self, Request, StatusReply};
+use crate::ipc::{self, MonitorInfo, Request, StatusReply};
 use crate::{t, tf};
+
+thread_local! {
+    /// Last `monitors_info` this poll loop saw, so other GUI code (e.g. the
+    /// card menu's "move to display" list) can read connected displays
+    /// without its own blocking IPC round trip — see `cached_monitors`.
+    static LAST_MONITORS: RefCell<Vec<MonitorInfo>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Connected displays as of the last status poll. Empty before the first
+/// poll lands, or while the daemon isn't running. Never blocks: it's a plain
+/// read of state `poll_once` already fetched in the background.
+pub(crate) fn cached_monitors() -> Vec<MonitorInfo> {
+    LAST_MONITORS.with(|m| m.borrow().clone())
+}
 
 /// How often to poll the daemon while the window is open. A live status
 /// surface doesn't need sub-second freshness, and this keeps the background
@@ -120,11 +135,15 @@ fn poll_once(widgets: Rc<PillWidgets>) {
             return;
         };
         match result {
-            Ok(crate::ipc::Response::Status(status)) => apply_status(&widgets, &status),
+            Ok(crate::ipc::Response::Status(status)) => {
+                LAST_MONITORS.with(|m| *m.borrow_mut() = status.monitors_info.clone());
+                apply_status(&widgets, &status);
+            }
             Ok(_) => {}
             Err(e) => {
                 // Daemon not running — expected and common, not an error.
                 log::debug!("status poll: daemon unreachable: {e:#}");
+                LAST_MONITORS.with(|m| m.borrow_mut().clear());
                 apply_off(&widgets);
             }
         }

@@ -45,6 +45,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel showed four dark notches around it. The corners are transparent now,
   in the SVG and in all five PNG sizes. Thanks to
   [@hualet](https://github.com/hualet) (#19).
+- **Setting a wallpaper no longer freezes the window on slow machines**
+  (issue #22). "Set as wallpaper" — from a card, the menu, per-monitor
+  assignment, the editor, and quieter settings toggles — used to save,
+  wait on the daemon over IPC, and rebuild the renderers all on the GTK main
+  thread, so a slow apply (weak GPU decode, an N150-class CPU, a daemon
+  cold-starting) froze the whole window, static images included. That work
+  now runs on a background thread: the config is saved right away, an
+  "Applying…" toast appears only if it's still running 150ms later, and the
+  result — success, failure, or superseded by a faster click right behind
+  it — comes back without ever blocking the UI. Rapid clicks coalesce into
+  at most one apply in flight plus one queued behind it, so mashing "Set as
+  wallpaper" can no longer pile up IPC calls. On the daemon side, `Apply`
+  now replies before redecoding the (slow, full-size) overview frame GNOME
+  and other desktops show behind icons, instead of making the caller wait
+  on that too.
 
 ### Added
 - **`FRESCO_MPV_LOG=1` writes mpv's own log** to

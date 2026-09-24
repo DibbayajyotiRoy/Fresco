@@ -129,13 +129,18 @@ export function TR({
 
 export function TD({
   className,
+  title,
   children,
 }: {
   className?: string;
+  /** Native tooltip for truncated content — the cell itself, not a wrapping
+   *  span, so callers don't have to add one just to attach a title. */
+  title?: string;
   children?: React.ReactNode;
 }) {
   return (
     <td
+      title={title}
       className={cn(
         "border border-stone-200 px-2.5 py-1 align-middle first:border-l-0 last:border-r-0",
         className

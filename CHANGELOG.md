@@ -58,6 +58,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   full-screen window and re-announcing the order — the same pattern behind
   the Deepin fix above. The lower is now skipped whenever the wallpaper is
   already at the bottom of the stack.
+- **An unknown language in `config.toml` no longer resets the whole config.**
+  A code this build doesn't recognise — a newer Fresco's language, or a
+  hand-edited typo — used to fail parsing the entire file, and both binaries
+  load config with `unwrap_or_default()`, so every other setting was silently
+  reset along with it. It now falls back to `System` for that one field.
 
 - **The app icon no longer has black corners.** The rounded logo was exported
   onto an opaque black square, so every launcher that draws it on a light
@@ -73,6 +78,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mpv's log says that.
 - **A Russian UI translation** (issue #20). Select it under Settings →
   Language, or follow a `ru`/`ru_RU`/`ru_UA` desktop locale automatically.
+- **UI translations for Hindi, Portuguese (Brazil), Spanish, German,
+  Indonesian, French, Vietnamese, Turkish, Romanian and Bengali**, chosen by
+  where Fresco's users are. Select one under Settings → Language, or follow
+  the matching desktop locale automatically.
 
 ## [1.1.42] — Unreleased
 

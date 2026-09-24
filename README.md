@@ -36,7 +36,7 @@ Fresco is a free, open-source live wallpaper app for Linux. It sets videos, GIFs
 | **Built with** | Rust, GTK4 / libadwaita, libmpv |
 | **Install** | Deepin App Store, `.deb` package, or one-line script |
 | **Users** | 1,000+ worldwide |
-| **Latest version** | 1.1.43 |
+| **Latest version** | 1.1.44 |
 
 ## Install
 

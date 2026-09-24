@@ -3835,10 +3835,12 @@ mod tests {
     /// output that had never once come up, however many different ways each
     /// attempt actually failed — the renderer never got a chance to overwrite
     /// it because only the "alive"/"already had a player" paths updated it.
-    /// A real spawn attempt must now overwrite it with what that attempt
-    /// actually found.
+    /// `last_down` keeps the *mode* (never started / dead / frozen) so the
+    /// give-up report can still tell "never came up" from "ran, then died";
+    /// what the latest attempt actually hit rides in `last_spawn_fail`, which
+    /// the report sends as `cause=`.
     #[test]
-    fn last_down_reflects_the_latest_spawn_failure() {
+    fn spawn_failure_cause_is_kept_apart_from_the_mode() {
         let _guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let script = write_dying_fake_mpvpaper("last-down", "Failed to initialize EGL, oops");
         std::env::set_var("FRESCO_MPVPAPER", &script);
@@ -3859,10 +3861,11 @@ mod tests {
         );
         assert_eq!(o.last_down, "never_started");
         o.supervise(false, 5, true);
+        assert_eq!(o.last_down, "never_started", "the mode is kept");
         assert_eq!(
-            o.last_down,
-            crate::daemon::mpvpaper::EarlyExit::Egl.code(),
-            "a real spawn attempt must overwrite the generic 'never_started'"
+            o.last_spawn_fail,
+            Some(crate::daemon::mpvpaper::EarlyExit::Egl.code()),
+            "the cause is what this attempt actually hit"
         );
 
         std::env::remove_var("FRESCO_MPVPAPER");

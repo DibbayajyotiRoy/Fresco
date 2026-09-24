@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

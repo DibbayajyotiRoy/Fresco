@@ -169,6 +169,19 @@ export type DailyCountry = {
   pings: number;
 };
 
+/**
+ * One row per install per calendar day it checked in — the check-in history
+ * `installs` itself does not keep (its first_seen/last_seen are overwritten
+ * on every heartbeat). Written by `register_install` /
+ * `register_install_minimal`; see supabase/schema.sql and
+ * supabase/migrations/2026-09-24_install_days.sql.
+ */
+export type InstallDay = {
+  install_id: string;
+  /** ISO date, no time (e.g. "2026-09-24"). */
+  day: string;
+};
+
 /** One anonymous support thread, as the maintainer sees it. */
 export type SupportThread = {
   /** Random uuid the client generated. Not the telemetry install id, and not

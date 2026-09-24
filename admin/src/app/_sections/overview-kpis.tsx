@@ -1,6 +1,32 @@
 import { StatCard } from "@/components/stat-card";
-import { getFeedback, getReleases, getRepo } from "@/lib/data";
+import { getFeedback, getInstalls, getReleases, getRepo } from "@/lib/data";
+import { lifecycleCounts } from "@/lib/install-analytics";
 import { formatNumber, formatRelative } from "@/lib/format";
+
+/**
+ * Real user counts — not downloads. `DownloadsCard` below counts GitHub
+ * asset fetches, which over- and under-count for the same reasons the Usage
+ * page documents (the installer double-fetches; nobody who built from source
+ * shows up at all). This one counts actual installs that have checked in,
+ * split by whether they still are. See /users for the full breakdown.
+ */
+export async function UsersCard() {
+  const installsRes = await getInstalls();
+  const installs = installsRes.ok ? installsRes.data : [];
+  const counts = lifecycleCounts(installs, Date.now());
+
+  return (
+    <StatCard
+      label="Users"
+      value={installsRes.ok ? formatNumber(counts.total) : "—"}
+      hint={
+        installsRes.ok
+          ? `${formatNumber(counts.active)} active · ${formatNumber(counts.lapsed)} lapsed`
+          : installsRes.error
+      }
+    />
+  );
+}
 
 /**
  * The KPI strip, split by source rather than by tile.
@@ -92,6 +118,40 @@ export async function FeedbackCards() {
         hint="up / (up + down)"
       />
     </>
+  );
+}
+
+/**
+ * "Installs per download" — how many GitHub asset downloads it takes to
+ * produce one distinct install that actually checked in. Exists so nobody
+ * reads the Downloads figure above as a user count: the installer script
+ * re-downloads on every run (a reinstall, a retry, a curious re-run), so
+ * downloads are always >= installs, often by a wide margin, and the ratio
+ * says exactly how wide rather than leaving the two side by side to be
+ * silently conflated. A ratio well under 1 install per download is expected
+ * and not a problem by itself.
+ */
+export async function DownloadRatioCard() {
+  const [releasesRes, installsRes] = await Promise.all([getReleases(), getInstalls()]);
+  if (!releasesRes.ok) {
+    return <StatCard label="Installs / download" value="—" hint={releasesRes.error} />;
+  }
+  if (!installsRes.ok) {
+    return <StatCard label="Installs / download" value="—" hint={installsRes.error} />;
+  }
+  const totalDownloads = releasesRes.data.reduce((s, r) => s + r.downloads, 0);
+  const installs = installsRes.data.length;
+  const ratio = totalDownloads > 0 ? installs / totalDownloads : null;
+  return (
+    <StatCard
+      label="Installs / download"
+      value={ratio === null ? "—" : ratio.toFixed(2)}
+      hint={
+        totalDownloads > 0
+          ? `${formatNumber(installs)} installs / ${formatNumber(totalDownloads)} downloads`
+          : "no downloads recorded"
+      }
+    />
   );
 }
 

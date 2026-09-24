@@ -2443,6 +2443,10 @@ struct WlOutput {
     /// is due, if this output has given up. `None` while playing normally or
     /// while a give-up is still waiting to be scheduled.
     next_rearm: Option<Instant>,
+    /// Re-arms scheduled since the last Apply; doubles the wait each time so
+    /// an output that can't recover isn't restarted every five minutes all
+    /// session long.
+    rearms: u32,
     /// Bumped on every [`WlOutput::respawn`]. A fresh mpv carries no overlays,
     /// so the widget engine must re-push after one — but the supervisor has
     /// several heal paths and threading a callback through each is how one gets
@@ -2509,6 +2513,7 @@ impl WlOutput {
             last_spawn_detail: None,
             giveup_reported: false,
             next_rearm: None,
+            rearms: 0,
             generation: 0,
         }
     }
@@ -2638,6 +2643,7 @@ impl WlOutput {
             self.restarts = 0;
             self.static_fallback = false;
             self.next_rearm = None;
+            self.rearms = 0;
             self.respawn(paused, false);
         }
     }
@@ -2886,16 +2892,6 @@ impl WlOutput {
                 self.restarts
             );
             self.respawn(paused, false);
-            // An attempt just ran, so its outcome is now the freshest thing
-            // known about this output — more specific than the "dead"/
-            // "frozen"/"never_started" summary above, and it is what
-            // `renderer_giveup` should blame once the budget runs out. Left
-            // alone, `last_down` stayed "never_started" through every retry
-            // of an output that had never once come up, however many
-            // different ways each attempt actually failed.
-            if let Some(fail) = self.last_spawn_fail {
-                self.last_down = fail;
-            }
             if self.last_spawn_fail == Some(COMPOSITOR_UNREACHABLE) {
                 // mpvpaper could not even open the Wayland display: the
                 // session is ending, or the compositor restarted on a new
@@ -2972,7 +2968,20 @@ impl WlOutput {
             }
             // Try again later rather than staying on the static frame for
             // good — see [`RENDERER_REARM_DELAY`].
-            self.next_rearm = Some(Instant::now() + RENDERER_REARM_DELAY);
+            // Causes a retry can't fix (a broken install, a compositor
+            // without layer-shell, a file mpv can't load) are not re-armed at
+            // all; the rest back off 5, 10, 20, 40, then 80 minutes.
+            let permanent = self.last_spawn_fail.is_some_and(|c| {
+                c == MPVPAPER_MISSING
+                    || c.ends_with(":linker")
+                    || c.ends_with(":no_layer_shell")
+                    || c.ends_with(":load_failed")
+            });
+            self.next_rearm = (!permanent).then(|| {
+                let delay = RENDERER_REARM_DELAY * 2u32.pow(self.rearms.min(4));
+                self.rearms += 1;
+                Instant::now() + delay
+            });
             self.respawn(true, true);
         }
         // restarts > max → given up; do nothing (anti-flap). Error stays in Status.

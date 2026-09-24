@@ -60,20 +60,49 @@ const TAIL_LINES: usize = 40;
 /// logging on stdout can never fill the pipe and stall the renderer. Generic
 /// over `Read` so the same function drives both `ChildStdout` and
 /// `ChildStderr` reader threads.
-fn drain<R: Read>(connector: String, stream: &'static str, pipe: R, tail: OutputTail) {
-    for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-        let line = line.trim_end().to_string();
-        if line.is_empty() {
-            continue;
+fn drain<R: Read>(connector: String, stream: &'static str, mut pipe: R, tail: OutputTail) {
+    // Raw bytes, not `BufRead::lines()`: stdout carries mpv's info log, which
+    // echoes file names and metadata tags, and `lines()` ends at the first
+    // line that isn't UTF-8 — which would stop draining for good, let the pipe
+    // fill, and freeze the renderer on its next log write. Lines are decoded
+    // lossily, and one without a newline is capped at [`MAX_LINE`] bytes so a
+    // runaway line can't grow memory without bound.
+    let mut chunk = [0u8; 8192];
+    let mut line: Vec<u8> = Vec::new();
+    let push = |line: &mut Vec<u8>| {
+        let text = String::from_utf8_lossy(line).trim_end().to_string();
+        line.clear();
+        if text.is_empty() {
+            return;
         }
-        log::debug!("[{connector}] mpvpaper {stream}: {line}");
+        log::debug!("[{connector}] mpvpaper {stream}: {text}");
         let mut t = tail.lock().unwrap_or_else(|e| e.into_inner());
         if t.len() >= TAIL_LINES {
             t.pop_front();
         }
-        t.push_back(line);
+        t.push_back(text);
+    };
+    loop {
+        let n = match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        for &b in &chunk[..n] {
+            if b == b'\n' {
+                push(&mut line);
+            } else if line.len() < MAX_LINE {
+                line.push(b);
+            }
+        }
     }
+    push(&mut line);
 }
+
+/// Longest line kept from the renderer's output; the rest of an over-long
+/// line is read and discarded so the pipe keeps draining.
+const MAX_LINE: usize = 4096;
 
 fn tail_text(tail: &OutputTail) -> String {
     tail.lock()
@@ -231,6 +260,19 @@ const RULES: &[(&str, EarlyExit, &str)] = &[
         "mpv_init_ctx",
     ),
     ("Failed to load file", EarlyExit::LoadFailed, "load_failed"),
+    // mpv's own words when the file itself is the problem. mpvpaper then
+    // exits 0 on mpv's shutdown, so without these a corrupt or vanished file
+    // would read as a clean exit rather than a load failure.
+    (
+        "Errors when loading file",
+        EarlyExit::LoadFailed,
+        "load_errors",
+    ),
+    (
+        "Failed to recognize file format",
+        EarlyExit::LoadFailed,
+        "load_format",
+    ),
     ("Failed to get EGL display", EarlyExit::Egl, "egl_display"),
     ("Failed to initialize EGL", EarlyExit::Egl, "egl_init"),
     (
@@ -249,6 +291,17 @@ const RULES: &[(&str, EarlyExit, &str)] = &[
         "egl_current",
     ),
     ("Failed to load OpenGL", EarlyExit::Egl, "egl_opengl"),
+    (
+        "Failed to create EGL surface",
+        EarlyExit::Egl,
+        "egl_surface",
+    ),
+    (
+        "Failed to make output surface current",
+        EarlyExit::Egl,
+        "egl_surface_current",
+    ),
+    ("Failed to swap egl buffers", EarlyExit::Egl, "egl_swap"),
 ];
 
 /// The rule that fired for an already-ANSI-stripped exit, if any — the shared
@@ -1119,6 +1172,47 @@ impl MpvIpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drain_survives_non_utf8_output_and_keeps_reading() {
+        // A file name or tag that isn't UTF-8 must not end the drain: a
+        // stopped reader lets the pipe fill and freezes the renderer.
+        let tail: OutputTail = Arc::new(Mutex::new(VecDeque::new()));
+        let mut bytes = b"first\n\xff\xfe broken\n".to_vec();
+        bytes.extend(vec![b'x'; MAX_LINE * 3]);
+        bytes.extend(b"\nlast line\n");
+        drain(
+            "T-1".into(),
+            "stdout",
+            std::io::Cursor::new(bytes),
+            tail.clone(),
+        );
+        let t = tail.lock().unwrap();
+        assert_eq!(t.front().map(String::as_str), Some("first"));
+        assert!(t[1].contains("broken"), "{:?}", t[1]);
+        assert_eq!(t[2].len(), MAX_LINE, "over-long line is capped");
+        assert_eq!(t.back().map(String::as_str), Some("last line"));
+    }
+
+    #[test]
+    fn mpv_load_errors_are_not_a_clean_exit() {
+        use std::os::unix::process::ExitStatusExt;
+        let ok = std::process::ExitStatus::from_raw(0);
+        for msg in [
+            "[cplayer] Errors when loading file \"x\".",
+            "[ffmpeg/demuxer] Failed to recognize file format.",
+        ] {
+            assert_eq!(
+                classify_early_exit(&ok, msg),
+                EarlyExit::LoadFailed,
+                "{msg}"
+            );
+        }
+        assert_eq!(
+            classify_early_exit(&ok, "Failed to create EGL surface for LVDS-1"),
+            EarlyExit::Egl
+        );
+    }
 
     #[test]
     fn muted_wallpaper_drops_audio_clock() {

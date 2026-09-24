@@ -749,7 +749,7 @@ impl IconPeek {
         root: Window,
         windows: &[Window],
     ) -> Option<bool> {
-        let stack = client_list_stacking(conn, atoms, root);
+        let stack = x11win::stacking_order(conn, atoms, root);
         if stack.is_empty() {
             return None;
         }
@@ -794,45 +794,10 @@ fn dde_stack_position(stack: &[Window], ours: &[Window], dde: &[Window]) -> Opti
     Some(dde_pos.iter().any(|&p| p > lowest_ours))
 }
 
-/// `_NET_CLIENT_LIST_STACKING` on `root`, bottom-most window first. Empty when
-/// the property cannot be read.
-fn client_list_stacking<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Vec<Window> {
-    // long_length is in 4-byte units and must stay well clear of the server's
-    // overflow guard — u32::MAX makes Xorg reject the request outright, which
-    // silently defeated the whole scan. 4096 windows is far past any real
-    // desktop.
-    let reply = match conn
-        .get_property(
-            false,
-            root,
-            atoms._NET_CLIENT_LIST_STACKING,
-            AtomEnum::WINDOW,
-            0,
-            4096,
-        )
-        .map_err(|e| format!("{e:?}"))
-        .and_then(|c| c.reply().map_err(|e| format!("{e:?}")))
-    {
-        Ok(r) => r,
-        Err(e) => {
-            log::warn!("DDE: could not read _NET_CLIENT_LIST_STACKING: {e}");
-            return Vec::new();
-        }
-    };
-    let Some(values) = reply.value32() else {
-        log::warn!(
-            "DDE: _NET_CLIENT_LIST_STACKING has unexpected format {}",
-            reply.format
-        );
-        return Vec::new();
-    };
-    values.collect()
-}
-
 /// Every client window whose WM_CLASS marks it as DDE's desktop — one per
 /// screen on a multi-monitor session.
 fn find_dde_desktop_windows<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Vec<Window> {
-    let clients = client_list_stacking(conn, atoms, root);
+    let clients = x11win::stacking_order(conn, atoms, root);
     log::debug!("DDE: scanning {} client windows", clients.len());
     let mut found = Vec::new();
     for w in clients {

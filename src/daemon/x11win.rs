@@ -266,6 +266,49 @@ pub fn restack<C: Connection>(conn: &C, window: Window, kind: WindowKind) -> Res
     }
 }
 
+/// `_NET_CLIENT_LIST_STACKING` on `root`, bottom-most window first. Empty
+/// whenever the property can't be read or doesn't say what we expect — this
+/// runs on the daemon's 2s stacking pass, so it never logs.
+pub fn stacking_order<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> Vec<Window> {
+    // long_length is in 4-byte units and must stay well clear of the server's
+    // overflow guard — u32::MAX makes Xorg reject the request outright, which
+    // silently defeated the whole scan. 4096 windows is far past any real
+    // desktop.
+    let Ok(reply) = conn
+        .get_property(
+            false,
+            root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            0,
+            4096,
+        )
+        .map_err(|_| ())
+        .and_then(|c| c.reply().map_err(|_| ()))
+    else {
+        return Vec::new();
+    };
+    let Some(values) = reply.value32() else {
+        return Vec::new();
+    };
+    values.collect()
+}
+
+/// Whether our windows already sit at the very bottom of `stack` — the
+/// bottom-most `ours.len()` slots, in any order. `None` when that can't be
+/// told: `ours` is empty, or any of our windows is missing from `stack`
+/// (unreadable property, or a window not yet mapped).
+pub fn at_bottom(stack: &[Window], ours: &[Window]) -> Option<bool> {
+    if ours.is_empty() {
+        return None;
+    }
+    let mut positions = Vec::with_capacity(ours.len());
+    for w in ours {
+        positions.push(stack.iter().position(|s| s == w)?);
+    }
+    Some(positions.iter().all(|&p| p < ours.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +379,26 @@ mod tests {
                 a._NET_WM_STATE_SKIP_PAGER,
             ]
         );
+    }
+
+    #[test]
+    fn at_bottom_true_when_ours_occupy_the_lowest_slots() {
+        assert_eq!(at_bottom(&[10, 11, 50, 60], &[11, 10]), Some(true));
+    }
+
+    #[test]
+    fn at_bottom_false_when_ours_is_not_lowest() {
+        assert_eq!(at_bottom(&[50, 10, 60], &[10]), Some(false));
+    }
+
+    #[test]
+    fn at_bottom_none_when_ours_is_empty() {
+        assert_eq!(at_bottom(&[], &[10]), None);
+        assert_eq!(at_bottom(&[10], &[]), None);
+    }
+
+    #[test]
+    fn at_bottom_none_when_a_window_is_missing_from_the_stack() {
+        assert_eq!(at_bottom(&[10, 50], &[10, 11]), None);
     }
 }

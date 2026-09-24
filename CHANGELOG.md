@@ -39,6 +39,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   desktop, and landing in the middle of a window-switch animation it pushed
   CPU up and dropped frames. The raise is now sent only when DDE's desktop is
   actually above the wallpaper, or when the stacking order can't be read.
+- **Switching windows on other X11 desktops no longer stutters either**
+  (issue #17). The same periodic pass lowers the wallpaper back to the bottom
+  every two seconds even where nothing raised it, and on a WM-managed window
+  each lower is a ConfigureRequest the window manager answers by restacking a
+  full-screen window and re-announcing the order — the same pattern behind
+  the Deepin fix above. The lower is now skipped whenever the wallpaper is
+  already at the bottom of the stack.
 
 - **The app icon no longer has black corners.** The rounded logo was exported
   onto an opaque black square, so every launcher that draws it on a light

@@ -1137,6 +1137,24 @@ where
     Ok(normalise_hex(&raw).unwrap_or_else(default_widget_colour))
 }
 
+/// Read [`crate::i18n::Language`] leniently: a code this build does not
+/// recognise becomes `System` rather than failing the whole file.
+///
+/// `Language`'s own `Deserialize` (derived from its `#[serde(rename)]`s) is
+/// strict, which is right for everything else — but here it means a config
+/// written by a newer Fresco, or a config.toml a user hand-edited with a
+/// typo, takes down `toml::from_str` for the *entire* file, and both binaries
+/// respond to that with `Config::load().unwrap_or_default()`, silently
+/// resetting every other setting along with it. One unknown language should
+/// cost the user their language setting, not their whole config.
+fn de_language<'de, D>(d: D) -> std::result::Result<crate::i18n::Language, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = String::deserialize(d)?;
+    Ok(crate::i18n::Language::from_code_lenient(&raw))
+}
+
 /// Read an optional `#RRGGBB` colour. Unusable input becomes `None` — for
 /// [`Lyrics::colour`] that means "keep the preset's own colour", which is a
 /// better answer to a typo than a white lyric.
@@ -1436,7 +1454,7 @@ pub struct Config {
     /// is: the desktop's own setting is the right default but the wrong
     /// mandate. Running an English locale while wanting a Chinese UI is a
     /// common, deliberate setup, so the inference needs an override.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_language")]
     pub language: crate::i18n::Language,
     /// UI accent color.
     #[serde(default)]
@@ -2852,6 +2870,25 @@ opacity = 200
         std::fs::write(&saved, text).unwrap();
         let back = Config::load_from(&saved).unwrap();
         assert!(!back.widgets.unwrap().visualizer.enabled);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unknown_language_falls_back_to_system_instead_of_failing_the_whole_file() {
+        // Same throwaway-directory idiom as `save_load_file`, so this test
+        // needs no dependency the crate does not already have.
+        let dir = std::env::temp_dir().join(format!("fresco-lang-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        // A language code this build has never heard of (a newer Fresco's
+        // language, or a hand-edited typo) must not take the rest of the file
+        // down with it — that is the whole point of `de_language`.
+        std::fs::write(&path, "language = \"xx\"\nlast_seen_version = \"1.2.3\"\n").unwrap();
+        let cfg = Config::load_from(&path).unwrap();
+        assert_eq!(cfg.language, crate::i18n::Language::System);
+        assert_eq!(cfg.last_seen_version, "1.2.3", "other fields still parse");
+
         std::fs::remove_dir_all(&dir).ok();
     }
 

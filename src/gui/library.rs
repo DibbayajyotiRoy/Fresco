@@ -1813,6 +1813,19 @@ mod tests {
         assert!(made.iter().all(|e| e.added > 0));
     }
 
+    /// Regression test for #18: a GIF is a looping video, not a still image,
+    /// case-insensitively — see `is_video`/`is_image` above (fixed in 4db19c5).
+    #[test]
+    fn gif_imports_as_looping_video_not_still() {
+        for p in ["/m/a.gif", "/m/b.GIF"] {
+            let p = Path::new(p);
+            assert!(is_video(p));
+            assert!(!is_image(p));
+        }
+        let made = entries_for_each(vec![PathBuf::from("/m/anim.gif")]);
+        assert_eq!(made[0].kind, Kind::Video);
+    }
+
     #[test]
     fn folder_media_lists_sorted_and_respects_recursion() {
         let dir = std::env::temp_dir().join(format!("fresco-folder-media-{}", make_id()));

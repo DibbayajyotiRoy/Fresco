@@ -10,6 +10,7 @@ use super::theme;
 use super::{
     daemon_ctl,
     library::{self, load_entries, save_entries, LibraryEntry},
+    status,
 };
 use crate::{
     autostart,
@@ -1070,13 +1071,13 @@ fn build_menu_popover(
             {
                 let state2 = state.clone();
                 move |active| {
-                    {
+                    let config = {
                         let mut s = state2.borrow_mut();
                         s.config.schedule_paused = !active;
                         s.config.save().ok();
-                    }
-                    let s = state2.borrow();
-                    daemon_ctl::ensure_daemon_and_apply(&s.config).ok();
+                        s.config.clone()
+                    };
+                    daemon_ctl::apply_async(&config, |_| {});
                 }
             },
         ));
@@ -1117,16 +1118,16 @@ fn build_menu_popover(
         {
             let state2 = state.clone();
             move |active| {
-                {
+                let config = {
                     let mut s = state2.borrow_mut();
                     s.config.browser_bridge = active;
                     s.config.save().ok();
-                }
+                    s.config.clone()
+                };
                 // The daemon binds the bridge port at startup only, so make
                 // sure it's running with the new setting (enable needs a live
                 // daemon; disable is honored per-request either way).
-                let s = state2.borrow();
-                daemon_ctl::ensure_daemon_and_apply(&s.config).ok();
+                daemon_ctl::apply_async(&config, |_| {});
             }
         },
     );
@@ -1464,7 +1465,7 @@ fn choice_menu<T: Clone + PartialEq + 'static>(
         lbl.set_halign(gtk4::Align::Start);
         lbl.set_hexpand(true);
         lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        let check = gtk4::Image::from_icon_name("emblem-ok-symbolic");
+        let check = gtk4::Image::from_icon_name("object-select-symbolic");
         check.set_visible(value == current);
         row.append(&lbl);
         row.append(&check);
@@ -2158,7 +2159,13 @@ fn build_library_card(
     {
         let state_c = state.clone();
         let stack_c = stack.clone();
+        let overlay_c = overlay.clone();
         click.connect_released(move |_, n_press, _, _| {
+            // Inline rename editor is up on this card (#21) — don't let the
+            // click fall through to apply/open underneath it.
+            if overlay_c.has_css_class("renaming") {
+                return;
+            }
             if n_press == 1 {
                 apply_entry_by_idx(state_c.clone(), idx);
             } else if n_press == 2 {
@@ -2177,6 +2184,9 @@ fn build_library_card(
         let stack_c = stack.clone();
         let overlay_c = overlay.clone();
         rclick.connect_pressed(move |_, _, x, y| {
+            if overlay_c.has_css_class("renaming") {
+                return;
+            }
             show_card_menu(
                 &overlay_c,
                 state_c.clone(),
@@ -2728,9 +2738,15 @@ fn stop_wallpaper(state: &Rc<RefCell<AppState>>) {
         s.config.monitors.clear();
         s.config.save().ok();
     }
-    if crate::ipc::daemon_alive() {
-        let _ = crate::ipc::request(&crate::ipc::Request::Stop);
-    }
+    // Fire-and-forget, like the status pill's pause/resume: config already
+    // says "off" on disk and callers already update the UI optimistically
+    // (toast + refresh), so there's nothing worth blocking the GTK thread on
+    // here. Its own queue, not the apply queue — see `daemon_ctl::stop_async`.
+    daemon_ctl::stop_async(|outcome| {
+        if let Err(e) = outcome.result {
+            log::warn!("stop request failed: {e}");
+        }
+    });
 }
 
 fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
@@ -2958,71 +2974,150 @@ fn confirm_remove_selected(
     dialog.present();
 }
 
-/// Small inline popover to rename a library entry.
+/// Trims `input` and hands back the new name to apply, or `None` when there
+/// is nothing to do — blank input, or unchanged from `current` once both are
+/// trimmed. Shared by the card and folder rename UIs so "is this rename worth
+/// doing" is answered in exactly one place.
+fn normalized_rename(current: &str, input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed == current.trim() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Applies a rename by entry id — not index, since the grid this was opened
+/// from may have been rebuilt (a refresh, a filter change) by the time the
+/// user confirms. Returns whether anything actually changed.
+///
+/// The refresh is deferred to the next idle turn rather than run inline:
+/// this is called from `Entry::activate` while that signal is still firing,
+/// and `populate_library` rebuilding the grid underneath it would tear down
+/// the very overlay/controllers that called us (#21).
+fn commit_rename(state: &Rc<RefCell<AppState>>, id: &str, input: &str) -> bool {
+    let changed = {
+        let mut s = state.borrow_mut();
+        let Some(entry) = s.entries.iter_mut().find(|e| e.id == id) else {
+            return false;
+        };
+        match normalized_rename(&entry.name, input) {
+            Some(name) => {
+                entry.name = name;
+                save_entries(&s.entries).ok();
+                true
+            }
+            None => false,
+        }
+    };
+    if changed {
+        let refresh = state.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            glib::idle_add_local_once(move || r());
+        }
+    }
+    changed
+}
+
+/// Inline rename editor for a library card (#21). This is an overlay layer
+/// added straight onto the card — not a popover — precisely because a
+/// popover's autohide grabs the pointer: clicking an IME candidate window
+/// (fcitx5/ibus, a separate client) then reads as "outside" and silently
+/// dismisses it, discarding whatever was typed. An overlay has no grab, so
+/// nothing closes it but the buttons below and Esc.
 fn rename_entry(parent: &gtk4::Overlay, state: Rc<RefCell<AppState>>, idx: usize) {
-    let current = state
+    let Some((id, current)) = state
         .borrow()
         .entries
         .get(idx)
-        .map(|e| e.name.clone())
-        .unwrap_or_default();
+        .map(|e| (e.id.clone(), e.name.clone()))
+    else {
+        return;
+    };
 
-    let pop = gtk4::Popover::new();
-    pop.set_parent(parent);
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    row.set_margin_top(6);
-    row.set_margin_bottom(6);
-    row.set_margin_start(6);
-    row.set_margin_end(6);
+    row.add_css_class("osd");
+    row.add_css_class("wp-rename");
+    row.set_valign(gtk4::Align::Center);
+    row.set_margin_top(8);
+    row.set_margin_bottom(8);
+    row.set_margin_start(8);
+    row.set_margin_end(8);
 
     let entry = gtk4::Entry::new();
     entry.set_text(&current);
+    entry.select_region(0, -1);
     entry.set_hexpand(true);
-    let save = gtk4::Button::from_icon_name("emblem-ok-symbolic");
-    save.add_css_class("suggested-action");
+
+    // `object-select-symbolic` is bundled with libgtk itself. The checkmark
+    // icon this replaced only ships in the Adwaita icon theme, so a theme
+    // without it (deepin's, notably) rendered this as the image-missing
+    // slash (#21).
+    let confirm = gtk4::Button::from_icon_name("object-select-symbolic");
+    confirm.add_css_class("suggested-action");
+    confirm.set_tooltip_text(Some(t!("Rename…")));
+    confirm.update_property(&[gtk4::accessible::Property::Label(t!("Rename…"))]);
+
+    let cancel = gtk4::Button::from_icon_name("window-close-symbolic");
+    cancel.add_css_class("flat");
+    cancel.set_tooltip_text(Some(t!("Cancel")));
+    cancel.update_property(&[gtk4::accessible::Property::Label(t!("Cancel"))]);
+
     row.append(&entry);
-    row.append(&save);
-    pop.set_child(Some(&row));
+    row.append(&confirm);
+    row.append(&cancel);
 
-    {
-        let state = state.clone();
-        let entry = entry.clone();
-        let pop = pop.clone();
-        save.connect_clicked(move |_| {
-            commit_rename(&state, idx, &entry.text());
-            pop.popdown();
-        });
-    }
-    {
-        let state = state.clone();
-        let pop = pop.clone();
-        entry.connect_activate(move |e| {
-            commit_rename(&state, idx, &e.text());
-            pop.popdown();
-        });
-    }
-
-    pop.connect_closed(|p| p.unparent());
-    pop.popup();
+    parent.add_overlay(&row);
+    parent.add_css_class("renaming");
     entry.grab_focus();
-}
 
-fn commit_rename(state: &Rc<RefCell<AppState>>, idx: usize, name: &str) {
-    let name = name.trim();
-    if name.is_empty() {
-        return;
+    // Every way out — commit, cancel, Esc — funnels through here so the
+    // overlay is torn down exactly once no matter which fires first.
+    let done = Rc::new(Cell::new(false));
+    let finish: Rc<dyn Fn(bool)> = {
+        let parent = parent.clone();
+        let row = row.clone();
+        let entry = entry.clone();
+        let state = state.clone();
+        Rc::new(move |commit: bool| {
+            if done.replace(true) {
+                return;
+            }
+            parent.remove_css_class("renaming");
+            parent.remove_overlay(&row);
+            if commit {
+                commit_rename(&state, &id, &entry.text());
+            }
+        })
+    };
+
+    {
+        let finish = finish.clone();
+        entry.connect_activate(move |_| finish(true));
     }
     {
-        let mut s = state.borrow_mut();
-        if let Some(e) = s.entries.get_mut(idx) {
-            e.name = name.to_string();
+        let finish = finish.clone();
+        confirm.connect_clicked(move |_| finish(true));
+    }
+    {
+        let finish = finish.clone();
+        cancel.connect_clicked(move |_| finish(false));
+    }
+
+    // Left at the default (bubble) phase deliberately: the input method gets
+    // first look at Esc, so dismissing an open IME candidate list takes one
+    // Esc and only a second one closes the editor, rather than Esc always
+    // killing the editor mid-composition.
+    let keys = gtk4::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk4::gdk::Key::Escape {
+            finish(false);
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
         }
-        save_entries(&s.entries).ok();
-    }
-    let refresh = state.borrow().refresh.clone();
-    if let Some(r) = refresh {
-        r();
-    }
+    });
+    entry.add_controller(keys);
 }
 
 // ─── Folders (collections) ───────────────────────────────────────────────────
@@ -3266,8 +3361,11 @@ fn show_collections_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<Ap
     dialog.present();
 }
 
-/// Inline rename prompt for a folder — the same popover shape as
-/// [`rename_entry`], parented to the pencil button that opened it.
+/// Inline rename prompt for a folder, parented to the pencil button that
+/// opened it. Folders are edited one at a time from a settings-style list
+/// rather than a hovered card, so the popover-grab issues that pushed
+/// [`rename_entry`] off popovers (#21) don't apply here — this one stays as
+/// it was.
 fn rename_collection_popover(
     anchor: &gtk4::Button,
     state: Rc<RefCell<AppState>>,
@@ -3285,20 +3383,25 @@ fn rename_collection_popover(
     let entry = gtk4::Entry::new();
     entry.set_text(current);
     entry.set_hexpand(true);
-    let save = gtk4::Button::from_icon_name("emblem-ok-symbolic");
+    let save = gtk4::Button::from_icon_name("object-select-symbolic");
     save.add_css_class("suggested-action");
     row.append(&entry);
     row.append(&save);
     pop.set_child(Some(&row));
 
+    let current = current.to_string();
     let commit = {
         let state = state.clone();
         let id = id.clone();
         let after = after.clone();
         Rc::new(move |text: String| {
+            // Skip the save+refresh entirely when nothing actually changed.
+            let Some(name) = normalized_rename(&current, &text) else {
+                return;
+            };
             {
                 let mut s = state.borrow_mut();
-                if !library::rename_collection(&mut s.collections, &id, &text) {
+                if !library::rename_collection(&mut s.collections, &id, &name) {
                     return;
                 }
                 library::save_collections(&s.collections).ok();
@@ -3743,7 +3846,7 @@ fn import_individually(state: &Rc<RefCell<AppState>>, paths: Vec<PathBuf>) -> (u
 /// One `generate_thumbnail` is an ffmpeg process; fifty of them in a row on the
 /// main loop is a frozen window for the length of a folder import. Mirrors
 /// `spawn_metadata_probe`: one worker thread, one save, one redraw.
-fn spawn_thumbnail_batch(state: &Rc<RefCell<AppState>>, ids: Vec<String>) {
+pub(crate) fn spawn_thumbnail_batch(state: &Rc<RefCell<AppState>>, ids: Vec<String>) {
     let pending: Vec<LibraryEntry> = {
         let s = state.borrow();
         s.entries
@@ -3997,8 +4100,8 @@ fn show_folder_import_choice(
 /// The pre-1.2 "Add folder" outcome: one folder-backed slideshow, then the
 /// editor. Unchanged behaviour, now reached through a choice.
 fn create_folder_slideshow(state: &Rc<RefCell<AppState>>, stack: &gtk4::Stack, folder: PathBuf) {
-    let mut entry = library::LibraryEntry::new_slideshow(folder);
-    entry.generate_thumbnail();
+    let entry = library::LibraryEntry::new_slideshow(folder);
+    let id = entry.id.clone();
     {
         let mut s = state.borrow_mut();
         library::push_entry(&mut s.entries, entry);
@@ -4007,12 +4110,15 @@ fn create_folder_slideshow(state: &Rc<RefCell<AppState>>, stack: &gtk4::Stack, f
         s.editing_idx = Some(idx);
         save_entries(&s.entries).ok();
     }
+    // Thumbnail shells out to ffmpeg; render it off the UI thread so opening
+    // the editor doesn't stall on it (see `spawn_thumbnail_batch`).
+    spawn_thumbnail_batch(state, vec![id]);
     stack.set_visible_child_name("editor");
 }
 
 /// Set an entry as the wallpaper of ONE display (a `config.monitors` override).
 fn apply_entry_on_monitor(state: Rc<RefCell<AppState>>, idx: usize, connector: &str) {
-    let name = {
+    let (name, config) = {
         let mut s = state.borrow_mut();
         let Some(entry) = s.entries.get_mut(idx) else {
             return;
@@ -4024,36 +4130,39 @@ fn apply_entry_on_monitor(state: Rc<RefCell<AppState>>, idx: usize, connector: &
         let wallpaper = entry.to_wallpaper();
         let name = entry.name.clone();
         assign_entry_to_monitor(&mut s.config, wallpaper, connector);
-        name
-    };
-    let ok = {
-        let s = state.borrow();
-        let r = daemon_ctl::ensure_daemon_and_apply(&s.config);
         save_entries(&s.entries).ok();
-        if let Err(e) = &r {
-            log::error!("failed to apply per-monitor wallpaper: {e}");
-        }
-        r.is_ok()
+        (name, s.config.clone())
     };
-    if ok {
-        show_toast(
-            &state,
-            &tf!(
-                "“{name}” set on {display}",
-                "name" => name,
-                "display" => connector
+    let pending = pending_toast(&state, t!("Applying…"));
+    let connector = connector.to_string();
+    let state_cb = state.clone();
+    daemon_ctl::apply_async(&config, move |outcome| {
+        pending.dismiss();
+        if outcome.superseded {
+            return;
+        }
+        match outcome.result {
+            Ok(()) => show_toast(
+                &state_cb,
+                &tf!(
+                    "“{name}” set on {display}",
+                    "name" => name,
+                    "display" => connector
+                ),
             ),
-        );
-    } else {
-        show_toast(
-            &state,
-            t!("Couldn’t start the wallpaper. Run frescod --check"),
-        );
-    }
-    let refresh = state.borrow().refresh.clone();
-    if let Some(r) = refresh {
-        r();
-    }
+            Err(e) => {
+                log::error!("failed to apply per-monitor wallpaper: {e}");
+                show_toast(
+                    &state_cb,
+                    t!("Couldn’t start the wallpaper. Run frescod --check"),
+                );
+            }
+        }
+        let refresh = state_cb.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            r();
+        }
+    });
 }
 
 /// Store a library entry as the browser-only wallpaper (served by the
@@ -4086,25 +4195,30 @@ fn set_browser_wallpaper(state: Rc<RefCell<AppState>>, idx: usize) {
 
 /// Clear all per-monitor overrides: the default wallpaper shows everywhere.
 fn clear_overrides_and_apply(state: Rc<RefCell<AppState>>) {
-    {
+    let config = {
         let mut s = state.borrow_mut();
         clear_monitor_overrides(&mut s.config);
-    }
-    let ok = {
-        let s = state.borrow();
-        daemon_ctl::ensure_daemon_and_apply(&s.config).is_ok()
+        s.config.clone()
     };
-    if ok {
-        show_toast(&state, t!("Default wallpaper on all displays"));
-    }
-    let refresh = state.borrow().refresh.clone();
-    if let Some(r) = refresh {
-        r();
-    }
+    let pending = pending_toast(&state, t!("Applying…"));
+    let state_cb = state.clone();
+    daemon_ctl::apply_async(&config, move |outcome| {
+        pending.dismiss();
+        if outcome.superseded {
+            return;
+        }
+        if outcome.result.is_ok() {
+            show_toast(&state_cb, t!("Default wallpaper on all displays"));
+        }
+        let refresh = state_cb.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            r();
+        }
+    });
 }
 
 pub(crate) fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
-    let (name, kind) = {
+    let (name, kind, config) = {
         let mut s = state.borrow_mut();
         let Some(entry) = s.entries.get_mut(idx) else {
             return;
@@ -4118,34 +4232,38 @@ pub(crate) fn apply_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
         let kind = wallpaper.kind;
         s.config.wallpaper = wallpaper;
         s.config.enabled = true;
-        (name, kind)
-    };
-    let ok = {
-        let s = state.borrow();
-        let r = daemon_ctl::ensure_daemon_and_apply(&s.config);
         save_entries(&s.entries).ok();
-        if let Err(e) = &r {
-            log::error!("failed to apply wallpaper: {e}");
-        }
-        r.is_ok()
+        (name, kind, s.config.clone())
     };
-    if ok {
-        crate::telemetry::event(
-            "wallpaper_set",
-            serde_json::json!({ "kind": format!("{kind:?}").to_lowercase() }),
-        );
-        show_toast(&state, &tf!("“{name}” set as wallpaper", "name" => name));
-        maybe_star_nudge(&state);
-    } else {
-        show_toast(
-            &state,
-            t!("Couldn’t start the wallpaper. Run frescod --check"),
-        );
-    }
-    let refresh = state.borrow().refresh.clone();
-    if let Some(r) = refresh {
-        r();
-    }
+    let pending = pending_toast(&state, t!("Applying…"));
+    let state_cb = state.clone();
+    daemon_ctl::apply_async(&config, move |outcome| {
+        pending.dismiss();
+        if outcome.superseded {
+            return;
+        }
+        match outcome.result {
+            Ok(()) => {
+                crate::telemetry::event(
+                    "wallpaper_set",
+                    serde_json::json!({ "kind": format!("{kind:?}").to_lowercase() }),
+                );
+                show_toast(&state_cb, &tf!("“{name}” set as wallpaper", "name" => name));
+                maybe_star_nudge(&state_cb);
+            }
+            Err(e) => {
+                log::error!("failed to apply wallpaper: {e}");
+                show_toast(
+                    &state_cb,
+                    t!("Couldn’t start the wallpaper. Run frescod --check"),
+                );
+            }
+        }
+        let refresh = state_cb.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            r();
+        }
+    });
 }
 
 /// Recurring ask, at a happy moment: once the user has 3+ successful applies,
@@ -4404,7 +4522,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             let transition = transition_from_index(transition_ref.selected());
             let power_saving = power_edit_from_index(power_ref.selected());
             let mut reseed: Option<(PathBuf, u16)> = None;
-            let name = {
+            let (name, config) = {
                 let mut s = state_set.borrow_mut();
                 s.config.wallpaper.crop = crop;
                 s.config.wallpaper.rotation = crop_ref.rotation();
@@ -4431,10 +4549,16 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                         // rebuilds from the entry) keeps what was chosen here.
                         e.mute = Some(mute_ref.is_active());
                         e.volume = Some(vol_ref.value() as u8);
-                        e.rotation = Some(crop_ref.rotation());
+                        // Regenerating is an ffmpeg process; only pay for it when
+                        // the rotation actually moved, not on every Set.
+                        let new_rotation = crop_ref.rotation();
+                        let rotation_changed = e.rotation != Some(new_rotation);
+                        e.rotation = Some(new_rotation);
                         e.power_saving = power_saving;
-                        // The card must show the new orientation immediately.
-                        e.generate_thumbnail();
+                        if rotation_changed {
+                            // The card must show the new orientation immediately.
+                            e.generate_thumbnail();
+                        }
                         // The preview reads that same file, now turned
                         // differently; keep it in step in case we stay here.
                         if let Some(t) = e.thumbnail.clone().filter(|p| p.exists()) {
@@ -4443,39 +4567,45 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     }
                 }
                 save_entries(&s.entries).ok();
-                idx.and_then(|i| s.entries.get(i))
-                    .map(|e| e.name.clone())
-                    .unwrap_or_default()
+                (
+                    idx.and_then(|i| s.entries.get(i))
+                        .map(|e| e.name.clone())
+                        .unwrap_or_default(),
+                    s.config.clone(),
+                )
             };
             if let Some((thumb, baked)) = reseed {
                 crop_ref.set_media(&thumb, baked);
             }
-            let ok = {
-                let s = state_set.borrow();
-                match daemon_ctl::ensure_daemon_and_apply(&s.config) {
-                    Ok(_) => true,
+            let pending = pending_toast(&state_set, t!("Applying…"));
+            let state_cb = state_set.clone();
+            let stack_cb = stack_set.clone();
+            daemon_ctl::apply_async(&config, move |outcome| {
+                pending.dismiss();
+                if outcome.superseded {
+                    return;
+                }
+                match outcome.result {
+                    Ok(()) => {
+                        log::info!("Wallpaper set; close this window, it keeps playing");
+                        show_toast(
+                            &state_cb,
+                            &tf!(
+                                "“{name}” set. Close the window; it keeps playing",
+                                "name" => name
+                            ),
+                        );
+                        stack_cb.set_visible_child_name("library");
+                    }
                     Err(e) => {
                         log::error!("failed to apply: {e}");
-                        false
+                        show_toast(
+                            &state_cb,
+                            t!("Couldn’t start the wallpaper. Run frescod --check"),
+                        );
                     }
                 }
-            };
-            if ok {
-                log::info!("Wallpaper set; close this window, it keeps playing");
-                show_toast(
-                    &state_set,
-                    &tf!(
-                        "“{name}” set. Close the window; it keeps playing",
-                        "name" => name
-                    ),
-                );
-                stack_set.set_visible_child_name("library");
-            } else {
-                show_toast(
-                    &state_set,
-                    t!("Couldn’t start the wallpaper. Run frescod --check"),
-                );
-            }
+            });
         });
     }
     controls.append(&set_btn);
@@ -4670,12 +4800,15 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     {
         let state = state.clone();
         power_row.connect_selected_notify(move |row| {
-            let mut s = state.borrow_mut();
-            s.config.power_saving = power_from_index(row.selected());
-            s.config.save().ok();
+            let config = {
+                let mut s = state.borrow_mut();
+                s.config.power_saving = power_from_index(row.selected());
+                s.config.save().ok();
+                s.config.clone()
+            };
             // Apply now (respawns renderers; the daemon stays up) so the change
             // takes effect immediately, not only on the next wallpaper set.
-            daemon_ctl::ensure_daemon_and_apply(&s.config).ok();
+            daemon_ctl::apply_async(&config, |_| {});
         });
     }
     group.add(&power_row);
@@ -4776,42 +4909,49 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
         let candidates = candidates.clone();
         move || {
             let on = enable.selected() == 1;
-            let mut s = state.borrow_mut();
-            if !on {
-                if s.config.schedule.take().is_some() {
+            let config = {
+                let mut s = state.borrow_mut();
+                if !on {
+                    if s.config.schedule.take().is_some() {
+                        s.config.save().ok();
+                        Some(s.config.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    let (dt, nt) = (day_time.text().to_string(), night_time.text().to_string());
+                    if crate::schedule::parse_hhmm(&dt).is_none()
+                        || crate::schedule::parse_hhmm(&nt).is_none()
+                    {
+                        return; // incomplete/invalid times — wait for a valid edit
+                    }
+                    let pick = |row: &adw::ComboRow| -> Option<crate::config::Wallpaper> {
+                        candidates
+                            .get(row.selected() as usize)
+                            .and_then(|(i, _)| s.entries.get(*i))
+                            .map(|e| e.to_wallpaper())
+                    };
+                    let (Some(day), Some(night)) = (pick(&day_row), pick(&night_row)) else {
+                        return;
+                    };
+                    s.config.schedule = Some(crate::config::Schedule {
+                        mode: crate::config::ScheduleMode::Daynight,
+                        day: Some(day),
+                        night: Some(night),
+                        day_start: dt,
+                        night_start: nt,
+                        lat: None,
+                        lon: None,
+                        at: vec![],
+                    });
+                    sync_wallpaper_to_schedule(&mut s.config);
                     s.config.save().ok();
-                    let _ = daemon_ctl::ensure_daemon_and_apply(&s.config);
+                    Some(s.config.clone())
                 }
-                return;
-            }
-            let (dt, nt) = (day_time.text().to_string(), night_time.text().to_string());
-            if crate::schedule::parse_hhmm(&dt).is_none()
-                || crate::schedule::parse_hhmm(&nt).is_none()
-            {
-                return; // incomplete/invalid times — wait for a valid edit
-            }
-            let pick = |row: &adw::ComboRow| -> Option<crate::config::Wallpaper> {
-                candidates
-                    .get(row.selected() as usize)
-                    .and_then(|(i, _)| s.entries.get(*i))
-                    .map(|e| e.to_wallpaper())
             };
-            let (Some(day), Some(night)) = (pick(&day_row), pick(&night_row)) else {
-                return;
-            };
-            s.config.schedule = Some(crate::config::Schedule {
-                mode: crate::config::ScheduleMode::Daynight,
-                day: Some(day),
-                night: Some(night),
-                day_start: dt,
-                night_start: nt,
-                lat: None,
-                lon: None,
-                at: vec![],
-            });
-            sync_wallpaper_to_schedule(&mut s.config);
-            s.config.save().ok();
-            let _ = daemon_ctl::ensure_daemon_and_apply(&s.config);
+            if let Some(config) = config {
+                daemon_ctl::apply_async(&config, |_| {});
+            }
         }
     };
 
@@ -4937,19 +5077,23 @@ fn lyrics_settings(state: &Rc<RefCell<AppState>>) -> Lyrics {
 /// edit here is what materialises the block; doing it in one helper keeps
 /// `get_or_insert_with` out of twenty call sites.
 ///
-/// The scoping is load-bearing, not style: `ensure_daemon_and_apply` re-reads
-/// the config through a shared borrow, so the mutable borrow must be dropped
-/// before it runs or the dialog panics on the first toggle. Every widget group
+/// The scoping is load-bearing, not style: `config` is cloned out and the
+/// mutable borrow dropped before `apply_async` runs, since its callback (run
+/// later, off this call stack) may itself need to borrow `state` — holding
+/// the borrow across the call would panic on re-entry. Every widget group
 /// funnels through this one function so that discipline exists in one place
 /// and cannot be got wrong twice.
 fn edit_widgets(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut Widgets)) {
-    {
+    let config = {
         let mut s = state.borrow_mut();
         edit(s.config.widgets.get_or_insert_with(Widgets::default));
         s.config.save().ok();
-    }
-    let s = state.borrow();
-    daemon_ctl::ensure_daemon_and_apply(&s.config).ok();
+        s.config.clone()
+    };
+    // The queue in `apply_async` coalesces bursts (e.g. dragging a lyric
+    // colour picker fires this on every step), so this is safe to call as
+    // often as a widget row likes.
+    daemon_ctl::apply_async(&config, |_| {});
 }
 
 /// Apply one edit to the lyric settings — see [`edit_widgets`].
@@ -6387,18 +6531,22 @@ fn show_add_from_url_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<A
                     match msg {
                         Msg::Progress(f) => progress.set_fraction(f.clamp(0.0, 1.0)),
                         Msg::Done(Ok(path)) => {
-                            let mut e = if library::is_video(&path) {
+                            let e = if library::is_video(&path) {
                                 library::LibraryEntry::new_video(path)
                             } else {
                                 library::LibraryEntry::new_image(path)
                             };
-                            e.generate_thumbnail();
+                            let id = e.id.clone();
                             let name = e.name.clone();
                             {
                                 let mut s = state.borrow_mut();
                                 s.entries.push(e);
                                 save_entries(&s.entries).ok();
                             }
+                            // Off the UI thread: this runs on the GTK main
+                            // loop (inside `spawn_future_local`), and
+                            // `generate_thumbnail` shells out to ffmpeg.
+                            spawn_thumbnail_batch(&state, vec![id]);
                             show_toast(
                                 &state,
                                 &tf!(
@@ -6581,7 +6729,7 @@ fn add_media_paths(
             }
         }
     }
-    let mut entry = if paths.len() > 1 {
+    let entry = if paths.len() > 1 {
         // All images → an image slideshow that loops on a timer. Mixed/videos
         // → a video playlist (images in a playlist would flash every second).
         if paths.iter().all(|p| library::is_image(p)) {
@@ -6597,7 +6745,7 @@ fn add_media_paths(
             library::LibraryEntry::new_image(p)
         }
     };
-    entry.generate_thumbnail();
+    let id = entry.id.clone();
 
     {
         let mut s = state.borrow_mut();
@@ -6612,6 +6760,9 @@ fn add_media_paths(
         s.editing_idx = Some(idx);
         save_entries(&s.entries).ok();
     }
+    // Thumbnail shells out to ffmpeg; do it off the UI thread so picking (or
+    // dropping) a file doesn't stall opening the editor.
+    spawn_thumbnail_batch(state, vec![id]);
     spawn_metadata_probe(state);
     stack.set_visible_child_name("editor");
 }
@@ -6937,7 +7088,7 @@ fn build_language_row(state: Rc<RefCell<AppState>>) -> gtk4::Box {
         lbl.set_xalign(0.0);
         lbl.set_halign(gtk4::Align::Start);
         lbl.set_hexpand(true);
-        let check = gtk4::Image::from_icon_name("emblem-ok-symbolic");
+        let check = gtk4::Image::from_icon_name("object-select-symbolic");
         check.set_visible(lang == current);
         row.append(&lbl);
         row.append(&check);
@@ -6976,6 +7127,42 @@ pub(crate) fn show_toast(state: &Rc<RefCell<AppState>>, msg: &str) {
     let toast = adw::Toast::new(msg);
     toast.set_timeout(4);
     state.borrow().toast.add_toast(toast);
+}
+
+/// A toast for a still-running async operation (an `apply_async`/`stop_async`
+/// call). It only actually appears if the operation is still going 150ms
+/// later — on the common fast path (daemon replies quickly) the toast never
+/// flashes onto screen at all. Call `.dismiss()` when the operation finishes;
+/// that's a no-op if it was never shown, and hides it immediately if it was.
+struct PendingToast {
+    toast: adw::Toast,
+    /// Set once the operation finishes, so the delayed add below never shows
+    /// a toast for something that's already done.
+    done: Rc<Cell<bool>>,
+}
+
+impl PendingToast {
+    fn dismiss(&self) {
+        self.done.set(true);
+        self.toast.dismiss();
+    }
+}
+
+fn pending_toast(state: &Rc<RefCell<AppState>>, msg: &str) -> PendingToast {
+    let toast = adw::Toast::new(msg);
+    toast.set_timeout(0); // stays up until we dismiss it
+    let done = Rc::new(Cell::new(false));
+    {
+        let state = state.clone();
+        let toast = toast.clone();
+        let done = done.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+            if !done.get() {
+                state.borrow().toast.add_toast(toast);
+            }
+        });
+    }
+    PendingToast { toast, done }
 }
 
 fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
@@ -7017,12 +7204,13 @@ fn clear_monitor_overrides(cfg: &mut Config) {
     cfg.monitors.clear();
 }
 
-/// Connected displays as the daemon reports them (empty when it isn't running).
+/// Connected displays as the daemon reports them (empty when it isn't
+/// running). Reads the status pill's poll cache instead of its own blocking
+/// IPC round trip — this is called from `show_card_menu`, and a synchronous
+/// `ipc::request` here used to freeze the window just from opening the
+/// right-click menu while the daemon was busy applying a wallpaper.
 fn connected_monitors() -> Vec<crate::ipc::MonitorInfo> {
-    match crate::ipc::request(&crate::ipc::Request::Status) {
-        Ok(crate::ipc::Response::Status(s)) => s.monitors_info,
-        _ => Vec::new(),
-    }
+    status::cached_monitors()
 }
 
 /// Human-friendly card title for an entry, without renaming anything: hex/uuid
@@ -8000,13 +8188,17 @@ fn run_link_step(
                     if let Some(t) = title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
                         e.name = t.to_string();
                     }
-                    e.generate_thumbnail();
+                    let id = e.id.clone();
                     let idx = {
                         let mut s = state.borrow_mut();
                         s.entries.push(e);
                         save_entries(&s.entries).ok();
                         s.entries.len() - 1
                     };
+                    // Thumbnail shells out to ffmpeg; `finish` below applies
+                    // the wallpaper from the entry's path, not its thumbnail,
+                    // so it doesn't need to wait for this.
+                    spawn_thumbnail_batch(&state, vec![id]);
                     finish(idx, true);
                     break;
                 }
@@ -8930,6 +9122,47 @@ fn show_notification_modal(window: &adw::ApplicationWindow, notif: &crate::supab
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// The rename box (#21) should never write back blank, whitespace-only,
+    /// or effectively-unchanged names — those are all "nothing to do", not
+    /// tiny renames worth a save+refresh.
+    #[test]
+    fn normalized_rename_rejects_blank_input() {
+        assert_eq!(normalized_rename("Sunset", ""), None);
+    }
+
+    #[test]
+    fn normalized_rename_rejects_whitespace_only_input() {
+        assert_eq!(normalized_rename("Sunset", "   "), None);
+    }
+
+    #[test]
+    fn normalized_rename_rejects_the_unchanged_name() {
+        assert_eq!(normalized_rename("Sunset", "Sunset"), None);
+    }
+
+    #[test]
+    fn normalized_rename_rejects_the_unchanged_name_once_trimmed() {
+        assert_eq!(normalized_rename("Sunset", "  Sunset  "), None);
+    }
+
+    #[test]
+    fn normalized_rename_accepts_and_trims_a_real_change() {
+        assert_eq!(
+            normalized_rename("Sunset", "  Ocean view  "),
+            Some("Ocean view".to_string())
+        );
+    }
+
+    /// Renames arrive in whatever script the user is typing in — CJK input
+    /// must round-trip untouched, not be mangled by byte-oriented trimming.
+    #[test]
+    fn normalized_rename_accepts_cjk_input() {
+        assert_eq!(
+            normalized_rename("Sunset", "夕焼け"),
+            Some("夕焼け".to_string())
+        );
+    }
 
     #[test]
     fn release_announcements_are_filtered_but_others_toast() {

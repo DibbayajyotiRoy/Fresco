@@ -10,6 +10,7 @@ import {
   ChatCircle,
   ChatsCircle,
   Desktop,
+  Globe,
   Images,
   Moon,
   ShieldWarning,
@@ -17,6 +18,7 @@ import {
   SpeakerSlash,
   SquaresFour,
   Sun,
+  Users,
 } from "@phosphor-icons/react/dist/ssr";
 
 import {
@@ -28,6 +30,8 @@ import { playNavRun, setSoundEnabled, soundEnabled } from "@/lib/sound";
 
 const NAV = [
   { title: "Overview", href: "/", icon: SquaresFour },
+  { title: "Users", href: "/users", icon: Users },
+  { title: "Countries", href: "/countries", icon: Globe },
   { title: "Catalog", href: "/catalog", icon: Images },
   { title: "Notifications", href: "/notifications", icon: Bell },
   { title: "Feedback", href: "/feedback", icon: ChatCircle },

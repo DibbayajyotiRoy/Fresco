@@ -10,10 +10,12 @@ import {
   OverviewHeaderFallback,
 } from "@/app/_sections/overview-header";
 import {
+  DownloadRatioCard,
   FeedbackCards,
   OpenIssuesCard,
   ReleaseCards,
   StarsCard,
+  UsersCard,
 } from "@/app/_sections/overview-kpis";
 import { ReleasesPanel } from "@/app/_sections/overview-releases";
 import { FeedbackBreakdowns } from "@/app/_sections/overview-breakdowns";
@@ -41,8 +43,17 @@ export default function OverviewPage() {
         <OverviewHeader />
       </Suspense>
 
-      {/* KPI strip — six figures across one row at xl. */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+      {/* KPI strip — eight figures across one row at xl. Users is real
+          telemetry (installs that have checked in); everything else here is
+          GitHub — the two are deliberately not merged into one number, and
+          "Installs / download" spells out exactly how they relate. */}
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+        <Suspense fallback={<StatCardSkeleton />}>
+          <UsersCard />
+        </Suspense>
+        <Suspense fallback={<StatCardSkeleton />}>
+          <DownloadRatioCard />
+        </Suspense>
         <Suspense fallback={<StatCardSkeleton />}>
           <StarsCard />
         </Suspense>

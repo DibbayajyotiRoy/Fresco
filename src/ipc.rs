@@ -75,6 +75,14 @@ pub struct StatusReply {
     /// lists outputs that currently have a wallpaper.
     #[serde(default)]
     pub monitors_info: Vec<MonitorInfo>,
+    /// Connectors (Wayland only) whose renderer gave up on live playback and
+    /// is holding a paused static frame instead — see `WlOutput::supervise`'s
+    /// give-up arm. `#[serde(default)]` so an older daemon/GUI pair (neither
+    /// of which knows this field) still round-trips a `Status` reply fine:
+    /// an old GUI just ignores it, and a new GUI reading an old daemon's
+    /// reply sees an empty list rather than failing to deserialize.
+    #[serde(default)]
+    pub gave_up: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -105,16 +113,28 @@ fn libc_getuid() -> u32 {
 /// Blocking request to the daemon. Returns Err if the daemon isn't running
 /// (connection refused / socket missing) — callers treat that as "not running".
 pub fn request(req: &Request) -> Result<Response> {
-    request_at(&socket_path(), req)
+    request_at(&socket_path(), req, DEFAULT_TIMEOUT)
+}
+
+/// Default read/write timeout for `request`. `Apply` on a slow machine can
+/// legitimately take longer than this (rebuild + overview refresh), so
+/// off-thread callers that expect that use `request_with_timeout` instead.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Like `request`, but with an explicit timeout instead of the 5s default.
+/// Used off the GTK main thread, where a slow daemon should time out
+/// gracefully rather than hang the worker indefinitely.
+pub fn request_with_timeout(req: &Request, timeout: Duration) -> Result<Response> {
+    request_at(&socket_path(), req, timeout)
 }
 
 /// Send `req` to the daemon listening at `path`. Split out from `request` so
 /// tests can target an isolated (guaranteed-absent) socket deterministically.
-fn request_at(path: &std::path::Path, req: &Request) -> Result<Response> {
+fn request_at(path: &std::path::Path, req: &Request, timeout: Duration) -> Result<Response> {
     let mut stream = UnixStream::connect(path)
         .with_context(|| format!("daemon not reachable at {}", path.display()))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
     let mut line = serde_json::to_string(req)?;
     line.push('\n');
     stream.write_all(line.as_bytes())?;
@@ -194,6 +214,41 @@ mod tests {
         // even when a real frescod is running on this machine.
         let path = std::env::temp_dir().join(format!("fresco-absent-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        assert!(request_at(&path, &Request::Status).is_err());
+        assert!(request_at(&path, &Request::Status, DEFAULT_TIMEOUT).is_err());
+    }
+
+    /// A daemon that accepts the connection but never replies must still time
+    /// out promptly, not hang the caller forever — this is what protects a
+    /// worker thread from a wedged daemon.
+    #[test]
+    fn slow_daemon_times_out() {
+        use std::os::unix::net::UnixListener;
+
+        let dir = std::env::temp_dir().join(format!("fresco-ipc-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("control.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+
+        // Accept the connection but never write a reply, then hold the thread
+        // open so the socket stays alive for the duration of the test.
+        let handle = std::thread::spawn(move || {
+            if let Ok((_stream, _addr)) = listener.accept() {
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        });
+
+        let start = std::time::Instant::now();
+        let result = request_at(&path, &Request::Status, Duration::from_millis(200));
+        assert!(result.is_err());
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "request_at should time out near the requested 200ms, took {:?}",
+            start.elapsed()
+        );
+
+        drop(handle); // detach; the test process exit reaps it
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 }

@@ -4,7 +4,91 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.43] — Unreleased
+## [1.1.44] — Unreleased
+
+### Added
+- **A Russian UI translation** (issue #20). Select it under Settings →
+  Language, or follow a `ru`/`ru_RU`/`ru_UA` desktop locale automatically.
+
+- **UI translations for Hindi, Portuguese (Brazil), Spanish, German,
+  Indonesian, French, Vietnamese, Turkish, Romanian and Bengali**, chosen by
+  where Fresco's users are. Select one under Settings → Language, or follow
+  the matching desktop locale automatically.
+
+### Fixed
+- **A Wayland video/GIF wallpaper that keeps failing to start now says why,
+  tells you instead of quietly holding a still frame, and tries again on its
+  own.** mpvpaper prints every one of its own errors — and mpv's — to
+  **stdout**, which Fresco discarded, so a failed renderer was always
+  reported as cause "unknown" no matter what actually broke (a missing EGL
+  context, a Wayland protocol error, mpv rejecting an option). Both streams
+  are now read, matched against mpvpaper's real error text, and folded into
+  a specific cause. Once an output gives up on live playback, Fresco now
+  raises a desktop notification naming that cause instead of leaving the
+  wallpaper looking merely frozen, and retries live playback again five
+  minutes later rather than staying on the static frame for good.
+- **The daily usage check-in now reaches long-running sessions too**, not
+  just the moment each backend starts. It was sent once at daemon start and
+  never again, so an install left running for days without a restart looked
+  inactive in the numbers; each backend loop now re-offers it periodically,
+  and it keeps its own roughly-once-a-day throttle either way.
+- **Renaming a card from its context menu now shows a proper check mark,
+  applies on Enter, and survives clicking an IME candidate** (issue #21).
+  The rename box was a popover, and its autohide grabbed the pointer: a
+  click on an fcitx5/ibus candidate window counted as "outside" and silently
+  closed it, dropping whatever had been typed, and Enter tore the popover
+  down without committing the name. Its confirm button also used an icon
+  (`emblem-ok-symbolic`) that only ships in the Adwaita icon theme, so
+  themes without it — deepin's, notably — showed a broken-image slash
+  instead of a check mark. The rename box is now an inline editor added
+  directly on the card, with no grab: Enter or the confirm button applies
+  the rename, Esc cancels, and clicking an IME candidate no longer closes
+  it.
+
+- **Switching windows on other X11 desktops no longer stutters either**
+  (issue #17). The same periodic pass lowers the wallpaper back to the bottom
+  every two seconds even where nothing raised it, and on a WM-managed window
+  each lower is a ConfigureRequest the window manager answers by restacking a
+  full-screen window and re-announcing the order — the same pattern behind
+  the Deepin fix above. The lower is now skipped whenever the wallpaper is
+  already at the bottom of the stack.
+
+- **An unknown language in `config.toml` no longer resets the whole config.**
+  A code this build doesn't recognise — a newer Fresco's language, or a
+  hand-edited typo — used to fail parsing the entire file, and both binaries
+  load config with `unwrap_or_default()`, so every other setting was silently
+  reset along with it. It now falls back to `System` for that one field.
+
+- **The app icon no longer has black corners.** The rounded logo was exported
+  onto an opaque black square, so every launcher that draws it on a light
+  panel showed four dark notches around it. The corners are transparent now,
+  in the SVG and in all five PNG sizes. Thanks to
+  [@hualet](https://github.com/hualet) (#19).
+
+- **Setting a wallpaper no longer freezes the window on slow machines**
+  (issue #22). "Set as wallpaper" — from a card, the menu, per-monitor
+  assignment, the editor, and quieter settings toggles — used to save,
+  wait on the daemon over IPC, and rebuild the renderers all on the GTK main
+  thread, so a slow apply (weak GPU decode, an N150-class CPU, a daemon
+  cold-starting) froze the whole window, static images included. That work
+  now runs on a background thread: the config is saved right away, an
+  "Applying…" toast appears only if it's still running 150ms later, and the
+  result — success, failure, or superseded by a faster click right behind
+  it — comes back without ever blocking the UI. Rapid clicks coalesce into
+  at most one apply in flight plus one queued behind it, so mashing "Set as
+  wallpaper" can no longer pile up IPC calls. On the daemon side, `Apply`
+  now replies before redecoding the (slow, full-size) overview frame GNOME
+  and other desktops show behind icons, instead of making the caller wait
+  on that too.
+
+## [1.1.43] — 2026-09-16
+
+### Added
+- **`FRESCO_MPV_LOG=1` writes mpv's own log** to
+  `~/.local/state/fresco/mpv-<output>.log`. The decode badge shows which
+  decoder mpv settled on but not why it passed over the others — a missing
+  CUDA library, a build without NVDEC, an unsupported interop — and only
+  mpv's log says that.
 
 ### Fixed
 - **The wallpaper now appears on MATE, with the desktop icons still on it**
@@ -25,6 +109,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Fresco falls back to raising the wallpaper above Caja with the icons hidden,
   as on Deepin, and a click on the desktop shows them for
   `dde_icon_peek_secs` seconds.
+
 - **Logging out or killing the daemon now puts your desktop back.** A
   logout, `pkill frescod` or Ctrl+C ends `frescod` with a signal, and it
   handled none, so it died on the spot and skipped the shutdown that restores
@@ -32,6 +117,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wallpaper on Deepin, and the key colour on MATE. SIGTERM, SIGINT and SIGHUP
   now stop it the same way the app's Stop does; a second signal still ends it
   at once.
+
 - **Switching windows on Deepin no longer stutters because of the wallpaper.**
   To stay above DDE's desktop, Fresco sent the window manager a raise request
   every two seconds whether or not anything had moved. Each one makes KWin
@@ -40,20 +126,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   CPU up and dropped frames. The raise is now sent only when DDE's desktop is
   actually above the wallpaper, or when the stacking order can't be read.
 
-- **The app icon no longer has black corners.** The rounded logo was exported
-  onto an opaque black square, so every launcher that draws it on a light
-  panel showed four dark notches around it. The corners are transparent now,
-  in the SVG and in all five PNG sizes. Thanks to
-  [@hualet](https://github.com/hualet) (#19).
-
-### Added
-- **`FRESCO_MPV_LOG=1` writes mpv's own log** to
-  `~/.local/state/fresco/mpv-<output>.log`. The decode badge shows which
-  decoder mpv settled on but not why it passed over the others — a missing
-  CUDA library, a build without NVDEC, an unsupported interop — and only
-  mpv's log says that.
-
-## [1.1.42] — Unreleased
+## [1.1.42] — 2026-09-13
 
 ### Fixed
 - **Cropping to the edge of the frame no longer crashes the app.** Dragging a

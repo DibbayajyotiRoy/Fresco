@@ -4,6 +4,11 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
+    // Lets src/lib/*.ts import sibling modules with an explicit ".ts"
+    // extension (e.g. "./install-analytics.ts"), which plain `node --test`
+    // (used by `npm test`) requires for relative specifiers but Next's own
+    // "@/..." aliased imports do not need. Safe with `noEmit: true`.
+    "allowImportingTsExtensions": true,
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,

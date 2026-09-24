@@ -5,11 +5,13 @@
   <id>io.github.dibbayajyotiroy.Fresco</id>
 
   <!-- The name is the brand and is not translated. Everything a store page
-       actually renders as prose has a zh_CN sibling; the release notes below
-       stay English, which AppStream handles by falling back per-element. -->
+       actually renders as prose has a zh_CN and a ru sibling; the release
+       notes below stay English, which AppStream handles by falling back
+       per-element. -->
   <name>Fresco</name>
   <summary>Set videos and images as live wallpapers</summary>
   <summary xml:lang="zh_CN">将视频和图片设为动态壁纸</summary>
+  <summary xml:lang="ru">Живые обои из видео и изображений</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
@@ -25,31 +27,49 @@
       选择媒体文件，点击「设置」后即可关闭应用——壁纸会继续播放，并在登录后
       自动恢复。
     </p>
+    <p xml:lang="ru">
+      Fresco превращает видео, GIF, изображения, слайд-шоу и видеоплейлисты в
+      обои рабочего стола. Выберите файл в простом приложении, нажмите
+      «Установить» и закройте приложение — обои продолжат воспроизводиться и
+      восстановятся при входе в систему.
+    </p>
     <p>Features:</p>
     <p xml:lang="zh_CN">功能：</p>
+    <p xml:lang="ru">Возможности:</p>
     <ul>
       <li>Looping video, animated GIF, static image, image slideshow, and video playlist wallpapers</li>
       <li xml:lang="zh_CN">循环视频、动态 GIF、静态图片、图片幻灯片和视频播放列表壁纸</li>
+      <li xml:lang="ru">Зацикленное видео, анимированный GIF, статичное изображение, слайд-шоу изображений и обои из видеоплейлиста</li>
       <li>Hardware-accelerated playback (VA-API / NVDEC) for low CPU usage without quality loss</li>
       <li xml:lang="zh_CN">硬件加速播放（VA-API / NVDEC），CPU 占用极低且不损失画质</li>
+      <li xml:lang="ru">Воспроизведение с аппаратным ускорением (VA-API / NVDEC) — низкая нагрузка на ЦП без потери качества</li>
       <li>A drag-to-crop and 90-degree rotate editor to frame exactly the region you want</li>
       <li xml:lang="zh_CN">支持拖拽裁剪和 90 度旋转的编辑器，精确取景</li>
+      <li xml:lang="ru">Редактор с обрезкой перетаскиванием и поворотом на 90 градусов — точный выбор нужной области</li>
       <li>Per-wallpaper sound and volume, plus slideshow transitions (crossfade, fade, slide, Ken Burns)</li>
       <li xml:lang="zh_CN">逐张壁纸独立设置声音与音量，以及幻灯片转场效果（交叉淡入、淡入淡出、滑动、缓慢推移）</li>
+      <li xml:lang="ru">Звук и громкость для каждых обоев отдельно, а также переходы слайд-шоу (перекрёстное затухание, затухание, сдвиг, Кен Бёрнс)</li>
       <li>A wallpaper library with thumbnails, a recently-used row, and search</li>
       <li xml:lang="zh_CN">带缩略图、最近使用和搜索的壁纸库</li>
+      <li xml:lang="ru">Библиотека обоев с миниатюрами, строкой недавно использованных и поиском</li>
       <li>Pause / resume, pause-on-battery, and auto-pause when a window goes fullscreen</li>
       <li xml:lang="zh_CN">暂停/继续、使用电池时暂停，以及窗口全屏时自动暂停</li>
+      <li xml:lang="ru">Пауза / продолжение, пауза от батареи и автопауза при разворачивании окна на весь экран</li>
       <li>Multi-monitor support with per-display wallpapers and synced video playback</li>
       <li xml:lang="zh_CN">多显示器支持，可为每个显示器单独设置壁纸并同步播放视频</li>
+      <li xml:lang="ru">Поддержка нескольких мониторов с отдельными обоями для каждого дисплея и синхронным воспроизведением видео</li>
       <li>Add from a link: paste a Pinterest pin or a direct video/image URL</li>
       <li xml:lang="zh_CN">从链接添加：粘贴 Pinterest 图钉或视频/图片的直接链接</li>
+      <li xml:lang="ru">Добавление по ссылке: вставьте пин Pinterest или прямую ссылку на видео/изображение</li>
       <li>Day and night wallpaper schedules</li>
       <li xml:lang="zh_CN">日间与夜间壁纸定时切换</li>
+      <li xml:lang="ru">Расписания дневных и ночных обоев</li>
       <li>A curated in-app wallpaper catalog</li>
       <li xml:lang="zh_CN">应用内精选壁纸库</li>
+      <li xml:lang="ru">Подборка обоев прямо в приложении</li>
       <li>A command palette (Ctrl+K) for fast keyboard-driven control</li>
       <li xml:lang="zh_CN">命令面板（Ctrl+K），键盘快速操作</li>
+      <li xml:lang="ru">Палитра команд (Ctrl+K) для быстрого управления с клавиатуры</li>
     </ul>
     <p>
       Fresco runs on X11 and on Wayland layer-shell compositors (COSMIC,
@@ -61,6 +81,11 @@
       Hyprland、Sway、KDE Plasma 6）；GNOME on Wayland 使用静态帧回退方案。
       在深度操作系统 Deepin 25 上，Fresco 运行于默认的 X11 会话。
     </p>
+    <p xml:lang="ru">
+      Fresco работает на X11 и на композиторах Wayland с поддержкой
+      layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6); в GNOME на Wayland
+      используется резервный режим статичного кадра.
+    </p>
   </description>
 
   <launchable type="desktop-id">io.github.dibbayajyotiroy.Fresco.desktop</launchable>
@@ -70,6 +95,7 @@
       <image>https://raw.githubusercontent.com/DibbayajyotiRoy/fresco/main/data/screenshots/gallery.png</image>
       <caption>The wallpaper library</caption>
       <caption xml:lang="zh_CN">壁纸库</caption>
+      <caption xml:lang="ru">Библиотека обоев</caption>
     </screenshot>
   </screenshots>
 

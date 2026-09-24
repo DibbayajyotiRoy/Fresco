@@ -73,6 +73,22 @@ const STALL_STRIKES: u32 = 3;
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
 const SYNC_TOLERANCE: f64 = 0.2;
 
+/// After a Wayland output gives up on live playback (falls back to a paused
+/// static frame — see `WlOutput::supervise`), how long to wait before trying
+/// live playback again. A transient cause (a driver update mid-session, a
+/// brief compositor hiccup) must not be a permanent downgrade; five minutes
+/// is long enough that a genuinely broken renderer doesn't retry-spam.
+const RENDERER_REARM_DELAY: Duration = Duration::from_secs(5 * 60);
+
+/// How often the long-running daemon loops re-offer a telemetry heartbeat.
+/// `telemetry::heartbeat`/`minimal_heartbeat` self-throttle to roughly once a
+/// day via their own marker file (`heartbeat_due`), so calling this often is
+/// cheap and harmless — it exists so a daemon that runs for days without a
+/// restart still checks in, instead of looking inactive to anyone watching
+/// usage. Well under the marker's 20h window so a long session never misses a
+/// day.
+const HEARTBEAT_RECHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
 /// During a transition the loop ticks at ~60fps for buttery, eased motion.
 const ANIM_TICK: Duration = Duration::from_millis(16);
 
@@ -430,6 +446,20 @@ pub struct Daemon {
     /// hands back only overlays whose content actually changed, so an idle
     /// desktop costs nothing (see docs/WIDGETS_ROADMAP.md "Power model").
     widgets: widgets::WidgetEngine,
+    /// Set by `handle_request(Apply)` instead of calling `overview::apply`
+    /// inline: that call decodes a full-size frame (ffmpegthumbnailer, `-s
+    /// 0`) and writes it via gsettings, which is slow enough on weak hardware
+    /// to make the GUI's IPC round trip (and thus its "Applying…" toast) last
+    /// much longer than it needs to. Deferring it to right after the reply is
+    /// sent (see `run`) means the caller — off the GTK main thread already,
+    /// see `daemon_ctl::apply_async` — gets its `Ok` back as soon as the
+    /// renderers are rebuilt, and the overview frame catches up a moment
+    /// later without anyone waiting on it.
+    overview_pending: bool,
+    /// Last time this loop re-offered a telemetry heartbeat — see
+    /// [`HEARTBEAT_RECHECK_INTERVAL`]. The heartbeat itself self-throttles to
+    /// roughly daily, so this only needs to be "often enough", not precise.
+    last_heartbeat_check: Instant,
 }
 
 impl Daemon {
@@ -467,6 +497,10 @@ impl Daemon {
             caja_mirror: None,
             caja_mirror_gave_up: false,
             widgets,
+            overview_pending: false,
+            // Due immediately at startup would just repeat `run()`'s own
+            // heartbeat call a moment later; start the clock instead.
+            last_heartbeat_check: Instant::now(),
         })
     }
 
@@ -776,6 +810,13 @@ impl Daemon {
                 let is_stop = matches!(req, Request::Stop);
                 let resp = self.handle_request(req);
                 let _ = reply.send(resp);
+                // Deferred from `handle_request(Apply)`: the caller already
+                // has its reply (and, off the GTK thread, has already
+                // unblocked the GUI), so the slow full-size overview redecode
+                // happens here instead of before the reply went out.
+                if std::mem::take(&mut self.overview_pending) {
+                    overview::apply(&self.config.wallpaper);
+                }
                 if is_stop {
                     self.shutdown();
                     return Ok(());
@@ -815,6 +856,21 @@ impl Daemon {
                 self.check_sync();
                 self.last_sync_check = now;
             }
+            if now.duration_since(self.last_heartbeat_check) >= HEARTBEAT_RECHECK_INTERVAL {
+                self.last_heartbeat_check = now;
+                // Same arguments as the startup call below; `heartbeat`
+                // itself throttles to roughly once a day via its marker
+                // file, so a daemon that runs for days without a restart
+                // still checks in instead of going quiet after the first one.
+                crate::telemetry::heartbeat(
+                    Some("x11"),
+                    self.renderers
+                        .first()
+                        .and_then(|r| r.player.hwdec_current())
+                        .as_deref(),
+                    Some(self.renderers.len() as u32),
+                );
+            }
             self.check_startup_renderers(now);
             self.check_cold_boot_stall(now);
             self.push_widgets();
@@ -847,7 +903,9 @@ impl Daemon {
                 self.widgets.invalidate();
                 match self.rebuild() {
                     Ok(_) => {
-                        overview::apply(&self.config.wallpaper);
+                        // See `overview_pending`'s doc comment: run() applies
+                        // it right after this reply is on the wire.
+                        self.overview_pending = true;
                         Response::Ok
                     }
                     Err(e) => Response::Err {
@@ -904,6 +962,7 @@ impl Daemon {
             bit_depth: video.map(|(_, _, d, _)| d),
             dropped_frames: video.map(|(_, _, _, n)| n),
             monitors_info: monitors_info_from(&self.monitors),
+            gave_up: Vec::new(), // X11 backend has no give-up fallback
         }
     }
 
@@ -963,9 +1022,14 @@ impl Daemon {
 
     /// Re-assert every wallpaper window's place in the stack (~every 2s), since
     /// other clients' stacking changes can shuffle us. Normally that means
-    /// lowering back to the bottom; in DDE restack mode our windows must be
-    /// RAISED instead — lowering there would drop the wallpaper straight back
-    /// under dde-shell's desktop window a couple of seconds after it appeared.
+    /// lowering back to the bottom, but only when we're not there already: a
+    /// window we own is WM-managed, so `lower` is a ConfigureRequest the WM
+    /// answers by restacking and re-announcing the whole stack — on a plain
+    /// X11 desktop that stutters window-switch animations for nothing when we
+    /// were at the bottom already (issue #17). In DDE restack mode our windows
+    /// must be RAISED instead — lowering there would drop the wallpaper
+    /// straight back under dde-shell's desktop window a couple of seconds
+    /// after it appeared.
     ///
     /// The DDE raise is not unconditional: when the user clicks the desktop,
     /// DDE's window comes up above ours and the icons become usable, so the
@@ -991,6 +1055,12 @@ impl Daemon {
             let peek = dde::icon_peek(self.config.dde_icon_peek_secs);
             self.dde_peek
                 .tick(&self.conn, &self.atoms, root, &windows, peek);
+            return;
+        }
+        let ours: Vec<x11rb::protocol::xproto::Window> =
+            self.renderers.iter().map(|r| r.window.window).collect();
+        let stack = x11win::stacking_order(&self.conn, &self.atoms, self.screen().root);
+        if x11win::at_bottom(&stack, &ours) == Some(true) {
             return;
         }
         for r in &self.renderers {
@@ -1688,16 +1758,25 @@ fn run_gnome_static() -> Result<()> {
     log::info!("frescod started (GNOME Wayland static-frame mode)");
     crate::telemetry::heartbeat(Some("gnome-static"), None, None);
 
-    while let Ok((req, reply)) = commands.recv() {
+    // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
+    // never wakes on its own, so a daemon left running for days without an
+    // Apply would only ever have sent the one startup heartbeat above and
+    // then gone quiet in the usage numbers. `heartbeat` self-throttles to
+    // roughly once a day via its own marker file either way.
+    loop {
+        let (req, reply) = match commands.recv_timeout(HEARTBEAT_RECHECK_INTERVAL) {
+            Ok(pair) => pair,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                crate::telemetry::heartbeat(Some("gnome-static"), None, None);
+                continue;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let is_stop = matches!(req, Request::Stop);
+        let is_apply = matches!(req, Request::Apply);
         let resp = match req {
             Request::Apply => {
                 config = Config::load().unwrap_or_else(|_| config.clone());
-                if config.enabled {
-                    overview::apply(&config.wallpaper);
-                } else {
-                    overview::restore();
-                }
                 Response::Ok
             }
             // A static frame has nothing to pause.
@@ -1710,6 +1789,18 @@ fn run_gnome_static() -> Result<()> {
             Request::Stop => Response::Ok,
         };
         let _ = reply.send(resp);
+        // The overview redecode (ffmpegthumbnailer at full size) happens
+        // after the reply is sent, not before — the caller (off the GTK
+        // thread already; see `daemon_ctl::apply_async`) gets its `Ok` back
+        // as soon as the new config is loaded, instead of waiting out the
+        // redecode too.
+        if is_apply {
+            if config.enabled {
+                overview::apply(&config.wallpaper);
+            } else {
+                overview::restore();
+            }
+        }
         if is_stop {
             break;
         }
@@ -1746,6 +1837,7 @@ fn static_status(config: &Config) -> StatusReply {
         bit_depth: None,
         dropped_frames: None,
         monitors_info: Vec::new(),
+        gave_up: Vec::new(),
     }
 }
 
@@ -1816,6 +1908,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut user_paused = false;
     let mut battery_paused = false;
     let mut last_supervise = Instant::now() - SUPERVISE;
+    let mut last_heartbeat_check = Instant::now();
     // Display-presence probe: due immediately, then paced by whether anything is
     // still restarting (see the supervise block).
     let mut next_output_probe = Instant::now();
@@ -1982,6 +2075,14 @@ fn run_wayland_layershell() -> Result<()> {
         }
 
         let now = Instant::now();
+
+        if now.duration_since(last_heartbeat_check) >= HEARTBEAT_RECHECK_INTERVAL {
+            last_heartbeat_check = now;
+            // Same arguments as the startup call above; `heartbeat` itself
+            // throttles to roughly once a day via its marker file, so a
+            // daemon that runs for days without a restart still checks in.
+            crate::telemetry::heartbeat(Some("wayland"), None, Some(outputs.len() as u32));
+        }
 
         // Slideshow engine (shared with the X11 path via advance_slideshow).
         for o in outputs.values_mut() {
@@ -2322,11 +2423,30 @@ struct WlOutput {
     no_renderer: bool,
     /// `renderer_missing` already reported for this output (once per daemon).
     missing_reported: bool,
-    /// Why the last renderer went down ("dead"/"frozen") and, if respawning also
-    /// failed, its content-free [`SpawnFail`] code — reported with `renderer_giveup`
-    /// so a warning in the field says what actually broke.
+    /// Why the last renderer went down: "never_started", "dead", "frozen", or
+    /// — once a respawn attempt has actually run — that attempt's content-free
+    /// [`SpawnFail`] code, which is more specific than any of the three and
+    /// overwrites them. Reported with `renderer_giveup` so a warning in the
+    /// field says what actually broke, not just that *something* did.
     last_down: &'static str,
     last_spawn_fail: Option<&'static str>,
+    /// [`crate::daemon::mpvpaper::ExitDetail`] of the most recent failed spawn
+    /// (`"exit=... sig=..."`), already content-free — see its doc comment.
+    /// `None` before any spawn has failed, or once one has succeeded.
+    last_spawn_detail: Option<String>,
+    /// `renderer_giveup` (telemetry) and the "give up" desktop notification
+    /// have already been sent for this output. Latched for the daemon's whole
+    /// run — see [`WlOutput::supervise`]'s give-up arm — so a re-armed output
+    /// that fails again does not spam either channel a second time.
+    giveup_reported: bool,
+    /// When a re-armed live-playback attempt (see [`RENDERER_REARM_DELAY`])
+    /// is due, if this output has given up. `None` while playing normally or
+    /// while a give-up is still waiting to be scheduled.
+    next_rearm: Option<Instant>,
+    /// Re-arms scheduled since the last Apply; doubles the wait each time so
+    /// an output that can't recover isn't restarted every five minutes all
+    /// session long.
+    rearms: u32,
     /// Bumped on every [`WlOutput::respawn`]. A fresh mpv carries no overlays,
     /// so the widget engine must re-push after one — but the supervisor has
     /// several heal paths and threading a callback through each is how one gets
@@ -2390,6 +2510,10 @@ impl WlOutput {
             missing_reported: false,
             last_down: "never_started",
             last_spawn_fail: None,
+            last_spawn_detail: None,
+            giveup_reported: false,
+            next_rearm: None,
+            rearms: 0,
             generation: 0,
         }
     }
@@ -2462,12 +2586,15 @@ impl WlOutput {
                 self.player = Some(handle);
                 self.applied_paused.set(paused || static_frame);
                 self.last_spawn_fail = None;
+                self.last_spawn_detail = None;
             }
             Err(e) => {
                 log::error!("[{}] {e:#}", self.connector);
                 self.last_spawn_fail = Some(
                     crate::daemon::mpvpaper::SpawnFail::of(&e).map_or("spawn_failed", |f| f.code()),
                 );
+                self.last_spawn_detail =
+                    crate::daemon::mpvpaper::ExitDetail::of(&e).map(|d| d.to_string());
                 if self.error.is_none() {
                     self.error = Some(e.to_string());
                 }
@@ -2515,6 +2642,8 @@ impl WlOutput {
         } else {
             self.restarts = 0;
             self.static_fallback = false;
+            self.next_rearm = None;
+            self.rearms = 0;
             self.respawn(paused, false);
         }
     }
@@ -2632,6 +2761,32 @@ impl WlOutput {
     /// there?" — only consulted once the renderer is down, so a bad enumeration
     /// can never tear down a healthy one.
     fn supervise(&mut self, paused: bool, max: u32, output_present: bool) {
+        // Re-arm: the cooldown after a give-up has elapsed, so drop the held
+        // static frame and give live playback a fresh restart budget. Done by
+        // dropping the player rather than clearing `static_fallback` in place
+        // — the alive-and-well early return just below would otherwise treat
+        // the still-running static frame as healthy and never actually
+        // respawn into live playback.
+        if self.static_fallback {
+            if let Some(at) = self.next_rearm {
+                if Instant::now() >= at {
+                    log::info!(
+                        "[{}] retrying live playback after giving up ({}m ago)",
+                        self.connector,
+                        RENDERER_REARM_DELAY.as_secs() / 60
+                    );
+                    self.next_rearm = None;
+                    self.restarts = 0;
+                    self.static_fallback = false;
+                    drop(self.player.take());
+                    self.slideshow = None;
+                    self.anim.forget();
+                    self.animating = false;
+                    self.stall_strikes = 0;
+                    self.last_pos = None;
+                }
+            }
+        }
         let alive = self.player.as_ref().map(|p| p.is_alive()).unwrap_or(false);
         if alive {
             // A paused or static-fallback frame is not expected to advance — don't
@@ -2782,19 +2937,51 @@ impl WlOutput {
                 "[{}] giving up live playback; attempting a static frame",
                 self.connector
             );
-            // Content-free by construction: a connector name, the failure mode,
-            // the wallpaper kind and a SpawnFail code — never a path or a file
-            // name. Without them a report in the field says only "it failed".
-            crate::telemetry::error(
-                "renderer_giveup",
-                &format!(
+            // Once per output per daemon run: telemetry and the desktop
+            // notification both said this on *every* failing Apply/restart
+            // before this dedupe, which is what turned one stuck renderer
+            // into a flood of identical reports.
+            if !self.giveup_reported {
+                self.giveup_reported = true;
+                // Content-free by construction: a connector name, the failure
+                // mode, the wallpaper kind, a SpawnFail code, and an
+                // ExitDetail (exit status + fingerprint, see its doc comment)
+                // — never a path or a file name. Without them a report in the
+                // field says only "it failed".
+                let mut detail = format!(
                     "{}: renderer failed {max}x (mode={}, kind={:?}, cause={})",
                     self.connector,
                     self.last_down,
                     self.wallpaper.kind,
                     self.last_spawn_fail.unwrap_or("spawn_ok"),
-                ),
-            );
+                );
+                if let Some(d) = &self.last_spawn_detail {
+                    detail.push(' ');
+                    detail.push_str(d);
+                }
+                crate::telemetry::error("renderer_giveup", &detail);
+                let hint = self
+                    .last_spawn_fail
+                    .map(spawn_fail_hint)
+                    .unwrap_or_else(|| "the renderer kept failing".to_string());
+                notifier::renderer_gave_up(&self.connector, &hint);
+            }
+            // Try again later rather than staying on the static frame for
+            // good — see [`RENDERER_REARM_DELAY`].
+            // Causes a retry can't fix (a broken install, a compositor
+            // without layer-shell, a file mpv can't load) are not re-armed at
+            // all; the rest back off 5, 10, 20, 40, then 80 minutes.
+            let permanent = self.last_spawn_fail.is_some_and(|c| {
+                c == MPVPAPER_MISSING
+                    || c.ends_with(":linker")
+                    || c.ends_with(":no_layer_shell")
+                    || c.ends_with(":load_failed")
+            });
+            self.next_rearm = (!permanent).then(|| {
+                let delay = RENDERER_REARM_DELAY * 2u32.pow(self.rearms.min(4));
+                self.rearms += 1;
+                Instant::now() + delay
+            });
             self.respawn(true, true);
         }
         // restarts > max → given up; do nothing (anti-flap). Error stays in Status.
@@ -2821,6 +3008,8 @@ fn spawn_fail_hint(code: &str) -> String {
         E::LoadFailed,
         E::Linker,
         E::Signal,
+        E::WaylandProtocol,
+        E::CleanExit,
         E::Unknown,
     ];
     if let Some(e) = all.iter().find(|e| e.code() == code) {
@@ -2904,6 +3093,11 @@ fn wayland_status(
     let video = outputs
         .values()
         .find_map(|o| o.player.as_ref().and_then(|p| p.video_status()));
+    let gave_up: Vec<String> = outputs
+        .values()
+        .filter(|o| o.static_fallback && o.giveup_reported)
+        .map(|o| o.connector.clone())
+        .collect();
     StatusReply {
         running: true,
         paused,
@@ -2921,6 +3115,7 @@ fn wayland_status(
         bit_depth: video.map(|(_, _, d, _)| d),
         dropped_frames: video.map(|(_, _, _, n)| n),
         monitors_info: monitors_info_from(monitors),
+        gave_up,
     }
 }
 
@@ -3254,7 +3449,7 @@ mod tests {
         parse_stat_ticks, stall_step, widget_wait, WlOutput, ANIM_TICK, MIN_WIDGET_WAIT,
         MONITOR_INTERVAL, STALL_STRIKES, TICK,
     };
-    use crate::config::{PowerSaving, Scaling, Wallpaper};
+    use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
 
     /// Smart Sleep, from the loops' side. The widget engine knows when the next
@@ -3616,5 +3811,119 @@ mod tests {
         assert_eq!(parse_stat_ticks(stat), Some(742));
         assert_eq!(parse_stat_ticks(""), None);
         assert_eq!(parse_stat_ticks("no parens here"), None);
+    }
+
+    /// Points `FRESCO_MPVPAPER` at a throwaway script that prints `body` in
+    /// mpvpaper's real coloured `cflp_error()` form on stdout and exits 1.
+    /// Caller holds `crate::ENV_LOCK` for as long as the override is set.
+    fn write_dying_fake_mpvpaper(tag: &str, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let script = std::env::temp_dir().join(format!(
+            "fresco-fake-mpvpaper-{tag}-{}.sh",
+            std::process::id()
+        ));
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nprintf '\\033[1;31m[-] {body}\\033[0m\\n'\nexit 1\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    /// `last_down` used to stay "never_started" through every retry of an
+    /// output that had never once come up, however many different ways each
+    /// attempt actually failed — the renderer never got a chance to overwrite
+    /// it because only the "alive"/"already had a player" paths updated it.
+    /// `last_down` keeps the *mode* (never started / dead / frozen) so the
+    /// give-up report can still tell "never came up" from "ran, then died";
+    /// what the latest attempt actually hit rides in `last_spawn_fail`, which
+    /// the report sends as `cause=`.
+    #[test]
+    fn spawn_failure_cause_is_kept_apart_from_the_mode() {
+        let _guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let script = write_dying_fake_mpvpaper("last-down", "Failed to initialize EGL, oops");
+        std::env::set_var("FRESCO_MPVPAPER", &script);
+
+        let id = std::process::id();
+        let media = std::env::temp_dir().join(format!("fresco-last-down-media-{id}.mp4"));
+        std::fs::write(&media, b"not really a video").unwrap();
+
+        let mut o = WlOutput::new(
+            "DP-1".into(),
+            Wallpaper {
+                kind: Kind::Video,
+                path: Some(media.clone()),
+                ..Default::default()
+            },
+            Scaling::Balanced,
+            PowerSaving::Full,
+        );
+        assert_eq!(o.last_down, "never_started");
+        o.supervise(false, 5, true);
+        assert_eq!(o.last_down, "never_started", "the mode is kept");
+        assert_eq!(
+            o.last_spawn_fail,
+            Some(crate::daemon::mpvpaper::EarlyExit::Egl.code()),
+            "the cause is what this attempt actually hit"
+        );
+
+        std::env::remove_var("FRESCO_MPVPAPER");
+        let _ = std::fs::remove_file(&script);
+        let _ = std::fs::remove_file(&media);
+    }
+
+    /// Drives `supervise()` to a give-up and checks the three fixes together:
+    /// telemetry (and by extension the desktop notification, gated on the
+    /// same latch) fires once and only once for the output's whole run, and
+    /// the [`crate::daemon::mpvpaper::ExitDetail`] riding along with it is
+    /// content-free — an `exit=`/`sig=` pair, never a path.
+    #[test]
+    fn renderer_giveup_is_reported_once_with_a_content_free_detail() {
+        let _guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let script = write_dying_fake_mpvpaper("giveup", "Failed to init mpv, bad option");
+        std::env::set_var("FRESCO_MPVPAPER", &script);
+
+        let id = std::process::id();
+        let media = std::env::temp_dir().join(format!("fresco-giveup-media-{id}.mp4"));
+        std::fs::write(&media, b"not really a video").unwrap();
+
+        const MAX: u32 = 5;
+        let mut o = WlOutput::new(
+            "DP-1".into(),
+            Wallpaper {
+                kind: Kind::Video,
+                path: Some(media.clone()),
+                ..Default::default()
+            },
+            Scaling::Balanced,
+            PowerSaving::Full,
+        );
+        assert!(!o.giveup_reported);
+        // MAX failing restarts, then the tick that crosses the cap.
+        for _ in 0..=MAX {
+            o.supervise(false, MAX, true);
+        }
+        assert!(o.static_fallback, "budget exhausted must fall back");
+        assert!(o.giveup_reported, "the give-up must be latched");
+
+        let detail = o
+            .last_spawn_detail
+            .clone()
+            .expect("a failed spawn must leave an ExitDetail behind");
+        assert!(detail.contains("exit="), "{detail}");
+        assert!(detail.contains("sig="), "{detail}");
+        assert!(!detail.contains('/'), "content-free: {detail}");
+
+        // Further ticks (still failing) must not flip the latch again — one
+        // report per output per daemon run, not one per failing tick.
+        for _ in 0..3 {
+            o.supervise(false, MAX, true);
+        }
+        assert!(o.giveup_reported);
+
+        std::env::remove_var("FRESCO_MPVPAPER");
+        let _ = std::fs::remove_file(&script);
+        let _ = std::fs::remove_file(&media);
     }
 }

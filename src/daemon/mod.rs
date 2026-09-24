@@ -963,9 +963,14 @@ impl Daemon {
 
     /// Re-assert every wallpaper window's place in the stack (~every 2s), since
     /// other clients' stacking changes can shuffle us. Normally that means
-    /// lowering back to the bottom; in DDE restack mode our windows must be
-    /// RAISED instead — lowering there would drop the wallpaper straight back
-    /// under dde-shell's desktop window a couple of seconds after it appeared.
+    /// lowering back to the bottom, but only when we're not there already: a
+    /// window we own is WM-managed, so `lower` is a ConfigureRequest the WM
+    /// answers by restacking and re-announcing the whole stack — on a plain
+    /// X11 desktop that stutters window-switch animations for nothing when we
+    /// were at the bottom already (issue #17). In DDE restack mode our windows
+    /// must be RAISED instead — lowering there would drop the wallpaper
+    /// straight back under dde-shell's desktop window a couple of seconds
+    /// after it appeared.
     ///
     /// The DDE raise is not unconditional: when the user clicks the desktop,
     /// DDE's window comes up above ours and the icons become usable, so the
@@ -991,6 +996,12 @@ impl Daemon {
             let peek = dde::icon_peek(self.config.dde_icon_peek_secs);
             self.dde_peek
                 .tick(&self.conn, &self.atoms, root, &windows, peek);
+            return;
+        }
+        let ours: Vec<x11rb::protocol::xproto::Window> =
+            self.renderers.iter().map(|r| r.window.window).collect();
+        let stack = x11win::stacking_order(&self.conn, &self.atoms, self.screen().root);
+        if x11win::at_bottom(&stack, &ours) == Some(true) {
             return;
         }
         for r in &self.renderers {

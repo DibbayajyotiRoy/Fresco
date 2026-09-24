@@ -430,6 +430,16 @@ pub struct Daemon {
     /// hands back only overlays whose content actually changed, so an idle
     /// desktop costs nothing (see docs/WIDGETS_ROADMAP.md "Power model").
     widgets: widgets::WidgetEngine,
+    /// Set by `handle_request(Apply)` instead of calling `overview::apply`
+    /// inline: that call decodes a full-size frame (ffmpegthumbnailer, `-s
+    /// 0`) and writes it via gsettings, which is slow enough on weak hardware
+    /// to make the GUI's IPC round trip (and thus its "Applying…" toast) last
+    /// much longer than it needs to. Deferring it to right after the reply is
+    /// sent (see `run`) means the caller — off the GTK main thread already,
+    /// see `daemon_ctl::apply_async` — gets its `Ok` back as soon as the
+    /// renderers are rebuilt, and the overview frame catches up a moment
+    /// later without anyone waiting on it.
+    overview_pending: bool,
 }
 
 impl Daemon {
@@ -467,6 +477,7 @@ impl Daemon {
             caja_mirror: None,
             caja_mirror_gave_up: false,
             widgets,
+            overview_pending: false,
         })
     }
 
@@ -776,6 +787,13 @@ impl Daemon {
                 let is_stop = matches!(req, Request::Stop);
                 let resp = self.handle_request(req);
                 let _ = reply.send(resp);
+                // Deferred from `handle_request(Apply)`: the caller already
+                // has its reply (and, off the GTK thread, has already
+                // unblocked the GUI), so the slow full-size overview redecode
+                // happens here instead of before the reply went out.
+                if std::mem::take(&mut self.overview_pending) {
+                    overview::apply(&self.config.wallpaper);
+                }
                 if is_stop {
                     self.shutdown();
                     return Ok(());
@@ -847,7 +865,9 @@ impl Daemon {
                 self.widgets.invalidate();
                 match self.rebuild() {
                     Ok(_) => {
-                        overview::apply(&self.config.wallpaper);
+                        // See `overview_pending`'s doc comment: run() applies
+                        // it right after this reply is on the wire.
+                        self.overview_pending = true;
                         Response::Ok
                     }
                     Err(e) => Response::Err {
@@ -1701,14 +1721,10 @@ fn run_gnome_static() -> Result<()> {
 
     while let Ok((req, reply)) = commands.recv() {
         let is_stop = matches!(req, Request::Stop);
+        let is_apply = matches!(req, Request::Apply);
         let resp = match req {
             Request::Apply => {
                 config = Config::load().unwrap_or_else(|_| config.clone());
-                if config.enabled {
-                    overview::apply(&config.wallpaper);
-                } else {
-                    overview::restore();
-                }
                 Response::Ok
             }
             // A static frame has nothing to pause.
@@ -1721,6 +1737,18 @@ fn run_gnome_static() -> Result<()> {
             Request::Stop => Response::Ok,
         };
         let _ = reply.send(resp);
+        // The overview redecode (ffmpegthumbnailer at full size) happens
+        // after the reply is sent, not before — the caller (off the GTK
+        // thread already; see `daemon_ctl::apply_async`) gets its `Ok` back
+        // as soon as the new config is loaded, instead of waiting out the
+        // redecode too.
+        if is_apply {
+            if config.enabled {
+                overview::apply(&config.wallpaper);
+            } else {
+                overview::restore();
+            }
+        }
         if is_stop {
             break;
         }

@@ -2,11 +2,13 @@ import "server-only";
 
 import { cache } from "react";
 
+import { buildFixtures, fixturesEnabled } from "@/lib/fixtures";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type {
   CatalogItem,
   DailyCountry,
   Feedback,
+  InstallDay,
   Issue,
   Notification,
   Release,
@@ -437,6 +439,10 @@ export const getIssues = cache(async (): Promise<DataResult<Issue[]>> => {
  * derives from this one query.
  */
 export const getInstalls = cache(async (): Promise<DataResult<Install[]>> => {
+  if (fixturesEnabled()) {
+    return { ok: true, data: buildFixtures(Date.now()).installs };
+  }
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return { ok: false, error: SUPABASE_MISSING };
@@ -609,8 +615,57 @@ export const getCatalogItems = cache(async (): Promise<
  * Deduped per render for callers passing an identical `sinceDate` — a plain
  * date string, so this one shares easily across sections.
  */
+/**
+ * Fetch every `install_days` row on or after `sinceDate` — the per-install
+ * check-in history `installs` itself does not keep. See
+ * supabase/schema.sql / supabase/migrations/2026-09-24_install_days.sql.
+ *
+ * Returns an empty list rather than an error when the table does not exist
+ * yet, same convention as `getDailyCountrySince`: this ships ahead of the
+ * migration, and a page dashing "collecting since —" is better than a 500.
+ *
+ * Deduped per render for callers passing an identical `sinceDate`.
+ */
+export const getInstallDaysSince = cache(
+  async (sinceDate: string): Promise<DataResult<InstallDay[]>> => {
+    if (fixturesEnabled()) {
+      const { installDays } = buildFixtures(Date.now());
+      return { ok: true, data: installDays.filter((d) => d.day >= sinceDate) };
+    }
+
+    const supabase = getSupabaseAdmin();
+    if (!supabase) {
+      return { ok: false, error: SUPABASE_MISSING };
+    }
+
+    const { data, error } = await selectAll<InstallDay>((from, to, withCount) =>
+      supabase
+        .from("install_days")
+        .select("install_id, day", { count: withCount ? "exact" : undefined })
+        .gte("day", sinceDate)
+        .order("day", { ascending: true })
+        .order("install_id", { ascending: true })
+        .range(from, to)
+    );
+
+    if (error) {
+      // 42P01 = undefined_table: the migration has not been run yet.
+      if (error.code === "42P01") {
+        return { ok: true, data: [] };
+      }
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true, data };
+  }
+);
+
 export const getDailyCountrySince = cache(
   async (sinceDate: string): Promise<DataResult<DailyCountry[]>> => {
+    if (fixturesEnabled()) {
+      return { ok: true, data: [] };
+    }
+
     const supabase = getSupabaseAdmin();
     if (!supabase) {
       return { ok: false, error: SUPABASE_MISSING };

@@ -15,7 +15,7 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -31,9 +31,14 @@ use crate::config::{Fit, Kind, PowerSaving, Scaling, Wallpaper};
 pub struct WaylandPlayer {
     socket_path: PathBuf,
     inner: RefCell<Inner>,
-    /// The last lines mpvpaper (and the mpv inside it) wrote to stderr, kept
-    /// by a reader thread so a renderer that dies mid-run can say why.
-    stderr_tail: StderrTail,
+    /// The last lines mpvpaper (and the mpv inside it) wrote — to **either**
+    /// stdout or stderr — kept by two reader threads so a renderer that dies
+    /// mid-run can say why. Merged into one tail because mpvpaper's own
+    /// `cflp_error()` wrapper prints to stdout and mpv logs to stdout too
+    /// (`terminal=yes` is forced by mpvpaper); splitting them would just as
+    /// often split the one line that explains the exit from the lines around
+    /// it.
+    stderr_tail: OutputTail,
 }
 
 struct Inner {
@@ -41,38 +46,65 @@ struct Inner {
     ipc: MpvIpc,
 }
 
-/// Bounded ring of the renderer's most recent stderr lines, shared with the
-/// thread that drains the pipe. Draining is not optional: mpv logs to the
-/// terminal (`terminal=yes` is forced by mpvpaper), and an undrained pipe
-/// would block the renderer once it filled.
-type StderrTail = Arc<Mutex<VecDeque<String>>>;
+/// Bounded ring of the renderer's most recent output lines, shared with the
+/// threads that drain the pipes. Draining is not optional: an unread pipe
+/// would block the renderer once it filled, on stdout as much as stderr.
+type OutputTail = Arc<Mutex<VecDeque<String>>>;
 
-/// How many stderr lines to keep. mpv's own chatter at startup is a handful of
+/// How many output lines to keep. mpv's own chatter at startup is a handful of
 /// lines; the error that matters is always among the last few.
-const STDERR_TAIL_LINES: usize = 40;
+const TAIL_LINES: usize = 40;
 
-fn drain_stderr(connector: String, pipe: std::process::ChildStderr, tail: StderrTail) {
+/// Drain one pipe (stdout or stderr) into the shared tail for the process's
+/// whole lifetime — not just until the first error — so mpv's ongoing info
+/// logging on stdout can never fill the pipe and stall the renderer. Generic
+/// over `Read` so the same function drives both `ChildStdout` and
+/// `ChildStderr` reader threads.
+fn drain<R: Read>(connector: String, stream: &'static str, pipe: R, tail: OutputTail) {
     for line in BufReader::new(pipe).lines().map_while(Result::ok) {
         let line = line.trim_end().to_string();
         if line.is_empty() {
             continue;
         }
-        log::debug!("[{connector}] mpvpaper: {line}");
+        log::debug!("[{connector}] mpvpaper {stream}: {line}");
         let mut t = tail.lock().unwrap_or_else(|e| e.into_inner());
-        if t.len() >= STDERR_TAIL_LINES {
+        if t.len() >= TAIL_LINES {
             t.pop_front();
         }
         t.push_back(line);
     }
 }
 
-fn tail_text(tail: &StderrTail) -> String {
+fn tail_text(tail: &OutputTail) -> String {
     tail.lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
         .cloned()
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Strip ANSI SGR escapes (`\x1b[...m` and friends) before matching or
+/// hashing. mpvpaper's `cflp_error()` colours every message it prints
+/// (`\x1b[1;31m[-] <msg>\x1b[0m`), and a needle match or a content hash taken
+/// against the raw bytes would depend on whether the terminal escapes are
+/// there at all.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next(); // consume '['
+            for c2 in chars.by_ref() {
+                if c2.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Why mpvpaper exited before its IPC socket appeared, classified from its
@@ -102,6 +134,15 @@ pub enum EarlyExit {
     Linker,
     /// Killed by a signal (SIGSEGV in a driver, OOM, …).
     Signal,
+    /// A Wayland protocol error — the compositor killed the connection over a
+    /// bad request (`<interface>@<id>: error <code>: ...`, or a raw
+    /// `Protocol error` from libwayland-client). Usually a compositor/driver
+    /// bug rather than anything Fresco's options control.
+    WaylandProtocol,
+    /// Exited 0 with nothing in its output that matches a known failure —
+    /// asked to quit right after starting (e.g. session teardown raced the
+    /// spawn) rather than having actually failed.
+    CleanExit,
     /// Exited with an error we do not recognise.
     Unknown,
 }
@@ -118,6 +159,8 @@ impl EarlyExit {
             EarlyExit::LoadFailed => "exited_early:load_failed",
             EarlyExit::Linker => "exited_early:linker",
             EarlyExit::Signal => "exited_early:signal",
+            EarlyExit::WaylandProtocol => "exited_early:wayland_protocol",
+            EarlyExit::CleanExit => "exited_early:clean_exit",
             EarlyExit::Unknown => "exited_early:unknown",
         }
     }
@@ -136,15 +179,112 @@ impl EarlyExit {
                 "the renderer cannot load this system's libmpv (run `fresco doctor`)"
             }
             EarlyExit::Signal => "the renderer crashed",
+            EarlyExit::WaylandProtocol => {
+                "the compositor rejected a Wayland request from the renderer"
+            }
+            EarlyExit::CleanExit => "the renderer exited right after starting",
             EarlyExit::Unknown => "the renderer exited at startup (run `fresco doctor`)",
         }
     }
 }
 
+/// Verbatim needles from mpvpaper's `cflp_error()`/`cflp_info()` output (its
+/// upstream `src/main.c`) and from mpv's own log, each paired with the
+/// [`EarlyExit`] it means and a short, stable id used as the *token* half of
+/// [`ExitDetail::sig`] — content-free, but stable across two runs that hit the
+/// same known cause. Ordered most-specific first: several mpv GL failures all
+/// contain "OpenGL", so the exact phrase must be tried before any looser one
+/// would be (there is none here today, but the ordering keeps that true as
+/// rules are added). Loose substrings ("EGL" alone, matching the harmless
+/// "libEGL warning: ..." mesa prints) are deliberately not here — see the
+/// early_exits_classify_by_status_then_stderr test for the case that bit us.
+const RULES: &[(&str, EarlyExit, &str)] = &[
+    (
+        "Unable to connect to the compositor",
+        EarlyExit::CompositorUnreachable,
+        "compositor_unreachable",
+    ),
+    (
+        "Missing a required Wayland interface",
+        EarlyExit::NoLayerShell,
+        "no_layer_shell",
+    ),
+    (
+        "can't seem to find any output",
+        EarlyExit::NoOutput,
+        "no_output",
+    ),
+    (
+        "OpenGL 2.1 or OpenGL ES 2.0 required",
+        EarlyExit::MpvGl,
+        "mpv_gl_glver",
+    ),
+    (
+        "Failed to initialize mpv GL context",
+        EarlyExit::MpvGl,
+        "mpv_gl",
+    ),
+    ("Failed to init mpv", EarlyExit::MpvInit, "mpv_init"),
+    (
+        "Failed creating mpv context",
+        EarlyExit::MpvInit,
+        "mpv_init_ctx",
+    ),
+    ("Failed to load file", EarlyExit::LoadFailed, "load_failed"),
+    ("Failed to get EGL display", EarlyExit::Egl, "egl_display"),
+    ("Failed to initialize EGL", EarlyExit::Egl, "egl_init"),
+    (
+        "Failed to set EGL frame buffer config",
+        EarlyExit::Egl,
+        "egl_fbconfig",
+    ),
+    (
+        "Failed to create EGL context",
+        EarlyExit::Egl,
+        "egl_context",
+    ),
+    (
+        "Failed to make context current",
+        EarlyExit::Egl,
+        "egl_current",
+    ),
+    ("Failed to load OpenGL", EarlyExit::Egl, "egl_opengl"),
+];
+
+/// The rule that fired for an already-ANSI-stripped exit, if any — the shared
+/// lookup behind both [`classify_early_exit`] and [`exit_detail`]'s token, so
+/// the two can never disagree about what matched.
+fn matched_rule(
+    status: &std::process::ExitStatus,
+    stripped: &str,
+) -> Option<(EarlyExit, &'static str)> {
+    use std::os::unix::process::ExitStatusExt;
+    if status.code() == Some(127) {
+        return Some((EarlyExit::Linker, "linker"));
+    }
+    if status.signal().is_some() {
+        return None; // a crash carries no useful text token
+    }
+    // The loader also fails with 127 under some shells but always prints this.
+    if stripped.contains("error while loading shared libraries") {
+        return Some((EarlyExit::Linker, "linker"));
+    }
+    if let Some((_, e, id)) = RULES
+        .iter()
+        .find(|(needle, _, _)| stripped.contains(needle))
+    {
+        return Some((*e, id));
+    }
+    if looks_like_wayland_protocol_error(stripped) {
+        return Some((EarlyExit::WaylandProtocol, "wayland_protocol"));
+    }
+    None
+}
+
 /// Classify an early exit. Pure so the fingerprints are unit-testable; the
-/// strings are verbatim prefixes of what mpvpaper prints (its `cflp_error`
-/// wrapper adds a coloured `[ERROR]` marker in front, hence `contains`).
-pub fn classify_early_exit(status: &std::process::ExitStatus, stderr: &str) -> EarlyExit {
+/// strings are verbatim prefixes of what mpvpaper prints on stdout via
+/// `cflp_error()` (`\x1b[1;31m[-] <msg>\x1b[0m`) — see [`strip_ansi`].
+pub fn classify_early_exit(status: &std::process::ExitStatus, output: &str) -> EarlyExit {
     use std::os::unix::process::ExitStatusExt;
     if status.code() == Some(127) {
         return EarlyExit::Linker;
@@ -152,31 +292,144 @@ pub fn classify_early_exit(status: &std::process::ExitStatus, stderr: &str) -> E
     if status.signal().is_some() {
         return EarlyExit::Signal;
     }
-    // The loader also fails with 127 under some shells but always prints this.
-    if stderr.contains("error while loading shared libraries") {
-        return EarlyExit::Linker;
+    let stripped = strip_ansi(output);
+    if let Some((e, _)) = matched_rule(status, &stripped) {
+        return e;
     }
-    const RULES: &[(&str, EarlyExit)] = &[
-        (
-            "Unable to connect to the compositor",
-            EarlyExit::CompositorUnreachable,
-        ),
-        (
-            "Missing a required Wayland interface",
-            EarlyExit::NoLayerShell,
-        ),
-        ("can't seem to find any output", EarlyExit::NoOutput),
-        ("Failed to initialize mpv GL context", EarlyExit::MpvGl),
-        ("Failed to init mpv", EarlyExit::MpvInit),
-        ("Failed creating mpv context", EarlyExit::MpvInit),
-        ("Failed to load file", EarlyExit::LoadFailed),
-        ("EGL", EarlyExit::Egl),
-        ("Failed to load OpenGL", EarlyExit::Egl),
-    ];
-    RULES
-        .iter()
-        .find(|(needle, _)| stderr.contains(needle))
-        .map_or(EarlyExit::Unknown, |(_, e)| *e)
+    // No text we recognise: a clean exit at status 0 is not a failure of
+    // anything, just an mpvpaper that quit right after starting (e.g. it lost
+    // a race with session teardown). An exit 0 rules match above still wins —
+    // this is only reached once nothing else has.
+    if status.code() == Some(0) {
+        return EarlyExit::CleanExit;
+    }
+    EarlyExit::Unknown
+}
+
+/// A hand-rolled parser for libwayland's protocol-error line, e.g.
+/// `zwlr_layer_shell_v1@12: error 0: invalid layer`: `<ident>@<digits>: error
+/// <digits>:`. No regex crate is pulled in for one shape. Also matches the
+/// plainer "Protocol error" some builds print instead.
+fn looks_like_wayland_protocol_error(text: &str) -> bool {
+    if text.contains("Protocol error") {
+        return true;
+    }
+    for (idx, _) in text.match_indices('@') {
+        let after_at = &text[idx + 1..];
+        let id_end = after_at
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after_at.len());
+        if id_end == 0 {
+            continue;
+        }
+        let Some(rest) = after_at[id_end..].strip_prefix(": error ") else {
+            continue;
+        };
+        let code_end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if code_end > 0 && rest[code_end..].starts_with(':') {
+            return true;
+        }
+    }
+    false
+}
+
+/// A content-free fingerprint of why mpvpaper exited, attached to the spawn
+/// error via `anyhow::Context` so [`ExitDetail::of`] can pull it back out at
+/// the give-up site. Per `src/telemetry.rs`'s privacy rules: no paths, no file
+/// names, no raw message text ever leaves this struct — `status` is just an
+/// exit code or signal number, and `sig` is either a static rule id (`tok:`)
+/// or an 8-hex FNV-1a hash of a normalized line (`h:`) that keeps words
+/// containing a path/URL-shaped character and turns every digit into `#`, so
+/// two runs that differ only in a file path or a number hash the same.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExitDetail {
+    pub status: String,
+    pub sig: String,
+}
+
+impl std::fmt::Display for ExitDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "exit={} sig={}", self.status, self.sig)
+    }
+}
+
+impl ExitDetail {
+    /// Pull a previously attached [`ExitDetail`] back out of an error chain.
+    pub fn of(e: &anyhow::Error) -> Option<ExitDetail> {
+        e.downcast_ref::<ExitDetail>().cloned()
+    }
+}
+
+/// Build the fingerprint for one exit. `output` is the merged stdout+stderr
+/// tail, already possibly carrying ANSI colour.
+fn exit_detail(status: &std::process::ExitStatus, output: &str) -> ExitDetail {
+    use std::os::unix::process::ExitStatusExt;
+    let status_str = match status.code() {
+        Some(c) => format!("c{c}"),
+        None => format!("s{}", status.signal().unwrap_or(0)),
+    };
+    let stripped = strip_ansi(output);
+    let sig = match matched_rule(status, &stripped) {
+        Some((_, id)) => format!("tok:{id}"),
+        None => {
+            let last = stripped
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("");
+            let normalized = normalize_line(last);
+            if normalized.is_empty() {
+                "h:none".to_string()
+            } else {
+                format!("h:{:08x}", fnv1a32(normalized.as_bytes()))
+            }
+        }
+    };
+    ExitDetail {
+        status: status_str,
+        sig,
+    }
+}
+
+/// Reduce one line to `[a-z# ]*`: lowercase, drop every word containing a
+/// path/URL/quote-shaped character (`/ \ . @ = :` or a quote), and turn every
+/// remaining digit into `#`. What survives is shape, not content — the whole
+/// point is that "mp4 not found at /home/al/wall.mp4" and "mp4 not found at
+/// /home/bo/other.mp4" hash identically, and neither ever contains a path.
+fn normalize_line(line: &str) -> String {
+    let lower = line.to_lowercase();
+    let mut words = Vec::new();
+    for word in lower.split_whitespace() {
+        if word.contains(['/', '\\', '.', '@', '=', ':', '\'', '"']) {
+            continue;
+        }
+        let mapped: String = word
+            .chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c })
+            .filter(|c| c.is_ascii_lowercase() || *c == '#')
+            .collect();
+        if !mapped.is_empty() {
+            words.push(mapped);
+        }
+    }
+    words.join(" ")
+}
+
+/// FNV-1a, 32-bit. Hand-written rather than `DefaultHasher` because the
+/// standard hasher's output is explicitly *not* guaranteed stable across Rust
+/// versions — telemetry that compares this hash across installs on different
+/// toolchains needs one that is.
+fn fnv1a32(bytes: &[u8]) -> u32 {
+    const FNV_OFFSET: u32 = 0x811c_9dc5;
+    const FNV_PRIME: u32 = 0x0100_0193;
+    let mut hash = FNV_OFFSET;
+    for &b in bytes {
+        hash ^= u32::from(b);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
 }
 
 /// Why a spawn failed, as a **content-free** code (no paths, no file names) the
@@ -263,7 +516,7 @@ impl WaylandPlayer {
             .arg(connector)
             .arg(file)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
@@ -284,10 +537,20 @@ impl WaylandPlayer {
             })?;
 
         let mut child = child;
-        let stderr_tail: StderrTail = Arc::new(Mutex::new(VecDeque::new()));
-        let reader = child.stderr.take().map(|pipe| {
+        let stderr_tail: OutputTail = Arc::new(Mutex::new(VecDeque::new()));
+        // Two reader threads, one bounded tail: mpvpaper's own `cflp_error()`
+        // prints to stdout (not stderr), and so does mpv's own logging
+        // (`terminal=yes` is forced by mpvpaper) — see the doc comment on
+        // `stderr_tail`. Both are drained for the process's whole lifetime,
+        // not just while we're waiting for the IPC socket, so mpv's ongoing
+        // info logging on stdout can never fill the pipe and stall it.
+        let stdout_reader = child.stdout.take().map(|pipe| {
             let (c, t) = (connector.to_string(), Arc::clone(&stderr_tail));
-            std::thread::spawn(move || drain_stderr(c, pipe, t))
+            std::thread::spawn(move || drain(c, "stdout", pipe, t))
+        });
+        let stderr_reader = child.stderr.take().map(|pipe| {
+            let (c, t) = (connector.to_string(), Arc::clone(&stderr_tail));
+            std::thread::spawn(move || drain(c, "stderr", pipe, t))
         });
         let mut ipc = MpvIpc::new(socket_path.clone());
         // Wait for the IPC socket, but fast-fail if mpvpaper exits first (e.g. a
@@ -296,23 +559,28 @@ impl WaylandPlayer {
         for _ in 0..50 {
             if let Ok(Some(status)) = child.try_wait() {
                 std::fs::remove_file(&socket_path).ok();
-                // The process is gone, so the pipe is at EOF and the reader
-                // finishes on its own; joining just makes the tail complete.
-                if let Some(r) = reader {
+                // The process is gone, so both pipes are at EOF and their
+                // readers finish on their own; joining just makes the tail
+                // complete before we read it.
+                if let Some(r) = stdout_reader {
+                    let _ = r.join();
+                }
+                if let Some(r) = stderr_reader {
                     let _ = r.join();
                 }
                 let tail = tail_text(&stderr_tail);
                 let why = classify_early_exit(&status, &tail);
+                let detail = exit_detail(&status, &tail);
                 log::error!(
                     "[{connector}] mpvpaper exited at startup ({status}, {}); its last output was:\n{tail}",
                     why.code()
                 );
-                return Err(
-                    anyhow::Error::new(SpawnFail::ExitedEarly(why)).context(format!(
+                return Err(anyhow::Error::new(SpawnFail::ExitedEarly(why))
+                    .context(detail)
+                    .context(format!(
                         "mpvpaper for {connector} exited immediately ({status}): {}",
                         why.hint()
-                    )),
-                );
+                    )));
             }
             if ipc.connect_retry(1).is_ok() {
                 connected = true;
@@ -960,39 +1228,115 @@ mod tests {
         assert_eq!(SpawnFail::of(&anyhow!("no playable file configured")), None);
     }
 
+    /// mpvpaper's real coloured stdout form — `cflp_error()` in upstream
+    /// `src/main.c`. Every classifier test below drives lines shaped exactly
+    /// like this (not the old made-up "[ERROR] ..." shape), because that
+    /// upstream wrapper prints to **stdout**, not stderr, and prefixes with
+    /// this escape rather than a plain "[ERROR]" tag — the mismatch between
+    /// the two is what let `classify_early_exit` return `Unknown` for every
+    /// real failure until this fix.
+    fn cflp_error(msg: &str) -> String {
+        format!("\x1b[1;31m[-] {msg}\x1b[0m")
+    }
+
     /// The early-exit fingerprints must map mpvpaper's real messages (verbatim
-    /// from upstream src/main.c) to the right code, and must never leak the
-    /// message itself — only the static code travels.
+    /// from upstream src/main.c, in their real ANSI-coloured stdout form) to
+    /// the right code, and must never leak the message itself — only the
+    /// static code travels.
     #[test]
     fn early_exits_classify_by_status_then_stderr() {
         use std::os::unix::process::ExitStatusExt;
         let exit = |c: i32| std::process::ExitStatus::from_raw(c << 8);
-        let cases: &[(i32, &str, EarlyExit)] = &[
-            (127, "", EarlyExit::Linker),
-            (1, "mpvpaper: error while loading shared libraries: libmpv.so.1: cannot open shared object file", EarlyExit::Linker),
-            (1, "[ERROR] Unable to connect to the compositor.\nIf your compositor is running, check or set the WAYLAND_DISPLAY environment variable.", EarlyExit::CompositorUnreachable),
-            (1, "[ERROR] Missing a required Wayland interface", EarlyExit::NoLayerShell),
-            (1, "[ERROR] :/ sorry about this but we can't seem to find any output.", EarlyExit::NoOutput),
-            (1, "[ERROR] Failed to initialize EGL EGL_NOT_INITIALIZED", EarlyExit::Egl),
-            (1, "[ERROR] Failed to create EGL context EGL_BAD_CONFIG", EarlyExit::Egl),
-            (1, "[ERROR] Failed to init mpv, option not found", EarlyExit::MpvInit),
-            (1, "[ERROR] Failed to initialize mpv GL context, unsupported", EarlyExit::MpvGl),
-            (1, "[ERROR] Failed to load file, error loading file", EarlyExit::LoadFailed),
-            (1, "something new", EarlyExit::Unknown),
+        let cases: &[(i32, String, EarlyExit)] = &[
+            (127, String::new(), EarlyExit::Linker),
+            (1, "mpvpaper: error while loading shared libraries: libmpv.so.1: cannot open shared object file".into(), EarlyExit::Linker),
+            (1, cflp_error("Unable to connect to the compositor.\nIf your compositor is running, check or set the WAYLAND_DISPLAY environment variable."), EarlyExit::CompositorUnreachable),
+            (1, cflp_error("Missing a required Wayland interface"), EarlyExit::NoLayerShell),
+            (1, cflp_error(":/ sorry about this but we can't seem to find any output."), EarlyExit::NoOutput),
+            (1, cflp_error("Failed to get EGL display"), EarlyExit::Egl),
+            (1, cflp_error("Failed to initialize EGL"), EarlyExit::Egl),
+            (1, cflp_error("Failed to set EGL frame buffer config"), EarlyExit::Egl),
+            (1, cflp_error("Failed to create EGL context"), EarlyExit::Egl),
+            (1, cflp_error("Failed to make context current"), EarlyExit::Egl),
+            (1, cflp_error("Failed to load OpenGL"), EarlyExit::Egl),
+            (1, cflp_error("Failed to init mpv, option not found"), EarlyExit::MpvInit),
+            (1, cflp_error("Failed creating mpv context"), EarlyExit::MpvInit),
+            (1, cflp_error("Failed to initialize mpv GL context, unsupported"), EarlyExit::MpvGl),
+            // mpv's own message (not mpvpaper's), also unadorned on stdout.
+            (1, "[vo/libmpv] At least OpenGL 2.1 or OpenGL ES 2.0 required.".into(), EarlyExit::MpvGl),
+            (1, cflp_error("Failed to load file, error loading file"), EarlyExit::LoadFailed),
+            // A harmless mesa warning that merely contains "EGL" must not be
+            // mistaken for one of the exact EGL failure messages above.
+            (1, "libEGL warning: DRI2: failed to authenticate".into(), EarlyExit::Unknown),
+            (1, "something new".into(), EarlyExit::Unknown),
+            (0, String::new(), EarlyExit::CleanExit),
+            (0, "zwlr_layer_shell_v1@12: error 0: invalid layer".into(), EarlyExit::WaylandProtocol),
+            (1, "wl_display@1: error 5: invalid object".into(), EarlyExit::WaylandProtocol),
+            (1, "[FATAL] Protocol error".into(), EarlyExit::WaylandProtocol),
         ];
-        for (code, err, want) in cases {
-            assert_eq!(classify_early_exit(&exit(*code), err), *want, "{err}");
+        for (code, output, want) in cases {
+            assert_eq!(classify_early_exit(&exit(*code), output), *want, "{output}");
         }
         // A signal death is a crash whatever was printed before it.
         let sig = std::process::ExitStatus::from_raw(11);
         assert_eq!(
-            classify_early_exit(&sig, "[ERROR] Failed to init mpv"),
+            classify_early_exit(&sig, &cflp_error("Failed to init mpv")),
             EarlyExit::Signal
         );
-        for e in [EarlyExit::Linker, EarlyExit::Unknown, EarlyExit::MpvInit] {
+        for e in [
+            EarlyExit::Linker,
+            EarlyExit::Unknown,
+            EarlyExit::MpvInit,
+            EarlyExit::WaylandProtocol,
+            EarlyExit::CleanExit,
+        ] {
             assert!(e.code().starts_with("exited_early:"), "{}", e.code());
             assert!(!e.code().contains('/'), "codes carry no paths");
         }
+    }
+
+    /// [`ExitDetail`] must never carry a path, must tell apart genuinely
+    /// different outputs, and must fold away exactly the parts (a path, a
+    /// number) that differ between two runs of the same underlying failure.
+    #[test]
+    fn exit_detail_is_content_free_and_stable() {
+        use std::os::unix::process::ExitStatusExt;
+        let exit = |c: i32| std::process::ExitStatus::from_raw(c << 8);
+
+        // A known rule always wins as a stable token, never a hash.
+        let d = exit_detail(
+            &exit(1),
+            &cflp_error("Failed to init mpv, option not found"),
+        );
+        assert_eq!(d.status, "c1");
+        assert_eq!(d.sig, "tok:mpv_init");
+        assert!(!d.sig.contains('/'));
+
+        // Empty output hashes to a fixed sentinel, not a hash of nothing.
+        assert_eq!(exit_detail(&exit(0), "").sig, "h:none");
+
+        // Two lines differing only in a path and a number must fold to the
+        // same signature: the path-bearing word is dropped whole, and the
+        // surviving digits map to '#'.
+        let a = exit_detail(&exit(1), "mpv: error opening file /home/al/wall1.mp4");
+        let b = exit_detail(&exit(1), "mpv: error opening file /home/bo/wall99.mp4");
+        assert_eq!(a.sig, b.sig, "{a:?} vs {b:?}");
+        assert!(!a.sig.contains('/'));
+        assert_ne!(a.sig, "h:none");
+
+        // A genuinely different message hashes differently.
+        let c = exit_detail(&exit(1), "completely unrelated failure text");
+        assert_ne!(a.sig, c.sig);
+
+        // Signal death: status carries the signal number, never a path.
+        let sig = std::process::ExitStatus::from_raw(11);
+        assert_eq!(exit_detail(&sig, "").status, "s11");
+
+        // Round-trips through the anyhow context the same way SpawnFail does.
+        let e = anyhow::Error::new(SpawnFail::ExitedEarly(EarlyExit::MpvInit))
+            .context(d.clone())
+            .context("mpvpaper for DP-1 exited immediately");
+        assert_eq!(ExitDetail::of(&e), Some(d));
     }
 
     fn have(bin: &str) -> bool {
@@ -1081,6 +1425,10 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
     #[test]
     fn mpvpaper_supervision_primitives() {
         use std::os::unix::fs::PermissionsExt;
+
+        // Serializes against every other test that sets FRESCO_MPVPAPER —
+        // std::env::set_var is process-global and cargo test runs threaded.
+        let _guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let wp = Wallpaper {
             kind: Kind::Video,

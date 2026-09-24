@@ -27,7 +27,7 @@ use serde::Deserialize;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
 
-use crate::t;
+use crate::{t, tf};
 
 /// Project host + publishable (anon) key — same as the GUI client. Safe to ship:
 /// Row-Level Security (supabase/schema.sql) is what protects the data, letting
@@ -423,6 +423,24 @@ fn handle(n: &Notification) {
 /// True if `candidate` is a strictly newer semver than the running version.
 fn is_newer(candidate: &str) -> bool {
     crate::update::is_newer(candidate, CURRENT_VERSION)
+}
+
+/// Tell the user a Wayland output gave up on live playback and fell back to a
+/// paused static frame, instead of leaving them looking at a wallpaper that
+/// silently stopped animating with no clue why. `hint` is the same one-line,
+/// user-facing explanation `Status.error` already carries (`EarlyExit::hint`
+/// or `spawn_fail_hint`), so the notification and the pill never disagree
+/// about the cause. Called at most once per output per daemon run — see
+/// `WlOutput::supervise`'s `giveup_reported` latch.
+pub(crate) fn renderer_gave_up(connector: &str, hint: &str) {
+    notify(
+        &tf!("The {connector} wallpaper stopped playing", "connector" => connector),
+        &tf!(
+            "{hint} — showing a still frame instead. Fresco will try live playback again in a few minutes.",
+            "hint" => hint
+        ),
+        Some((t!("Open Fresco"), Click::OpenSupport)),
+    );
 }
 
 /// Raise a native desktop notification, optionally with one action button. The

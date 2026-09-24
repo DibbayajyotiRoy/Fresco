@@ -49,6 +49,16 @@ pub fn is_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
+/// Serializes every test that sets `FRESCO_MPVPAPER` (or any other process
+/// env var these tests share). `std::env::set_var`/`remove_var` act on the
+/// whole process, and `cargo test` runs tests on multiple threads by default,
+/// so two such tests running concurrently would each see the other's
+/// override mid-run. Every test that touches the env var must
+/// `let _guard = fresco::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());`
+/// before setting it and hold `_guard` until it removes it again.
+#[cfg(all(test, feature = "daemon"))]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Absolute locations to look for the **bundled** mpvpaper, in priority order.
 /// Fresco ships it under `<prefix>/lib/fresco/mpvpaper` (e.g. `/usr/lib/fresco`
 /// from the .deb, `/app/lib/fresco` in Flatpak) so it never collides with a

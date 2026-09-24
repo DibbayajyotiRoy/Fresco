@@ -16,6 +16,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the matching desktop locale automatically.
 
 ### Fixed
+- **A Wayland video/GIF wallpaper that keeps failing to start now says why,
+  tells you instead of quietly holding a still frame, and tries again on its
+  own.** mpvpaper prints every one of its own errors — and mpv's — to
+  **stdout**, which Fresco discarded, so a failed renderer was always
+  reported as cause "unknown" no matter what actually broke (a missing EGL
+  context, a Wayland protocol error, mpv rejecting an option). Both streams
+  are now read, matched against mpvpaper's real error text, and folded into
+  a specific cause. Once an output gives up on live playback, Fresco now
+  raises a desktop notification naming that cause instead of leaving the
+  wallpaper looking merely frozen, and retries live playback again five
+  minutes later rather than staying on the static frame for good.
+- **The daily usage check-in now reaches long-running sessions too**, not
+  just the moment each backend starts. It was sent once at daemon start and
+  never again, so an install left running for days without a restart looked
+  inactive in the numbers; each backend loop now re-offers it periodically,
+  and it keeps its own roughly-once-a-day throttle either way.
 - **Renaming a card from its context menu now shows a proper check mark,
   applies on Enter, and survives clicking an IME candidate** (issue #21).
   The rename box was a popover, and its autohide grabbed the pointer: a

@@ -50,14 +50,18 @@ pub enum Language {
     /// Simplified Chinese (简体中文).
     #[serde(rename = "zh-CN")]
     ChineseSimplified,
+    /// Russian (Русский).
+    #[serde(rename = "ru")]
+    Russian,
 }
 
 impl Language {
     /// Every language offered in Settings, in menu order.
-    pub const ALL: [Language; 3] = [
+    pub const ALL: [Language; 4] = [
         Language::System,
         Language::English,
         Language::ChineseSimplified,
+        Language::Russian,
     ];
 
     /// The BCP-47-ish tag used in `config.toml` and `FRESCO_LANG`.
@@ -66,6 +70,7 @@ impl Language {
             Language::System => "system",
             Language::English => "en",
             Language::ChineseSimplified => "zh-CN",
+            Language::Russian => "ru",
         }
     }
 
@@ -81,6 +86,7 @@ impl Language {
             Language::System => tr("System"),
             Language::English => "English",
             Language::ChineseSimplified => "简体中文",
+            Language::Russian => "Русский",
         }
     }
 
@@ -94,36 +100,49 @@ impl Language {
         match self {
             Language::English => None,
             Language::ChineseSimplified => Some(Language::ChineseSimplified),
+            Language::Russian => Some(Language::Russian),
             Language::System => detect_locale_language(),
         }
     }
 }
 
-/// Map the desktop locale onto a catalog we actually ship.
+/// Pull the language subtag out of a raw `LANG`/`LC_*` value.
+///
+/// "zh_CN.UTF-8" / "zh-Hans-CN" / "ru_RU.UTF-8" / "C.UTF-8" -> the language
+/// subtag, lower-cased. Split out of [`detect_locale_language`] so the parsing
+/// shape itself can be unit-tested without touching process-global env vars.
+fn locale_subtag(raw: &str) -> String {
+    raw.split(['.', '@'])
+        .next()
+        .unwrap_or(raw)
+        .split(['_', '-'])
+        .next()
+        .unwrap_or(raw)
+        .to_ascii_lowercase()
+}
+
+/// Map a language subtag onto a catalog we actually ship.
 ///
 /// Every `zh` variant resolves to Simplified, including `zh_TW`/`zh_HK`. That
 /// is a deliberate approximation and not a claim of Traditional support: a
 /// Traditional reader gets Simplified Chinese, which is imperfect but far
 /// closer to readable than falling back to English would be. If a `zh-TW`
 /// catalog is ever added, this is the one place that needs to learn about it.
+fn language_for_subtag(lang: &str) -> Option<Language> {
+    match lang {
+        "zh" => Some(Language::ChineseSimplified),
+        "ru" => Some(Language::Russian),
+        _ => None,
+    }
+}
+
+/// Map the desktop locale onto a catalog we actually ship.
 fn detect_locale_language() -> Option<Language> {
     let raw = ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
         .find_map(|k| std::env::var(k).ok())
         .filter(|v| !v.is_empty())?;
-    // "zh_CN.UTF-8" / "zh-Hans-CN" / "C.UTF-8" -> the language subtag.
-    let lang = raw
-        .split(['.', '@'])
-        .next()
-        .unwrap_or(&raw)
-        .split(['_', '-'])
-        .next()
-        .unwrap_or(&raw)
-        .to_ascii_lowercase();
-    match lang.as_str() {
-        "zh" => Some(Language::ChineseSimplified),
-        _ => None,
-    }
+    language_for_subtag(&locale_subtag(&raw))
 }
 
 /// The active catalog, or `None` for English. Written once by [`init`].
@@ -134,6 +153,7 @@ static CATALOG: OnceLock<Option<&'static HashMap<&'static str, &'static str>>> =
 fn catalog_source(lang: Language) -> Option<&'static str> {
     match lang {
         Language::ChineseSimplified => Some(include_str!("../i18n/zh-CN.json")),
+        Language::Russian => Some(include_str!("../i18n/ru.json")),
         _ => None,
     }
 }
@@ -535,23 +555,62 @@ mod tests {
     #[test]
     fn locale_detection_reads_the_language_subtag() {
         // Sanity-check the parsing shape rather than the env, which is global.
-        for (raw, want_zh) in [
-            ("zh_CN.UTF-8", true),
-            ("zh", true),
-            ("zh-Hans-CN", true),
-            ("en_US.UTF-8", false),
-            ("C.UTF-8", false),
-            ("", false),
+        for (raw, want) in [
+            ("zh_CN.UTF-8", Some(Language::ChineseSimplified)),
+            ("zh", Some(Language::ChineseSimplified)),
+            ("zh-Hans-CN", Some(Language::ChineseSimplified)),
+            ("ru_RU.UTF-8", Some(Language::Russian)),
+            ("ru_UA.UTF-8", Some(Language::Russian)),
+            ("ru", Some(Language::Russian)),
+            ("ru-RU", Some(Language::Russian)),
+            ("en_US.UTF-8", None),
+            ("C.UTF-8", None),
+            ("", None),
         ] {
-            let lang = raw
-                .split(['.', '@'])
-                .next()
-                .unwrap_or(raw)
-                .split(['_', '-'])
-                .next()
-                .unwrap_or(raw)
-                .to_ascii_lowercase();
-            assert_eq!(lang == "zh", want_zh, "locale {raw:?}");
+            assert_eq!(
+                language_for_subtag(&locale_subtag(raw)),
+                want,
+                "locale {raw:?}"
+            );
+        }
+    }
+
+    /// zh-CN is the reference catalog. Every other shipped catalog must
+    /// translate exactly the same key set — not a superset, not a subset.
+    ///
+    /// This is deliberately strict: a catalog with a missing key silently
+    /// falls back to English for that string (harmless but incomplete), while
+    /// one with an extra key is dead weight that `every_catalog_key_is_reachable_from_the_source`
+    /// won't necessarily catch if the stray key happens to collide with a
+    /// const-table literal. Keeping every catalog's key set identical to the
+    /// reference is what makes "473 keys, fully translated" a fact you can
+    /// check by diffing two `HashSet`s instead of eyeballing a JSON file.
+    #[test]
+    fn catalogs_share_the_reference_key_set() {
+        let reference_src = catalog_source(Language::ChineseSimplified)
+            .expect("zh-CN is the reference catalog and must exist");
+        let reference: HashMap<String, String> = serde_json::from_str(reference_src).unwrap();
+        let reference_keys: std::collections::HashSet<&str> =
+            reference.keys().map(String::as_str).collect();
+
+        for lang in Language::ALL {
+            if lang == Language::ChineseSimplified {
+                continue;
+            }
+            let Some(src) = catalog_source(lang) else {
+                continue;
+            };
+            let map: HashMap<String, String> = serde_json::from_str(src).unwrap();
+            let keys: std::collections::HashSet<&str> = map.keys().map(String::as_str).collect();
+            let missing: Vec<&&str> = reference_keys.difference(&keys).collect();
+            let extra: Vec<&&str> = keys.difference(&reference_keys).collect();
+            assert!(
+                missing.is_empty() && extra.is_empty(),
+                "catalog {} does not match the reference key set — missing: {:?}, extra: {:?}",
+                lang.code(),
+                missing,
+                extra
+            );
         }
     }
 

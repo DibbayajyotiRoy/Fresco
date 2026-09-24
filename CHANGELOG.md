@@ -52,6 +52,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   decoder mpv settled on but not why it passed over the others — a missing
   CUDA library, a build without NVDEC, an unsupported interop — and only
   mpv's log says that.
+- **A Russian UI translation** (issue #20). Select it under Settings →
+  Language, or follow a `ru`/`ru_RU`/`ru_UA` desktop locale automatically.
 
 ## [1.1.42] — Unreleased
 

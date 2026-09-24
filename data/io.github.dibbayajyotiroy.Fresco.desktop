@@ -3,8 +3,10 @@ Type=Application
 Name=Fresco
 GenericName=Live Wallpaper
 GenericName[zh_CN]=动态壁纸
+GenericName[ru]=Живые обои
 Comment=Set video, GIF, and image wallpapers with hardware-accelerated playback
 Comment[zh_CN]=将视频、GIF 和图片设为壁纸，硬件加速播放
+Comment[ru]=Установка видео, GIF и изображений в качестве обоев с аппаратным ускорением
 Exec=fresco %F
 Icon=io.github.dibbayajyotiroy.Fresco
 Terminal=false
@@ -15,6 +17,7 @@ Keywords=wallpaper;live;video;background;animated;
 # and "壁纸引擎" because Wallpaper Engine is the reference point most people
 # arrive with.
 Keywords[zh_CN]=壁纸;动态壁纸;视频壁纸;桌面;背景;动画;bizhi;dongtai;壁纸引擎;
+Keywords[ru]=обои;живые обои;видеообои;фон;рабочий стол;анимация;
 MimeType=video/mp4;video/webm;video/x-matroska;image/gif;image/png;image/jpeg;image/webp;
 StartupNotify=true
 StartupWMClass=fresco

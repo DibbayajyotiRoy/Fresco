@@ -75,6 +75,14 @@ pub struct StatusReply {
     /// lists outputs that currently have a wallpaper.
     #[serde(default)]
     pub monitors_info: Vec<MonitorInfo>,
+    /// Connectors (Wayland only) whose renderer gave up on live playback and
+    /// is holding a paused static frame instead — see `WlOutput::supervise`'s
+    /// give-up arm. `#[serde(default)]` so an older daemon/GUI pair (neither
+    /// of which knows this field) still round-trips a `Status` reply fine:
+    /// an old GUI just ignores it, and a new GUI reading an old daemon's
+    /// reply sees an empty list rather than failing to deserialize.
+    #[serde(default)]
+    pub gave_up: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -167,8 +167,14 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
         .add_css_class(if warn { "dot-warn" } else { "dot-ok" });
 
     // Presentation-only restyle: overline state + prettified name in the pill,
-    // CPU% relegated to the tooltip (with any daemon error).
-    w.overline.set_label(if status.paused {
+    // CPU% relegated to the tooltip (with any daemon error). A renderer that
+    // gave up on live playback and is holding a paused static frame (see
+    // `daemon::WlOutput::supervise`) must not say PLAYING — the dot already
+    // turns amber for it via `status.error`, but the overline used to keep
+    // claiming the wallpaper was animating right through a give-up.
+    w.overline.set_label(if !status.gave_up.is_empty() {
+        t!("NEEDS ATTENTION")
+    } else if status.paused {
         t!("PAUSED")
     } else {
         t!("PLAYING")

@@ -17,8 +17,7 @@ conflicts=('fresco')
 # glib2 owns /usr/bin/gdbus and /usr/bin/gsettings — see the fresco PKGBUILD.
 depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'glib2')
 optdepends=(
-  'libva-intel-driver: VA-API hardware decode on Intel GPUs'
-  'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
+  'intel-media-driver: VA-API hardware decode on Intel GPUs'
   'gst-plugins-good: hover-to-play previews in the library'
   'gst-libav: hover-to-play previews in the library'
   'pipewire: system-audio capture for the audio visualiser widget (pw-cat)'

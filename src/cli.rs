@@ -37,6 +37,7 @@ use crate::capability::{
     detect, gnome_shell_version, gnome_x11_session_available, is_gnome_session, Capability,
 };
 use crate::config::Config;
+use crate::hwdecode;
 use crate::ipc::{request, request_with_timeout, Request, Response, StatusReply};
 
 const GREEN: &str = "\x1b[32m";
@@ -163,10 +164,11 @@ fn doctor() -> i32 {
             still_frame_hint(gnome_static, x11_session),
         ),
     }
+    let pm = hwdecode::Pm::detect();
     check(
         "Hardware acceleration",
         hwaccel_available(),
-        "install mesa-va-drivers / intel-media-va-driver",
+        &hwdecode::install_hint(pm, hwdecode::DRIVER_PKGS),
         &mut problems,
     );
     // mpvpaper only matters on layer-shell Wayland (it's how we render there).
@@ -225,7 +227,10 @@ fn doctor() -> i32 {
     } else {
         warn(
             "Now-playing widgets (gdbus)",
-            "lyrics / album art / track-synced clock need gdbus — install libglib2.0-bin",
+            &format!(
+                "lyrics / album art / track-synced clock need gdbus — {}",
+                hwdecode::install_hint(pm, hwdecode::GDBUS_PKG)
+            ),
         );
     }
     if which("pw-cat") || which("parec") {
@@ -233,7 +238,10 @@ fn doctor() -> i32 {
     } else {
         warn(
             "Audio visualiser (pw-cat/parec)",
-            "install pipewire-bin or pulseaudio-utils to enable the visualiser widget",
+            &format!(
+                "{} to enable the visualiser widget",
+                hwdecode::install_hint(pm, hwdecode::AUDIO_PKGS)
+            ),
         );
     }
 
@@ -390,10 +398,10 @@ fn warn(label: &str, hint: &str) {
 }
 
 fn hwaccel_available() -> bool {
-    std::path::Path::new("/dev/dri/renderD128").exists() || which("vainfo")
+    hwdecode::render_node_present() || which("vainfo")
 }
 
-fn which(bin: &str) -> bool {
+pub(crate) fn which(bin: &str) -> bool {
     std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
         .unwrap_or(false)

@@ -68,7 +68,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::OnceLock;
+use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
@@ -679,6 +679,26 @@ pub(super) fn startup(app: &gio::Application, state: &Rc<RefCell<AppState>>) {
     preview_proxy::prune_orphans(known_ids);
 }
 
+/// Log why `m` cannot play, if it cannot (issue #42).
+///
+/// On Debian, Ubuntu and deepin the GTK media backend is its own package,
+/// `libgtk-4-media-gstreamer`, which `libgtk-4-1` only *Recommends*. Without it
+/// GTK hands out a `GtkNoMediaFile` that sets "GTK could not find a media
+/// module" on the stream and says nothing else — no `g_warning`, no frames, so
+/// hover previews silently showed the still frame forever on deepin.
+fn report_media_error(m: &gtk4::MediaFile) {
+    static HINT: Once = Once::new();
+    let Some(err) = m.error() else { return };
+    log::warn!("hover preview: {err}");
+    HINT.call_once(|| {
+        log::warn!(
+            "hover preview: install libgtk-4-media-gstreamer (the GTK media backend) to enable \
+             hover previews; Debian/Ubuntu/deepin: sudo apt install libgtk-4-media-gstreamer \
+             gstreamer1.0-plugins-good gstreamer1.0-libav"
+        );
+    });
+}
+
 /// What one attached card holds. Shared by the policy's action closure, the
 /// first-frame callback (weakly) and the proxy-ready callback (weakly).
 struct CardView {
@@ -753,6 +773,13 @@ impl CardView {
         m.set_muted(true);
         m.set_loop(true);
         self.video_pic.set_paintable(Some(&m));
+
+        // With no GTK media backend installed `for_filename` has already failed
+        // (the error is set before we can connect); a missing codec plugin
+        // fails later, through the same property. Either way the card would
+        // wait for a first frame forever and look like the feature never ran.
+        report_media_error(&m);
+        m.connect_error_notify(report_media_error);
 
         // WEAK, and this is the leak fix. `set_paintable` above gave the
         // Picture a strong reference to the MediaFile; a strong reference from

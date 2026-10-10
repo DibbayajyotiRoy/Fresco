@@ -81,7 +81,7 @@ use crate::ipc::LockSetupState;
 
 /// This plugin's KPackage id — matches the directory name under
 /// `packaging/kde/` and `metadata.json`'s own `KPlugin.Id`.
-const PLUGIN_ID: &str = "io.github.dibbayajyotiroy.fresco.lockscreen";
+pub(in crate::daemon) const PLUGIN_ID: &str = "io.github.dibbayajyotiroy.fresco.lockscreen";
 
 const KSCREENLOCKERRC: &str = "kscreenlockerrc";
 
@@ -217,7 +217,7 @@ fn refresh_config_with<R: KConfigRunner>(runner: &R, ctx: &HostCtx) -> Result<()
     }
     let resolved = crate::lockscreen::resolve(&ctx.config.lockscreen.clone().unwrap_or_default());
     let live = wants_live(ctx.config);
-    let (video_path, still_path) = wallpaper_paths(&ctx.config.wallpaper);
+    let (video_path, still_path) = wallpaper_paths(ctx.config.lock_source(None));
     runner.write(GENERAL_GROUP, "VideoPath", &video_path, false)?;
     runner.write(GENERAL_GROUP, "StillPath", &still_path, false)?;
     runner.write(GENERAL_GROUP, "PlayVideo", bool_str(live), true)?;
@@ -271,7 +271,7 @@ fn setup_with<R: KConfigRunner>(runner: &R, ctx: &HostCtx, paths: &KdePaths) -> 
 
     let resolved = crate::lockscreen::resolve(&ctx.config.lockscreen.clone().unwrap_or_default());
     let live = wants_live(ctx.config);
-    let (video_path, still_path) = wallpaper_paths(&ctx.config.wallpaper);
+    let (video_path, still_path) = wallpaper_paths(ctx.config.lock_source(None));
     let layer_dir = ctx.runtime_dir.join("lock").to_string_lossy().into_owned();
 
     if let Err(e) = apply_setup_writes(
@@ -459,7 +459,7 @@ fn bool_str(b: bool) -> &'static str {
 /// answer for every kind (a slideshow's first frame, a video's poster frame,
 /// or the image itself) — empty only when that returns `None` (no source
 /// file yet).
-fn wallpaper_paths(w: &Wallpaper) -> (String, String) {
+pub(in crate::daemon) fn wallpaper_paths(w: &Wallpaper) -> (String, String) {
     let video = matches!(w.kind, Kind::Video | Kind::Playlist)
         .then(|| w.effective_path())
         .flatten()
@@ -547,6 +547,12 @@ fn ensure_plugin_installed(paths: &KdePaths) -> Result<(), String> {
             paths.user_plugin_dir.display()
         )
     })
+}
+
+/// [`ensure_plugin_installed`] against the real filesystem — for
+/// `daemon::kde_desktop`, which selects the same plugin on the desktop.
+pub(in crate::daemon) fn ensure_plugin_installed_real() -> Result<(), String> {
+    ensure_plugin_installed(&KdePaths::real()?)
 }
 
 /// Recursively copy `src` to `dst`, creating directories as needed. No
@@ -656,7 +662,10 @@ const KCONFIG_TIMEOUT: Duration = Duration::from_secs(5);
 /// safe here specifically because both tools' entire output is one short
 /// line, far under a pipe buffer; draining before exit (to avoid ever
 /// blocking on a full pipe) is not needed for output this small.
-fn run_bounded(cmd: &mut Command, timeout: Duration) -> Result<(bool, String, String), String> {
+pub(in crate::daemon) fn run_bounded(
+    cmd: &mut Command,
+    timeout: Duration,
+) -> Result<(bool, String, String), String> {
     let program = cmd.get_program().to_string_lossy().into_owned();
     let mut child = cmd
         .stdin(Stdio::null())
@@ -748,7 +757,7 @@ impl KConfigRunner for ProcessRunner {
     }
 }
 
-fn on_path(name: &str) -> bool {
+pub(in crate::daemon) fn on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|paths| {
         std::env::split_paths(&paths).any(|dir| is_executable(&dir.join(name)))
     })

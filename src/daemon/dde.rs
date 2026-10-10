@@ -234,7 +234,10 @@ pub(super) enum Bus {
 }
 
 /// Run `gdbus call` on `bus` and return stdout on success. `timeout` is
-/// gdbus's own `--timeout` in seconds; `None` keeps its 25 s default.
+/// gdbus's own `--timeout` in seconds; `None` keeps its 25 s default. `fd0`,
+/// when given, becomes the child's stdin, so an `@h 0` argument hands that file
+/// to the service as a D-Bus file descriptor (`gdbus` does that for an `h`
+/// argument; `busctl` refuses the type).
 fn gdbus_run(
     bus: Bus,
     timeout: Option<u32>,
@@ -242,8 +245,12 @@ fn gdbus_run(
     path: &str,
     iface_method: &str,
     args: &[&str],
+    fd0: Option<std::fs::File>,
 ) -> Option<String> {
     let mut cmd = Command::new("gdbus");
+    if let Some(file) = fd0 {
+        cmd.stdin(file);
+    }
     cmd.arg("call").arg(match bus {
         Bus::Session => "--session",
         Bus::System => "--system",
@@ -263,7 +270,7 @@ fn gdbus_run(
 
 /// Run `gdbus call --session` and return stdout on success.
 fn gdbus_call(dest: &str, path: &str, iface_method: &str, args: &[&str]) -> Option<String> {
-    gdbus_run(Bus::Session, None, dest, path, iface_method, args)
+    gdbus_run(Bus::Session, None, dest, path, iface_method, args, None)
 }
 
 /// Bound for [`gdbus_call_on`].
@@ -286,6 +293,28 @@ pub(super) fn gdbus_call_on(
         path,
         iface_method,
         args,
+        None,
+    )
+}
+
+/// [`gdbus_call_on`] with `file` as the child's stdin: put `@h 0` among `args`
+/// to send it to the service as a file descriptor.
+pub(super) fn gdbus_call_on_with_fd0(
+    bus: Bus,
+    dest: &str,
+    path: &str,
+    iface_method: &str,
+    args: &[&str],
+    file: std::fs::File,
+) -> Option<String> {
+    gdbus_run(
+        bus,
+        Some(GDBUS_TIMEOUT_SECS),
+        dest,
+        path,
+        iface_method,
+        args,
+        Some(file),
     )
 }
 

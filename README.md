@@ -108,7 +108,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
-| KDE Plasma 6 (Wayland) | ✅ | layer-shell |
+| KDE Plasma 6 (X11 and Wayland) | ✅ | Set through plasmashell's own wallpaper plugin, so desktop icons stay visible. Needs `qml6-module-qtmultimedia` for video. Playback is Qt's, not mpv's: muted, no hwdec tuning, crop or transitions; a playlist plays its first file and a slideshow shows its first frame |
 | GNOME on Wayland | ⚠️ | Still frame only — Mutter exposes no live wallpaper surface, so no video and no widgets. Live video needs a Fresco GNOME extension (planned) |
 
 Every environment above is exercised headlessly in CI on each release.
@@ -200,6 +200,16 @@ Yes. Fresco supports per-display wallpapers, and when the same video is used acr
 ### Does it support GIFs and image slideshows?
 
 Yes — animated GIFs, static images, image slideshows with transitions (crossfade, fade, slide, Ken Burns), and multi-video playlists, in addition to video files.
+
+### Can I switch wallpapers with a keyboard shortcut?
+
+Yes. `fresco next`, `fresco prev` and `fresco random` switch the wallpaper without opening the app, so you can bind them in your compositor (`random` never picks the one already playing). They step through your library in the order the app shows it, or through just the folder you have open there, and start the Fresco service if it is not running. For example in Sway:
+
+```
+bindsym $mod+Right  exec fresco next
+bindsym $mod+Left   exec fresco prev
+bindsym $mod+Return exec fresco random
+```
 
 ### Can I show song lyrics on my Linux desktop?
 

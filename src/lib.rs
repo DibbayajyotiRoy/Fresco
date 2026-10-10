@@ -17,6 +17,7 @@ pub mod download;
 pub mod dsp;
 #[cfg(feature = "gui")]
 pub mod gui;
+pub mod hwdecode;
 pub mod i18n;
 pub mod ipc;
 #[cfg(any(feature = "gui", feature = "daemon"))]

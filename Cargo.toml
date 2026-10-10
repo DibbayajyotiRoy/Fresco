@@ -123,7 +123,13 @@ depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreame
 #   * ffmpeg — `ffmpeg` for rotated thumbnails/overview frames (falls back to
 #     ffmpegthumbnailer unrotated) and `ffprobe` for library metadata (fields
 #     just stay empty). Both already degrade silently by design.
-recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1"
+#   * qml6-module-qtmultimedia — plays the video of Fresco's KDE Plasma
+#     wallpaper plugin (packaging/kde/README.md). On Plasma, Fresco sets its
+#     wallpaper through plasmashell and that plugin IS the desktop wallpaper
+#     (src/daemon/kde_desktop.rs, issue #44), so without this module a Plasma
+#     user sees a still frame instead of the video; it is also what plays on
+#     the lock screen. Nothing else needs it.
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1, qml6-module-qtmultimedia"
 # Suggests, not Recommends: each of these is needed by exactly one lock-screen
 # host, so installing it unconditionally would be a much stronger nudge than
 # "might be useful" warrants for most machines (docs/plan-lock-screen.md §4.3,
@@ -131,10 +137,7 @@ recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-
 #   * xsecurelock — the X11 lock-host (src/daemon/lock/hosts/x11.rs) shells
 #     out to it via `fresco lock`; without it that host degrades to
 #     LockSetupState::Unavailable rather than failing to install.
-#   * qml6-module-qtmultimedia — the KDE lock-screen wallpaper plugin's video
-#     layer (packaging/kde/README.md's "Optional runtime dependency"); the
-#     plugin already degrades to a still image without it.
-suggests = "xsecurelock, qml6-module-qtmultimedia"
+suggests = "xsecurelock"
 extended-description = """\
 Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
 desktop wallpaper. Pick media in a simple app, click Set, close the app — \

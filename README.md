@@ -108,7 +108,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
-| KDE Plasma 6 (Wayland) | ✅ | layer-shell |
+| KDE Plasma 6 (X11 and Wayland) | ✅ | Set through plasmashell's own wallpaper plugin, so desktop icons stay visible. Needs `qml6-module-qtmultimedia` for video. Playback is Qt's, not mpv's: muted, no hwdec tuning, crop or transitions; a playlist plays its first file and a slideshow shows its first frame |
 | GNOME on Wayland | ⚠️ | Still frame only — Mutter exposes no live wallpaper surface, so no video and no widgets. Live video needs a Fresco GNOME extension (planned) |
 
 Every environment above is exercised headlessly in CI on each release.

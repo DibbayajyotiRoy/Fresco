@@ -13,6 +13,21 @@ config or install itself -- that is Fresco's daemon's job. This README is the
 contract between the two: the exact files, paths and config keys the daemon
 must produce for this package to do anything.
 
+## Also the desktop wallpaper (issue #44)
+
+plasmashell draws the desktop and its icons into one opaque window, so no
+window of Fresco's can show the video there. On Plasma, `frescod` therefore
+selects this same package as the **desktop** wallpaper of every screen
+(`src/daemon/kde_desktop.rs`): the DBus call `plasma-apply-wallpaperimage`
+makes (`org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript`),
+with `wallpaperPlugin` set to this package's id and `VideoPath`, `StillPath`,
+`PlayVideo` and `Dim=0` written to `[Wallpaper][<id>][General]` of each
+desktop. The previous plugin of each desktop is saved to
+`~/.local/state/fresco/kde-desktop-saved.json` and selected again on Stop.
+Plasma offers no way to hide a wallpaper package from the desktop chooser
+(`WallpaperConfigModel` lists every valid `Plasma/Wallpaper`), hence the plain
+name "Fresco". `FRESCO_KDE_DESKTOP=0` turns this off.
+
 ## Files in this package
 
 ```

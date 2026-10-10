@@ -19,7 +19,7 @@ pkgbase = fresco
 	optdepends = gst-libav: hover-to-play previews in the library
 	optdepends = xsecurelock: X11 lock screen with the live wallpaper and widgets (fresco lock)
 	optdepends = swaylock-plugin: wlroots lock screen with the live wallpaper and widgets (fresco lock)
-	optdepends = qt6-multimedia: video playback in the KDE Plasma lock-screen wallpaper
+	optdepends = qt6-multimedia: video playback in the KDE Plasma desktop and lock-screen wallpaper
 	source = fresco-1.0.0.tar.gz::https://github.com/DibbayajyotiRoy/fresco/archive/refs/tags/v1.0.0.tar.gz
 	sha256sums = SKIP
 

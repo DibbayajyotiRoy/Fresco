@@ -394,7 +394,6 @@ impl LockRuntime {
     fn lock_preview(
         &mut self,
         ctx: &HostCtx,
-        wallpaper: &Wallpaper,
         np: Option<&widgets::Snapshot>,
         theme: crate::widgetkit::Theme,
         width: u32,
@@ -405,6 +404,7 @@ impl LockRuntime {
                 message: "lock screen is not enabled".to_string(),
             };
         };
+        let wallpaper = ctx.config.lock_source(None);
         match self
             .preview
             .render(self.kind, wallpaper, &resolved, np, theme, width, height)
@@ -1456,14 +1456,8 @@ impl Daemon {
                 let ctx = self.lock.ctx(&self.config, &geoms);
                 let np = self.widgets.now_playing();
                 let theme = lock_widget_theme(&self.config);
-                self.lock.lock_preview(
-                    &ctx,
-                    &self.config.wallpaper,
-                    np.as_ref(),
-                    theme,
-                    width,
-                    height,
-                )
+                self.lock
+                    .lock_preview(&ctx, np.as_ref(), theme, width, height)
             }
             Request::LockNotify { locked, sockets } => {
                 self.lock.lock_notify(locked, sockets, Instant::now());
@@ -2435,7 +2429,7 @@ fn run_gnome_static() -> Result<()> {
             Request::LockPreview { width, height } => {
                 let ctx = lock_rt.ctx(&config, &[]);
                 let theme = lock_widget_theme(&config);
-                lock_rt.lock_preview(&ctx, &config.wallpaper, None, theme, width, height)
+                lock_rt.lock_preview(&ctx, None, theme, width, height)
             }
             Request::LockNotify { locked, sockets } => {
                 lock_rt.lock_notify(locked, sockets, Instant::now());
@@ -2846,14 +2840,7 @@ fn run_wayland_layershell() -> Result<()> {
                         let ctx = lock_rt.ctx(&config, &geoms);
                         let np = widget_engine.now_playing();
                         let theme = lock_widget_theme(&config);
-                        lock_rt.lock_preview(
-                            &ctx,
-                            &config.wallpaper,
-                            np.as_ref(),
-                            theme,
-                            width,
-                            height,
-                        )
+                        lock_rt.lock_preview(&ctx, np.as_ref(), theme, width, height)
                     }
                     Request::LockNotify { locked, sockets } => {
                         lock_rt.lock_notify(locked, sockets, Instant::now());

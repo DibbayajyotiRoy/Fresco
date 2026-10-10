@@ -715,7 +715,7 @@ fn grade_still(path: &Path, blur: f32, dim: f32) {
 /// everyone.
 fn render_frame(config: &Config, dir: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
-    let rendered = super::overview::render_still(&config.wallpaper).or_else(|| {
+    let rendered = super::overview::render_still(config.lock_source(None)).or_else(|| {
         config
             .monitors
             .values()

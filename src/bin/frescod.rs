@@ -4,6 +4,7 @@
 //!   frescod              run the daemon (reads ~/.config/fresco/config.toml)
 //!   frescod --once FILE  render one file on every monitor until Ctrl-C (spike)
 //!   frescod --check      print hardware/decode diagnostics and exit
+//!   frescod --version    print the version and exit (also -V, -v, version)
 //!   frescod --saver      X11 lock-screen saver module; run by a screensaver
 //!                        host (xsecurelock's XSECURELOCK_SAVER, or a
 //!                        mate-screensaver/xfce4-screensaver theme), never by
@@ -12,6 +13,12 @@
 use std::path::PathBuf;
 
 fn main() {
+    // Before logging/i18n init: asking for the version must not touch the log
+    // file or the config.
+    if let Some("--version" | "-V" | "-v" | "version") = std::env::args().nth(1).as_deref() {
+        println!("frescod {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     init_logging();
     // The daemon raises desktop notifications, so it needs the same catalog the
     // GUI uses. Log output stays English — it is read by us, not by the user.

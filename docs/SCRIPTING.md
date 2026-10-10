@@ -11,6 +11,21 @@ cron-driven wallpaper changes.
 **Requests:** `{"cmd":"status"}`, `{"cmd":"apply"}`, `{"cmd":"pause"}`,
 `{"cmd":"resume"}`, `{"cmd":"stop"}`, `{"cmd":"update"}`
 
+**CLI verbs (no socket needed):** `fresco next`, `fresco prev` and
+`fresco random` switch the wallpaper in one command. They step through your
+library in the order the app shows it (or just the folder open there), save
+the config, and start `frescod` if it is not running; `random` never picks the
+current wallpaper. They print what they applied and exit 1 with a message on
+failure or an empty library; a library with only one wallpaper exits 0 with a
+note on stderr. They are not socket requests, so bind them directly:
+
+```
+# Sway
+bindsym $mod+Right  exec fresco next
+bindsym $mod+Left   exec fresco prev
+bindsym $mod+Return exec fresco random
+```
+
 Every recipe below is copy-pasteable and uses only `socat` (or python3) and `jq`.
 
 Define this once in your script:

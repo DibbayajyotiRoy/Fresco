@@ -37,7 +37,9 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::Screen;
 use x11rb::rust_connection::RustConnection;
 
+use crate::cli::which;
 use crate::config::{Config, Kind, PowerSaving, Scaling, Transition, Wallpaper};
+use crate::hwdecode::{self, install_hint, HwDecode, Pm};
 use crate::ipc::{LockReply, LockSocket, LockStatus, MonitorInfo, Request, Response, StatusReply};
 
 use lock::engine::LockEngine;
@@ -393,7 +395,6 @@ impl LockRuntime {
     fn lock_preview(
         &mut self,
         ctx: &HostCtx,
-        wallpaper: &Wallpaper,
         np: Option<&widgets::Snapshot>,
         theme: crate::widgetkit::Theme,
         width: u32,
@@ -404,6 +405,7 @@ impl LockRuntime {
                 message: "lock screen is not enabled".to_string(),
             };
         };
+        let wallpaper = ctx.config.lock_source(None);
         match self
             .preview
             .render(self.kind, wallpaper, &resolved, np, theme, width, height)
@@ -1143,6 +1145,23 @@ impl Daemon {
                 dde::render_self_check(&self.conn, &windows);
             }
         }
+        // Cinnamon (issue #39): muffin's compositor keeps painting a wallpaper
+        // mapped after nemo-desktop over the icons, whatever the window stack
+        // says, until a normal window appears. Make it re-sort now.
+        if crate::capability::is_cinnamon() && !self.renderers.is_empty() {
+            match x11win::force_compositor_restack(&self.conn, &screen, &self.atoms) {
+                Ok(()) => log::info!(
+                    "cinnamon: forced compositor restack; wallpaper windows {:x?}, \
+                     window stack (bottom first) {:x?}",
+                    self.renderers
+                        .iter()
+                        .map(|r| r.window.window)
+                        .collect::<Vec<_>>(),
+                    x11win::stacking_order(&self.conn, &self.atoms, screen.root)
+                ),
+                Err(e) => log::warn!("cinnamon: compositor restack helper failed: {e:#}"),
+            }
+        }
         self.sync_caja_mirror();
         Ok(())
     }
@@ -1464,14 +1483,8 @@ impl Daemon {
                 let ctx = self.lock.ctx(&self.config, &geoms);
                 let np = self.widgets.now_playing();
                 let theme = lock_widget_theme(&self.config);
-                self.lock.lock_preview(
-                    &ctx,
-                    &self.config.wallpaper,
-                    np.as_ref(),
-                    theme,
-                    width,
-                    height,
-                )
+                self.lock
+                    .lock_preview(&ctx, np.as_ref(), theme, width, height)
             }
             Request::LockNotify { locked, sockets } => {
                 self.lock.lock_notify(locked, sockets, Instant::now());
@@ -2450,7 +2463,7 @@ fn run_gnome_static() -> Result<()> {
             Request::LockPreview { width, height } => {
                 let ctx = lock_rt.ctx(&config, &[]);
                 let theme = lock_widget_theme(&config);
-                lock_rt.lock_preview(&ctx, &config.wallpaper, None, theme, width, height)
+                lock_rt.lock_preview(&ctx, None, theme, width, height)
             }
             Request::LockNotify { locked, sockets } => {
                 lock_rt.lock_notify(locked, sockets, Instant::now());
@@ -2871,14 +2884,7 @@ fn run_wayland_layershell() -> Result<()> {
                         let ctx = lock_rt.ctx(&config, &geoms);
                         let np = widget_engine.now_playing();
                         let theme = lock_widget_theme(&config);
-                        lock_rt.lock_preview(
-                            &ctx,
-                            &config.wallpaper,
-                            np.as_ref(),
-                            theme,
-                            width,
-                            height,
-                        )
+                        lock_rt.lock_preview(&ctx, np.as_ref(), theme, width, height)
                     }
                     Request::LockNotify { locked, sockets } => {
                         lock_rt.lock_notify(locked, sockets, Instant::now());
@@ -4410,11 +4416,20 @@ pub fn check() {
         }
     }
 
-    let vainfo = which("vainfo");
-    if vainfo {
-        println!("VA-API (vainfo) : {G}available{X}");
-    } else {
-        println!("VA-API (vainfo) : {Y}not installed{X} (apt install intel-media-va-driver mesa-va-drivers)");
+    let pm = Pm::detect();
+    match hwdecode::probe() {
+        HwDecode::Nvdec => println!(
+            "NVDEC           : {G}available{X} (NVIDIA GPU with libnvcuvid; Fresco decodes with NVDEC here)"
+        ),
+        HwDecode::Vainfo => println!("VA-API (vainfo) : {G}available{X}"),
+        HwDecode::DriversPresent => println!(
+            "VA-API (vainfo) : {G}drivers present{X} (render node and VA driver found; the vainfo diagnostic tool is not installed - {} to verify)",
+            install_hint(pm, hwdecode::VAINFO_PKG)
+        ),
+        HwDecode::Missing => println!(
+            "VA-API (vainfo) : {Y}no render node or VA driver found{X} ({})",
+            install_hint(pm, hwdecode::DRIVER_PKGS)
+        ),
     }
 
     // The widget helpers. Both fail as *silence* — a widget that is enabled in
@@ -4424,13 +4439,14 @@ pub fn check() {
     if which("gdbus") {
         println!("MPRIS (gdbus)   : {G}available{X}");
     } else {
-        println!("MPRIS (gdbus)   : {Y}not installed{X} (apt install libglib2.0-bin — lyrics, album art and the track-synced clock need it)");
+        println!("MPRIS (gdbus)   : {Y}not installed{X} ({} — lyrics, album art and the track-synced clock need it)", install_hint(pm, hwdecode::GDBUS_PKG));
     }
     match (which("pw-cat"), which("parec")) {
         (true, _) => println!("Audio capture   : {G}pw-cat{X}"),
         (false, true) => println!("Audio capture   : {G}parec{X}"),
         (false, false) => println!(
-            "Audio capture   : {Y}not installed{X} (apt install pipewire-bin or pulseaudio-utils — needed by the audio visualiser widget)"
+            "Audio capture   : {Y}not installed{X} ({} — needed by the audio visualiser widget)",
+            install_hint(pm, hwdecode::AUDIO_PKGS)
         ),
     }
 
@@ -4446,10 +4462,7 @@ pub fn check() {
     match crate::ipc::request(&Request::Status) {
         Ok(Response::Status(s)) => {
             println!("Daemon          : {G}running{X}");
-            println!(
-                "  decode        : {}",
-                s.hwdec.as_deref().unwrap_or("(none)")
-            );
+            println!("  decode        : {}", decode_display(s.hwdec.as_deref()));
             println!(
                 "  wallpaper     : {}",
                 s.wallpaper.as_deref().unwrap_or("(none)")
@@ -4463,10 +4476,14 @@ pub fn check() {
     }
 }
 
-fn which(bin: &str) -> bool {
-    std::env::var("PATH")
-        .map(|path| std::env::split_paths(&path).any(|dir| dir.join(bin).is_file()))
-        .unwrap_or(false)
+/// The `decode` line of `--check`: mpv's `hwdec-current` is the truthful
+/// source, so `no` is a real software-decode verdict and is labelled as one.
+fn decode_display(hwdec: Option<&str>) -> String {
+    match hwdec {
+        None => "no wallpaper playing".into(),
+        Some("no" | "") => "software (mpv is not using hardware decode)".into(),
+        Some(h) => h.into(),
+    }
 }
 
 /// How long a run loop may wait, given what it wants for itself and what the
@@ -4673,8 +4690,8 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_stat_ticks, presentation_confirmed, stall_step, widget_wait, WlOutput, ANIM_TICK,
-        CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL, STALL_STRIKES, TICK,
+        decode_display, parse_stat_ticks, presentation_confirmed, stall_step, widget_wait,
+        WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL, STALL_STRIKES, TICK,
     };
     use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
@@ -5419,6 +5436,18 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
         let _ = std::fs::remove_file(&fake);
         let _ = std::fs::remove_file(&img_a);
         let _ = std::fs::remove_file(&img_b);
+    }
+
+    /// Issue #41: mpv's `no` is a real software verdict, whatever tools are
+    /// installed, and no player is not a verdict at all.
+    #[test]
+    fn decode_label_reports_what_mpv_says() {
+        assert_eq!(decode_display(Some("vaapi")), "vaapi");
+        assert_eq!(
+            decode_display(Some("no")),
+            "software (mpv is not using hardware decode)"
+        );
+        assert_eq!(decode_display(None), "no wallpaper playing");
     }
 }
 

@@ -102,7 +102,11 @@ priority = "optional"
 #     the DDE background calls in src/daemon/dde.rs.
 # libgtk-4-1 pulls libglib2.0-0, NOT libglib2.0-bin, so a minimal desktop or a
 # container genuinely may not have it — transitive presence is not a guarantee.
-depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
+# libgtk-4-media-gstreamer is the same story: GTK's only media backend is its own
+# package, which libgtk-4-1 merely Recommends. A system that skips recommends
+# (deepin's .deb installer does) has none, and every library hover preview then
+# silently shows the still frame (issue #42).
+depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreamer, libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
 # Recommends, not Depends: every one of these powers a feature that degrades to
 # a logged, actionable message rather than breaking the app.
 #   * pulseaudio-utils | pipewire-bin — `parec` / `pw-cat` for the audio

@@ -20,8 +20,7 @@ license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'mpvpaper' 'glib2')
 makedepends=('rust' 'cargo' 'git')
 optdepends=(
-  'libva-intel-driver: VA-API hardware decode on Intel GPUs'
-  'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
+  'intel-media-driver: VA-API hardware decode on Intel GPUs'
   'gst-plugins-good: hover-to-play previews in the library'
   'gst-libav: hover-to-play previews in the library'
   # The audio visualiser widget captures the default sink monitor through

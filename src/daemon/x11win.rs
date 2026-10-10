@@ -19,6 +19,7 @@ x11rb::atom_manager! {
         _NET_WM_WINDOW_TYPE,
         _NET_WM_WINDOW_TYPE_DESKTOP,
         _NET_WM_WINDOW_TYPE_NORMAL,
+        _NET_WM_WINDOW_TYPE_DOCK,
         _NET_WM_STATE,
         _NET_WM_STATE_BELOW,
         _NET_WM_STATE_STICKY,
@@ -264,11 +265,10 @@ pub fn raise<C: Connection>(conn: &C, window: Window) -> Result<()> {
 /// Muffin (Cinnamon, X11) drops a plain ConfigureWindow stacking request from
 /// any client that isn't the active application once the active window has a
 /// newer user time than ours (`meta_window_x11_configure_request`'s
-/// focus-stealing guard) — and our window never gets a newer one. A wallpaper
-/// mapped after `nemo-desktop` (both are DESKTOP-layer, so the later one sits
-/// on top) while anything else has focus, as on a busy login, therefore stays
-/// above the icons until focus moves on (issue #39). The pager-flagged message
-/// goes through `handle_net_restack_window`, which has no such guard.
+/// focus-stealing guard) — and our window never gets a newer one. The
+/// pager-flagged message goes through `handle_net_restack_window`, which has no
+/// such guard. Either way this only fixes muffin's LOGICAL stack; what the
+/// compositor paints is a separate matter, see [`force_compositor_restack`].
 pub fn lower_wallpaper<C: Connection>(
     conn: &C,
     atoms: &Atoms,
@@ -290,6 +290,83 @@ pub fn lower_wallpaper<C: Connection>(
 fn restack_below_event(atoms: &Atoms, window: Window) -> ClientMessageEvent {
     let detail = u32::from(StackMode::BELOW);
     ClientMessageEvent::new(32, window, atoms._NET_RESTACK_WINDOW, [2, 0, detail, 0, 0])
+}
+
+/// How long [`force_compositor_restack`]'s helper window stays mapped. Muffin
+/// re-sorts its actors in a "later" that runs before the next frame, so this
+/// only has to outlast a frame (or a slow one at login) — not the restack.
+const COMPOSITOR_RESYNC_LINGER: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Make Muffin's compositor paint our (already lowered) wallpaper windows
+/// BELOW `nemo-desktop` (issue #39).
+///
+/// Muffin keeps `_NET_WM_WINDOW_TYPE_DESKTOP` windows in the compositor's
+/// `bottom_window_group`, appending each new actor on top, and
+/// `sync_actor_stacking` only re-sorts anything once some non-desktop window
+/// actor exists. At login nothing else exists, so a wallpaper mapped after
+/// `nemo-desktop` keeps painting over the icons even though
+/// [`lower_wallpaper`] has already fixed the logical stack
+/// (`_NET_CLIENT_LIST_STACKING` says we are at the bottom) — until the user
+/// opens an app, which adds such an actor and triggers the re-sort.
+///
+/// So trigger it ourselves: map a 1x1 DOCK window (a plain `window_group`
+/// actor; DOCK never takes focus and, with no struts, leaves the work area
+/// alone), give muffin a moment to re-sort, and destroy it. Call after the
+/// wallpaper windows are mapped and lowered.
+pub fn force_compositor_restack<C: Connection>(
+    conn: &C,
+    screen: &Screen,
+    atoms: &Atoms,
+) -> Result<()> {
+    let window = conn.generate_id()?;
+    conn.create_window(
+        COPY_DEPTH_FROM_PARENT,
+        window,
+        screen.root,
+        0,
+        0,
+        1,
+        1,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        0,
+        &CreateWindowAux::new()
+            .background_pixel(screen.black_pixel)
+            .override_redirect(0),
+    )?
+    .check()
+    .context("create_window (restack helper)")?;
+    conn.change_property32(
+        PropMode::REPLACE,
+        window,
+        atoms._NET_WM_WINDOW_TYPE,
+        AtomEnum::ATOM,
+        &[atoms._NET_WM_WINDOW_TYPE_DOCK],
+    )?;
+    conn.change_property32(
+        PropMode::REPLACE,
+        window,
+        atoms._NET_WM_STATE,
+        AtomEnum::ATOM,
+        &[
+            atoms._NET_WM_STATE_SKIP_TASKBAR,
+            atoms._NET_WM_STATE_SKIP_PAGER,
+        ],
+    )?;
+    conn.change_property8(
+        PropMode::REPLACE,
+        window,
+        AtomEnum::WM_NAME,
+        AtomEnum::STRING,
+        b"Fresco restack helper",
+    )?;
+    conn.map_window(window)?;
+    conn.flush()?;
+    wait_until_viewable(conn, window);
+    std::thread::sleep(COMPOSITOR_RESYNC_LINGER);
+    conn.destroy_window(window)?;
+    conn.flush()?;
+    Ok(())
 }
 
 /// Put `window` where its `kind` belongs in the stack. Called at creation and
@@ -339,6 +416,10 @@ pub fn stacking_order<C: Connection>(conn: &C, atoms: &Atoms, root: Window) -> V
 /// bottom-most `ours.len()` slots, in any order. `None` when that can't be
 /// told: `ours` is empty, or any of our windows is missing from `stack`
 /// (unreadable property, or a window not yet mapped).
+///
+/// `stack` is the window manager's LOGICAL order. Muffin can paint a different
+/// one (see [`force_compositor_restack`]), so `true` does not prove the
+/// wallpaper is visually below the desktop icons.
 pub fn at_bottom(stack: &[Window], ours: &[Window]) -> Option<bool> {
     if ours.is_empty() {
         return None;
@@ -361,6 +442,7 @@ mod tests {
             _NET_WM_WINDOW_TYPE: 1,
             _NET_WM_WINDOW_TYPE_DESKTOP: 2,
             _NET_WM_WINDOW_TYPE_NORMAL: 3,
+            _NET_WM_WINDOW_TYPE_DOCK: 17,
             _NET_WM_STATE: 4,
             _NET_WM_STATE_BELOW: 5,
             _NET_WM_STATE_STICKY: 6,
@@ -456,5 +538,48 @@ mod tests {
     #[test]
     fn at_bottom_none_when_a_window_is_missing_from_the_stack() {
         assert_eq!(at_bottom(&[10, 50], &[10, 11]), None);
+    }
+
+    /// The restack helper against a real (WM-less) X server: while it lingers
+    /// it is a new root child declared `_NET_WM_WINDOW_TYPE_DOCK`, and once the
+    /// call returns it is gone again without raising any X error. Needs an X
+    /// server, so it is `#[ignore]`d:
+    /// `xvfb-run -a cargo test --lib x11win -- --ignored`.
+    #[test]
+    #[ignore]
+    fn restack_helper_is_a_dock_window_that_goes_away() {
+        use x11rb::rust_connection::RustConnection;
+        let (conn, num) = RustConnection::connect(None).unwrap();
+        let screen = conn.setup().roots[num].clone();
+        let atoms = Atoms::new(&conn).unwrap().reply().unwrap();
+        let children =
+            |c: &RustConnection| c.query_tree(screen.root).unwrap().reply().unwrap().children;
+        let before = children(&conn);
+
+        let mut seen_dock = false;
+        std::thread::scope(|s| {
+            let call = s.spawn(|| {
+                let (c, n) = RustConnection::connect(None).unwrap();
+                let screen = c.setup().roots[n].clone();
+                let atoms = Atoms::new(&c).unwrap().reply().unwrap();
+                force_compositor_restack(&c, &screen, &atoms).unwrap();
+                assert!(c.poll_for_event().unwrap().is_none(), "X error");
+            });
+            while !call.is_finished() {
+                for w in children(&conn).into_iter().filter(|w| !before.contains(w)) {
+                    let ty = conn
+                        .get_property(false, w, atoms._NET_WM_WINDOW_TYPE, AtomEnum::ATOM, 0, 8)
+                        .unwrap()
+                        .reply()
+                        .unwrap();
+                    seen_dock |= ty
+                        .value32()
+                        .is_some_and(|mut v| v.next() == Some(atoms._NET_WM_WINDOW_TYPE_DOCK));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        });
+        assert!(seen_dock, "helper never appeared as a DOCK window");
+        assert_eq!(children(&conn), before, "helper window leaked");
     }
 }

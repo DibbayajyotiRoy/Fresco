@@ -217,7 +217,7 @@ fn refresh_config_with<R: KConfigRunner>(runner: &R, ctx: &HostCtx) -> Result<()
     }
     let resolved = crate::lockscreen::resolve(&ctx.config.lockscreen.clone().unwrap_or_default());
     let live = wants_live(ctx.config);
-    let (video_path, still_path) = wallpaper_paths(&ctx.config.wallpaper);
+    let (video_path, still_path) = wallpaper_paths(ctx.config.lock_source(None));
     runner.write(GENERAL_GROUP, "VideoPath", &video_path, false)?;
     runner.write(GENERAL_GROUP, "StillPath", &still_path, false)?;
     runner.write(GENERAL_GROUP, "PlayVideo", bool_str(live), true)?;
@@ -271,7 +271,7 @@ fn setup_with<R: KConfigRunner>(runner: &R, ctx: &HostCtx, paths: &KdePaths) -> 
 
     let resolved = crate::lockscreen::resolve(&ctx.config.lockscreen.clone().unwrap_or_default());
     let live = wants_live(ctx.config);
-    let (video_path, still_path) = wallpaper_paths(&ctx.config.wallpaper);
+    let (video_path, still_path) = wallpaper_paths(ctx.config.lock_source(None));
     let layer_dir = ctx.runtime_dir.join("lock").to_string_lossy().into_owned();
 
     if let Err(e) = apply_setup_writes(

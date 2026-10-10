@@ -4377,10 +4377,12 @@ pub fn check() {
     }
 
     let vainfo = which("vainfo");
-    if vainfo {
-        println!("VA-API (vainfo) : {G}available{X}");
-    } else {
-        println!("VA-API (vainfo) : {Y}not installed{X} (apt install intel-media-va-driver mesa-va-drivers)");
+    match classify_vaapi(vainfo, render_node_present(), va_driver_present()) {
+        VaApi::Verifiable => println!("VA-API (vainfo) : {G}available{X}"),
+        VaApi::DriversPresent => println!(
+            "VA-API (vainfo) : {G}drivers present{X} (render node and VA driver found; the vainfo diagnostic tool is not installed - install the 'vainfo' package to verify)"
+        ),
+        VaApi::Missing => println!("VA-API (vainfo) : {Y}not installed{X} (apt install intel-media-va-driver mesa-va-drivers)"),
     }
 
     // The widget helpers. Both fail as *silence* — a widget that is enabled in
@@ -4410,7 +4412,7 @@ pub fn check() {
             println!("Daemon          : {G}running{X}");
             println!(
                 "  decode        : {}",
-                s.hwdec.as_deref().unwrap_or("(none)")
+                decode_display(s.hwdec.as_deref(), vainfo)
             );
             println!(
                 "  wallpaper     : {}",
@@ -4423,6 +4425,67 @@ pub fn check() {
         }
         _ => println!("Daemon          : {Y}not running{X}"),
     }
+}
+
+/// What `--check` can say about VA-API without the `vainfo` tool.
+#[derive(Debug, PartialEq, Eq)]
+enum VaApi {
+    /// `vainfo` is installed, so the user can verify decode themselves.
+    Verifiable,
+    /// No `vainfo`, but a render node and a VA driver are both on disk. The
+    /// stack is most likely fine; only the diagnostic tool is missing.
+    DriversPresent,
+    /// No render node or no driver: hardware decode genuinely cannot work.
+    Missing,
+}
+
+fn classify_vaapi(vainfo: bool, render_node: bool, driver: bool) -> VaApi {
+    match (vainfo, render_node && driver) {
+        (true, _) => VaApi::Verifiable,
+        (false, true) => VaApi::DriversPresent,
+        (false, false) => VaApi::Missing,
+    }
+}
+
+/// The `decode` line of `--check`. mpv reporting `no` means "software", but
+/// without `vainfo` that is not something the user can confirm or refute, so
+/// it is shown as unverified rather than as a verdict.
+fn decode_display(hwdec: Option<&str>, vainfo: bool) -> String {
+    match hwdec {
+        None => "(none)".into(),
+        Some("no" | "") if !vainfo => "unverified (vainfo not installed)".into(),
+        Some(h) => h.into(),
+    }
+}
+
+fn dir_has(dir: &std::path::Path, pred: impl Fn(&str) -> bool) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().any(|e| pred(&e.file_name().to_string_lossy())))
+        .unwrap_or(false)
+}
+
+fn render_node_present() -> bool {
+    dir_has(std::path::Path::new("/dev/dri"), |n| {
+        n.starts_with("renderD")
+    })
+}
+
+/// A libva driver (`*_drv_video.so`) in `$LIBVA_DRIVERS_PATH` or the usual
+/// per-distro directories.
+fn va_driver_present() -> bool {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("LIBVA_DRIVERS_PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    dirs.extend(
+        [
+            "/usr/lib/x86_64-linux-gnu/dri",
+            "/usr/lib64/dri",
+            "/usr/lib/dri",
+        ]
+        .map(PathBuf::from),
+    );
+    dirs.iter()
+        .any(|d| dir_has(d, |n| n.ends_with("_drv_video.so")))
 }
 
 fn which(bin: &str) -> bool {
@@ -4635,8 +4698,9 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_stat_ticks, presentation_confirmed, stall_step, widget_wait, WlOutput, ANIM_TICK,
-        CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL, STALL_STRIKES, TICK,
+        classify_vaapi, decode_display, parse_stat_ticks, presentation_confirmed, stall_step,
+        widget_wait, VaApi, WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL,
+        STALL_STRIKES, TICK,
     };
     use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
@@ -5381,6 +5445,25 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
         let _ = std::fs::remove_file(&fake);
         let _ = std::fs::remove_file(&img_a);
         let _ = std::fs::remove_file(&img_b);
+    }
+
+    /// Issue #41: a missing `vainfo` binary must not read as "no VA-API" when
+    /// the render node and a driver are right there, and must not turn mpv's
+    /// `no` into a software-decode verdict nobody can check.
+    #[test]
+    fn missing_vainfo_is_not_reported_as_missing_vaapi() {
+        assert_eq!(classify_vaapi(true, false, false), VaApi::Verifiable);
+        assert_eq!(classify_vaapi(false, true, true), VaApi::DriversPresent);
+        assert_eq!(classify_vaapi(false, true, false), VaApi::Missing);
+        assert_eq!(classify_vaapi(false, false, true), VaApi::Missing);
+
+        assert_eq!(decode_display(Some("vaapi"), false), "vaapi");
+        assert_eq!(decode_display(Some("no"), true), "no");
+        assert_eq!(
+            decode_display(Some("no"), false),
+            "unverified (vainfo not installed)"
+        );
+        assert_eq!(decode_display(None, false), "(none)");
     }
 }
 

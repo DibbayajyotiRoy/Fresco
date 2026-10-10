@@ -3,10 +3,9 @@
  * Copyright (C) 2026 Dibbayajyoti Roy
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Shown by System Settings > Screen Locking > Appearance (and by the
- * desktop wallpaper KCM, if someone also picks this plugin there) when this
- * wallpaper is selected. It deliberately has no controls: Fresco's own app
- * (Preferences > Lock Screen) is the only writer of VideoPath, StillPath,
+ * Shown by System Settings > Screen Locking > Appearance and by the desktop
+ * wallpaper settings when this wallpaper is selected. It deliberately has no
+ * controls: Fresco's own app is the only writer of VideoPath, StillPath,
  * PlayVideo, Dim, LayerDir and RefreshMs (see ../config/main.xml), so a
  * second settings UI here would just be an easily-stale duplicate.
  *
@@ -27,7 +26,7 @@ ColumnLayout {
         Layout.fillWidth: true
         type: Kirigami.MessageType.Information
         visible: true
-        text: i18n("This wallpaper is configured by Fresco. Open Fresco → Lock Screen to change it.")
+        text: i18n("This wallpaper is set by Fresco. Open Fresco to change the video or image.")
     }
 
     // Push the message to the top instead of letting the layout stretch it.

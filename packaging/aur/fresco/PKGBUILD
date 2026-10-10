@@ -20,8 +20,7 @@ license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'mpv' 'wayland' 'ffmpegthumbnailer' 'mpvpaper' 'glib2')
 makedepends=('rust' 'cargo' 'git')
 optdepends=(
-  'libva-intel-driver: VA-API hardware decode on Intel GPUs'
-  'intel-media-driver: VA-API hardware decode on newer Intel GPUs'
+  'intel-media-driver: VA-API hardware decode on Intel GPUs'
   'gst-plugins-good: hover-to-play previews in the library'
   'gst-libav: hover-to-play previews in the library'
   # The audio visualiser widget captures the default sink monitor through
@@ -35,7 +34,7 @@ optdepends=(
   # needed by exactly one of them, so none of these are hard dependencies.
   'xsecurelock: X11 lock screen with the live wallpaper and widgets (fresco lock)'
   'swaylock-plugin: wlroots lock screen with the live wallpaper and widgets (fresco lock)'
-  'qt6-multimedia: video playback in the KDE Plasma lock-screen wallpaper'
+  'qt6-multimedia: video playback in the KDE Plasma desktop and lock-screen wallpaper'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')  # pin per release: curl -L <source-url> | sha256sum

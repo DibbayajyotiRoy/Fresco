@@ -64,6 +64,10 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
             print_help();
             Some(0)
         }
+        Some("-V") | Some("-v") | Some("--version") | Some("version") => {
+            println!("fresco {}", env!("CARGO_PKG_VERSION"));
+            Some(0)
+        }
         // Toolkit options are not ours — let the GUI parse them.
         Some(opt) if opt.starts_with('-') => None,
         // An unrecognized word is a CLI typo, not a GUI launch.
@@ -84,6 +88,7 @@ fn print_help() {
          fresco doctor     Show session, backend, and health diagnostics\n  \
          fresco status     Show the running wallpaper's status\n  \
          fresco logs [N]   Show the last N daemon log lines (default 50)\n  \
+         fresco --version  Show the version (also -V, -v, version)\n  \
          fresco --help     Show this help\n\n\
          Bind `fresco lock` to a key or an idle daemon:\n  \
          Sway:      bindsym $mod+Escape exec fresco lock\n  \
@@ -1219,6 +1224,19 @@ mod still_frame_tests {
             let hint = still_frame_hint(false, x11);
             assert!(!hint.contains("GNOME"), "{hint}");
             assert!(hint.contains("layer-shell"), "{hint}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn version_flags_exit_zero_without_launching_the_gui() {
+        for flag in ["-V", "-v", "--version", "version"] {
+            let args = vec!["fresco".to_string(), flag.to_string()];
+            assert_eq!(dispatch(&args), Some(0), "{flag}");
         }
     }
 }

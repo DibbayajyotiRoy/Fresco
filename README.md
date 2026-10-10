@@ -50,7 +50,7 @@ Fresco is a free, open-source live wallpaper app for Linux that sets any video, 
 | **Install** | Deepin App Store, `.deb` package, or one-line script |
 | **Users** | 1,500+ people in 110+ countries |
 | **Languages** | English plus 12 translations |
-| **Latest version** | 1.1.45 |
+| **Latest version** | 1.1.49 |
 
 ## Install
 
@@ -424,4 +424,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin, and Kali Linux, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Used by 1,500+ people in 110+ countries. Last updated: 2026-09-28.</sub>
+<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin, and Kali Linux, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Used by 1,500+ people in 110+ countries. Last updated: 2026-10-10.</sub>

@@ -1,7 +1,7 @@
 //! Polished command-line surface for the `fresco` binary.
 //!
-//! `fresco doctor` / `fresco status` / `fresco logs` / `fresco lock` run
-//! without launching the GUI. They reflect the running daemon over IPC and
+//! `fresco doctor` / `fresco status` / `fresco logs` / `fresco lock` /
+//! `fresco next|prev|random` run without launching the GUI. They reflect the running daemon over IPC and
 //! the detected session capability — the user never needs to know about
 //! layer-shell, EGL, or mpvpaper. Anything Fresco can't do is reported as a
 //! plain-language hint, not a stack trace.
@@ -61,6 +61,12 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         Some("status") => Some(status()),
         Some("logs") => Some(logs(args.get(2).map(String::as_str))),
         Some("lock") => Some(lock_cmd()),
+        #[cfg(feature = "gui")]
+        Some("next") => Some(crate::gui::switch::run(crate::gui::switch::Step::Next)),
+        #[cfg(feature = "gui")]
+        Some("prev") => Some(crate::gui::switch::run(crate::gui::switch::Step::Prev)),
+        #[cfg(feature = "gui")]
+        Some("random") => Some(crate::gui::switch::run(crate::gui::switch::Step::Random)),
         Some("-h") | Some("--help") | Some("help") => {
             print_help();
             Some(0)
@@ -86,11 +92,16 @@ fn print_help() {
          Usage:\n  \
          fresco            Launch the app\n  \
          fresco lock       Lock the screen now, through your desktop's own locker\n  \
+         fresco next       Switch to the next wallpaper in your library\n  \
+         fresco prev       Switch to the previous wallpaper in your library\n  \
+         fresco random     Switch to a random wallpaper (never the current one)\n  \
          fresco doctor     Show session, backend, and health diagnostics\n  \
          fresco status     Show the running wallpaper's status\n  \
          fresco logs [N]   Show the last N daemon log lines (default 50)\n  \
          fresco --version  Show the version (also -V, -v, version)\n  \
          fresco --help     Show this help\n\n\
+         Bind `fresco next` / `prev` / `random` to keys:\n  \
+         Sway:      bindsym $mod+Right exec fresco next\n\n\
          Bind `fresco lock` to a key or an idle daemon:\n  \
          Sway:      bindsym $mod+Escape exec fresco lock\n  \
          hypridle:  lock_cmd = fresco lock\n  \

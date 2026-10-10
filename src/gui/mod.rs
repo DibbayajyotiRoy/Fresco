@@ -8,6 +8,7 @@ mod lockscreen;
 mod preview;
 mod preview_proxy;
 mod status;
+pub mod switch;
 mod theme;
 mod transition_preview;
 mod updates;

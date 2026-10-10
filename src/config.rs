@@ -1420,6 +1420,14 @@ pub struct LockScreen {
     /// time-of-day or name substitution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub greeting: Option<String>,
+    /// The lock screen's own wallpaper, independent of what plays on the
+    /// desktop. `None` — the default, and what every config written before this
+    /// key existed says — follows the desktop wallpaper; every consumer reads
+    /// the result through [`Config::lock_source`]. Declared above `widgets` for
+    /// the same reason `Wallpaper::transition` sits above `crop`: both serialise
+    /// as tables, and TOML wants plain values first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper: Option<Wallpaper>,
     /// Which of Fresco's own widgets are drawn on the lock screen. See
     /// [`LockWidgets`].
     #[serde(default)]
@@ -1462,6 +1470,7 @@ impl Default for LockScreen {
             blur_curve: LOCK_BLUR_CURVE,
             clock_theme: None,
             greeting: None,
+            wallpaper: None,
             widgets: LockWidgets::default(),
         }
     }
@@ -2041,6 +2050,9 @@ impl Config {
         if let Some(w) = self.browser_wallpaper.as_mut() {
             migrate_wallpaper(w);
         }
+        if let Some(w) = self.lockscreen.as_mut().and_then(|l| l.wallpaper.as_mut()) {
+            migrate_wallpaper(w);
+        }
         if let Some(sched) = self.schedule.as_mut() {
             for w in [sched.day.as_mut(), sched.night.as_mut()]
                 .into_iter()
@@ -2077,6 +2089,17 @@ impl Config {
     /// Effective wallpaper for a connector, honoring per-monitor overrides.
     pub fn wallpaper_for(&self, connector: &str) -> &Wallpaper {
         self.monitors.get(connector).unwrap_or(&self.wallpaper)
+    }
+
+    /// What the lock screen shows: [`LockScreen::wallpaper`] when the user
+    /// picked one (the same on every output), otherwise the desktop wallpaper —
+    /// the per-monitor override for `connector` when given, else the default.
+    /// The one place lock-screen consumers choose their source.
+    pub fn lock_source(&self, connector: Option<&str>) -> &Wallpaper {
+        match self.lockscreen.as_ref().and_then(|l| l.wallpaper.as_ref()) {
+            Some(own) => own,
+            None => connector.map_or(&self.wallpaper, |c| self.wallpaper_for(c)),
+        }
     }
 }
 
@@ -3347,7 +3370,56 @@ opacity = 200
         assert_eq!(l.blur, 0.0);
         assert_eq!(l.clock_theme, None, "None = the preset's own theme");
         assert_eq!(l.greeting, None, "None = the generated greeting");
+        assert_eq!(l.wallpaper, None, "None = follow the desktop wallpaper");
         assert_eq!(l.widgets, LockWidgets::default());
+    }
+
+    #[test]
+    fn lock_source_prefers_the_lock_wallpaper_else_the_desktop() {
+        let video = |p: &str| Wallpaper {
+            kind: Kind::Video,
+            path: Some(PathBuf::from(p)),
+            ..Wallpaper::default()
+        };
+        let mut cfg = Config {
+            wallpaper: video("/desktop.mp4"),
+            ..Config::default()
+        };
+        cfg.monitors.insert("HDMI-1".into(), video("/hdmi.mp4"));
+        // No `[lockscreen]` at all, and a `[lockscreen]` with no own wallpaper:
+        // both follow the desktop, honouring a per-monitor override.
+        for lockscreen in [None, Some(LockScreen::default())] {
+            cfg.lockscreen = lockscreen;
+            assert_eq!(cfg.lock_source(None), &cfg.wallpaper);
+            assert_eq!(cfg.lock_source(Some("eDP-1")), &cfg.wallpaper);
+            assert_eq!(cfg.lock_source(Some("HDMI-1")), &cfg.monitors["HDMI-1"]);
+        }
+        // An own wallpaper wins everywhere, per-monitor overrides included.
+        let own = video("/lock.mp4");
+        cfg.lockscreen = Some(LockScreen {
+            wallpaper: Some(own.clone()),
+            ..LockScreen::default()
+        });
+        for c in [None, Some("eDP-1"), Some("HDMI-1")] {
+            assert_eq!(cfg.lock_source(c), &own);
+        }
+    }
+
+    #[test]
+    fn lockscreen_wallpaper_is_backward_compatible_and_migrates() {
+        // A [lockscreen] written before the key existed loads as "follow the
+        // desktop"; and a wallpaper table under it is migrated like any other
+        // (the old `crossfade` folds onto `fade`).
+        let old: Config = toml::from_str("[lockscreen]\nenabled = true\n").unwrap();
+        assert_eq!(old.lockscreen.unwrap().wallpaper, None);
+        let mut cfg: Config = toml::from_str(
+            "[lockscreen]\n[lockscreen.wallpaper]\nkind = \"image\"\npath = \"/a.png\"\ntransition = \"crossfade\"\n",
+        )
+        .unwrap();
+        cfg.migrate();
+        let w = cfg.lockscreen.unwrap().wallpaper.unwrap();
+        assert_eq!(w.path.as_deref(), Some(std::path::Path::new("/a.png")));
+        assert_eq!(w.transition, Transition::Fade);
     }
 
     #[test]
@@ -3430,6 +3502,11 @@ visualizer = true
             blur_curve: LOCK_BLUR_CURVE,
             clock_theme: Some(crate::clock::ClockTheme::Lock),
             greeting: Some(String::new()),
+            wallpaper: Some(Wallpaper {
+                kind: Kind::Image,
+                path: Some(PathBuf::from("/walls/lock.png")),
+                ..Wallpaper::default()
+            }),
             widgets: LockWidgets {
                 clock: false,
                 date: true,

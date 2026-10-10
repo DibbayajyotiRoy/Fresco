@@ -201,11 +201,13 @@ assets = [
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "644"],
+    ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "644"],
+    ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "644"],
 ]
 # The postinst NEVER refreshes the icon cache or desktop database: the standard

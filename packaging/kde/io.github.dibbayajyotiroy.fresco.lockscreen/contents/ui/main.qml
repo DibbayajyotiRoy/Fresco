@@ -21,10 +21,10 @@
  *      desktop (icons included) into one opaque window, so a Fresco window
  *      can never show the video there; instead Fresco's daemon selects this
  *      plugin on every desktop through plasmashell's scripting DBus API and
- *      writes VideoPath/StillPath/PlayVideo (src/daemon/kde_desktop.rs,
- *      issue #44). Nothing below branches on which host it is running under:
- *      the plugin only ever reads local files Fresco already wrote, so it
- *      has nothing that needs to behave differently between the two.
+ *      writes VideoPath/StillPath/PlayVideo/PauseMode (src/daemon/
+ *      kde_desktop.rs, issue #44). The plugin only ever reads local files
+ *      Fresco already wrote, so almost nothing differs between the two; the
+ *      one exception is the desktop-only auto-pause (WindowWatcher.qml).
  *
  * All configuration comes from Fresco's own daemon, which writes plain
  * KConfigXT values into kscreenlockerrc (see ../config/main.xml and
@@ -113,6 +113,54 @@ WallpaperItem {
         target: videoLoader.item
         property: "videoSource"
         value: Qt.resolvedUrl(root.configuration.VideoPath)
+        when: videoLoader.status === Loader.Ready && videoLoader.item !== null
+    }
+
+    // ---------------------------------------------------------------
+    // Auto-pause (desktop only): freeze the video while a fullscreen -- or,
+    // with PauseMode 1, a maximized -- window covers the wallpaper anyway.
+    // ---------------------------------------------------------------
+
+    // The greeter's window is plasma-desktop's LockScreen.qml; the desktop's
+    // is not. The lock screen has no windows to watch (and a fullscreen app
+    // behind it must not freeze the clock-over-video), so skip it there.
+    // windowKnown keeps the watcher from loading before this is decided.
+    property bool windowKnown: false
+    property bool lockScreenMode: false
+    Item {
+        onWindowChanged: window => {
+            if (!window) {
+                return;
+            }
+            root.lockScreenMode = "source" in window && window.source.toString().endsWith("LockScreen.qml");
+            root.windowKnown = true;
+        }
+    }
+
+    // Loaded by source for the same reason as videoLoader above: if
+    // org.kde.taskmanager is unavailable, status becomes Loader.Error, item
+    // stays null, and `windowPaused` stays false -- the video just never
+    // auto-pauses.
+    Loader {
+        id: watcherLoader
+        active: root.haveVideo && root.windowKnown && !root.lockScreenMode && root.configuration.PauseMode !== 2
+        source: "WindowWatcher.qml"
+    }
+
+    Binding {
+        target: watcherLoader.item
+        property: "screenGeometry"
+        value: (root.parent && root.parent.screenGeometry) ? root.parent.screenGeometry : Qt.rect(0, 0, 0, 0)
+        when: watcherLoader.item !== null
+    }
+
+    readonly property bool windowPaused: watcherLoader.item !== null &&
+        (watcherLoader.item.fullscreen || (root.configuration.PauseMode === 1 && watcherLoader.item.maximized))
+
+    Binding {
+        target: videoLoader.item
+        property: "paused"
+        value: root.windowPaused
         when: videoLoader.status === Loader.Ready && videoLoader.item !== null
     }
 

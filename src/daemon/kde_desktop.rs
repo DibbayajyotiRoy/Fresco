@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use super::lock::hosts::kde::{self, PLUGIN_ID};
 use super::{dde, overview};
-use crate::config::Wallpaper;
+use crate::config::{Config, Wallpaper};
 
 const DEST: &str = "org.kde.plasmashell";
 const OBJECT: &str = "/PlasmaShell";
@@ -106,21 +106,22 @@ static BUSY: Mutex<()> = Mutex::new(());
 /// Runs on a detached thread: waiting for plasmashell at login, rendering the
 /// poster frame and the DBus call can take seconds, none of which may stall a
 /// daemon loop. Idempotent.
-pub fn apply(wallpaper: &Wallpaper) {
+pub fn apply(config: &Config) {
     if !enabled() {
         return;
     }
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-    let wallpaper = wallpaper.clone();
+    let wallpaper = config.wallpaper.clone();
+    let pause_mode = kde_pause_mode(config);
     std::thread::spawn(move || {
         let _busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(e) = apply_now(&wallpaper, generation) {
+        if let Err(e) = apply_now(&wallpaper, pause_mode, generation) {
             log::warn!("KDE Plasma: could not apply the wallpaper through plasmashell: {e}");
         }
     });
 }
 
-fn apply_now(wallpaper: &Wallpaper, generation: u64) -> Result<(), String> {
+fn apply_now(wallpaper: &Wallpaper, pause_mode: i32, generation: u64) -> Result<(), String> {
     if !wait_for_shell(generation) {
         return Ok(()); // superseded
     }
@@ -142,7 +143,7 @@ fn apply_now(wallpaper: &Wallpaper, generation: u64) -> Result<(), String> {
             overview::encode_file_uri(std::path::Path::new(p))
         }
     };
-    evaluate(&apply_script(&uri(&video), &uri(&still)))?;
+    evaluate(&apply_script(&uri(&video), &uri(&still), pause_mode))?;
     log::info!(
         "KDE Plasma: applied via plasmashell wallpaper plugin ({})",
         if video.is_empty() { &still } else { &video }
@@ -240,10 +241,17 @@ fn js_str(s: &str) -> String {
         .replace('\u{2029}', "\\u2029")
 }
 
+/// The plugin's `PauseMode` (`contents/config/main.xml`): 0 pauses the video
+/// while a window is fullscreen, 1 also while one is maximized, 2 never.
+fn kde_pause_mode(_config: &Config) -> i32 {
+    // wire to config.pause_on_maximized once feat/pause-on-maximized lands
+    0
+}
+
 /// The script `plasma-apply-wallpaperimage` sends, with our plugin and its
 /// config keys (`contents/config/main.xml`). No veil, no widget layer on the
 /// desktop.
-fn apply_script(video_uri: &str, still_uri: &str) -> String {
+fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32) -> String {
     let id = js_str(PLUGIN_ID);
     format!(
         "desktops().forEach(function(d){{\
@@ -252,6 +260,7 @@ fn apply_script(video_uri: &str, still_uri: &str) -> String {
          d.writeConfig('VideoPath',{video});\
          d.writeConfig('StillPath',{still});\
          d.writeConfig('PlayVideo',{play});\
+         d.writeConfig('PauseMode',{pause_mode});\
          d.writeConfig('Dim',0);\
          }});",
         video = js_str(video_uri),
@@ -358,7 +367,7 @@ mod tests {
 
     #[test]
     fn hostile_paths_stay_inside_their_string_literal() {
-        let benign = apply_script("file:///a.mp4", "file:///a.png");
+        let benign = apply_script("file:///a.mp4", "file:///a.png", 0);
         for evil in [
             "x');d.wallpaperPlugin=('evil",
             "x\");evil();(\"",
@@ -367,24 +376,25 @@ mod tests {
             "x\u{2028}evil();//",
             "x</script>",
         ] {
-            let s = apply_script(evil, evil);
+            let s = apply_script(evil, evil, 0);
             assert_eq!(skeleton(&s), skeleton(&benign), "{evil:?}");
         }
     }
 
     #[test]
     fn apply_script_selects_our_plugin_and_writes_the_plugin_keys() {
-        let s = apply_script("file:///v.mp4", "file:///s.png");
+        let s = apply_script("file:///v.mp4", "file:///s.png", 1);
         assert!(s.starts_with("desktops().forEach(function(d){d.wallpaperPlugin=\"io.github."));
-        for key in ["VideoPath", "StillPath", "PlayVideo", "Dim"] {
+        for key in ["VideoPath", "StillPath", "PlayVideo", "PauseMode", "Dim"] {
             assert!(s.contains(&format!("writeConfig('{key}'")), "{key}");
         }
         assert!(s.contains("writeConfig('PlayVideo',true)"));
+        assert!(s.contains("writeConfig('PauseMode',1)"));
         assert!(
             s.contains("['Wallpaper',\"io.github.dibbayajyotiroy.fresco.lockscreen\",'General']")
         );
         // An image wallpaper has nothing to play.
-        assert!(apply_script("", "file:///s.png").contains("writeConfig('PlayVideo',false)"));
+        assert!(apply_script("", "file:///s.png", 0).contains("writeConfig('PlayVideo',false)"));
     }
 
     #[test]
@@ -406,7 +416,7 @@ mod tests {
     fn script_survives_gdbus_argument_quoting() {
         // gdbus parses the argument as a GVariant string: quotes and
         // backslashes in the script must round-trip through the literal.
-        let script = apply_script("file:///it's.mp4", "");
+        let script = apply_script("file:///it's.mp4", "", 0);
         let lit = overview::gvariant_string_literal(&script);
         let inner = &lit[1..lit.len() - 1];
         let mut un = String::new();

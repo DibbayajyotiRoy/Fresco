@@ -96,6 +96,8 @@ package() {
       "$pkgdir/$_kde_dest/contents/ui/main.qml"
     install -Dm644 "packaging/kde/$_kde_plugin/contents/ui/VideoLayer.qml" \
       "$pkgdir/$_kde_dest/contents/ui/VideoLayer.qml"
+    install -Dm644 "packaging/kde/$_kde_plugin/contents/ui/WindowWatcher.qml" \
+      "$pkgdir/$_kde_dest/contents/ui/WindowWatcher.qml"
     install -Dm644 "packaging/kde/$_kde_plugin/contents/ui/config.qml" \
       "$pkgdir/$_kde_dest/contents/ui/config.qml"
   done

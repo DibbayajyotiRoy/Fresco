@@ -33,6 +33,12 @@
       <label>Play VideoPath as a looping, muted video instead of showing StillPath.</label>
       <default>true</default>
     </entry>
+    <entry name="PauseMode" type="Int">
+      <label>Desktop only: pause the video while a window is fullscreen (0), fullscreen or maximized (1), or never (2).</label>
+      <default>0</default>
+      <min>0</min>
+      <max>2</max>
+    </entry>
     <entry name="Dim" type="Double">
       <label>Opacity (0-0.8) of the black veil drawn over the media, for prompt legibility.</label>
       <default>0.2</default>

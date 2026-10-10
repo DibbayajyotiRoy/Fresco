@@ -337,11 +337,13 @@ pub(super) fn parse_first_string(out: &str) -> Option<String> {
     }
 }
 
-/// Ask DDE for the current wallpaper of `monitor`, trying each service.
+/// Ask DDE for the current wallpaper of `monitor`, trying each service. Bounded
+/// ([`GDBUS_TIMEOUT_SECS`]): the lock-screen preview calls this on the daemon's
+/// main loop.
 fn get_background(monitor: &str) -> Option<String> {
     for (dest, path, iface) in SERVICES {
         let method = format!("{iface}.GetCurrentWorkspaceBackgroundForMonitor");
-        if let Some(out) = gdbus_call(dest, path, &method, &[monitor]) {
+        if let Some(out) = gdbus_call_on(Bus::Session, dest, path, &method, &[monitor]) {
             if let Some(uri) = parse_first_string(&out) {
                 if !uri.is_empty() {
                     return Some(uri);
@@ -350,6 +352,40 @@ fn get_background(monitor: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Whether `path` is a picture Fresco itself puts in DDE's wallpaper or
+/// lock-screen slot (the transparent / key-colour PNG, a lock-screen frame), and
+/// so not something the user chose.
+fn is_fresco_picture(path: &std::path::Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+        n == "dde-transparent.png"
+            || n == "dde-key.png"
+            || (n.starts_with(super::dde_lock::FRAME_PREFIX) && n.ends_with(".png"))
+    })
+}
+
+/// The first of `uris` that names an existing local picture which is not one of
+/// Fresco's own.
+fn first_user_picture(uris: impl IntoIterator<Item = String>) -> Option<PathBuf> {
+    uris.into_iter()
+        .filter_map(|u| super::dde_lock::uri_to_path(&u))
+        .find(|p| !is_fresco_picture(p) && p.is_file())
+}
+
+/// The user's own desktop wallpaper (what they picked in Settings ->
+/// Personalization -> Wallpaper), for the lock-screen preview: the original
+/// Fresco saved when it swapped DDE's wallpaper for its own PNG ([`save_original`]
+/// never records Fresco's pictures), else what DDE reports now for `monitors` —
+/// minus Fresco's own pictures, which DDE reports while Fresco has them set.
+pub(super) fn user_wallpaper(monitors: &[String]) -> Option<PathBuf> {
+    let saved = std::fs::read(saved_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<SavedWallpapers>(&b).ok())
+        .map(|s| s.monitors.into_values().collect::<Vec<_>>())
+        .unwrap_or_default();
+    first_user_picture(saved)
+        .or_else(|| first_user_picture(monitors.iter().filter_map(|m| get_background(m))))
 }
 
 /// Set the wallpaper of `monitor`, trying each service. True on success.
@@ -1189,6 +1225,31 @@ mod tests {
         assert_eq!(back, s);
         assert_eq!(back.monitors.len(), 2);
         assert_eq!(back.monitors["eDP-1"], "file:///home/u/b.png".to_string());
+    }
+
+    #[test]
+    fn user_picture_skips_fresco_pictures_and_missing_files() {
+        let dir = std::env::temp_dir().join(format!("fresco-dde-userpic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let touch = |name: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, b"x").unwrap();
+            format!("file://{}", p.display())
+        };
+        let mine = touch("my wall.jpg");
+        let ours = [
+            touch("dde-transparent.png"),
+            touch("dde-key.png"),
+            touch("dde-lock-1700000000000.png"),
+        ];
+        let gone = format!("file://{}/gone.jpg", dir.display());
+
+        let uris = ours.iter().cloned().chain([gone, mine.replace(' ', "%20")]);
+        let found = first_user_picture(uris).expect("the user's own picture");
+        assert_eq!(found, dir.join("my wall.jpg"));
+        assert_eq!(first_user_picture(ours), None);
+        assert_eq!(first_user_picture([String::new()]), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

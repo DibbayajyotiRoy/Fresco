@@ -403,6 +403,8 @@ impl LockRuntime {
                 message: "lock screen is not enabled".to_string(),
             };
         };
+        self.preview
+            .set_monitors(ctx.outputs.iter().map(|o| o.connector.clone()));
         match self
             .preview
             .render(self.kind, wallpaper, &resolved, np, theme, width, height)

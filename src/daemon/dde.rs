@@ -152,6 +152,11 @@ pub enum Mode {
     /// [`Mode::CajaMirror`] against dde-shell's 32-bit desktop window, with the
     /// DDE wallpaper set to the key colour over DBus. Experimental.
     DdeMirror,
+    /// Xfce: [`Mode::CajaMirror`] against xfdesktop's per-monitor desktop
+    /// windows, with the backdrop set to the key colour over xfconf. Our
+    /// windows are not restacked: xfwm4 already keeps them in a layer above
+    /// xfdesktop's, and nothing it does on a click moves xfdesktop above them.
+    XfceMirror,
 }
 
 impl Mode {
@@ -161,6 +166,7 @@ impl Mode {
         match self {
             Mode::CajaMirror => Some(super::caja_mirror::Desktop::Caja),
             Mode::DdeMirror => Some(super::caja_mirror::Desktop::Dde),
+            Mode::XfceMirror => Some(super::caja_mirror::Desktop::Xfce),
             _ => None,
         }
     }
@@ -574,6 +580,9 @@ pub fn apply<C: Connection>(
     if crate::capability::is_mate() {
         return apply_mate(conn, atoms, root, windows);
     }
+    if crate::capability::is_xfce() {
+        return apply_xfce(conn);
+    }
     let pref = effective_pref(config_pref);
     let depth = desktop_window_depth(conn, atoms, root);
     match depth {
@@ -706,6 +715,28 @@ fn apply_mate<C: Connection>(conn: &C, atoms: &Atoms, root: Window, windows: &[W
              brings them back for `dde_icon_peek_secs` seconds"
         );
         Mode::Restack
+    }
+}
+
+/// Xfce: nothing to restack. Our windows keep the declaration they were
+/// created with (`DESKTOP` + `BELOW`): xfwm4 puts `BELOW` in a layer above the
+/// one it keeps xfdesktop's `DESKTOP` window in, layers are strict, and it
+/// ignores stacking requests for DESKTOP windows — so we are above xfdesktop
+/// for good and a raise or a lower would only stir the stack. What the layer
+/// hides is xfdesktop's icons; the mirror draws them onto our windows.
+///
+/// [`Mode::XfceMirror`] when the server can redirect and track xfdesktop's
+/// windows (Composite + Damage), otherwise [`Mode::Inactive`]: the icons stay
+/// hidden while the video plays, and there is no click-to-peek.
+fn apply_xfce<C: Connection>(conn: &C) -> Mode {
+    if has_mirror_extensions(conn) {
+        Mode::XfceMirror
+    } else {
+        log::warn!(
+            "Xfce: the X server has no Composite/Damage, so xfdesktop's icons cannot be drawn \
+             over the wallpaper — they are hidden while it plays"
+        );
+        Mode::Inactive
     }
 }
 
@@ -1113,7 +1144,20 @@ pub(super) fn wm_class_is_desktop(desktop: super::caja_mirror::Desktop, value: &
     match desktop {
         super::caja_mirror::Desktop::Caja => wm_class_is_caja_desktop(value),
         super::caja_mirror::Desktop::Dde => wm_class_is_dde_desktop(value),
+        super::caja_mirror::Desktop::Xfce => wm_class_is_xfdesktop(value),
     }
+}
+
+/// xfdesktop's desktop window(s) on Xfce: WM_CLASS `"xfdesktop\0Xfdesktop\0"`
+/// (GTK's program name and its capitalised class). Matched part by part,
+/// exactly, so `xfdesktop-settings` (`"xfdesktop-settings\0Xfdesktop-settings\0"`)
+/// and every other program are out. Dialogs xfdesktop itself opens share the
+/// class; the mirror tells them from the desktop by window type.
+pub(super) fn wm_class_is_xfdesktop(value: &[u8]) -> bool {
+    let mut parts = value.split(|&b| b == 0);
+    let instance = parts.next().unwrap_or_default();
+    let class = parts.next().unwrap_or_default();
+    instance.eq_ignore_ascii_case(b"xfdesktop") && class.eq_ignore_ascii_case(b"xfdesktop")
 }
 
 /// Caja's desktop window on MATE. Read off a Linux Mint 22 MATE desktop: the
@@ -1412,7 +1456,44 @@ mod tests {
         use super::super::caja_mirror::Desktop;
         assert_eq!(Mode::CajaMirror.mirror_desktop(), Some(Desktop::Caja));
         assert_eq!(Mode::DdeMirror.mirror_desktop(), Some(Desktop::Dde));
+        assert_eq!(Mode::XfceMirror.mirror_desktop(), Some(Desktop::Xfce));
         assert_eq!(Mode::Restack.mirror_desktop(), None);
+        assert_eq!(Mode::Inactive.mirror_desktop(), None);
+    }
+
+    #[test]
+    fn xfdesktop_matching() {
+        assert!(wm_class_is_xfdesktop(b"xfdesktop\0Xfdesktop\0"));
+        assert!(wm_class_is_xfdesktop(b"Xfdesktop\0Xfdesktop\0"));
+        // The settings dialog shares the prefix; our window, Caja's desktop,
+        // Deepin's desktop and an unrelated Xfce app are not it.
+        assert!(!wm_class_is_xfdesktop(
+            b"xfdesktop-settings\0Xfdesktop-settings\0"
+        ));
+        assert!(!wm_class_is_xfdesktop(b"xfdesktop-settings\0Xfdesktop\0"));
+        assert!(!wm_class_is_xfdesktop(
+            b"fresco-wallpaper\0fresco-wallpaper\0"
+        ));
+        assert!(!wm_class_is_xfdesktop(b"desktop_window\0Caja\0"));
+        assert!(!wm_class_is_xfdesktop(
+            b"dde-shell/desktop\0org.deepin.dde-shell\0"
+        ));
+        assert!(!wm_class_is_xfdesktop(b"xfce4-panel\0Xfce4-panel\0"));
+        assert!(!wm_class_is_xfdesktop(b""));
+        // And the per-desktop dispatch keeps each matcher to its own window.
+        use super::super::caja_mirror::Desktop;
+        assert!(wm_class_is_desktop(
+            Desktop::Xfce,
+            b"xfdesktop\0Xfdesktop\0"
+        ));
+        assert!(!wm_class_is_desktop(
+            Desktop::Caja,
+            b"xfdesktop\0Xfdesktop\0"
+        ));
+        assert!(!wm_class_is_desktop(
+            Desktop::Xfce,
+            b"desktop_window\0Caja\0"
+        ));
     }
 
     #[test]

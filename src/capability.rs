@@ -154,6 +154,32 @@ fn classify_mate(current_desktop: Option<&str>, session_desktop: Option<&str>) -
         })
 }
 
+/// Is this session Xfce? xfdesktop paints the backdrop and the icons into one
+/// opaque window per monitor, and xfwm4 keeps it below the layer our wallpaper
+/// window lives in, so the icons are hidden by the video: the X11 backend
+/// mirrors them onto the wallpaper instead (`daemon::caja_mirror`).
+pub fn is_xfce() -> bool {
+    classify_xfce(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+    )
+}
+
+/// Pure Xfce classification. A whole segment of the colon-separated list must
+/// be `XFCE` (or `XUBUNTU`), so no desktop whose name merely *contains* those
+/// letters matches.
+fn classify_xfce(current_desktop: Option<&str>, session_desktop: Option<&str>) -> bool {
+    [current_desktop, session_desktop]
+        .into_iter()
+        .flatten()
+        .any(|v| {
+            v.split(':').any(|seg| {
+                let s = seg.trim();
+                s.eq_ignore_ascii_case("xfce") || s.eq_ignore_ascii_case("xubuntu")
+            })
+        })
+}
+
 /// Is this session Cinnamon (Linux Mint)? Its muffin compositor has no
 /// layer-shell on Wayland and reads its own background schema.
 pub fn is_cinnamon() -> bool {
@@ -509,6 +535,26 @@ mod tests {
             assert!(!classify_mate(Some(d), None), "current {d}");
         }
         assert!(!classify_mate(None, None));
+    }
+
+    #[test]
+    fn xfce_detection() {
+        for d in ["XFCE", "xfce", "X-Generic:XFCE", "XFCE:Xubuntu", "Xubuntu"] {
+            assert!(classify_xfce(Some(d), None), "current {d}");
+            assert!(classify_xfce(None, Some(d)), "session {d}");
+        }
+        for d in [
+            "GNOME",
+            "MATE",
+            "xfce4-ish",
+            "notxfce",
+            "LXQt",
+            "Deepin",
+            "",
+        ] {
+            assert!(!classify_xfce(Some(d), None), "current {d}");
+        }
+        assert!(!classify_xfce(None, None));
     }
 
     const UBUNTU_XORG: &str = "[Desktop Entry]\n\

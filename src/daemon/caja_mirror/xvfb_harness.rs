@@ -534,3 +534,253 @@ fn dde_mirror_end_to_end() {
 
     let _ = std::fs::remove_dir_all(&state);
 }
+
+// -- Xfce ---------------------------------------------------------------------
+
+/// A pane's icons: `(x, y, width, height, rgb)`, drawn over the key colour.
+type Icons = Vec<(i16, i16, u16, u16, [u8; 3])>;
+
+fn pixel(c: [u8; 3]) -> u32 {
+    (u32::from(c[0]) << 16) | (u32::from(c[1]) << 8) | u32::from(c[2])
+}
+
+/// What the mirror should show at `(x, y)` of a pane: the icon there, else
+/// the wallpaper (the key colour is see-through).
+fn icon_at(icons: &Icons, x: usize, y: usize) -> [u8; 3] {
+    let (x, y) = (x as i32, y as i32);
+    icons
+        .iter()
+        .rev()
+        .find(|&&(ix, iy, w, h, _)| {
+            (i32::from(ix)..i32::from(ix) + i32::from(w)).contains(&x)
+                && (i32::from(iy)..i32::from(iy) + i32::from(h)).contains(&y)
+        })
+        .map_or(MAGENTA, |r| r.4)
+}
+
+/// Xfce (xfdesktop 4.19+): one 24-bit desktop window per monitor, each its own
+/// source. Two fake ones sit side by side under two magenta wallpaper windows,
+/// plus a dialog sharing xfdesktop's WM_CLASS that must not be mirrored. The
+/// right-hand desktop window is destroyed and brought back, as a hot-plugged
+/// monitor would.
+#[test]
+#[ignore = "needs Xvfb with Composite and DAMAGE; see the module docs"]
+fn xfce_mirror_per_monitor_end_to_end() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .is_test(false)
+        .try_init();
+    let (conn, screen_num) = x11rb::connect(None).expect("an X server to test against");
+    let screen = conn.setup().roots[screen_num].clone();
+    assert_eq!(screen.root_depth, 24, "the harness wants a 24-bit screen");
+    let root = screen.root;
+    let stacking = intern(&conn, b"_NET_CLIENT_LIST_STACKING");
+    let wm_type = intern(&conn, b"_NET_WM_WINDOW_TYPE");
+    let desktop_type = intern(&conn, b"_NET_WM_WINDOW_TYPE_DESKTOP");
+    let dialog_type = intern(&conn, b"_NET_WM_WINDOW_TYPE_DIALOG");
+
+    // A window of `w × h` at `x` filled from its own background pixmap, so
+    // changing the pixmap and clearing the window repaints it (damage and all).
+    let make = |x: i16, y: i16, w: u16, h: u16, ty: Atom| -> (Window, Pixmap) {
+        let canvas = conn.generate_id().unwrap();
+        conn.create_pixmap(24, canvas, root, w, h).unwrap();
+        let win = conn.generate_id().unwrap();
+        conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            win,
+            root,
+            x,
+            y,
+            w,
+            h,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new().background_pixmap(canvas),
+        )
+        .unwrap();
+        conn.change_property8(
+            PropMode::REPLACE,
+            win,
+            AtomEnum::WM_CLASS,
+            AtomEnum::STRING,
+            b"xfdesktop\0Xfdesktop\0",
+        )
+        .unwrap();
+        conn.change_property32(PropMode::REPLACE, win, wm_type, AtomEnum::ATOM, &[ty])
+            .unwrap();
+        (win, canvas)
+    };
+    let paint = |win: Window, canvas: Pixmap, w: u16, h: u16, icons: &Icons| {
+        let gc = conn.generate_id().unwrap();
+        conn.create_gc(gc, canvas, &CreateGCAux::new().foreground(pixel(KEY)))
+            .unwrap();
+        let rect = |x, y, width, height| Rectangle {
+            x,
+            y,
+            width,
+            height,
+        };
+        conn.poly_fill_rectangle(canvas, gc, &[rect(0, 0, w, h)])
+            .unwrap();
+        for &(x, y, iw, ih, c) in icons {
+            conn.change_gc(gc, &ChangeGCAux::new().foreground(pixel(c)))
+                .unwrap();
+            conn.poly_fill_rectangle(canvas, gc, &[rect(x, y, iw, ih)])
+                .unwrap();
+        }
+        conn.free_gc(gc).unwrap();
+        conn.clear_area(false, win, 0, 0, 0, 0).unwrap();
+        conn.flush().unwrap();
+    };
+
+    let (w, h) = (PANE as u16, H as u16);
+    let left: Icons = vec![
+        (40, 40, 64, 64, [200, 120, 40]),
+        (57, 60, 30, 24, [0, 0, 0]),
+    ];
+    let right: Icons = vec![
+        (100, 200, 80, 80, [60, 90, 220]),
+        (120, 220, 20, 20, [20, 20, 20]),
+    ];
+    let (a, a_canvas) = make(0, 0, w, h, desktop_type);
+    let (mut b, mut b_canvas) = make(PANE as i16, 0, w, h, desktop_type);
+    // xfdesktop's own dialog: same class, not a desktop window, solid red.
+    let (dialog, dialog_canvas) = make(300, 300, 200, 100, dialog_type);
+    paint(a, a_canvas, w, h, &left);
+    paint(b, b_canvas, w, h, &right);
+    let red: Icons = vec![(0, 0, 200, 100, [255, 0, 0])];
+    paint(dialog, dialog_canvas, 200, 100, &red);
+    for win in [a, b, dialog] {
+        conn.map_window(win).unwrap();
+    }
+    // The wallpaper windows, mapped after, so they start above.
+    let mut parents = Vec::new();
+    for x in [0i16, PANE as i16] {
+        let p = conn.generate_id().unwrap();
+        conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            p,
+            root,
+            x,
+            0,
+            w,
+            h,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new().background_pixel(0x00ff_00ff),
+        )
+        .unwrap();
+        conn.map_window(p).unwrap();
+        parents.push(Parent {
+            window: p,
+            x,
+            y: 0,
+            width: w,
+            height: h,
+        });
+    }
+    conn.flush().unwrap();
+    // No window manager under Xvfb: publish the stack as one would.
+    let sync_stack = |known: &[Window]| {
+        let order: Vec<Window> = conn
+            .query_tree(root)
+            .unwrap()
+            .reply()
+            .unwrap()
+            .children
+            .into_iter()
+            .filter(|c| known.contains(c))
+            .collect();
+        conn.change_property32(PropMode::REPLACE, root, stacking, AtomEnum::WINDOW, &order)
+            .unwrap();
+        conn.flush().unwrap();
+    };
+    let known = |b: Window| {
+        let mut k = vec![a, b, dialog];
+        k.extend(parents.iter().map(|p| p.window));
+        k
+    };
+    sync_stack(&known(b));
+
+    // What the screen shows over each wallpaper window, against what it should.
+    let mismatches = |panes: [Option<&Icons>; 2]| -> Vec<String> {
+        let mut bad = Vec::new();
+        for (p, icons) in parents.iter().zip(panes) {
+            let img = conn
+                .get_image(ImageFormat::Z_PIXMAP, root, p.x, p.y, w, h, !0)
+                .unwrap()
+                .reply()
+                .unwrap();
+            for (i, px) in img.data.chunks_exact(4).enumerate() {
+                let (x, y) = (i % PANE, i / PANE);
+                let want = icons.map_or(MAGENTA, |icons| icon_at(icons, x, y));
+                let got = [px[2], px[1], px[0]];
+                if got != want && bad.len() < 12 {
+                    bad.push(format!(
+                        "parent@{} ({x},{y}): screen {got:?}, expected {want:?}",
+                        p.x
+                    ));
+                }
+            }
+        }
+        bad
+    };
+    let wait_for_picture = |what: &str, panes: [Option<&Icons>; 2]| {
+        let t0 = Instant::now();
+        let mut last = Vec::new();
+        while t0.elapsed() < Duration::from_secs(8) {
+            last = mismatches(panes);
+            if last.is_empty() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!(
+            "{what}: the screen never matched; first mismatches:\n{}",
+            last.join("\n")
+        );
+    };
+
+    let mirror = Mirror::start(Desktop::Xfce).expect("the mirror starts");
+    mirror.set_parents(&conn, parents.clone());
+    conn.flush().unwrap();
+
+    // 1. Each monitor's icons land on its own wallpaper window, and the dialog
+    //    (red, over the left pane) is not copied.
+    wait_for_picture("both monitors", [Some(&left), Some(&right)]);
+
+    // 2. The right monitor's desktop window goes away: its icons go with it,
+    //    the left monitor's stay.
+    conn.destroy_window(b).unwrap();
+    conn.flush().unwrap();
+    sync_stack(&known(b));
+    wait_for_picture("after a monitor's window went away", [Some(&left), None]);
+
+    // 3. It returns with different icons (the mirror notices a new window
+    //    when the stack moves).
+    let right2: Icons = vec![(300, 100, 100, 100, [10, 200, 90])];
+    (b, b_canvas) = make(PANE as i16, 0, w, h, desktop_type);
+    paint(b, b_canvas, w, h, &right2);
+    conn.map_window(b).unwrap();
+    // Under the wallpaper windows, as xfwm4's lower layer keeps it.
+    conn.configure_window(
+        b,
+        &ConfigureWindowAux::new()
+            .sibling(parents[0].window)
+            .stack_mode(StackMode::BELOW),
+    )
+    .unwrap();
+    conn.flush().unwrap();
+    sync_stack(&known(b));
+    wait_for_picture("after it came back", [Some(&left), Some(&right2)]);
+    assert!(!mirror.failed());
+
+    // 4. Stop: the icon windows are gone.
+    mirror.stop(&conn);
+    for p in &parents {
+        let kids = conn.query_tree(p.window).unwrap().reply().unwrap().children;
+        assert!(kids.is_empty(), "icon windows destroyed");
+    }
+}

@@ -703,6 +703,15 @@ fn set_tracked_copies(path: &Path, copies: Vec<String>) {
     }
 }
 
+/// The copies of our frames now in Deepin's wallpaper store, as paths. They sit
+/// beside the user's own wallpapers there, so `dde::user_wallpaper` skips them.
+pub(super) fn our_copies() -> Vec<PathBuf> {
+    tracked_copies(&saved_path())
+        .iter()
+        .filter_map(|c| uri_to_path(c))
+        .collect()
+}
+
 // -- sync / restore flows ------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]

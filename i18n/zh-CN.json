@@ -327,7 +327,7 @@
   "Of day": "今日进度",
   "Off": "关闭",
   "On AC power only": "仅接通电源时",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "在 Deepin 上，锁屏会使用应用了你设置的调暗和虚化的静止画面。挂件仅在预览中显示。",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "在 Deepin 上，锁屏会使用应用了你设置的调暗效果的静止画面，Deepin 会自行添加虚化和色调。挂件仅在预览中显示。",
   "On {desktop}: {summary}": "{desktop}：{summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "每个文件一张壁纸。可以挂着一张用上几天，想换的时候再换。",
   "One entry per image or video in the folder, so you can pick between them.": "文件夹里每个图片或视频各建一张壁纸，方便你逐张挑选。",

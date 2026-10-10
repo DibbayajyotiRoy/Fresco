@@ -327,7 +327,7 @@
   "Of day": "Del día",
   "Off": "Desactivado",
   "On AC power only": "Solo con corriente",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "En Deepin, la pantalla de bloqueo recibe una imagen estática con tu oscurecimiento y desenfoque. Los widgets solo aparecen en la vista previa.",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "En Deepin, la pantalla de bloqueo recibe una imagen estática con tu oscurecimiento. Deepin añade su propio desenfoque y tinte. Los widgets solo aparecen en la vista previa.",
   "On {desktop}: {summary}": "En {desktop}: {summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "Una entrada por archivo. Puedes dejar uno puesto por días y cambiarlo cuando te apetezca.",
   "One entry per image or video in the folder, so you can pick between them.": "Una entrada por cada imagen o video de la carpeta, para que puedas elegir entre ellos.",

@@ -1135,6 +1135,23 @@ impl Daemon {
                 dde::render_self_check(&self.conn, &windows);
             }
         }
+        // Cinnamon (issue #39): muffin's compositor keeps painting a wallpaper
+        // mapped after nemo-desktop over the icons, whatever the window stack
+        // says, until a normal window appears. Make it re-sort now.
+        if crate::capability::is_cinnamon() && !self.renderers.is_empty() {
+            match x11win::force_compositor_restack(&self.conn, &screen, &self.atoms) {
+                Ok(()) => log::info!(
+                    "cinnamon: forced compositor restack; wallpaper windows {:x?}, \
+                     window stack (bottom first) {:x?}",
+                    self.renderers
+                        .iter()
+                        .map(|r| r.window.window)
+                        .collect::<Vec<_>>(),
+                    x11win::stacking_order(&self.conn, &self.atoms, screen.root)
+                ),
+                Err(e) => log::warn!("cinnamon: compositor restack helper failed: {e:#}"),
+            }
+        }
         self.sync_caja_mirror();
         Ok(())
     }

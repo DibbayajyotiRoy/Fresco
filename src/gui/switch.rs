@@ -83,6 +83,11 @@ fn switch(step: Step) -> Result<Option<String>> {
     let mut config = Config::load()?;
     let mut entries = library::load_entries()?;
     let collections = library::load_collections().unwrap_or_default();
+    // `broken` is stored from whenever the GUI last ran; the GUI re-checks on
+    // every start, so do the same or a file deleted since then gets picked.
+    for e in &mut entries {
+        e.check_health();
+    }
 
     // The library as the gallery lists it, minus entries whose file is gone.
     let pool: Vec<usize> =

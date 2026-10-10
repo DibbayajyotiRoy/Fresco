@@ -45,6 +45,17 @@ fn pick(len: usize, current: Option<usize>, step: Step, rand: usize) -> Option<u
     })
 }
 
+/// The view to cycle through. Applying an entry stamps its `last_used`, so
+/// under "Recently used" it would jump to the top and `next` would ping-pong
+/// between the top two forever; use the stable manual order instead (the open
+/// folder still scopes the pool).
+fn cycle_view(mut view: library::LibraryView) -> library::LibraryView {
+    if view.sort == library::SortMode::RecentlyUsed {
+        view.sort = library::SortMode::Manual;
+    }
+    view
+}
+
 /// Entry point for the CLI: exit code 0 and the applied name on stdout, or 1
 /// and a message on stderr. A library with nothing else to switch to is not an
 /// error: exit 0 with a note on stderr.
@@ -74,11 +85,12 @@ fn switch(step: Step) -> Result<Option<String>> {
     let collections = library::load_collections().unwrap_or_default();
 
     // The library as the gallery lists it, minus entries whose file is gone.
-    let pool: Vec<usize> = window::display_order(&entries, &collections, library::load_view())
-        .iter()
-        .filter_map(|id| entries.iter().position(|e| &e.id == id))
-        .filter(|&i| !entries[i].broken)
-        .collect();
+    let pool: Vec<usize> =
+        window::display_order(&entries, &collections, cycle_view(library::load_view()))
+            .iter()
+            .filter_map(|id| entries.iter().position(|e| &e.id == id))
+            .filter(|&i| !entries[i].broken)
+            .collect();
     let current = pool
         .iter()
         .position(|&i| window::entry_matches_wallpaper(&entries[i], &config.wallpaper));
@@ -140,6 +152,30 @@ mod tests {
             .map(|r| pick(4, Some(2), Step::Random, r).unwrap())
             .collect();
         assert_eq!(seen, [0, 1, 3].into());
+    }
+
+    /// Under "Recently used", applying `b` must not reorder the cycle, or
+    /// `next` would bounce between the top two entries.
+    #[test]
+    fn recently_used_sort_does_not_reorder_the_cycle() {
+        use std::path::PathBuf;
+        let mut a = library::LibraryEntry::new_video(PathBuf::from("/a.mp4"));
+        let mut b = library::LibraryEntry::new_video(PathBuf::from("/b.mp4"));
+        a.last_used = 5;
+        b.last_used = 1;
+        let view = library::LibraryView {
+            sort: library::SortMode::RecentlyUsed,
+            collection: None,
+        };
+        let order =
+            |e: &[library::LibraryEntry]| window::display_order(e, &[], cycle_view(view.clone()));
+        let before = order(&[a.clone(), b.clone()]);
+        assert_eq!(before, vec![a.id.clone(), b.id.clone()]);
+        b.touch(); // what applying `b` does
+        assert_eq!(order(&[a.clone(), b.clone()]), before);
+        // The raw view would have flipped it, which is the bug.
+        let raw = window::display_order(&[a.clone(), b.clone()], &[], view.clone());
+        assert_eq!(raw, vec![b.id, a.id]);
     }
 
     #[test]

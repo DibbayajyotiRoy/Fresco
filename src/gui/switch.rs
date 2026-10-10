@@ -46,11 +46,16 @@ fn pick(len: usize, current: Option<usize>, step: Step, rand: usize) -> Option<u
 }
 
 /// Entry point for the CLI: exit code 0 and the applied name on stdout, or 1
-/// and a message on stderr.
+/// and a message on stderr. A library with nothing else to switch to is not an
+/// error: exit 0 with a note on stderr.
 pub fn run(step: Step) -> i32 {
     match switch(step) {
-        Ok(name) => {
+        Ok(Some(name)) => {
             println!("Applied “{name}”");
+            0
+        }
+        Ok(None) => {
+            eprintln!("note: your library has only this one wallpaper, nothing to switch to");
             0
         }
         Err(e) => {
@@ -60,7 +65,8 @@ pub fn run(step: Step) -> i32 {
     }
 }
 
-fn switch(step: Step) -> Result<String> {
+/// `Ok(None)`: the only candidate is already playing, so nothing was touched.
+fn switch(step: Step) -> Result<Option<String>> {
     // Never fall back to defaults here: saving them would clobber a config
     // that merely failed to parse.
     let mut config = Config::load()?;
@@ -77,11 +83,17 @@ fn switch(step: Step) -> Result<String> {
         .iter()
         .position(|&i| window::entry_matches_wallpaper(&entries[i], &config.wallpaper));
     let rand = std::collections::hash_map::RandomState::new().hash_one(0u8) as usize;
-    let Some(idx) = pick(pool.len(), current, step, rand).map(|slot| pool[slot]) else {
+    let Some(slot) = pick(pool.len(), current, step, rand) else {
         bail!("no wallpapers to switch between — add some in the Fresco app first");
     };
+    // Only a one-item pool picks the current item. Re-applying it would
+    // restart the renderer for nothing; if it is stopped or the daemon is
+    // down, falling through starts it.
+    if current == Some(slot) && config.enabled && crate::ipc::daemon_alive() {
+        return Ok(None);
+    }
 
-    let entry = &mut entries[idx];
+    let entry = &mut entries[pool[slot]];
     entry.touch();
     config.wallpaper = entry.to_wallpaper();
     config.enabled = true;
@@ -89,7 +101,7 @@ fn switch(step: Step) -> Result<String> {
     config.save()?;
     library::save_entries(&entries).ok();
     daemon_ctl::apply_blocking()?;
-    Ok(name)
+    Ok(Some(name))
 }
 
 #[cfg(test)]

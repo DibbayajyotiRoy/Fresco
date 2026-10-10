@@ -194,6 +194,7 @@ pub(crate) fn current_uid() -> Option<u32> {
 
 /// The process's own login name, which is what Deepin's root helpers compare
 /// against: `/etc/passwd`, else `$USER`/`$LOGNAME`. No D-Bus round trips.
+#[cfg(feature = "daemon")]
 pub(crate) fn current_login() -> Option<String> {
     Some(Who::detect().login).filter(|l| !l.is_empty())
 }

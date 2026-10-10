@@ -121,6 +121,23 @@ pub fn apply(config: &Config) {
     });
 }
 
+/// Rewrite only the plugin's `PauseMode` on the desktops already showing it.
+/// For the Pause switches flipped while the wallpaper plays: a full [`apply`]
+/// would also rewrite the video, still and poster frame for a setting that
+/// touches none of them. No-op off Plasma; detached like [`apply`].
+pub fn set_pause_mode(config: &Config) {
+    if !enabled() {
+        return;
+    }
+    let script = pause_mode_script(kde_pause_mode(config));
+    std::thread::spawn(move || {
+        let _busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = evaluate(&script) {
+            log::warn!("KDE Plasma: could not update the pause mode: {e}");
+        }
+    });
+}
+
 fn apply_now(wallpaper: &Wallpaper, pause_mode: i32, generation: u64) -> Result<(), String> {
     if !wait_for_shell(generation) {
         return Ok(()); // superseded
@@ -268,6 +285,19 @@ fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32) -> String {
     )
 }
 
+/// The script behind [`set_pause_mode`]: `PauseMode` only, and only on the
+/// desktops that show our plugin.
+fn pause_mode_script(pause_mode: i32) -> String {
+    let id = js_str(PLUGIN_ID);
+    format!(
+        "desktops().forEach(function(d){{\
+         if(d.wallpaperPlugin=={id}){{\
+         d.currentConfigGroup=['Wallpaper',{id},'General'];\
+         d.writeConfig('PauseMode',{pause_mode});\
+         }}}});"
+    )
+}
+
 /// Reselect the saved plugin on every desktop still showing ours.
 fn restore_script(saved: &Saved) -> String {
     let map = serde_json::to_string(&saved.desktops)
@@ -402,6 +432,17 @@ mod tests {
         assert_eq!(kde_pause_mode(&config), 0);
         config.pause_on_maximized = true;
         assert_eq!(kde_pause_mode(&config), 1);
+    }
+
+    #[test]
+    fn pause_mode_script_writes_only_the_pause_mode_on_our_desktops() {
+        let s = pause_mode_script(1);
+        assert!(s.contains("if(d.wallpaperPlugin==\"io.github."));
+        assert!(s.contains("writeConfig('PauseMode',1)"));
+        for key in ["VideoPath", "StillPath", "PlayVideo", "Dim"] {
+            assert!(!s.contains(key), "{key}");
+        }
+        assert!(pause_mode_script(0).contains("writeConfig('PauseMode',0)"));
     }
 
     #[test]

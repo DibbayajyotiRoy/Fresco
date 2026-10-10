@@ -61,6 +61,73 @@ const MIN_WIDGET_WAIT: Duration = Duration::from_millis(1);
 const LOWER_INTERVAL: Duration = Duration::from_secs(2);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 const BATTERY_INTERVAL: Duration = Duration::from_secs(30);
+/// How often the run loops stat config.toml for the two pause switches.
+const CONFIG_POLL: Duration = Duration::from_secs(2);
+
+/// config.toml's modification time, `None` when it is missing or unreadable.
+fn config_mtime() -> Option<std::time::SystemTime> {
+    std::fs::metadata(Config::path())
+        .and_then(|m| m.modified())
+        .ok()
+}
+
+/// Gets the GUI's "Pause on battery" and "Pause when an app is maximized"
+/// switches to the running daemon. Those switches only save config.toml: an
+/// `Apply` would rebuild the renderers (X11) or re-issue `loadfile` (Wayland),
+/// restarting the video for a setting that never touches it. So the run loops
+/// stat the file and adopt just those two flags, never the wallpaper.
+// ponytail: mtime poll, 2 s latency; a Reload IPC if instant apply ever matters
+struct PauseConfigWatch {
+    seen: Option<std::time::SystemTime>,
+}
+
+impl PauseConfigWatch {
+    fn new() -> Self {
+        Self {
+            seen: config_mtime(),
+        }
+    }
+
+    /// Record the file as seen. An `Apply` calls this *before* its own
+    /// `Config::load`, so a save landing in between is still picked up by the
+    /// next `poll` instead of being swallowed.
+    fn mark(&mut self) {
+        self.seen = config_mtime();
+    }
+
+    /// The re-read config when the file changed since last seen. A file that
+    /// no longer parses is logged once per change and the running settings
+    /// stay.
+    fn poll(&mut self) -> Option<Config> {
+        let now = config_mtime();
+        if now == self.seen {
+            return None;
+        }
+        self.seen = now;
+        match Config::load() {
+            Ok(fresh) => Some(fresh),
+            Err(e) => {
+                log::warn!(
+                    "config.toml changed but could not be read ({e:#}); keeping the running pause settings"
+                );
+                None
+            }
+        }
+    }
+}
+
+/// Copy the two pause switches from `fresh` into `cached`, leaving every other
+/// field (a scheduled wallpaper swap lives only in `cached`) alone. Returns
+/// which of them changed: `(pause_on_battery, pause_on_maximized)`.
+fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
+    let changed = (
+        cached.pause_on_battery != fresh.pause_on_battery,
+        cached.pause_on_maximized != fresh.pause_on_maximized,
+    );
+    cached.pause_on_battery = fresh.pause_on_battery;
+    cached.pause_on_maximized = fresh.pause_on_maximized;
+    changed
+}
 /// Audio recovery cadence/backoff (see `AudioHeal`).
 const AUDIO_RETRY_BASE: Duration = Duration::from_secs(5);
 const AUDIO_RETRY_MAX: u8 = 6;
@@ -778,6 +845,8 @@ pub struct Daemon {
     atoms: Atoms,
     renderers: Vec<Renderer>,
     config: Config,
+    /// See [`PauseConfigWatch`].
+    config_watch: PauseConfigWatch,
     user_paused: bool,
     battery_paused: bool,
     last_stacking: Instant,
@@ -862,6 +931,7 @@ impl Daemon {
             atoms,
             renderers: Vec::new(),
             config,
+            config_watch: PauseConfigWatch::new(),
             user_paused: false,
             battery_paused: false,
             last_stacking: Instant::now(),
@@ -1398,6 +1468,7 @@ impl Daemon {
             }
             self.check_audio(now);
             if now.duration_since(self.last_fullscreen_check) >= LOWER_INTERVAL {
+                self.check_config();
                 self.check_fullscreen();
                 self.last_fullscreen_check = now;
             }
@@ -1462,6 +1533,7 @@ impl Daemon {
     fn handle_request(&mut self, req: Request) -> Response {
         match req {
             Request::Apply => {
+                self.config_watch.mark();
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
                 self.sched.hold_current(&self.config);
                 // Widget settings live in the same file, so a GUI toggle arrives
@@ -1728,6 +1800,27 @@ impl Daemon {
                 log::info!("monitor layout changed → rebuilding");
                 let _ = self.rebuild();
             }
+        }
+    }
+
+    /// Adopt the pause switches the GUI saved since the last look (see
+    /// [`PauseConfigWatch`]) without rebuilding anything.
+    fn check_config(&mut self) {
+        let Some(fresh) = self.config_watch.poll() else {
+            return;
+        };
+        let (battery, maximized) = adopt_pause_flags(&mut self.config, &fresh);
+        if battery {
+            log::info!("pause on battery = {}", self.config.pause_on_battery);
+            self.check_battery(); // reconciles now, in either direction
+        }
+        if maximized {
+            log::info!(
+                "pause when an app is maximized = {}",
+                self.config.pause_on_maximized
+            );
+            // The caller's `check_fullscreen` runs next with the new flag.
+            kde_desktop::set_pause_mode(&self.config);
         }
     }
 
@@ -2613,6 +2706,8 @@ fn run_wayland_layershell() -> Result<()> {
     const ALL_OUTPUTS: &str = "ALL";
 
     setup_vaapi_env();
+    let mut config_watch = PauseConfigWatch::new();
+    let mut last_config_poll = Instant::now();
     let mut config = Config::load().unwrap_or_default();
     if !config.enabled {
         // Safety net, same as `run_x11`'s: a prior run killed rather than
@@ -2792,6 +2887,7 @@ fn run_wayland_layershell() -> Result<()> {
                         // be drawn smaller — leaves its old pixels on screen
                         // with nothing left that would ever take them down.
                         clear_wayland_widgets(&mut widget_engine, &outputs);
+                        config_watch.mark();
                         config = Config::load().unwrap_or_else(|_| config.clone());
                         sched.hold_current(&config);
                         // Widget settings ride in the same file, so a GUI toggle
@@ -3131,6 +3227,27 @@ fn run_wayland_layershell() -> Result<()> {
                     config.wallpaper.crop = want.crop;
                     sched.applied = Some(path);
                     kde_desktop::apply(&config);
+                }
+            }
+
+            // The GUI's pause switches only save config.toml (see
+            // `PauseConfigWatch`). The battery block just below and the
+            // fullscreen poll further down read these two flags every pass,
+            // so adopting them here is all that is needed.
+            if now.duration_since(last_config_poll) >= CONFIG_POLL {
+                last_config_poll = now;
+                if let Some(fresh) = config_watch.poll() {
+                    let (battery, maximized) = adopt_pause_flags(&mut config, &fresh);
+                    if battery {
+                        log::info!("pause on battery = {}", config.pause_on_battery);
+                    }
+                    if maximized {
+                        log::info!(
+                            "pause when an app is maximized = {}",
+                            config.pause_on_maximized
+                        );
+                        kde_desktop::set_pause_mode(&config);
+                    }
                 }
             }
 
@@ -4742,11 +4859,40 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_display, parse_stat_ticks, presentation_confirmed, stall_step, widget_wait,
-        WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL, STALL_STRIKES, TICK,
+        adopt_pause_flags, decode_display, parse_stat_ticks, presentation_confirmed, stall_step,
+        widget_wait, WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL,
+        STALL_STRIKES, TICK,
     };
-    use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
+    use crate::config::{Config, Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_saved_pause_switch_is_adopted_without_touching_anything_else() {
+        let mut cached = Config::default();
+        // A scheduled swap lives only in the cached config.
+        cached.wallpaper.path = Some("/scheduled.mp4".into());
+        let mut fresh = Config::default();
+        fresh.wallpaper.path = Some("/on-disk.mp4".into());
+
+        // Nothing flipped: nothing reported, wallpaper untouched.
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
+
+        fresh.pause_on_maximized = true;
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, true));
+        assert!(cached.pause_on_maximized && !cached.pause_on_battery);
+
+        fresh.pause_on_battery = true;
+        fresh.pause_on_maximized = false;
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (true, true));
+        assert!(cached.pause_on_battery && !cached.pause_on_maximized);
+
+        // Already in step: a second look reports nothing.
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
+        assert_eq!(
+            cached.wallpaper.path.as_deref(),
+            Some(std::path::Path::new("/scheduled.mp4"))
+        );
+    }
 
     #[test]
     fn a_failed_mirror_restacks_everywhere_but_xfce() {

@@ -27,6 +27,8 @@ x11rb::atom_manager! {
         _NET_WM_STATE_SKIP_PAGER,
         _NET_WM_STATE_FULLSCREEN,
         _NET_WM_STATE_HIDDEN,
+        _NET_WM_STATE_MAXIMIZED_VERT,
+        _NET_WM_STATE_MAXIMIZED_HORZ,
         _NET_CLIENT_LIST_STACKING,
         _NET_RESTACK_WINDOW,
         _NET_WM_NAME,
@@ -432,12 +434,12 @@ pub fn at_bottom(stack: &[Window], ours: &[Window]) -> Option<bool> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     /// Distinct sentinel atoms, so the assertions below pin down both the
     /// contents and the ORDER of the property values.
-    fn atoms() -> Atoms {
+    pub(in crate::daemon) fn atoms() -> Atoms {
         Atoms {
             _NET_WM_WINDOW_TYPE: 1,
             _NET_WM_WINDOW_TYPE_DESKTOP: 2,
@@ -450,6 +452,8 @@ mod tests {
             _NET_WM_STATE_SKIP_PAGER: 8,
             _NET_WM_STATE_FULLSCREEN: 9,
             _NET_WM_STATE_HIDDEN: 10,
+            _NET_WM_STATE_MAXIMIZED_VERT: 17,
+            _NET_WM_STATE_MAXIMIZED_HORZ: 18,
             _NET_CLIENT_LIST_STACKING: 11,
             _NET_RESTACK_WINDOW: 16,
             _NET_WM_NAME: 12,

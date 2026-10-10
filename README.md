@@ -92,7 +92,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 - **Batch management** — select several wallpapers at once and remove them in one step
 - **Built-in catalog** — browse curated, properly licensed wallpapers in-app
 - **Command palette** — Ctrl+K to set any wallpaper or reach any feature from the keyboard
-- **Fullscreen auto-pause** — per monitor, including on COSMIC; plus pause-on-battery
+- **Fullscreen auto-pause** — per monitor, on X11, wlroots compositors and COSMIC (not KDE Wayland); optionally for maximized windows too, plus pause-on-battery
 - **Browser new-tab extension** — mirror your wallpaper on every new tab (Chrome/Brave/Edge/Firefox; load unpacked from [`./extension`](extension))
 - **Deepin DDE support** — on Deepin 25, Fresco adapts the DDE desktop automatically, and clicking the desktop brings the icons back for ten seconds whenever you need them (see [FAQ](#my-desktop-icons-are-hidden-while-the-wallpaper-plays-on-deepin))
 - **Crop & rotate editor**, per-wallpaper sound/volume, slideshow transitions, and a searchable library

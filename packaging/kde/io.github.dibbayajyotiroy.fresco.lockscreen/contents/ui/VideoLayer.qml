@@ -30,6 +30,11 @@ Item {
     // property from the outside once the Loader reports Ready.
     property url videoSource
 
+    // Set from main.qml (same Binding mechanism) while a fullscreen/maximized
+    // window hides the wallpaper; frees the GPU on iGPUs.
+    property bool paused: false
+    onPausedChanged: paused ? player.pause() : player.play()
+
     // Surfaced to main.qml so it can fall back to StillPath on a playback
     // error (bad codec, corrupt file, etc). This is a *different* failure
     // mode from "QtMultimedia isn't installed" -- that one never gets this
@@ -56,7 +61,8 @@ Item {
         source: videoLayer.videoSource
         videoOutput: videoOutput
         audioOutput: audioOutput
-        autoPlay: true
+        // Also keeps a source change from restarting playback mid-pause.
+        autoPlay: !videoLayer.paused
         loops: MediaPlayer.Infinite
     }
 }

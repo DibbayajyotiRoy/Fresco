@@ -1300,7 +1300,7 @@ impl Daemon {
         overview::apply(&self.config.wallpaper);
         cosmic_bg::apply(&self.config);
         dde_lock::apply(&self.config);
-        kde_desktop::apply(&self.config.wallpaper);
+        kde_desktop::apply(&self.config);
         log::info!("frescod started with {} renderer(s)", self.renderers.len());
         crate::telemetry::heartbeat(
             Some("x11"),
@@ -1324,7 +1324,7 @@ impl Daemon {
                     overview::apply(&self.config.wallpaper);
                     cosmic_bg::apply(&self.config);
                     dde_lock::apply(&self.config);
-                    kde_desktop::apply(&self.config.wallpaper);
+                    kde_desktop::apply(&self.config);
                 }
                 if is_stop {
                     self.shutdown();
@@ -1779,7 +1779,7 @@ impl Daemon {
         overview::apply(&self.config.wallpaper);
         cosmic_bg::apply(&self.config);
         dde_lock::apply(&self.config);
-        kde_desktop::apply(&self.config.wallpaper);
+        kde_desktop::apply(&self.config);
     }
 
     /// Re-seat clones of the same video on one clock (see SYNC_INTERVAL): the
@@ -2700,7 +2700,7 @@ fn run_wayland_layershell() -> Result<()> {
     // `dde_lock`'s module doc. No-op on every other compositor. (COSMIC's
     // `cosmic-bg` sync already ran above, before any mpvpaper existed.)
     dde_lock::apply(&config);
-    kde_desktop::apply(&config.wallpaper);
+    kde_desktop::apply(&config);
     log::info!(
         "frescod started (Wayland layer-shell / mpvpaper, {} output(s))",
         outputs.len()
@@ -2828,7 +2828,7 @@ fn run_wayland_layershell() -> Result<()> {
                             let synced = cosmic_bg::apply(&config);
                             cosmic_reloads.note(&synced, Instant::now());
                             dde_lock::apply(&config);
-                            kde_desktop::apply(&config.wallpaper);
+                            kde_desktop::apply(&config);
                         } else {
                             cosmic_bg::restore();
                             cosmic_reloads.reset();
@@ -3081,7 +3081,7 @@ fn run_wayland_layershell() -> Result<()> {
                     config.wallpaper.rotation = want.rotation;
                     config.wallpaper.crop = want.crop;
                     sched.applied = Some(path);
-                    kde_desktop::apply(&config.wallpaper);
+                    kde_desktop::apply(&config);
                 }
             }
 

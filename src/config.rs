@@ -1697,6 +1697,11 @@ pub struct Config {
     pub enabled: bool,
     #[serde(default)]
     pub pause_on_battery: bool,
+    /// Also pause an output while a maximized window covers it. Fullscreen
+    /// windows always pause; this extends that to maximized ones, for
+    /// integrated GPUs that cannot render the wallpaper and a game/heavy app.
+    #[serde(default)]
+    pub pause_on_maximized: bool,
     #[serde(default)]
     pub scaling: Scaling,
     /// Global decode-load reduction; see [`PowerSaving`].
@@ -1915,6 +1920,7 @@ impl Default for Config {
             autostart: true,
             enabled: true,
             pause_on_battery: false,
+            pause_on_maximized: false,
             scaling: Scaling::default(),
             power_saving: PowerSaving::default(),
             framerate: 0,
@@ -2428,6 +2434,7 @@ mod tests {
             h: 0.5,
         });
         cfg.pause_on_battery = true;
+        cfg.pause_on_maximized = true;
         cfg.monitors.insert(
             "HDMI-1".into(),
             Wallpaper {

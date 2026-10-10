@@ -780,8 +780,9 @@ pub struct Daemon {
     last_battery_check: Instant,
     last_cache_check: Instant,
     last_sync_check: Instant,
-    /// Connectors currently covered by a viewable fullscreen window (EWMH),
-    /// with the covering window's title for the log.
+    /// Connectors currently covered by a viewable fullscreen (or, with
+    /// `pause_on_maximized`, maximized) window (EWMH), with a "kind window
+    /// (title)" description for the log.
     fullscreen_covered: std::collections::HashMap<String, String>,
     last_fullscreen_check: Instant,
     sched: SchedState,
@@ -1013,7 +1014,13 @@ impl Daemon {
                 u.target.as_deref().unwrap_or("all")
             );
             for r in &self.renderers {
-                if targets.iter().any(|c| c == &r.window.connector) && u.is_for(&r.window.connector)
+                let c = &r.window.connector;
+                // A covered output shows nothing, so don't make mpv repaint it
+                // (clears still go through, so nothing stale survives);
+                // `check_fullscreen` re-pushes everything when it's uncovered.
+                if targets.iter().any(|t| t == c)
+                    && u.is_for(c)
+                    && (u.is_clear() || !self.fullscreen_covered.contains_key(c))
                 {
                     dispatch_widget(&r.player, &u);
                 }
@@ -1576,23 +1583,26 @@ impl Daemon {
         }
     }
 
-    /// Poll EWMH fullscreen state and reconcile per-monitor pause on change.
+    /// Poll EWMH fullscreen (and, if configured, maximized) state and
+    /// reconcile per-monitor pause on change.
     fn check_fullscreen(&mut self) {
         let covered = x11_fullscreen::covered_connectors(
             &self.conn,
             self.screen().root,
             &self.atoms,
             &self.monitors,
+            self.config.pause_on_maximized,
         );
         if covered != self.fullscreen_covered {
-            for (c, title) in &covered {
+            for (c, what) in &covered {
                 if !self.fullscreen_covered.contains_key(c) {
-                    log::info!("[{c}] fullscreen window ({title:?}) detected; pausing wallpaper");
+                    log::info!("[{c}] {what} detected; pausing wallpaper");
                 }
             }
-            for c in self.fullscreen_covered.keys() {
+            for (c, what) in &self.fullscreen_covered {
                 if !covered.contains_key(c) {
-                    log::info!("[{c}] fullscreen cleared; resuming wallpaper");
+                    log::info!("[{c}] {what} cleared; resuming wallpaper");
+                    self.widgets.invalidate(); // overlays skipped while covered
                 }
             }
             self.fullscreen_covered = covered;
@@ -2602,8 +2612,9 @@ fn run_wayland_layershell() -> Result<()> {
     let mut sched = SchedState::default();
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
-    // wlroots/KWin (wlr protocol) and COSMIC (zcosmic-toplevel-info); absent on
-    // GNOME (which uses the static path, not this one).
+    // wlroots compositors (wlr protocol) and COSMIC (zcosmic-toplevel-info); absent
+    // on KDE Wayland (KWin does not expose wlr-foreign-toplevel to ordinary
+    // clients) and on GNOME (which uses the static path, not this one).
     let mut fs_watch = fullscreen::FullscreenWatch::new();
     log::info!(
         "fullscreen auto-pause: {}",
@@ -3183,7 +3194,11 @@ fn run_wayland_layershell() -> Result<()> {
         if let Some(w) = fs_watch.as_mut() {
             if now.duration_since(last_fs_poll) >= FS_POLL {
                 last_fs_poll = now;
-                hidden = w.fullscreen_connectors();
+                let now_hidden = w.fullscreen_connectors(config.pause_on_maximized);
+                if hidden.iter().any(|c| !now_hidden.contains(c)) {
+                    widget_engine.invalidate(); // overlays skipped while covered
+                }
+                hidden = now_hidden;
             }
         }
         let lock_forces_pause = lock_rt.locked
@@ -3234,7 +3249,12 @@ fn run_wayland_layershell() -> Result<()> {
                 }));
                 for u in widget_engine.tick() {
                     for (c, o) in &outputs {
-                        if !targets.iter().any(|t| t == c) || !u.is_for(c) {
+                        // Covered outputs show nothing: skip the repaint, but let
+                        // clears through. Re-pushed (invalidate) once uncovered.
+                        if !targets.iter().any(|t| t == c)
+                            || !u.is_for(c)
+                            || (hidden.contains(c) && !u.is_clear())
+                        {
                             continue;
                         }
                         if let Some(p) = o.player.as_ref() {

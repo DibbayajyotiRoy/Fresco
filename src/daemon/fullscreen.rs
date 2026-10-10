@@ -2,12 +2,15 @@
 //! COSMIC-native fallback (`zcosmic-toplevel-info-v1`).
 //!
 //! The daemon pauses the wallpaper on any output that currently has a fullscreen
-//! window, reclaiming the residual hardware-decode cost while the wallpaper is
-//! fully hidden. (Rendering already idles when occluded — the compositor stops
-//! sending frame callbacks — but mpv keeps *decoding* until we pause it.)
+//! window (or, when `pause_on_maximized` is set, a maximized one), reclaiming
+//! the residual hardware-decode cost while the wallpaper is fully hidden.
+//! (Rendering already idles when occluded — the compositor stops sending frame
+//! callbacks — but mpv keeps *decoding* until we pause it.)
 //!
-//! The wlr protocol is implemented by wlroots compositors (Sway/Hyprland) and
-//! KWin. COSMIC's compositor ships its own `zcosmic_toplevel_info_v1` instead,
+//! The wlr protocol is implemented by wlroots compositors (Sway/Hyprland). KWin
+//! does NOT expose it to ordinary clients (its own toplevel management is
+//! restricted to privileged clients), so KDE Wayland has no daemon-side
+//! fullscreen pause. COSMIC's compositor ships its own `zcosmic_toplevel_info_v1` instead,
 //! which carries the same per-toplevel state array (fullscreen included) and
 //! output enter/leave events, so we mirror the wlr plumbing onto it when the wlr
 //! manager is absent. GNOME Mutter implements neither, so there
@@ -32,10 +35,13 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{
     zwlr_foreign_toplevel_handle_v1 as handle, zwlr_foreign_toplevel_manager_v1 as manager,
 };
 
-/// Wire value of the `fullscreen` entry in the handle's `state` enum. Stable ABI
-/// in both protocols, and (deliberately, on COSMIC's side) the same value:
-/// wlr `zwlr_foreign_toplevel_handle_v1.state` and COSMIC
-/// `zcosmic_toplevel_handle_v1.state` both define fullscreen = 3.
+/// Wire values of the handle's `state` enum entries we use. Stable ABI in both
+/// protocols, and (deliberately, on COSMIC's side) the same values: wlr
+/// `zwlr_foreign_toplevel_handle_v1.state` and COSMIC
+/// `zcosmic_toplevel_handle_v1.state` both define maximized = 0,
+/// minimized = 1, fullscreen = 3.
+const STATE_MAXIMIZED: u32 = 0;
+const STATE_MINIMIZED: u32 = 1;
 const STATE_FULLSCREEN: u32 = 3;
 
 /// Which protocol the watch bound — surfaced for the startup log line.
@@ -46,19 +52,37 @@ pub enum Backend {
 }
 
 /// `state` arrives as a packed wl_array of native-endian u32 enum values;
-/// fullscreen iff the fullscreen entry is present. Trailing partial chunks
-/// (malformed arrays) are ignored.
-fn state_array_has_fullscreen(bytes: &[u8]) -> bool {
+/// true iff `wanted` is present. Trailing partial chunks (malformed arrays)
+/// are ignored.
+fn state_array_has(bytes: &[u8], wanted: u32) -> bool {
     bytes
         .chunks_exact(4)
-        .any(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]) == STATE_FULLSCREEN)
+        .any(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]) == wanted)
 }
 
-/// Per-toplevel tracked state: is it fullscreen, and which outputs is it on.
+/// Per-toplevel tracked state: fullscreen / maximized / minimized, and which
+/// outputs it is on.
 #[derive(Default)]
 struct Toplevel {
     fullscreen: bool,
+    maximized: bool,
+    minimized: bool,
     outputs: HashSet<u32>, // wl_output protocol ids
+}
+
+impl Toplevel {
+    /// Refresh the flags from a `state` event's packed array.
+    fn set_states(&mut self, bytes: &[u8]) {
+        self.fullscreen = state_array_has(bytes, STATE_FULLSCREEN);
+        self.maximized = state_array_has(bytes, STATE_MAXIMIZED);
+        self.minimized = state_array_has(bytes, STATE_MINIMIZED);
+    }
+
+    /// Does this toplevel hide the wallpaper? Fullscreen always does; a
+    /// maximized, non-minimized one only when `maximized` is asked for.
+    fn covers(&self, maximized: bool) -> bool {
+        self.fullscreen || (maximized && self.maximized && !self.minimized)
+    }
 }
 
 #[derive(Default)]
@@ -77,11 +101,12 @@ struct State {
 }
 
 impl State {
-    /// Connectors that currently have a fullscreen toplevel.
-    fn fullscreen_connectors(&self) -> HashSet<String> {
+    /// Connectors that currently have a fullscreen (or, with `maximized`, a
+    /// maximized) toplevel.
+    fn fullscreen_connectors(&self, maximized: bool) -> HashSet<String> {
         let mut hidden = HashSet::new();
         for tl in self.toplevels.values() {
-            if !tl.fullscreen {
+            if !tl.covers(maximized) {
                 continue;
             }
             for oid in &tl.outputs {
@@ -145,12 +170,13 @@ impl FullscreenWatch {
 
     /// Drain pending toplevel events (one bounded roundtrip — fast on a local
     /// compositor, never an open-ended wait) and return the connectors that
-    /// currently have a fullscreen window. Returns empty on any protocol error.
-    pub fn fullscreen_connectors(&mut self) -> HashSet<String> {
+    /// currently have a fullscreen window (or a maximized one when `maximized`).
+    /// Returns empty on any protocol error.
+    pub fn fullscreen_connectors(&mut self, maximized: bool) -> HashSet<String> {
         if self.queue.roundtrip(&mut self.state).is_err() {
             return HashSet::new();
         }
-        self.state.fullscreen_connectors()
+        self.state.fullscreen_connectors(maximized)
     }
 }
 
@@ -247,8 +273,7 @@ impl Dispatch<handle::ZwlrForeignToplevelHandleV1, ()> for State {
         let id = hnd.id().protocol_id();
         match event {
             handle::Event::State { state: bytes } => {
-                state.toplevels.entry(id).or_default().fullscreen =
-                    state_array_has_fullscreen(&bytes);
+                state.toplevels.entry(id).or_default().set_states(&bytes);
             }
             handle::Event::OutputEnter { output } => {
                 state
@@ -310,8 +335,7 @@ impl Dispatch<cosmic_handle::ZcosmicToplevelHandleV1, ()> for State {
         match event {
             // Same wire format as the wlr handle: packed u32 enum array.
             cosmic_handle::Event::State { state: bytes } => {
-                state.toplevels.entry(id).or_default().fullscreen =
-                    state_array_has_fullscreen(&bytes);
+                state.toplevels.entry(id).or_default().set_states(&bytes);
             }
             cosmic_handle::Event::OutputEnter { output } => {
                 state
@@ -345,20 +369,20 @@ mod tests {
     #[test]
     fn state_array_detects_fullscreen() {
         // maximized=0, minimized=1, activated=2, fullscreen=3 (both protocols).
-        assert!(state_array_has_fullscreen(&packed(&[3])));
-        assert!(state_array_has_fullscreen(&packed(&[2, 3])));
-        assert!(state_array_has_fullscreen(&packed(&[0, 2, 3, 4])));
-        assert!(!state_array_has_fullscreen(&packed(&[0, 1, 2])));
-        assert!(!state_array_has_fullscreen(&packed(&[])));
+        assert!(state_array_has(&packed(&[3]), STATE_FULLSCREEN));
+        assert!(state_array_has(&packed(&[2, 3]), STATE_FULLSCREEN));
+        assert!(state_array_has(&packed(&[0, 2, 3, 4]), STATE_FULLSCREEN));
+        assert!(!state_array_has(&packed(&[0, 1, 2]), STATE_FULLSCREEN));
+        assert!(!state_array_has(&packed(&[]), STATE_FULLSCREEN));
         // Unknown future state values are ignored, not misread.
-        assert!(!state_array_has_fullscreen(&packed(&[7, 42])));
+        assert!(!state_array_has(&packed(&[7, 42]), STATE_FULLSCREEN));
     }
 
     #[test]
     fn state_array_ignores_trailing_partial_chunk() {
         let mut bytes = packed(&[2]);
         bytes.extend_from_slice(&[3, 0]); // malformed tail, not a full u32
-        assert!(!state_array_has_fullscreen(&bytes));
+        assert!(!state_array_has(&bytes, STATE_FULLSCREEN));
     }
 
     #[test]
@@ -372,6 +396,7 @@ mod tests {
             Toplevel {
                 fullscreen: true,
                 outputs: [10, 12].into_iter().collect(),
+                ..Default::default()
             },
         );
         // Non-fullscreen on HDMI-A-1 → not reported.
@@ -380,14 +405,56 @@ mod tests {
             Toplevel {
                 fullscreen: false,
                 outputs: [11].into_iter().collect(),
+                ..Default::default()
             },
         );
         assert_eq!(
-            s.fullscreen_connectors(),
+            s.fullscreen_connectors(false),
             HashSet::from(["DP-1".to_string()])
         );
         // Toplevel leaves DP-1 → set empties.
         s.toplevels.get_mut(&1).unwrap().outputs.remove(&10);
-        assert!(s.fullscreen_connectors().is_empty());
+        assert!(s.fullscreen_connectors(false).is_empty());
+    }
+
+    #[test]
+    fn set_states_parses_maximized_minimized_fullscreen() {
+        let mut tl = Toplevel::default();
+        tl.set_states(&packed(&[0, 2])); // maximized + activated
+        assert!(tl.maximized && !tl.minimized && !tl.fullscreen);
+        tl.set_states(&packed(&[0, 1])); // maximized + minimized
+        assert!(tl.maximized && tl.minimized && !tl.fullscreen);
+        tl.set_states(&packed(&[3])); // fullscreen only: earlier flags clear
+        assert!(!tl.maximized && !tl.minimized && tl.fullscreen);
+        tl.set_states(&packed(&[]));
+        assert!(!tl.maximized && !tl.minimized && !tl.fullscreen);
+    }
+
+    #[test]
+    fn maximized_toplevels_count_only_when_asked_and_not_minimized() {
+        let mut s = State::default();
+        s.output_names.insert(10, "DP-1".into());
+        s.toplevels.insert(
+            1,
+            Toplevel {
+                maximized: true,
+                outputs: [10].into_iter().collect(),
+                ..Default::default()
+            },
+        );
+        assert!(s.fullscreen_connectors(false).is_empty());
+        assert_eq!(
+            s.fullscreen_connectors(true),
+            HashSet::from(["DP-1".to_string()])
+        );
+        // Minimized maximized window is out of sight: no pause.
+        s.toplevels.get_mut(&1).unwrap().minimized = true;
+        assert!(s.fullscreen_connectors(true).is_empty());
+        // Fullscreen is unconditional, as before: flag off, minimized or not.
+        s.toplevels.get_mut(&1).unwrap().fullscreen = true;
+        assert_eq!(
+            s.fullscreen_connectors(false),
+            HashSet::from(["DP-1".to_string()])
+        );
     }
 }

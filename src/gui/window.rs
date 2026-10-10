@@ -1571,6 +1571,22 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             }
         },
     ));
+    let maximized_row = switch_row(
+        t!("Pause when an app is maximized"),
+        state.borrow().config.pause_on_maximized,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.pause_on_maximized = active;
+                s.config.save().ok();
+            }
+        },
+    );
+    maximized_row.set_tooltip_text(Some(t!(
+        "Saves CPU and GPU on integrated graphics; fullscreen apps always pause"
+    )));
+    popover_box.append(&maximized_row);
     // Quick schedule pause — only shown when a schedule exists. Turning it off
     // here keeps the configured day/night setup (unlike Advanced's "Off",
     // which deletes it); users kept hunting for this switch.

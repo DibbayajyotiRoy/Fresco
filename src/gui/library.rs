@@ -764,7 +764,8 @@ pub fn load_entries() -> Result<Vec<LibraryEntry>> {
         return Ok(Vec::new());
     }
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let entries: Vec<LibraryEntry> = serde_json::from_str(&text)?;
+    let entries: Vec<LibraryEntry> =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
     Ok(entries)
 }
 

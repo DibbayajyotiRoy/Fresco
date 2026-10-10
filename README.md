@@ -50,7 +50,7 @@ Fresco is a free, open-source live wallpaper app for Linux that sets any video, 
 | **Install** | Deepin App Store, `.deb` package, or one-line script |
 | **Users** | 1,500+ people in 110+ countries |
 | **Languages** | English plus 12 translations |
-| **Latest version** | 1.1.45 |
+| **Latest version** | 1.1.49 |
 
 ## Install
 
@@ -92,7 +92,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 - **Batch management** — select several wallpapers at once and remove them in one step
 - **Built-in catalog** — browse curated, properly licensed wallpapers in-app
 - **Command palette** — Ctrl+K to set any wallpaper or reach any feature from the keyboard
-- **Fullscreen auto-pause** — per monitor, including on COSMIC; plus pause-on-battery
+- **Fullscreen auto-pause** — per monitor, on X11, wlroots compositors, COSMIC and KDE Plasma (through its wallpaper plugin); optionally for maximized windows too, plus pause-on-battery
 - **Browser new-tab extension** — mirror your wallpaper on every new tab (Chrome/Brave/Edge/Firefox; load unpacked from [`./extension`](extension))
 - **Deepin DDE support** — on Deepin 25, Fresco adapts the DDE desktop automatically, and clicking the desktop brings the icons back for ten seconds whenever you need them (see [FAQ](#my-desktop-icons-are-hidden-while-the-wallpaper-plays-on-deepin))
 - **Crop & rotate editor**, per-wallpaper sound/volume, slideshow transitions, and a searchable library
@@ -108,7 +108,7 @@ The wallpaper keeps playing after the window closes and comes back automatically
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
-| KDE Plasma 6 (Wayland) | ✅ | layer-shell |
+| KDE Plasma 6 (X11 and Wayland) | ✅ | Set through plasmashell's own wallpaper plugin, so desktop icons stay visible. Needs `qml6-module-qtmultimedia` for video. Playback is Qt's, not mpv's: muted, no hwdec tuning, crop or transitions; a playlist plays its first file and a slideshow shows its first frame |
 | GNOME on Wayland | ⚠️ | Still frame only — Mutter exposes no live wallpaper surface, so no video and no widgets. Live video needs a Fresco GNOME extension (planned) |
 
 Every environment above is exercised headlessly in CI on each release.
@@ -200,6 +200,16 @@ Yes. Fresco supports per-display wallpapers, and when the same video is used acr
 ### Does it support GIFs and image slideshows?
 
 Yes — animated GIFs, static images, image slideshows with transitions (crossfade, fade, slide, Ken Burns), and multi-video playlists, in addition to video files.
+
+### Can I switch wallpapers with a keyboard shortcut?
+
+Yes. `fresco next`, `fresco prev` and `fresco random` switch the wallpaper without opening the app, so you can bind them in your compositor (`random` never picks the one already playing). They step through your library in the order the app shows it, or through just the folder you have open there, and start the Fresco service if it is not running. For example in Sway:
+
+```
+bindsym $mod+Right  exec fresco next
+bindsym $mod+Left   exec fresco prev
+bindsym $mod+Return exec fresco random
+```
 
 ### Can I show song lyrics on my Linux desktop?
 
@@ -414,4 +424,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin, and Kali Linux, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Used by 1,500+ people in 110+ countries. Last updated: 2026-09-28.</sub>
+<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin, and Kali Linux, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Used by 1,500+ people in 110+ countries. Last updated: 2026-10-10.</sub>

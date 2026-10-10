@@ -61,7 +61,7 @@ use crate::userinfo::{self, UserInfo};
 use crate::widgetkit::lockscene::LockSceneSpec;
 use crate::widgetkit::{FontStack, Rect, Size, Theme};
 
-use self::background::{BgOrigin, Resolved};
+use self::background::{BgOrigin, BgSource, Resolved};
 use super::super::widgets::Snapshot;
 use super::avatar::AvatarCache;
 use super::engine::{self, ReservedZoneKind};
@@ -131,6 +131,10 @@ pub struct PreviewRenderer {
     /// one in production, a temp directory in tests (so a test can never read
     /// the developer's own Library).
     library_dir: Option<PathBuf>,
+    /// Connector names of the daemon's outputs: how Deepin's Appearance service
+    /// is asked for the user's own desktop wallpaper. See
+    /// [`PreviewRenderer::set_monitors`].
+    monitors: Vec<String>,
     /// The decoded background and what it was decoded for; see
     /// [`PreviewRenderer::ensure_background`].
     background: Option<CachedBackground>,
@@ -159,6 +163,7 @@ impl PreviewRenderer {
             user: userinfo::current_identity(),
             avatar: AvatarCache::new(),
             library_dir: background::default_library_dir(),
+            monitors: Vec::new(),
             background: None,
             fitted: None,
             last_render: None,
@@ -176,6 +181,12 @@ impl PreviewRenderer {
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
         self.last_size = None; // a fresh path has never been rendered to.
+    }
+
+    /// Tell the renderer which outputs the daemon drives, for the Deepin
+    /// desktop-wallpaper fallback (see the module docs' "Always a background").
+    pub fn set_monitors(&mut self, monitors: impl IntoIterator<Item = String>) {
+        self.monitors = monitors.into_iter().collect();
     }
 
     /// Point thumbnail lookups at `dir` instead of the real Library. Test-only.
@@ -251,7 +262,7 @@ impl PreviewRenderer {
 
         // Never fails: a missing or unreadable wallpaper degrades to the
         // library thumbnail or a gradient (logged), not to an error toast.
-        self.ensure_background(wallpaper, now);
+        self.ensure_background(host, wallpaper, now);
         let background = self.fitted_background(width, height);
 
         let slots = engine::slots_for(resolved);
@@ -318,7 +329,7 @@ impl PreviewRenderer {
     /// when `wallpaper` itself differs from what was cached, or — for a
     /// degraded result — once [`background::DEGRADED_RETRY`] has passed. See
     /// the module docs' "Always a background" and "Caching and throttling".
-    fn ensure_background(&mut self, wallpaper: &Wallpaper, now: Instant) {
+    fn ensure_background(&mut self, host: HostKind, wallpaper: &Wallpaper, now: Instant) {
         let previous = self
             .background
             .as_ref()
@@ -341,7 +352,12 @@ impl PreviewRenderer {
             .library_dir
             .as_deref()
             .and_then(|dir| background::library_thumbnail_in(dir, wallpaper));
-        let plan = background::plan_sources(wallpaper, &slideshow_images, thumbnail);
+        let mut plan = background::plan_sources(wallpaper, &slideshow_images, thumbnail);
+        // No Fresco wallpaper chosen: Deepin's lock screen then shows the user's
+        // own wallpaper (Fresco puts nothing there), so the preview does too.
+        if plan.is_empty() && host == HostKind::Deepin {
+            plan.extend(super::super::dde::user_wallpaper(&self.monitors).map(BgSource::Desktop));
+        }
         let deadline = Instant::now() + background::BUDGET;
         let rotation = wallpaper.rotation;
         let frames =
@@ -370,6 +386,12 @@ impl PreviewRenderer {
             BgOrigin::Thumbnail => log::warn!(
                 "lock preview: wallpaper unreadable ({note}); showing the library \
                  thumbnail instead (low resolution)"
+            ),
+            BgOrigin::Desktop if previous_origin == Some(BgOrigin::Desktop) => {
+                log::debug!("lock preview: still on the desktop wallpaper: {note}");
+            }
+            BgOrigin::Desktop => log::info!(
+                "lock preview: no Fresco wallpaper to show; using your desktop wallpaper"
             ),
             BgOrigin::Placeholder if previous_origin == Some(BgOrigin::Placeholder) => {
                 log::debug!("lock preview: still on the placeholder: {note}");

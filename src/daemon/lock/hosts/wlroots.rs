@@ -453,7 +453,7 @@ fn build_plugin_command(
     let mut arms = Vec::new();
     let mut sockets = Vec::new();
     for out in outputs {
-        let wallpaper = config.wallpaper_for(&out.connector);
+        let wallpaper = config.lock_source(Some(&out.connector));
         let Some(media) = wallpaper.effective_path() else {
             continue;
         };
@@ -478,15 +478,12 @@ fn build_plugin_command(
         });
     }
 
-    let default = config.wallpaper.effective_path().map(|media| {
+    let fallback = config.lock_source(None);
+    let default = fallback.effective_path().map(|media| {
         let sock = lock_socket_path(runtime_dir, "unknown");
-        let power_saving = config.wallpaper.effective_power_saving(config.power_saving);
-        let mut opts = crate::daemon::mpvpaper::build_mpv_opts(
-            &config.wallpaper,
-            config.scaling,
-            power_saving,
-            &sock,
-        );
+        let power_saving = fallback.effective_power_saving(config.power_saving);
+        let mut opts =
+            crate::daemon::mpvpaper::build_mpv_opts(fallback, config.scaling, power_saving, &sock);
         if !playing_live {
             opts.push_str(" pause=yes");
         }

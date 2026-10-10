@@ -1571,6 +1571,22 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             }
         },
     ));
+    let maximized_row = switch_row(
+        t!("Pause when an app is maximized"),
+        state.borrow().config.pause_on_maximized,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.pause_on_maximized = active;
+                s.config.save().ok();
+            }
+        },
+    );
+    maximized_row.set_tooltip_text(Some(t!(
+        "Saves CPU and GPU on integrated graphics; fullscreen apps always pause"
+    )));
+    popover_box.append(&maximized_row);
     // Quick schedule pause — only shown when a schedule exists. Turning it off
     // here keeps the configured day/night setup (unlike Advanced's "Off",
     // which deletes it); users kept hunting for this switch.
@@ -1921,6 +1937,24 @@ fn plan_sections(
         });
     }
     out
+}
+
+/// Entry ids in the order the library shows them, top to bottom, each once
+/// (Favorites lead, so a starred entry would otherwise appear twice). What
+/// `fresco next` / `prev` cycle through, so a hotkey steps through the same
+/// sequence the user sees. Honours the open folder and sort like the grid.
+pub(super) fn display_order(
+    entries: &[LibraryEntry],
+    collections: &[library::Collection],
+    view: library::LibraryView,
+) -> Vec<String> {
+    let view = normalize_view(view, collections);
+    let mut seen = std::collections::HashSet::new();
+    plan_sections(entries, collections, &view, "")
+        .into_iter()
+        .flat_map(|s| s.ids)
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
 }
 
 /// The ids the grid is currently showing, honouring **both** the search box and
@@ -8557,7 +8591,7 @@ fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
             .any(|w| entry_matches_wallpaper(entry, w))
 }
 
-fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
+pub(super) fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
     if entry.kind != w.kind {
         return false;
     }
@@ -11415,6 +11449,24 @@ mod tests {
         );
         assert_eq!(plans[0].title, t!("Favorites"));
         assert!(!plans[0].reorderable);
+    }
+
+    /// A starred entry is listed under Favorites AND its own section; the
+    /// next/prev cycle must visit it once, at its Favorites position.
+    #[test]
+    fn display_order_lists_each_entry_once_favorites_first() {
+        let nature = library::Collection::new("Nature", 0);
+        let fav = LibraryEntry {
+            favorite: true,
+            ..filed("star", Some(&nature.id), 0)
+        };
+        let plain = filed("plain", None, 0);
+        let order = display_order(
+            &[plain.clone(), fav.clone()],
+            &[nature],
+            library::LibraryView::default(),
+        );
+        assert_eq!(order, vec![fav.id, plain.id]);
     }
 
     /// The invariant behind "Select all": it must never tick a card that the

@@ -46,7 +46,7 @@ use gtk4::{glib, glib::ControlFlow, prelude::*};
 use libadwaita::{self as adw, prelude::*};
 
 use crate::clock::ClockTheme;
-use crate::config::{LiveVideo, LockPreset, LockWidgets};
+use crate::config::{Kind, LiveVideo, LockPreset, LockWidgets};
 use crate::ipc::{self, LockSetupState, Request, Response, StatusReply};
 use crate::lockscreen::LockWidget;
 use crate::userinfo;
@@ -461,13 +461,13 @@ fn cosmic_hint(host: &str) -> Option<String> {
     })
 }
 
-/// Deepin's real lock screen only receives a still frame — with the dim and
-/// blur sliders baked in, but no widgets (a frozen clock would be wrong a
-/// minute later) — so the widgets show in Fresco's preview only. `None` for
-/// every other host.
+/// Deepin's real lock screen only receives a still frame — with the dim slider
+/// baked in (Deepin adds its own blur and tint on top), but no widgets (a frozen
+/// clock would be wrong a minute later) — so the widgets show in Fresco's
+/// preview only. `None` for every other host.
 fn deepin_hint(host: &str) -> Option<String> {
     (host == "deepin").then(|| {
-        t!("On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.")
+        t!("On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.")
             .to_string()
     })
 }
@@ -975,7 +975,9 @@ fn add_look_group(
         });
     }
 
-    // ── Dim / blur ──
+    // ── Wallpaper / dim / blur ──
+    group.add(&lock_wallpaper_row(state));
+
     let dim_row = lock_slider_row(
         t!("Dim"),
         t!("Darkens the wallpaper behind the widgets"),
@@ -1010,6 +1012,71 @@ fn add_look_group(
 
     page.add(&group);
     group
+}
+
+/// Which wallpaper sits behind the lock widgets: the desktop's (the default) or
+/// one image/video picked from the library, so the lock screen does not depend
+/// on whatever happens to be playing on the desktop (issue #37). Same candidate
+/// list and "left the library" handling as the day/night schedule's pickers
+/// (`window::add_schedule_group`); item 0 is "Same as desktop wallpaper".
+fn lock_wallpaper_row(state: &Rc<RefCell<AppState>>) -> adw::ComboRow {
+    let (candidates, names): (Vec<usize>, Vec<String>) = state
+        .borrow()
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| !e.broken && matches!(e.kind, Kind::Video | Kind::Image))
+        .map(|(i, e)| (i, e.name.clone()))
+        .unzip();
+    let labels: Vec<&str> = std::iter::once(t!("Same as desktop wallpaper"))
+        .chain(names.iter().map(String::as_str))
+        .collect();
+
+    let hint = t!("Choose one from your library, or keep matching the desktop");
+    let row = adw::ComboRow::new();
+    row.set_title(t!("Lock screen wallpaper"));
+    row.set_subtitle(hint);
+    row.set_model(Some(&gtk4::StringList::new(&labels)));
+
+    // A stored wallpaper that left the library must show as unselected, not as
+    // "Same as desktop": the next edit would otherwise silently drop the pick.
+    let selected = match lockscreen_settings(state).wallpaper {
+        None => 0,
+        Some(w) => {
+            let st = state.borrow();
+            w.path
+                .as_deref()
+                .and_then(|p| {
+                    crate::schedule::library_position(
+                        candidates.iter().map(|&i| st.entries[i].path.as_deref()),
+                        p,
+                    )
+                })
+                .map_or(gtk4::INVALID_LIST_POSITION, |i| i as u32 + 1)
+        }
+    };
+    if selected == gtk4::INVALID_LIST_POSITION {
+        row.set_subtitle(t!("No longer in your library — pick another wallpaper"));
+    }
+    row.set_selected(selected);
+
+    {
+        let state = state.clone();
+        row.connect_selected_notify(move |row| {
+            let pick = match row.selected() {
+                gtk4::INVALID_LIST_POSITION => None,
+                0 => Some(None),
+                n => candidates.get(n as usize - 1).and_then(|&i| {
+                    let st = state.borrow();
+                    st.entries.get(i).map(|e| Some(e.to_wallpaper()))
+                }),
+            };
+            let Some(pick) = pick else { return };
+            row.set_subtitle(hint);
+            edit_lockscreen(&state, |l| l.wallpaper = pick);
+        });
+    }
+    row
 }
 
 /// The auto-greeting phrase for right now, with or without a name — the

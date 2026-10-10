@@ -13,6 +13,21 @@ config or install itself -- that is Fresco's daemon's job. This README is the
 contract between the two: the exact files, paths and config keys the daemon
 must produce for this package to do anything.
 
+## Also the desktop wallpaper (issue #44)
+
+plasmashell draws the desktop and its icons into one opaque window, so no
+window of Fresco's can show the video there. On Plasma, `frescod` therefore
+selects this same package as the **desktop** wallpaper of every screen
+(`src/daemon/kde_desktop.rs`): the DBus call `plasma-apply-wallpaperimage`
+makes (`org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript`),
+with `wallpaperPlugin` set to this package's id and `VideoPath`, `StillPath`,
+`PlayVideo`, `PauseMode` and `Dim=0` written to `[Wallpaper][<id>][General]` of each
+desktop. The previous plugin of each desktop is saved to
+`~/.local/state/fresco/kde-desktop-saved.json` and selected again on Stop.
+Plasma offers no way to hide a wallpaper package from the desktop chooser
+(`WallpaperConfigModel` lists every valid `Plasma/Wallpaper`), hence the plain
+name "Fresco". `FRESCO_KDE_DESKTOP=0` turns this off.
+
 ## Files in this package
 
 ```
@@ -20,9 +35,10 @@ io.github.dibbayajyotiroy.fresco.lockscreen/
   metadata.json                 # KPackage id/name/version (see spec below)
   contents/
     config/main.xml             # KConfigXT schema: VideoPath, StillPath,
-                                 # PlayVideo, Dim, LayerDir, RefreshMs
+                                 # PlayVideo, PauseMode, Dim, LayerDir, RefreshMs
     ui/main.qml                 # WallpaperItem: still/widgets, loads video by URL
     ui/VideoLayer.qml           # The only file that imports QtMultimedia
+    ui/WindowWatcher.qml        # Desktop auto-pause (org.kde.taskmanager), loaded by URL
     ui/config.qml               # "Configured by Fresco" pointer page
 ```
 
@@ -269,6 +285,7 @@ expects:
 | `VideoPath` | String | `""` | Absolute path; empty = no video |
 | `StillPath` | String | `""` | Absolute path; empty = no still fallback |
 | `PlayVideo` | Bool | `true` | If false, goes straight to `StillPath` |
+| `PauseMode` | Int | `0` | Desktop only: `0` pause while a window is fullscreen, `1` also while one is maximized, `2` never. Windows on other screens/desktops/activities and minimized ones are ignored |
 | `Dim` | Double | `0.2` | Clamped to `[0, 0.8]` in both the schema (`<min>`/`<max>`) and `main.qml` |
 | `LayerDir` | String | `""` | Directory Fresco rewrites; see contract above |
 | `RefreshMs` | Int | `1000` | Widget-layer poll interval |

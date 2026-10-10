@@ -152,6 +152,11 @@ pub enum Mode {
     /// [`Mode::CajaMirror`] against dde-shell's 32-bit desktop window, with the
     /// DDE wallpaper set to the key colour over DBus. Experimental.
     DdeMirror,
+    /// Xfce: [`Mode::CajaMirror`] against xfdesktop's per-monitor desktop
+    /// windows, with the backdrop set to the key colour over xfconf. Our
+    /// windows are not restacked: xfwm4 already keeps them in a layer above
+    /// xfdesktop's, and nothing it does on a click moves xfdesktop above them.
+    XfceMirror,
 }
 
 impl Mode {
@@ -161,6 +166,7 @@ impl Mode {
         match self {
             Mode::CajaMirror => Some(super::caja_mirror::Desktop::Caja),
             Mode::DdeMirror => Some(super::caja_mirror::Desktop::Dde),
+            Mode::XfceMirror => Some(super::caja_mirror::Desktop::Xfce),
             _ => None,
         }
     }
@@ -228,7 +234,10 @@ pub(super) enum Bus {
 }
 
 /// Run `gdbus call` on `bus` and return stdout on success. `timeout` is
-/// gdbus's own `--timeout` in seconds; `None` keeps its 25 s default.
+/// gdbus's own `--timeout` in seconds; `None` keeps its 25 s default. `fd0`,
+/// when given, becomes the child's stdin, so an `@h 0` argument hands that file
+/// to the service as a D-Bus file descriptor (`gdbus` does that for an `h`
+/// argument; `busctl` refuses the type).
 fn gdbus_run(
     bus: Bus,
     timeout: Option<u32>,
@@ -236,8 +245,12 @@ fn gdbus_run(
     path: &str,
     iface_method: &str,
     args: &[&str],
+    fd0: Option<std::fs::File>,
 ) -> Option<String> {
     let mut cmd = Command::new("gdbus");
+    if let Some(file) = fd0 {
+        cmd.stdin(file);
+    }
     cmd.arg("call").arg(match bus {
         Bus::Session => "--session",
         Bus::System => "--system",
@@ -257,7 +270,7 @@ fn gdbus_run(
 
 /// Run `gdbus call --session` and return stdout on success.
 fn gdbus_call(dest: &str, path: &str, iface_method: &str, args: &[&str]) -> Option<String> {
-    gdbus_run(Bus::Session, None, dest, path, iface_method, args)
+    gdbus_run(Bus::Session, None, dest, path, iface_method, args, None)
 }
 
 /// Bound for [`gdbus_call_on`].
@@ -280,6 +293,28 @@ pub(super) fn gdbus_call_on(
         path,
         iface_method,
         args,
+        None,
+    )
+}
+
+/// [`gdbus_call_on`] with `file` as the child's stdin: put `@h 0` among `args`
+/// to send it to the service as a file descriptor.
+pub(super) fn gdbus_call_on_with_fd0(
+    bus: Bus,
+    dest: &str,
+    path: &str,
+    iface_method: &str,
+    args: &[&str],
+    file: std::fs::File,
+) -> Option<String> {
+    gdbus_run(
+        bus,
+        Some(GDBUS_TIMEOUT_SECS),
+        dest,
+        path,
+        iface_method,
+        args,
+        Some(file),
     )
 }
 
@@ -308,11 +343,13 @@ pub(super) fn parse_first_string(out: &str) -> Option<String> {
     }
 }
 
-/// Ask DDE for the current wallpaper of `monitor`, trying each service.
+/// Ask DDE for the current wallpaper of `monitor`, trying each service. Bounded
+/// ([`GDBUS_TIMEOUT_SECS`]): the lock-screen preview calls this on the daemon's
+/// main loop.
 fn get_background(monitor: &str) -> Option<String> {
     for (dest, path, iface) in SERVICES {
         let method = format!("{iface}.GetCurrentWorkspaceBackgroundForMonitor");
-        if let Some(out) = gdbus_call(dest, path, &method, &[monitor]) {
+        if let Some(out) = gdbus_call_on(Bus::Session, dest, path, &method, &[monitor]) {
             if let Some(uri) = parse_first_string(&out) {
                 if !uri.is_empty() {
                     return Some(uri);
@@ -321,6 +358,46 @@ fn get_background(monitor: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Whether `path` is a picture Fresco itself puts in DDE's wallpaper or
+/// lock-screen slot (the transparent / key-colour PNG, a lock-screen frame), and
+/// so not something the user chose. `copies` are the frames' copies in Deepin's
+/// wallpaper store (`<md5>.png`, no recognisable name).
+fn is_fresco_picture(path: &std::path::Path, copies: &[PathBuf]) -> bool {
+    copies.iter().any(|c| c == path)
+        || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+            n == "dde-transparent.png"
+                || n == "dde-key.png"
+                || (n.starts_with(super::dde_lock::FRAME_PREFIX) && n.ends_with(".png"))
+        })
+}
+
+/// The first of `uris` that names an existing local picture which is not one of
+/// Fresco's own (see [`is_fresco_picture`]).
+fn first_user_picture(
+    uris: impl IntoIterator<Item = String>,
+    copies: &[PathBuf],
+) -> Option<PathBuf> {
+    uris.into_iter()
+        .filter_map(|u| super::dde_lock::uri_to_path(&u))
+        .find(|p| !is_fresco_picture(p, copies) && p.is_file())
+}
+
+/// The user's own desktop wallpaper (what they picked in Settings ->
+/// Personalization -> Wallpaper), for the lock-screen preview: the original
+/// Fresco saved when it swapped DDE's wallpaper for its own PNG ([`save_original`]
+/// never records Fresco's pictures), else what DDE reports now for `monitors` —
+/// minus Fresco's own pictures, which DDE reports while Fresco has them set.
+pub(super) fn user_wallpaper(monitors: &[String]) -> Option<PathBuf> {
+    let copies = super::dde_lock::our_copies();
+    let saved = std::fs::read(saved_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<SavedWallpapers>(&b).ok())
+        .map(|s| s.monitors.into_values().collect::<Vec<_>>())
+        .unwrap_or_default();
+    first_user_picture(saved, &copies)
+        .or_else(|| first_user_picture(monitors.iter().filter_map(|m| get_background(m)), &copies))
 }
 
 /// Set the wallpaper of `monitor`, trying each service. True on success.
@@ -574,6 +651,9 @@ pub fn apply<C: Connection>(
     if crate::capability::is_mate() {
         return apply_mate(conn, atoms, root, windows);
     }
+    if crate::capability::is_xfce() {
+        return apply_xfce(conn);
+    }
     let pref = effective_pref(config_pref);
     let depth = desktop_window_depth(conn, atoms, root);
     match depth {
@@ -706,6 +786,28 @@ fn apply_mate<C: Connection>(conn: &C, atoms: &Atoms, root: Window, windows: &[W
              brings them back for `dde_icon_peek_secs` seconds"
         );
         Mode::Restack
+    }
+}
+
+/// Xfce: nothing to restack. Our windows keep the declaration they were
+/// created with (`DESKTOP` + `BELOW`): xfwm4 puts `BELOW` in a layer above the
+/// one it keeps xfdesktop's `DESKTOP` window in, layers are strict, and it
+/// ignores stacking requests for DESKTOP windows — so we are above xfdesktop
+/// for good and a raise or a lower would only stir the stack. What the layer
+/// hides is xfdesktop's icons; the mirror draws them onto our windows.
+///
+/// [`Mode::XfceMirror`] when the server can redirect and track xfdesktop's
+/// windows (Composite + Damage), otherwise [`Mode::Inactive`]: the icons stay
+/// hidden while the video plays, and there is no click-to-peek.
+fn apply_xfce<C: Connection>(conn: &C) -> Mode {
+    if has_mirror_extensions(conn) {
+        Mode::XfceMirror
+    } else {
+        log::warn!(
+            "Xfce: the X server has no Composite/Damage, so xfdesktop's icons cannot be drawn \
+             over the wallpaper — they are hidden while it plays"
+        );
+        Mode::Inactive
     }
 }
 
@@ -1113,7 +1215,20 @@ pub(super) fn wm_class_is_desktop(desktop: super::caja_mirror::Desktop, value: &
     match desktop {
         super::caja_mirror::Desktop::Caja => wm_class_is_caja_desktop(value),
         super::caja_mirror::Desktop::Dde => wm_class_is_dde_desktop(value),
+        super::caja_mirror::Desktop::Xfce => wm_class_is_xfdesktop(value),
     }
+}
+
+/// xfdesktop's desktop window(s) on Xfce: WM_CLASS `"xfdesktop\0Xfdesktop\0"`
+/// (GTK's program name and its capitalised class). Matched part by part,
+/// exactly, so `xfdesktop-settings` (`"xfdesktop-settings\0Xfdesktop-settings\0"`)
+/// and every other program are out. Dialogs xfdesktop itself opens share the
+/// class; the mirror tells them from the desktop by window type.
+pub(super) fn wm_class_is_xfdesktop(value: &[u8]) -> bool {
+    let mut parts = value.split(|&b| b == 0);
+    let instance = parts.next().unwrap_or_default();
+    let class = parts.next().unwrap_or_default();
+    instance.eq_ignore_ascii_case(b"xfdesktop") && class.eq_ignore_ascii_case(b"xfdesktop")
 }
 
 /// Caja's desktop window on MATE. Read off a Linux Mint 22 MATE desktop: the
@@ -1160,6 +1275,43 @@ mod tests {
         assert_eq!(back, s);
         assert_eq!(back.monitors.len(), 2);
         assert_eq!(back.monitors["eDP-1"], "file:///home/u/b.png".to_string());
+    }
+
+    #[test]
+    fn user_picture_skips_fresco_pictures_and_missing_files() {
+        let dir = std::env::temp_dir().join(format!("fresco-dde-userpic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let touch = |name: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, b"x").unwrap();
+            format!("file://{}", p.display())
+        };
+        let mine = touch("my wall.jpg");
+        let ours = [
+            touch("dde-transparent.png"),
+            touch("dde-key.png"),
+            touch("dde-lock-1700000000000.png"),
+        ];
+        let gone = format!("file://{}/gone.jpg", dir.display());
+        // A frame's copy in Deepin's wallpaper store: only the state file's
+        // list says it is ours.
+        let copy = touch("0123456789abcdef.png");
+        let copies = [dir.join("0123456789abcdef.png")];
+
+        let uris = ours
+            .iter()
+            .cloned()
+            .chain([copy.clone(), gone, mine.replace(' ', "%20")]);
+        let found = first_user_picture(uris, &copies).expect("the user's own picture");
+        assert_eq!(found, dir.join("my wall.jpg"));
+        assert_eq!(first_user_picture(ours, &copies), None);
+        assert_eq!(first_user_picture([copy.clone()], &copies), None);
+        assert!(
+            first_user_picture([copy], &[]).is_some(),
+            "unlisted: not ours"
+        );
+        assert_eq!(first_user_picture([String::new()], &copies), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1412,7 +1564,44 @@ mod tests {
         use super::super::caja_mirror::Desktop;
         assert_eq!(Mode::CajaMirror.mirror_desktop(), Some(Desktop::Caja));
         assert_eq!(Mode::DdeMirror.mirror_desktop(), Some(Desktop::Dde));
+        assert_eq!(Mode::XfceMirror.mirror_desktop(), Some(Desktop::Xfce));
         assert_eq!(Mode::Restack.mirror_desktop(), None);
+        assert_eq!(Mode::Inactive.mirror_desktop(), None);
+    }
+
+    #[test]
+    fn xfdesktop_matching() {
+        assert!(wm_class_is_xfdesktop(b"xfdesktop\0Xfdesktop\0"));
+        assert!(wm_class_is_xfdesktop(b"Xfdesktop\0Xfdesktop\0"));
+        // The settings dialog shares the prefix; our window, Caja's desktop,
+        // Deepin's desktop and an unrelated Xfce app are not it.
+        assert!(!wm_class_is_xfdesktop(
+            b"xfdesktop-settings\0Xfdesktop-settings\0"
+        ));
+        assert!(!wm_class_is_xfdesktop(b"xfdesktop-settings\0Xfdesktop\0"));
+        assert!(!wm_class_is_xfdesktop(
+            b"fresco-wallpaper\0fresco-wallpaper\0"
+        ));
+        assert!(!wm_class_is_xfdesktop(b"desktop_window\0Caja\0"));
+        assert!(!wm_class_is_xfdesktop(
+            b"dde-shell/desktop\0org.deepin.dde-shell\0"
+        ));
+        assert!(!wm_class_is_xfdesktop(b"xfce4-panel\0Xfce4-panel\0"));
+        assert!(!wm_class_is_xfdesktop(b""));
+        // And the per-desktop dispatch keeps each matcher to its own window.
+        use super::super::caja_mirror::Desktop;
+        assert!(wm_class_is_desktop(
+            Desktop::Xfce,
+            b"xfdesktop\0Xfdesktop\0"
+        ));
+        assert!(!wm_class_is_desktop(
+            Desktop::Caja,
+            b"xfdesktop\0Xfdesktop\0"
+        ));
+        assert!(!wm_class_is_desktop(
+            Desktop::Xfce,
+            b"desktop_window\0Caja\0"
+        ));
     }
 
     #[test]

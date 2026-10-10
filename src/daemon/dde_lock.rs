@@ -11,11 +11,11 @@
 //! and puts the user's original back when Fresco stops.
 //!
 //! HARD RULE (feature-wide): Fresco never touches authentication. This module
-//! only ever asks DDE to use a different picture, through the same settings
-//! call its own control center makes. `dde-lock` still owns the password
-//! prompt.
+//! only ever asks DDE to use a different picture, through the same calls its
+//! own control center and file manager make. `dde-lock` still owns the
+//! password prompt.
 //!
-//! # What DDE does (read from upstream `master`, 2026-10-01)
+//! # What DDE does (read from upstream `master`, 2026-10-10)
 //!
 //! * **Setting.** `org.deepin.dde.Appearance1` (session bus; legacy
 //!   `com.deepin.daemon.Appearance`) has no dedicated method — the greeter
@@ -23,62 +23,95 @@
 //!   (`linuxdeepin/dde-appearance`: `dbus/org.deepin.dde.Appearance1.xml`;
 //!   `TYPEGREETERBACKGROUND` in `src/service/modules/common/commondefine.h`;
 //!   `doSetByType` → `doSetGreeterBackground` in
-//!   `src/service/impl/appearancemanager.cpp`). That is queued and returns
-//!   nothing, so success cannot be read off the call.
+//!   `src/service/impl/appearancemanager.cpp`). Control center's "Lock screen"
+//!   option and the file manager's wallpaper dialog make the same call. It is
+//!   queued and returns nothing, so success cannot be read off the call.
 //! * **Store of record.** `doSetGreeterBackground` forwards to
-//!   `org.deepin.dde.Accounts1.User.SetGreeterBackground` on the *system* bus
-//!   (`src/service/dbus/appearancedbusproxy.cpp`), which validates the file
-//!   (gif/jpeg/png/bmp/tiff by content) and stores the `GreeterBackground`
-//!   property on `/org/deepin/dde/Accounts1/User<uid>`
+//!   `org.deepin.dde.Accounts1.User.SetGreeterBackground` on the *system* bus,
+//!   which validates the file (gif/jpeg/png/bmp/tiff by content) and stores the
+//!   `GreeterBackground` property on `/org/deepin/dde/Accounts1/User<uid>`
 //!   (`linuxdeepin/dde-daemon`: `accounts1/user_ifc.go`). That property is also
 //!   the only place the current value can be read back, which is how a set is
 //!   verified here. Side effect of going through Appearance: it flags
 //!   `isCustomLockBackground` in its dconfig, so a later light/dark theme
 //!   switch keeps the lock background instead of resetting it — see
 //!   [`restore`] for what that means for the user's original.
-//! * **Reading.** `dde-lock` reads that property and follows its
-//!   `GreeterBackgroundChanged` signal
-//!   (`linuxdeepin/dde-session-shell`: `src/session-widgets/userinfo.cpp`), then
-//!   does not draw the picture itself: it asks `org.deepin.dde.ImageBlur1.Get`
-//!   for a blurred copy and draws that, falling back to
-//!   `/usr/share/backgrounds/default_background.jpg` when the service returns
-//!   nothing (`src/widgets/fullscreenbackground.cpp`). So (a) Deepin always
-//!   blurs the lock screen itself, on top of the blur Fresco bakes into the
-//!   frame, and (b) an unreadable frame silently shows Deepin's default again.
-//! * **Who must be able to read the frame.** `ImageBlur1` is served by
-//!   `deepin-daemon` (`linuxdeepin/dde-services`:
-//!   `src/plugin-qt/wallpapercache/`), the login greeter runs as `lightdm`;
-//!   neither is the user. Deepin itself copies a user's custom wallpaper to
-//!   `/var/cache/wallpapers/custom-wallpapers/<user>/` through a root helper
-//!   (`bin/dde-system-daemon/wallpaper.go`, `SaveCustomWallPaper`) for exactly
-//!   that reason, but that store is capped at 20 files per user and shows up in
-//!   the wallpaper picker, so a frame per wallpaper change would push out the
-//!   user's own. Instead the frame lives where those services can read it:
-//!   `~/.cache/fresco` when every directory up to it is world-searchable, else
-//!   a `0755` directory under `/var/tmp` — see [`pick_frame_dir`].
-//! * **Blur cache.** The blur service caches by `md5(path)` and returns the
-//!   cached image without comparing contents, so every frame gets a fresh
-//!   timestamped name (the same trick `overview::render_still` uses). That
-//!   also covers the user's dim and blur: every apply (and the GUI sends one on
-//!   each slider change) re-renders the frame under a new name, so a changed
-//!   setting is never served from that cache.
-//! * **Dim and blur.** The frame has the user's `[lockscreen]` dim and blur
-//!   baked in ([`grade_still`], through the same backdrop painter the in-app
-//!   preview uses). Widgets are not: the greeter background is one frozen
-//!   picture, so a clock in it would be wrong a minute later. Deepin may blur
-//!   the frame again on top (see **Reading**).
+//! * **Reading, and why 1.1.48 changed nothing.** `dde-lock` reads that
+//!   property and follows its `GreeterBackgroundChanged` signal
+//!   (`linuxdeepin/dde-session-shell`: `src/session-widgets/userinfo.cpp`). It
+//!   then does not draw the picture itself: `FullScreenBackground::
+//!   updateBlurBackground` (`src/widgets/fullscreenbackground.cpp`) asks the
+//!   *system* bus `org.deepin.dde.ImageEffect1.Get("", path)` (2 s timeout) for
+//!   a processed copy and draws that. When the call fails, or returns nothing
+//!   readable, it silently draws `/usr/share/backgrounds/default_background.jpg`
+//!   instead — Deepin's own wallpaper, while the Accounts property (what the
+//!   old code read back) still named our frame. The service behind
+//!   `ImageEffect1` is, on current Deepin 25, the wallpaper-cache plugin of
+//!   `linuxdeepin/dde-services` (`src/plugin-qt/wallpapercache/`). It runs as
+//!   `deepin-daemon` under `PrivateTmp=yes` and `PrivateUsers=yes`
+//!   (`misc/deepin-service-plugin@org.deepin.dde.WallpaperCache.service.d/
+//!   override.conf`), and `WallpaperCacheService::Get` answers `QString()` for a
+//!   path it cannot open. So a frame in `/var/tmp` or `/tmp` does not exist for
+//!   it, and neither does one under a home directory that is not
+//!   world-searchable: the old frame directories (see [`pick_frame_dir`]) were
+//!   exactly the places it cannot see.
+//! * **Where Deepin keeps pictures it must share.** Control center and
+//!   `dde-appearance` (`Backgrounds::prepare`) copy every user picture through
+//!   the root helper `org.deepin.dde.Daemon1.SaveCustomWallPaper`
+//!   (`linuxdeepin/dde-daemon`: `bin/dde-system-daemon/wallpaper.go`) into
+//!   `/var/cache/wallpapers/custom-wallpapers/<user>/<md5>.<ext>` (mode 0644,
+//!   directories 0755), which every service can read. This module does the same
+//!   ([`Greeter::store`]) and points the greeter background at the copy. The
+//!   helper's signature changed on 2026-06-30 (`eae6bb95`): `(s user, h fd,
+//!   s type)` since, `(s user, s file)` before (the helper then read the file as
+//!   the user, and `solid::` in front of the path chose the solid dir). It is
+//!   read from the service's introspection so both work ([`save_args`]). The
+//!   `h` argument is a real D-Bus file descriptor, which `gdbus` sends from its
+//!   own stdin (`@h 0`); `busctl` rejects the type. Frames go to the
+//!   `custom-solidwallpapers` dir ("solid"), not the custom one, so they do not
+//!   push the user's own pictures out of the 20-per-directory cap; the helper
+//!   evicts the oldest file past that cap, so even a crash cannot grow it.
+//!   One copy is kept at a time: the previous one is deleted
+//!   (`DeleteCustomWallPaper`, no polkit for one's own files) when a new frame
+//!   is installed, and on restore. Without the helper (older DDE) the frame is
+//!   used where it was rendered, as 1.1.48 did.
+//! * **Processing and blur.** `Get("")` is the `pixmix` effect
+//!   (`imageeffectprocessor.cpp`): a darkened, saturated average colour laid
+//!   over the picture at 90 % opacity. Deepin always does that to the lock
+//!   background, so blurring the frame first only costs time; the frame carries
+//!   the user's dim, not their blur. The service caches by `md5(path)` and
+//!   returns the cached image while its mtime is not older than the source's,
+//!   without comparing contents. A copy's name is the md5 of its content, so
+//!   changed pixels are a new path; the frame itself gets a fresh timestamped
+//!   name for the same reason.
+//! * **Verifying the blur step.** After a set, this module asks
+//!   `ImageEffect1.Get` itself, which is what `dde-lock` will do next. An empty
+//!   answer is logged as the cause of "Deepin still shows its own background".
+//!   The call also has the service build the processed image now instead of
+//!   inside `dde-lock`'s 2 s window.
+//! * **Known limitation.** `dde-lock` also swaps the background for the primary
+//!   monitor's current-workspace *desktop* wallpaper whenever the workspace
+//!   changes while the screen is locked (`LockContent::currentWorkspaceChanged`
+//!   in `src/session-widgets/lockcontent.cpp`). That is not touched here:
+//!   setting Deepin's desktop wallpaper would hand Fresco the user's desktop,
+//!   and DDE's X11 strategies already use it for their own purposes (see
+//!   `dde`).
+//! * **Widgets.** Not in the frame: the greeter background is one frozen
+//!   picture, so a clock in it would be wrong a minute later.
 //!
 //! # Backup and restore
 //!
 //! The first time a frame is installed, the user's current greeter background
-//! is saved to `$XDG_STATE_HOME/fresco/dde-saved-lock-background.json`. An
-//! existing state file is **never** overwritten — after a crash it holds the
-//! true original, and "current" is by then our own frame. [`restore`] puts the
-//! original back on Stop/SIGTERM and again at startup when the lock feature is
-//! off (crash recovery), but only while the lock screen still shows one of our
-//! frames: if the user chose another picture in the meantime, theirs wins and
-//! the state is just dropped. Restoring through Appearance leaves
-//! `isCustomLockBackground` set (see above); nothing here can clear it.
+//! is saved to `$XDG_STATE_HOME/fresco/dde-saved-lock-background.json`, with the
+//! copies this module has put in Deepin's wallpaper store. An existing state
+//! file is **never** overwritten — after a crash it holds the true original, and
+//! "current" is by then our own frame. [`restore`] puts the original back on
+//! Stop/SIGTERM and again at startup when the lock feature is off (crash
+//! recovery), then deletes the copies, but only while the lock screen still
+//! shows one of our frames or copies: if the user chose another picture in the
+//! meantime, theirs wins and the state is just dropped. Restoring through
+//! Appearance leaves `isCustomLockBackground` set (see above); nothing here can
+//! clear it.
 //!
 //! Only runs on Deepin and only while `[lockscreen].enabled`; everywhere else
 //! every entry point returns before touching anything.
@@ -94,7 +127,7 @@ use super::overview::{encode_file_uri, gvariant_string_literal};
 use crate::config::Config;
 
 /// Prefix of every frame this module writes; what [`is_our_frame`] keys on.
-const FRAME_PREFIX: &str = "dde-lock-";
+pub(super) const FRAME_PREFIX: &str = "dde-lock-";
 
 /// State file name (under `dde::state_dir()`).
 const SAVED_FILE: &str = "dde-saved-lock-background.json";
@@ -117,6 +150,32 @@ const ACCOUNTS: [(&str, &str, &str); 2] = [
         "com.deepin.daemon.Accounts.User",
     ),
 ];
+
+/// Deepin's root helper (system bus): (service, object path, interface). Its
+/// `SaveCustomWallPaper` copies a picture into the store every Deepin service
+/// can read; `DeleteCustomWallPaper` removes our copy again.
+const DAEMON: (&str, &str, &str) = (
+    "org.deepin.dde.Daemon1",
+    "/org/deepin/dde/Daemon1",
+    "org.deepin.dde.Daemon1",
+);
+
+/// The service `dde-lock` asks for the processed lock background (system bus):
+/// (service, object path, interface).
+const IMAGE_EFFECT: (&str, &str, &str) = (
+    "org.deepin.dde.ImageEffect1",
+    "/org/deepin/dde/ImageEffect1",
+    "org.deepin.dde.ImageEffect1",
+);
+
+/// `SaveCustomWallPaper`'s picture kind for our frames: the solid-colour
+/// directory, so they never push the user's own custom pictures out of the
+/// per-directory cap.
+const WALLPAPER_KIND: &str = "solid";
+
+/// What the pre-`h` `SaveCustomWallPaper(user, file)` reads in front of the
+/// path to pick the solid directory.
+const LEGACY_SOLID_PREFIX: &str = "solid::";
 
 /// How long a set is given to show up in the Accounts property before it is
 /// reported as not accepted. The set is queued twice (Appearance, then
@@ -208,10 +267,20 @@ fn sync(config: &Config) {
         &frame,
         PATIENCE,
     ) {
-        Synced::Applied => {
+        Synced::Applied {
+            installed,
+            blur_reads,
+        } => {
             FAILURE_LOGGED.store(false, Ordering::Relaxed);
-            log::info!("DDE lock screen: background set to {}", frame.display());
-            if let Some(blocked) = first_unsearchable_ancestor(&frame) {
+            log::info!("DDE lock screen: background set to {}", installed.display());
+            if blur_reads == Some(false) {
+                log_failure(&format!(
+                    "DDE lock screen: Deepin's blur service (org.deepin.dde.ImageEffect1) cannot \
+                     read {}, so the lock screen will show Deepin's default background instead",
+                    installed.display()
+                ));
+            }
+            if let Some(blocked) = first_unsearchable_ancestor(&installed) {
                 static PRIVATE_WARNED: std::sync::Once = std::sync::Once::new();
                 PRIVATE_WARNED.call_once(|| {
                     log::warn!(
@@ -252,8 +321,8 @@ fn log_failure(msg: &str) {
 
 // -- DDE access --------------------------------------------------------------
 
-/// The two operations on DDE's lock-screen background, so the save/restore
-/// logic can be exercised without a Deepin session.
+/// The operations on DDE's lock-screen background, so the save/restore logic
+/// can be exercised without a Deepin session.
 trait Greeter {
     /// The current greeter background exactly as DDE reports it (a
     /// `file://` URI or a path); `None` when it cannot be read or is empty.
@@ -261,6 +330,16 @@ trait Greeter {
     /// Ask DDE to use `uri`. True when a service took the request — not that
     /// it has been applied; check with [`Greeter::current`].
     fn set(&self, uri: &str) -> bool;
+    /// Copy `frame` into Deepin's own wallpaper store, where every Deepin
+    /// service can read it; the copy's absolute path. `None` when Deepin has no
+    /// such helper (older DDE) or refused the picture.
+    fn store(&self, frame: &Path) -> Option<String>;
+    /// Delete a copy [`Greeter::store`] returned. Best effort.
+    fn forget(&self, copy: &str);
+    /// Whether Deepin's blur service, which `dde-lock` asks for the picture it
+    /// draws, can read `picture`: `Some(false)` when it answers with nothing,
+    /// `None` when it could not be asked (not there, or too slow).
+    fn blur_reads(&self, picture: &Path) -> Option<bool>;
 }
 
 /// The real thing: `gdbus` against the Accounts (read) and Appearance (write)
@@ -313,6 +392,119 @@ impl Greeter for Dde {
             }
         }
         false
+    }
+
+    fn store(&self, frame: &Path) -> Option<String> {
+        let login = crate::userinfo::current_login()?;
+        let (dest, path, iface) = DAEMON;
+        let xml = dde::gdbus_call_on(
+            Bus::System,
+            dest,
+            path,
+            "org.freedesktop.DBus.Introspectable.Introspect",
+            &[],
+        )
+        .as_deref()
+        .and_then(dde::parse_first_string)?;
+        let inputs = introspected_inputs(&xml, "SaveCustomWallPaper")?;
+        let call = save_args(&inputs, &login, frame)?;
+        let args: Vec<&str> = call.args.iter().map(String::as_str).collect();
+        let method = format!("{iface}.SaveCustomWallPaper");
+        let out = if call.send_fd {
+            let file = std::fs::File::open(frame).ok()?;
+            dde::gdbus_call_on_with_fd0(Bus::System, dest, path, &method, &args, file)
+        } else {
+            dde::gdbus_call_on(Bus::System, dest, path, &method, &args)
+        }?;
+        dde::parse_first_string(&out).filter(|p| Path::new(p).is_absolute())
+    }
+
+    fn forget(&self, copy: &str) {
+        let Some(login) = crate::userinfo::current_login() else {
+            return;
+        };
+        let (dest, path, iface) = DAEMON;
+        let gone = dde::gdbus_call_on(
+            Bus::System,
+            dest,
+            path,
+            &format!("{iface}.DeleteCustomWallPaper"),
+            &[
+                &gvariant_string_literal(&login),
+                &gvariant_string_literal(copy),
+            ],
+        );
+        if gone.is_none() {
+            log::debug!("DDE lock screen: could not delete {copy} from Deepin's wallpaper store");
+        }
+    }
+
+    fn blur_reads(&self, picture: &Path) -> Option<bool> {
+        let (dest, path, iface) = IMAGE_EFFECT;
+        let out = dde::gdbus_call_on(
+            Bus::System,
+            dest,
+            path,
+            &format!("{iface}.Get"),
+            &[
+                &gvariant_string_literal(""),
+                &gvariant_string_literal(&picture.to_string_lossy()),
+            ],
+        )?;
+        Some(dde::parse_first_string(&out).is_some_and(|p| !p.is_empty()))
+    }
+}
+
+/// The types of the `in` arguments of `method` in a D-Bus introspection
+/// document, in order. `None` when the method is not described.
+fn introspected_inputs(xml: &str, method: &str) -> Option<Vec<String>> {
+    let start = xml.find(&format!("<method name=\"{method}\""))?;
+    let body = &xml[start..];
+    let body = &body[..body.find("</method>").unwrap_or(body.len())];
+    let mut inputs = Vec::new();
+    for tag in body.split("<arg ").skip(1) {
+        let tag = &tag[..tag.find('>').unwrap_or(tag.len())];
+        if !tag.contains("direction=\"in\"") {
+            continue;
+        }
+        let ty = tag.split("type=\"").nth(1)?;
+        inputs.push(ty[..ty.find('"')?].to_string());
+    }
+    Some(inputs)
+}
+
+/// One `SaveCustomWallPaper` call, ready for `gdbus`.
+#[derive(Debug, PartialEq, Eq)]
+struct SaveCall {
+    /// Arguments in GVariant text form.
+    args: Vec<String>,
+    /// The picture travels as a file descriptor (`@h 0`, the child's stdin).
+    send_fd: bool,
+}
+
+/// The call for a helper whose `in` arguments are `inputs`: `(s user, h file,
+/// s kind)` since dde-daemon `eae6bb95` (2026-06-30), `(s user, s file)`
+/// before, which takes the path and reads it as the user. Anything else is a
+/// helper this module does not know how to call.
+fn save_args(inputs: &[String], login: &str, frame: &Path) -> Option<SaveCall> {
+    let user = gvariant_string_literal(login);
+    match inputs.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        ["s", "h", "s"] => Some(SaveCall {
+            args: vec![
+                user,
+                "@h 0".to_string(),
+                gvariant_string_literal(WALLPAPER_KIND),
+            ],
+            send_fd: true,
+        }),
+        ["s", "s"] => Some(SaveCall {
+            args: vec![
+                user,
+                gvariant_string_literal(&format!("{LEGACY_SOLID_PREFIX}{}", frame.display())),
+            ],
+            send_fd: false,
+        }),
+        _ => None,
     }
 }
 
@@ -367,7 +559,7 @@ fn percent_decode(s: &str) -> String {
 /// The local path a greeter-background value names: `file:///a%20b.png` and
 /// `/a b.png` both give `/a b.png`. `None` for anything that is not an
 /// absolute local path.
-fn uri_to_path(value: &str) -> Option<PathBuf> {
+pub(super) fn uri_to_path(value: &str) -> Option<PathBuf> {
     let value = value.trim();
     let raw = value.strip_prefix("file://").unwrap_or(value);
     raw.starts_with('/')
@@ -434,10 +626,19 @@ enum RestoreStep {
     Keep,
 }
 
-fn restore_step(saved: &str, current: Option<&str>, dirs: &[PathBuf]) -> RestoreStep {
+/// `copies` are the pictures this module put in Deepin's wallpaper store, as
+/// the state file lists them; those are ours as much as the frames in `dirs`.
+fn restore_step(
+    saved: &str,
+    current: Option<&str>,
+    dirs: &[PathBuf],
+    copies: &[String],
+) -> RestoreStep {
     match current {
         None => RestoreStep::Keep,
-        Some(c) if is_our_frame(c, dirs) => RestoreStep::Write(saved.to_string()),
+        Some(c) if is_our_frame(c, dirs) || copies.iter().any(|x| same_picture(x, c)) => {
+            RestoreStep::Write(saved.to_string())
+        }
         Some(_) => RestoreStep::Discard,
     }
 }
@@ -448,6 +649,11 @@ fn restore_step(saved: &str, current: Option<&str>, dirs: &[PathBuf]) -> Restore
 struct Saved {
     /// The user's greeter background, exactly as DDE reported it.
     uri: String,
+    /// Copies of our frames in Deepin's wallpaper store that are not deleted
+    /// yet, as [`Greeter::store`] returned them. Absent in state files from
+    /// before the copies existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    copies: Vec<String>,
 }
 
 fn saved_path() -> PathBuf {
@@ -470,22 +676,54 @@ fn load_saved(path: &Path) -> Load {
     }
 }
 
-fn write_saved(path: &Path, uri: &str) -> bool {
+fn write_saved(path: &Path, saved: &Saved) -> bool {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    serde_json::to_vec_pretty(&Saved {
-        uri: uri.to_string(),
-    })
-    .ok()
-    .is_some_and(|b| std::fs::write(path, b).is_ok())
+    serde_json::to_vec_pretty(saved)
+        .ok()
+        .is_some_and(|b| std::fs::write(path, b).is_ok())
+}
+
+/// The copies the state file lists; none without a valid one.
+fn tracked_copies(path: &Path) -> Vec<String> {
+    match load_saved(path) {
+        Load::Valid(s) => s.copies,
+        _ => Vec::new(),
+    }
+}
+
+/// Replace the state file's list of copies. Does nothing without a valid state
+/// file: the original is then lost, there is nothing to restore, and so nothing
+/// to clean up either (Deepin itself caps the directory at 20 files).
+fn set_tracked_copies(path: &Path, copies: Vec<String>) {
+    if let Load::Valid(mut saved) = load_saved(path) {
+        saved.copies = copies;
+        write_saved(path, &saved);
+    }
+}
+
+/// The copies of our frames now in Deepin's wallpaper store, as paths. They sit
+/// beside the user's own wallpapers there, so `dde::user_wallpaper` skips them.
+pub(super) fn our_copies() -> Vec<PathBuf> {
+    tracked_copies(&saved_path())
+        .iter()
+        .filter_map(|c| uri_to_path(c))
+        .collect()
 }
 
 // -- sync / restore flows ------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
 enum Synced {
-    Applied,
+    Applied {
+        /// The picture the greeter background now names: the copy in Deepin's
+        /// wallpaper store, or the frame itself when there is no such store.
+        installed: PathBuf,
+        /// Whether Deepin's blur service can read it (see
+        /// [`Greeter::blur_reads`]).
+        blur_reads: Option<bool>,
+    },
     /// The current value could not be read; nothing was changed.
     Unreadable,
     /// The original could not be written to disk; nothing was changed.
@@ -498,6 +736,8 @@ enum Synced {
 
 /// Install `frame` (already rendered, named with [`FRAME_PREFIX`], in one of
 /// `dirs`) as the greeter background, saving the original into `state` first.
+/// The frame goes through [`Greeter::store`] when Deepin has one; the previous
+/// copy is deleted once the new one shows, so one slot is ever used.
 fn sync_in<G: Greeter>(
     g: &G,
     state: &Path,
@@ -509,7 +749,11 @@ fn sync_in<G: Greeter>(
     match save_step(current.as_deref(), state.exists(), dirs) {
         SaveStep::AlreadySaved | SaveStep::OwnFrameNoState => {}
         SaveStep::Save(original) => {
-            if !write_saved(state, &original) {
+            let saved = Saved {
+                uri: original,
+                copies: Vec::new(),
+            };
+            if !write_saved(state, &saved) {
                 std::fs::remove_file(frame).ok();
                 return Synced::StateNotSaved;
             }
@@ -520,9 +764,39 @@ fn sync_in<G: Greeter>(
         }
     }
 
-    let uri = encode_file_uri(frame);
+    let previous = tracked_copies(state);
+    let copy = g.store(frame);
+    let installed = match &copy {
+        Some(c) => {
+            std::fs::remove_file(frame).ok();
+            // Listed before the set, so a request that lands late is still
+            // cleaned up by a restore.
+            let mut listed = previous.clone();
+            if !listed.contains(c) {
+                listed.push(c.clone());
+            }
+            set_tracked_copies(state, listed);
+            PathBuf::from(c)
+        }
+        None => {
+            log::debug!(
+                "DDE lock screen: no wallpaper store to copy the frame into; using it in place"
+            );
+            frame.to_path_buf()
+        }
+    };
+
+    let uri = encode_file_uri(&installed);
     if !g.set(&uri) {
-        std::fs::remove_file(frame).ok();
+        match &copy {
+            // A copy an earlier sync made is not ours to delete here: it may
+            // be what the lock screen shows.
+            Some(c) if !previous.contains(c) => g.forget(c),
+            Some(_) => {}
+            None => {
+                std::fs::remove_file(frame).ok();
+            }
+        }
         return Synced::NotRequested;
     }
     if !shows(g, &uri, patience) {
@@ -530,8 +804,16 @@ fn sync_in<G: Greeter>(
         // screen needs the file. The next sync or restore sweeps it.
         return Synced::NotAccepted;
     }
-    remove_frames(dirs, Some(frame));
-    Synced::Applied
+    for old in previous.iter().filter(|p| Some(*p) != copy.as_ref()) {
+        g.forget(old);
+    }
+    set_tracked_copies(state, copy.iter().cloned().collect());
+    remove_frames(dirs, copy.is_none().then_some(frame));
+    let blur_reads = g.blur_reads(&installed);
+    Synced::Applied {
+        installed,
+        blur_reads,
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -544,6 +826,16 @@ enum Restored {
     Pending,
 }
 
+/// Forget the state, and with it every picture of ours: the copies in Deepin's
+/// wallpaper store and the frames on disk.
+fn clean_up<G: Greeter>(g: &G, state: &Path, dirs: &[PathBuf], copies: &[String]) {
+    for copy in copies {
+        g.forget(copy);
+    }
+    std::fs::remove_file(state).ok();
+    remove_frames(dirs, None);
+}
+
 fn restore_in<G: Greeter>(g: &G, state: &Path, dirs: &[PathBuf], patience: Patience) -> Restored {
     let saved = match load_saved(state) {
         Load::Absent => return Restored::NothingSaved,
@@ -553,17 +845,15 @@ fn restore_in<G: Greeter>(g: &G, state: &Path, dirs: &[PathBuf], patience: Patie
         }
         Load::Valid(s) => s,
     };
-    match restore_step(&saved.uri, g.current().as_deref(), dirs) {
+    match restore_step(&saved.uri, g.current().as_deref(), dirs, &saved.copies) {
         RestoreStep::Keep => Restored::Pending,
         RestoreStep::Discard => {
-            std::fs::remove_file(state).ok();
-            remove_frames(dirs, None);
+            clean_up(g, state, dirs, &saved.copies);
             Restored::Discarded
         }
         RestoreStep::Write(uri) => {
             if g.set(&uri) && shows(g, &uri, patience) {
-                std::fs::remove_file(state).ok();
-                remove_frames(dirs, None);
+                clean_up(g, state, dirs, &saved.copies);
                 Restored::Done
             } else {
                 Restored::Pending
@@ -711,11 +1001,11 @@ fn grade_still(path: &Path, blur: f32, dim: f32) {
 
 /// Render a still of the wallpaper (the global one, else the first per-monitor
 /// one — the greeter background is a single picture per user), with the user's
-/// lock-screen dim and blur applied, into `dir` under a fresh name, readable by
-/// everyone.
+/// lock-screen dim applied (not the blur: Deepin processes the picture itself,
+/// see the module doc), into `dir` under a fresh name, readable by everyone.
 fn render_frame(config: &Config, dir: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
-    let rendered = super::overview::render_still(&config.wallpaper).or_else(|| {
+    let rendered = super::overview::render_still(config.lock_source(None)).or_else(|| {
         config
             .monitors
             .values()
@@ -723,7 +1013,7 @@ fn render_frame(config: &Config, dir: &Path) -> Option<PathBuf> {
     })?;
     if let Some(lock) = &config.lockscreen {
         let resolved = crate::lockscreen::resolve(lock);
-        grade_still(&rendered, resolved.blur, resolved.dim);
+        grade_still(&rendered, 0.0, resolved.dim);
     }
     std::fs::create_dir_all(dir).ok()?;
     let stamp = SystemTime::now()
@@ -768,12 +1058,16 @@ mod tests {
     }
 
     /// A fake Deepin: holds the greeter background, and can be told to refuse
-    /// requests or to take them without ever applying them.
+    /// requests or to take them without ever applying them. It has no
+    /// wallpaper store until `stores` is switched on.
     struct Fake {
         value: RefCell<Option<String>>,
         takes_requests: Cell<bool>,
         applies: Cell<bool>,
         requests: RefCell<Vec<String>>,
+        stores: Cell<bool>,
+        forgotten: RefCell<Vec<String>>,
+        blur: Cell<Option<bool>>,
     }
 
     impl Fake {
@@ -783,6 +1077,9 @@ mod tests {
                 takes_requests: Cell::new(true),
                 applies: Cell::new(true),
                 requests: RefCell::new(Vec::new()),
+                stores: Cell::new(false),
+                forgotten: RefCell::new(Vec::new()),
+                blur: Cell::new(Some(true)),
             }
         }
         fn now(&self) -> Option<String> {
@@ -806,7 +1103,24 @@ mod tests {
             }
             true
         }
+        fn store(&self, frame: &Path) -> Option<String> {
+            // The helper names a copy after its content; the fake after the frame.
+            if !self.stores.get() {
+                return None;
+            }
+            let name = frame.file_name()?.to_str()?.replace(FRAME_PREFIX, "copy-");
+            Some(format!("{STORE}/{name}"))
+        }
+        fn forget(&self, copy: &str) {
+            self.forgotten.borrow_mut().push(copy.to_string());
+        }
+        fn blur_reads(&self, _picture: &Path) -> Option<bool> {
+            self.blur.get()
+        }
     }
+
+    /// Where the fake store keeps its copies.
+    const STORE: &str = "/var/cache/wallpapers/custom-solidwallpapers/u";
 
     const ORIGINAL: &str = "file:///usr/share/backgrounds/default_lock_background.jpg";
 
@@ -961,20 +1275,41 @@ mod tests {
     fn restore_step_only_overwrites_our_own_frame() {
         let dirs = vec![PathBuf::from("/c")];
         assert_eq!(
-            restore_step(ORIGINAL, Some("file:///c/dde-lock-9.png"), &dirs),
+            restore_step(ORIGINAL, Some("file:///c/dde-lock-9.png"), &dirs, &[]),
             RestoreStep::Write(ORIGINAL.to_string())
+        );
+        // A copy in Deepin's wallpaper store counts, as the state lists it.
+        let copy = format!("{STORE}/copy-9.png");
+        assert_eq!(
+            restore_step(
+                ORIGINAL,
+                Some(&format!("file://{copy}")),
+                &dirs,
+                std::slice::from_ref(&copy)
+            ),
+            RestoreStep::Write(ORIGINAL.to_string())
+        );
+        // The same directory is not enough: another solid picture is the user's.
+        assert_eq!(
+            restore_step(
+                ORIGINAL,
+                Some(&format!("file://{STORE}/theirs.png")),
+                &dirs,
+                &[copy]
+            ),
+            RestoreStep::Discard
         );
         // The user picked something else meanwhile: theirs wins.
         assert_eq!(
-            restore_step(ORIGINAL, Some("file:///home/u/mine.jpg"), &dirs),
+            restore_step(ORIGINAL, Some("file:///home/u/mine.jpg"), &dirs, &[]),
             RestoreStep::Discard
         );
         // Already the original (our set never took).
         assert_eq!(
-            restore_step(ORIGINAL, Some(ORIGINAL), &dirs),
+            restore_step(ORIGINAL, Some(ORIGINAL), &dirs, &[]),
             RestoreStep::Discard
         );
-        assert_eq!(restore_step(ORIGINAL, None, &dirs), RestoreStep::Keep);
+        assert_eq!(restore_step(ORIGINAL, None, &dirs, &[]), RestoreStep::Keep);
     }
 
     // -- the flows ----------------------------------------------------------------
@@ -987,7 +1322,10 @@ mod tests {
         let frame = frame_in(&cache, 1);
         let g = Fake::showing(Some(ORIGINAL));
 
-        assert_eq!(sync_in(&g, &state, &dirs, &frame, NO_WAIT), Synced::Applied);
+        assert!(matches!(
+            sync_in(&g, &state, &dirs, &frame, NO_WAIT),
+            Synced::Applied { .. }
+        ));
 
         assert!(same_picture(&g.now().unwrap(), &frame.to_string_lossy()));
         let saved: Saved = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
@@ -1005,10 +1343,10 @@ mod tests {
         sync_in(&g, &state, &dirs, &first, NO_WAIT);
 
         let second = frame_in(&cache, 2);
-        assert_eq!(
+        assert!(matches!(
             sync_in(&g, &state, &dirs, &second, NO_WAIT),
-            Synced::Applied
-        );
+            Synced::Applied { .. }
+        ));
 
         // The state still names the user's picture, not our first frame.
         let saved: Saved = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
@@ -1121,7 +1459,10 @@ mod tests {
         // -- crash: the Fake and the files persist, the process does not --
 
         let new = frame_in(&cache, 2);
-        assert_eq!(sync_in(&g, &state, &dirs, &new, NO_WAIT), Synced::Applied);
+        assert!(matches!(
+            sync_in(&g, &state, &dirs, &new, NO_WAIT),
+            Synced::Applied { .. }
+        ));
         assert_eq!(restore_in(&g, &state, &dirs, NO_WAIT), Restored::Done);
         assert_eq!(g.now().as_deref(), Some(ORIGINAL));
     }
@@ -1208,7 +1549,10 @@ mod tests {
         let g = Fake::showing(Some(&format!("file://{}", old.display())));
         let new = frame_in(&cache, 2);
 
-        assert_eq!(sync_in(&g, &state, &dirs, &new, NO_WAIT), Synced::Applied);
+        assert!(matches!(
+            sync_in(&g, &state, &dirs, &new, NO_WAIT),
+            Synced::Applied { .. }
+        ));
 
         // Never records our own frame as the "original".
         assert!(!state.exists());
@@ -1223,7 +1567,10 @@ mod tests {
         let frame = frame_in(&cache, 1);
         let g = Fake::showing(Some(ORIGINAL));
 
-        assert_eq!(sync_in(&g, &state, &dirs, &frame, NO_WAIT), Synced::Applied);
+        assert!(matches!(
+            sync_in(&g, &state, &dirs, &frame, NO_WAIT),
+            Synced::Applied { .. }
+        ));
         assert!(is_our_frame(&g.now().unwrap(), &dirs));
     }
 
@@ -1334,5 +1681,289 @@ mod tests {
 
         remove_frames(&dirs, None);
         assert!(!b.exists() && other.exists());
+    }
+
+    // -- the copy in Deepin's wallpaper store -------------------------------------
+
+    /// `Introspect` as Deepin's Go daemon writes it (the `h` form), and the
+    /// pre-2026-06-30 `s` form, each with an unrelated method around it.
+    const XML_FD: &str = r#"<node><interface name="org.deepin.dde.Daemon1">
+<method name="DeleteCustomWallPaper"><arg name="username" type="s" direction="in"></arg><arg name="file" type="s" direction="in"></arg></method>
+<method name="SaveCustomWallPaper">
+  <arg name="username" type="s" direction="in"></arg>
+  <arg name="fd" type="h" direction="in"></arg>
+  <arg name="wallpaperType" type="s" direction="in"></arg>
+  <arg name="result" type="s" direction="out"></arg>
+</method>
+</interface></node>"#;
+    const XML_PATH: &str = r#"<node><method name="SaveCustomWallPaper"><arg name="username" type="s" direction="in"></arg><arg name="file" type="s" direction="in"></arg><arg type="s" direction="out"></arg></method></node>"#;
+
+    fn types(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_helper_signature_is_read_from_its_introspection() {
+        assert_eq!(
+            introspected_inputs(XML_FD, "SaveCustomWallPaper"),
+            Some(types(&["s", "h", "s"]))
+        );
+        assert_eq!(
+            introspected_inputs(XML_FD, "DeleteCustomWallPaper"),
+            Some(types(&["s", "s"]))
+        );
+        assert_eq!(
+            introspected_inputs(XML_PATH, "SaveCustomWallPaper"),
+            Some(types(&["s", "s"]))
+        );
+        // Self-closing tags, `direction` first: how Qt services and the bus
+        // daemon itself write it.
+        assert_eq!(
+            introspected_inputs(
+                r#"<node><method name="M"><arg direction="in" type="s"/><arg direction="out" type="u"/><arg direction="in" type="h"/></method></node>"#,
+                "M"
+            ),
+            Some(types(&["s", "h"]))
+        );
+        assert_eq!(introspected_inputs(XML_PATH, "Nope"), None);
+        assert_eq!(introspected_inputs("", "SaveCustomWallPaper"), None);
+        // Through gdbus's `('…',)` quoting, newlines escaped as it prints them.
+        let quoted = format!("('{}',)", XML_FD.replace('\n', "\\n"));
+        let xml = dde::parse_first_string(&quoted).unwrap();
+        assert_eq!(
+            introspected_inputs(&xml, "SaveCustomWallPaper"),
+            Some(types(&["s", "h", "s"]))
+        );
+    }
+
+    #[test]
+    fn the_save_call_matches_the_helper_signature() {
+        let frame = Path::new("/home/u/.cache/fresco/dde-lock-1.png");
+        assert_eq!(
+            save_args(&types(&["s", "h", "s"]), "u", frame),
+            Some(SaveCall {
+                args: vec!["'u'".into(), "@h 0".into(), "'solid'".into()],
+                send_fd: true,
+            })
+        );
+        assert_eq!(
+            save_args(&types(&["s", "s"]), "u", frame),
+            Some(SaveCall {
+                args: vec![
+                    "'u'".into(),
+                    "'solid::/home/u/.cache/fresco/dde-lock-1.png'".into()
+                ],
+                send_fd: false,
+            })
+        );
+        // A helper this module cannot call is not guessed at.
+        assert_eq!(save_args(&types(&["s", "h"]), "u", frame), None);
+        assert_eq!(save_args(&types(&["s", "s", "s"]), "u", frame), None);
+        assert_eq!(save_args(&[], "u", frame), None);
+    }
+
+    fn copy_of(stamp: u32) -> String {
+        format!("{STORE}/copy-{stamp}.png")
+    }
+
+    #[test]
+    fn a_copy_in_the_store_is_what_the_greeter_names() {
+        let root = tempdir("copy");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let frame = frame_in(&cache, 1);
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+
+        assert_eq!(
+            sync_in(&g, &state, &dirs, &frame, NO_WAIT),
+            Synced::Applied {
+                installed: PathBuf::from(copy_of(1)),
+                blur_reads: Some(true),
+            }
+        );
+
+        assert!(same_picture(&g.now().unwrap(), &copy_of(1)));
+        assert!(!frame.exists(), "the local frame is only the source");
+        let saved: Saved = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+        assert_eq!(saved.uri, ORIGINAL);
+        assert_eq!(saved.copies, vec![copy_of(1)]);
+    }
+
+    #[test]
+    fn a_new_copy_replaces_the_old_one_but_never_deletes_itself() {
+        let root = tempdir("slot");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT);
+
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 2), NO_WAIT);
+        assert_eq!(*g.forgotten.borrow(), vec![copy_of(1)]);
+        assert!(same_picture(&g.now().unwrap(), &copy_of(2)));
+        assert_eq!(tracked_copies(&state), vec![copy_of(2)]);
+
+        // Same pixels again: the helper hands back the same file, which is
+        // what is showing and must stay.
+        g.forgotten.borrow_mut().clear();
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 2), NO_WAIT);
+        assert!(g.forgotten.borrow().is_empty());
+        assert_eq!(tracked_copies(&state), vec![copy_of(2)]);
+    }
+
+    #[test]
+    fn without_a_store_the_frame_is_installed_in_place_as_before() {
+        let root = tempdir("nostore");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let frame = frame_in(&cache, 1);
+        let g = Fake::showing(Some(ORIGINAL));
+
+        assert_eq!(
+            sync_in(&g, &state, &dirs, &frame, NO_WAIT),
+            Synced::Applied {
+                installed: frame.clone(),
+                blur_reads: Some(true),
+            }
+        );
+        assert!(frame.exists());
+        assert!(tracked_copies(&state).is_empty());
+        assert!(g.forgotten.borrow().is_empty());
+    }
+
+    #[test]
+    fn falling_back_to_the_frame_drops_copies_an_earlier_run_left() {
+        let root = tempdir("fallback");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT);
+
+        g.stores.set(false);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 2), NO_WAIT);
+
+        assert_eq!(*g.forgotten.borrow(), vec![copy_of(1)]);
+        assert!(tracked_copies(&state).is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_picture_is_reported_with_the_service_that_cannot_read_it() {
+        let root = tempdir("blur");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let g = Fake::showing(Some(ORIGINAL));
+        g.blur.set(Some(false));
+
+        let synced = sync_in(
+            &g,
+            &state,
+            std::slice::from_ref(&cache),
+            &frame_in(&cache, 1),
+            NO_WAIT,
+        );
+
+        assert!(matches!(
+            synced,
+            Synced::Applied {
+                blur_reads: Some(false),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_refused_request_deletes_a_fresh_copy_but_not_one_already_showing() {
+        let root = tempdir("refusedcopy");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT);
+        g.takes_requests.set(false);
+
+        // A different picture: its copy is useless once refused.
+        assert_eq!(
+            sync_in(&g, &state, &dirs, &frame_in(&cache, 2), NO_WAIT),
+            Synced::NotRequested
+        );
+        assert_eq!(*g.forgotten.borrow(), vec![copy_of(2)]);
+
+        // The picture that is showing: leave its copy alone.
+        g.forgotten.borrow_mut().clear();
+        assert_eq!(
+            sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT),
+            Synced::NotRequested
+        );
+        assert!(g.forgotten.borrow().is_empty());
+    }
+
+    #[test]
+    fn restore_gives_the_original_back_and_deletes_the_copy() {
+        let root = tempdir("restorecopy");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT);
+
+        assert_eq!(restore_in(&g, &state, &dirs, NO_WAIT), Restored::Done);
+
+        assert_eq!(g.now().as_deref(), Some(ORIGINAL));
+        assert_eq!(*g.forgotten.borrow(), vec![copy_of(1)]);
+        assert!(!state.exists());
+    }
+
+    #[test]
+    fn restore_keeps_the_copy_while_it_is_still_on_screen() {
+        let root = tempdir("keepcopy");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT);
+        g.takes_requests.set(false);
+
+        assert_eq!(restore_in(&g, &state, &dirs, NO_WAIT), Restored::Pending);
+
+        assert!(g.forgotten.borrow().is_empty());
+        assert_eq!(tracked_copies(&state), vec![copy_of(1)]);
+    }
+
+    #[test]
+    fn restore_deletes_the_copy_even_when_the_user_chose_another_picture() {
+        let root = tempdir("userchosecopy");
+        let (state, cache) = (root.join("state.json"), root.join("cache"));
+        let dirs = vec![cache.clone()];
+        let g = Fake::showing(Some(ORIGINAL));
+        g.stores.set(true);
+        sync_in(&g, &state, &dirs, &frame_in(&cache, 1), NO_WAIT);
+        *g.value.borrow_mut() = Some("file:///home/u/mine.jpg".to_string());
+
+        assert_eq!(restore_in(&g, &state, &dirs, NO_WAIT), Restored::Discarded);
+
+        assert_eq!(g.now().as_deref(), Some("file:///home/u/mine.jpg"));
+        assert_eq!(*g.forgotten.borrow(), vec![copy_of(1)]);
+    }
+
+    #[test]
+    fn a_state_file_from_before_copies_still_loads() {
+        let root = tempdir("oldstate");
+        let state = root.join("state.json");
+        std::fs::write(&state, format!(r#"{{"uri":"{ORIGINAL}"}}"#)).unwrap();
+        assert!(matches!(
+            load_saved(&state),
+            Load::Valid(Saved { copies, .. }) if copies.is_empty()
+        ));
+
+        // And an empty list is not written back out.
+        assert!(write_saved(
+            &state,
+            &Saved {
+                uri: ORIGINAL.to_string(),
+                copies: Vec::new()
+            }
+        ));
+        assert!(!std::fs::read_to_string(&state).unwrap().contains("copies"));
     }
 }

@@ -3,7 +3,8 @@
 //!
 //! Reads the WM-maintained EWMH state: `_NET_CLIENT_LIST_STACKING` on the root
 //! plus each client's `_NET_WM_STATE`, and reports which monitors are covered
-//! by a viewable fullscreen window. Deliberately POLLED on the daemon's 2s
+//! by a viewable fullscreen window (or, when asked, a maximized one).
+//! Deliberately POLLED on the daemon's 2s
 //! cadence, never event-driven — reacting to X events is how the historical
 //! ConfigureNotify storm froze laptops (see the note in `Daemon::run`).
 //!
@@ -19,14 +20,16 @@ use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, MapState, Window};
 use super::monitors::Monitor;
 use super::x11win::Atoms;
 
-/// Connectors whose monitor is ≥50% covered by a viewable fullscreen window,
-/// mapped to a short description of that window (title, for the pause log —
-/// so a misfiring compositor surface is identifiable from the log alone).
+/// Connectors whose monitor is ≥50% covered by a viewable fullscreen window
+/// (or, with `maximized`, a maximized one), mapped to a short description of
+/// that window (kind + title, for the pause log — so a misfiring compositor
+/// surface is identifiable from the log alone).
 pub fn covered_connectors<C: Connection>(
     conn: &C,
     root: Window,
     atoms: &Atoms,
     monitors: &[Monitor],
+    maximized: bool,
 ) -> HashMap<String, String> {
     let mut covered = HashMap::new();
     let Ok(list) = conn
@@ -61,24 +64,41 @@ pub fn covered_connectors<C: Connection>(
         let Some(states) = window_states(conn, win, atoms) else {
             continue;
         };
-        if !states.contains(&atoms._NET_WM_STATE_FULLSCREEN)
-            || states.contains(&atoms._NET_WM_STATE_HIDDEN)
-        {
+        let Some(kind) = cover_kind(&states, atoms, maximized) else {
             continue;
-        }
+        };
         // Absolute geometry: the WM reparents clients, so translate to root.
         let Some((x, y, w, h)) = absolute_geometry(conn, root, win) else {
             continue;
         };
         for m in monitors {
             if overlap_at_least_half(x, y, w, h, m) {
-                covered
-                    .entry(m.connector.clone())
-                    .or_insert_with(|| window_title(conn, win, atoms));
+                covered.entry(m.connector.clone()).or_insert_with(|| {
+                    format!("{kind} window ({:?})", window_title(conn, win, atoms))
+                });
             }
         }
     }
     covered
+}
+
+/// How a client's `_NET_WM_STATE` makes it cover the screen: `"fullscreen"`,
+/// or (only when `maximized` is asked for) `"maximized"`; `None` if it doesn't
+/// or is minimized. Maximized candidates that skip the taskbar are ignored —
+/// that is how desktop-icon windows and panels look, and they must never pause.
+fn cover_kind(states: &[u32], atoms: &Atoms, maximized: bool) -> Option<&'static str> {
+    let has = |a| states.contains(&a);
+    if has(atoms._NET_WM_STATE_HIDDEN) {
+        return None;
+    }
+    if has(atoms._NET_WM_STATE_FULLSCREEN) {
+        return Some("fullscreen");
+    }
+    (maximized
+        && has(atoms._NET_WM_STATE_MAXIMIZED_VERT)
+        && has(atoms._NET_WM_STATE_MAXIMIZED_HORZ)
+        && !has(atoms._NET_WM_STATE_SKIP_TASKBAR))
+    .then_some("maximized")
 }
 
 /// Best-effort window title (`_NET_WM_NAME`), for the pause log.
@@ -153,6 +173,41 @@ mod tests {
             height: h,
             scale_milli: 1000,
         }
+    }
+
+    #[test]
+    fn cover_kind_predicate() {
+        use crate::daemon::x11win::tests::atoms;
+        let a = atoms();
+        let both = [
+            a._NET_WM_STATE_MAXIMIZED_VERT,
+            a._NET_WM_STATE_MAXIMIZED_HORZ,
+        ];
+        // Fullscreen always counts, flag or not; hidden never does.
+        let fs = [a._NET_WM_STATE_FULLSCREEN];
+        assert_eq!(cover_kind(&fs, &a, false), Some("fullscreen"));
+        assert_eq!(cover_kind(&fs, &a, true), Some("fullscreen"));
+        assert_eq!(cover_kind(&[fs[0], a._NET_WM_STATE_HIDDEN], &a, true), None);
+        // Fullscreen wins the label over maximized.
+        assert_eq!(
+            cover_kind(&[both[0], both[1], fs[0]], &a, true),
+            Some("fullscreen")
+        );
+        // Maximized needs the flag and BOTH axes.
+        assert_eq!(cover_kind(&both, &a, false), None);
+        assert_eq!(cover_kind(&both, &a, true), Some("maximized"));
+        assert_eq!(cover_kind(&both[..1], &a, true), None);
+        assert_eq!(cover_kind(&both[1..], &a, true), None);
+        assert_eq!(cover_kind(&[], &a, true), None);
+        // Minimized, or a taskbar-skipping desktop/panel window: not a cover.
+        assert_eq!(
+            cover_kind(&[both[0], both[1], a._NET_WM_STATE_HIDDEN], &a, true),
+            None
+        );
+        assert_eq!(
+            cover_kind(&[both[0], both[1], a._NET_WM_STATE_SKIP_TASKBAR], &a, true),
+            None
+        );
     }
 
     #[test]
@@ -236,7 +291,7 @@ mod tests {
         .unwrap();
         conn.sync().unwrap();
 
-        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors);
+        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, false);
         assert!(
             covered.contains_key("TEST-1"),
             "fullscreen window not detected: {covered:?}"
@@ -252,7 +307,7 @@ mod tests {
         )
         .unwrap();
         conn.sync().unwrap();
-        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors);
+        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, false);
         assert!(
             covered.is_empty(),
             "state cleared but still covered: {covered:?}"
@@ -269,7 +324,7 @@ mod tests {
         .unwrap();
         conn.unmap_window(win).unwrap();
         conn.sync().unwrap();
-        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors);
+        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, false);
         assert!(covered.is_empty(), "unmapped window counted: {covered:?}");
 
         // Leave the root property empty so nothing lingers for other tests.

@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.48"
+version = "1.1.49"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -51,7 +51,8 @@ libloading = { version = "0.8", optional = true }
 nix = { version = "0.29", features = ["process", "signal", "fs"], optional = true }
 wayland-client = { version = "0.31", optional = true }
 # wlr-foreign-toplevel-management: lets the daemon see fullscreen state per output
-# so it can pause that output's wallpaper (wlroots/KDE; GNOME doesn't implement it).
+# so it can pause that output's wallpaper (wlroots compositors; KWin and GNOME don't
+# expose it to ordinary clients).
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 # zcosmic-toplevel-info: COSMIC's native equivalent (its compositor lacks the wlr
 # protocol), used as a fallback so fullscreen auto-pause works on COSMIC too.
@@ -102,7 +103,11 @@ priority = "optional"
 #     the DDE background calls in src/daemon/dde.rs.
 # libgtk-4-1 pulls libglib2.0-0, NOT libglib2.0-bin, so a minimal desktop or a
 # container genuinely may not have it — transitive presence is not a guarantee.
-depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
+# libgtk-4-media-gstreamer is the same story: GTK's only media backend is its own
+# package, which libgtk-4-1 merely Recommends. A system that skips recommends
+# (deepin's .deb installer does) has none, and every library hover preview then
+# silently shows the still frame (issue #42).
+depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreamer, libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
 # Recommends, not Depends: every one of these powers a feature that degrades to
 # a logged, actionable message rather than breaking the app.
 #   * pulseaudio-utils | pipewire-bin — `parec` / `pw-cat` for the audio
@@ -119,7 +124,13 @@ depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libmpv2 | libmpv1, libw
 #   * ffmpeg — `ffmpeg` for rotated thumbnails/overview frames (falls back to
 #     ffmpegthumbnailer unrotated) and `ffprobe` for library metadata (fields
 #     just stay empty). Both already degrade silently by design.
-recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1"
+#   * qml6-module-qtmultimedia — plays the video of Fresco's KDE Plasma
+#     wallpaper plugin (packaging/kde/README.md). On Plasma, Fresco sets its
+#     wallpaper through plasmashell and that plugin IS the desktop wallpaper
+#     (src/daemon/kde_desktop.rs, issue #44), so without this module a Plasma
+#     user sees a still frame instead of the video; it is also what plays on
+#     the lock screen. Nothing else needs it.
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1, qml6-module-qtmultimedia"
 # Suggests, not Recommends: each of these is needed by exactly one lock-screen
 # host, so installing it unconditionally would be a much stronger nudge than
 # "might be useful" warrants for most machines (docs/plan-lock-screen.md §4.3,
@@ -127,10 +138,7 @@ recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-
 #   * xsecurelock — the X11 lock-host (src/daemon/lock/hosts/x11.rs) shells
 #     out to it via `fresco lock`; without it that host degrades to
 #     LockSetupState::Unavailable rather than failing to install.
-#   * qml6-module-qtmultimedia — the KDE lock-screen wallpaper plugin's video
-#     layer (packaging/kde/README.md's "Optional runtime dependency"); the
-#     plugin already degrades to a still image without it.
-suggests = "xsecurelock, qml6-module-qtmultimedia"
+suggests = "xsecurelock"
 extended-description = """\
 Fresco sets videos, GIFs, images, slideshows, and video playlists as your \
 desktop wallpaper. Pick media in a simple app, click Set, close the app — \
@@ -194,11 +202,13 @@ assets = [
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "644"],
+    ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", "644"],
+    ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", "644"],
     ["packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", "644"],
 ]
 # The postinst NEVER refreshes the icon cache or desktop database: the standard

@@ -154,6 +154,61 @@ fn classify_mate(current_desktop: Option<&str>, session_desktop: Option<&str>) -
         })
 }
 
+/// Is this session Xfce? xfdesktop paints the backdrop and the icons into one
+/// opaque window per monitor, and xfwm4 keeps it below the layer our wallpaper
+/// window lives in, so the icons are hidden by the video: the X11 backend
+/// mirrors them onto the wallpaper instead (`daemon::caja_mirror`).
+pub fn is_xfce() -> bool {
+    classify_xfce(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+    )
+}
+
+/// Pure Xfce classification. A whole segment of the colon-separated list must
+/// be `XFCE` (or `XUBUNTU`), so no desktop whose name merely *contains* those
+/// letters matches.
+fn classify_xfce(current_desktop: Option<&str>, session_desktop: Option<&str>) -> bool {
+    [current_desktop, session_desktop]
+        .into_iter()
+        .flatten()
+        .any(|v| {
+            v.split(':').any(|seg| {
+                let s = seg.trim();
+                s.eq_ignore_ascii_case("xfce") || s.eq_ignore_ascii_case("xubuntu")
+            })
+        })
+}
+
+/// Is this session KDE Plasma? plasmashell draws the desktop — wallpaper and
+/// icons — into one opaque full-screen surface (X11 desktop layer / Wayland
+/// layer-shell background) that no window of ours can sit under or beside, so
+/// on Plasma the wallpaper is set through plasmashell itself (issue #44); see
+/// `daemon::kde_desktop`.
+pub fn is_kde() -> bool {
+    classify_kde(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+    )
+}
+
+/// Pure Plasma classification. A whole segment of the colon-separated list
+/// must be one of Plasma's own names (`KDE` from `XDG_CURRENT_DESKTOP`;
+/// `plasma`/`plasmax11`/`plasmawayland` from some distros' `XDG_SESSION_DESKTOP`).
+fn classify_kde(current_desktop: Option<&str>, session_desktop: Option<&str>) -> bool {
+    [current_desktop, session_desktop]
+        .into_iter()
+        .flatten()
+        .any(|v| {
+            v.split(':').any(|seg| {
+                matches!(
+                    seg.trim().to_ascii_lowercase().as_str(),
+                    "kde" | "plasma" | "plasmax11" | "plasmawayland"
+                )
+            })
+        })
+}
+
 /// Is this session Cinnamon (Linux Mint)? Its muffin compositor has no
 /// layer-shell on Wayland and reads its own background schema.
 pub fn is_cinnamon() -> bool {
@@ -509,6 +564,46 @@ mod tests {
             assert!(!classify_mate(Some(d), None), "current {d}");
         }
         assert!(!classify_mate(None, None));
+    }
+
+    #[test]
+    fn xfce_detection() {
+        for d in ["XFCE", "xfce", "X-Generic:XFCE", "XFCE:Xubuntu", "Xubuntu"] {
+            assert!(classify_xfce(Some(d), None), "current {d}");
+            assert!(classify_xfce(None, Some(d)), "session {d}");
+        }
+        for d in [
+            "GNOME",
+            "MATE",
+            "xfce4-ish",
+            "notxfce",
+            "LXQt",
+            "Deepin",
+            "",
+        ] {
+            assert!(!classify_xfce(Some(d), None), "current {d}");
+        }
+        assert!(!classify_xfce(None, None));
+    }
+
+    #[test]
+    fn kde_detection() {
+        for d in ["KDE", "kde", "plasma", "ubuntu:KDE", "plasmax11"] {
+            assert!(classify_kde(Some(d), None), "current {d}");
+            assert!(classify_kde(None, Some(d)), "session {d}");
+        }
+        for d in [
+            "GNOME",
+            "X-Cinnamon",
+            "kdelike",
+            "KDE-ish",
+            "Deepin",
+            "COSMIC",
+            "",
+        ] {
+            assert!(!classify_kde(Some(d), None), "current {d}");
+        }
+        assert!(!classify_kde(None, None));
     }
 
     const UBUNTU_XORG: &str = "[Desktop Entry]\n\

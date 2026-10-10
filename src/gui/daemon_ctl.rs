@@ -46,8 +46,9 @@ const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Apply config, starting the daemon first if not running. Blocking — callers
-/// MUST run this off the GTK main thread; see `apply_async`.
-fn apply_blocking() -> Result<()> {
+/// MUST run this off the GTK main thread; see `apply_async`. (`fresco next`
+/// and friends call it directly: they never start GTK at all.)
+pub(super) fn apply_blocking() -> Result<()> {
     if ipc::daemon_alive() {
         let resp = ipc::request_with_timeout(&Request::Apply, APPLY_TIMEOUT)?;
         if let Response::Err { message } = resp {

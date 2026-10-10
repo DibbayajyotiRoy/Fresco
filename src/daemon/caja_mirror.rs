@@ -82,6 +82,28 @@
 //! `opacity` makes the window invisible to KWin (the offscreen copy we mirror
 //! from is unaffected), with a raise of our own windows as a second line.
 //!
+//! # Xfce
+//!
+//! xfdesktop paints its backdrop and its icons into one opaque 24-bit window
+//! ([`Desktop::Xfce`]) — and, since 4.19, into **one such window per monitor**,
+//! so the mirror holds a *list* of sources, each with its own redirect, damage
+//! object and offscreen pixmap. A source's pixels land on every wallpaper window
+//! its geometry covers (`refresh` intersects each source with each icon window),
+//! which for MATE's single window, and for the old screen-wide xfdesktop window,
+//! is the same arithmetic as before. Windows that appear later (a monitor
+//! plugged in, xfdesktop restarted) are picked up when the stack changes. Two
+//! things differ from MATE:
+//!
+//! * there is **no stacking to guard**. Our wallpaper windows keep their
+//!   `DESKTOP` + `BELOW` declaration, which xfwm4 files in a layer above the
+//!   one it keeps xfdesktop's `DESKTOP` window in; layers are strict, and xfwm4
+//!   ignores restack requests for a `DESKTOP` window, so a click never lifts
+//!   xfdesktop over us. The icons are hidden by that layer, not by a race;
+//! * the key-colour background is set over xfconf (`xfconf::apply`), on
+//!   every monitor/workspace key xfdesktop reads, and put back from a saved
+//!   copy. And since dialogs xfdesktop opens share its WM_CLASS, a source must
+//!   also be of window type `DESKTOP`, or a dialog would be mirrored too.
+//!
 //! # How a refresh paints
 //!
 //! Each icon window has a *staging pixmap* as its background. A refresh copies
@@ -115,6 +137,7 @@ use super::x11win;
 
 mod mask;
 mod opacity;
+mod xfconf;
 #[cfg(test)]
 mod xvfb_harness;
 
@@ -135,6 +158,9 @@ pub enum Desktop {
     Caja,
     /// Deepin: dde-shell's 32-bit ARGB desktop window, background via DBus.
     Dde,
+    /// Xfce: xfdesktop's 24-bit desktop window — one per monitor — background
+    /// via xfconf.
+    Xfce,
 }
 
 impl Desktop {
@@ -142,6 +168,7 @@ impl Desktop {
         match self {
             Desktop::Caja => "MATE",
             Desktop::Dde => "DDE",
+            Desktop::Xfce => "Xfce",
         }
     }
 
@@ -294,7 +321,8 @@ impl Mirror {
     }
 }
 
-/// Caja's desktop window, redirected offscreen.
+/// A desktop window being mirrored (Caja's, dde-shell's, or one of xfdesktop's
+/// per-monitor windows), redirected offscreen.
 struct Caja {
     window: Window,
     pixmap: Pixmap,
@@ -375,7 +403,13 @@ struct State {
     stacking: Atom,
     wake: Window,
     msb_first: bool,
-    caja: Option<Caja>,
+    /// `_NET_WM_WINDOW_TYPE` and its `_DESKTOP` value: Xfce sources must carry
+    /// it (see `find_sources`).
+    wm_type: Atom,
+    type_desktop: Atom,
+    /// The desktop windows being mirrored: one on MATE and Deepin, one per
+    /// monitor on Xfce. Empty until the first is found.
+    sources: Vec<Caja>,
     children: Vec<Child>,
     /// The wallpaper windows the daemon last asked us to cover.
     parents: Vec<Parent>,
@@ -411,6 +445,14 @@ fn run(desktop: Desktop, rx: Receiver<Cmd>, ready: &Sender<Result<Window, String
         .reply()?
         .atom;
     let opacity_atom = conn.intern_atom(false, opacity::ATOM_NAME)?.reply()?.atom;
+    let wm_type = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_TYPE")?
+        .reply()?
+        .atom;
+    let type_desktop = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_TYPE_DESKTOP")?
+        .reply()?
+        .atom;
     let msb_first = conn.setup().image_byte_order == ImageOrder::MSB_FIRST;
 
     let wake = conn.generate_id()?;
@@ -449,7 +491,9 @@ fn run(desktop: Desktop, rx: Receiver<Cmd>, ready: &Sender<Result<Window, String
         stacking,
         wake,
         msb_first,
-        caja: None,
+        wm_type,
+        type_desktop,
+        sources: Vec::new(),
         children: Vec::new(),
         parents: Vec::new(),
         child_fmt: None,
@@ -474,7 +518,7 @@ fn run(desktop: Desktop, rx: Receiver<Cmd>, ready: &Sender<Result<Window, String
                 Err(TryRecvError::Empty) => break,
             }
         }
-        if st.caja.is_none() {
+        if st.sources.is_empty() {
             st.attach()?;
             check_stack = true;
         }
@@ -512,6 +556,11 @@ fn run(desktop: Desktop, rx: Receiver<Cmd>, ready: &Sender<Result<Window, String
         let before = st.rechecks.len();
         st.rechecks.retain(|&t| t > woke);
         st.stack_dirty |= st.rechecks.len() != before;
+        // Xfce has a desktop window per monitor, and they come and go with the
+        // monitors (and with xfdesktop): look for new ones when the stack moved.
+        if st.desktop == Desktop::Xfce && st.stack_dirty {
+            st.attach()?;
+        }
         // Before the slow part: a desktop window that has come up over the
         // wallpaper is on screen until this runs. Caja is checked on every
         // wake, as it always was; Deepin when an event said the stack moved.
@@ -550,20 +599,29 @@ impl Drop for State {
 }
 
 impl State {
-    /// Find Caja's desktop window and start mirroring it. A no-op while Caja
-    /// is not up yet — a stacking change wakes us when it arrives.
+    /// Find the desktop window(s) and start mirroring those not mirrored yet.
+    /// A no-op while the desktop is not up yet — a stacking change wakes us
+    /// when it arrives.
     fn attach(&mut self) -> Result<()> {
-        let Some(window) = self.find_caja() else {
-            return Ok(());
-        };
+        for window in self.find_sources() {
+            if !self.sources.iter().any(|s| s.window == window) {
+                self.attach_one(window)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Start mirroring one desktop window.
+    fn attach_one(&mut self, window: Window) -> Result<()> {
         let conn = &self.conn;
         let Some(geom) = conn.get_geometry(window)?.reply().ok() else {
             return Ok(());
         };
-        if self.desktop == Desktop::Caja && geom.depth != self.root_depth {
+        if self.desktop != Desktop::Dde && geom.depth != self.root_depth {
             bail!(
-                "Caja's desktop window is {}-bit on a {}-bit screen; it cannot be copied \
+                "the {} desktop window is {}-bit on a {}-bit screen; it cannot be copied \
                  onto the wallpaper",
+                self.desktop.label(),
                 geom.depth,
                 self.root_depth
             );
@@ -660,7 +718,7 @@ impl State {
         // paint itself into it. The damage that follows drives the first copy.
         conn.clear_area(true, window, 0, 0, 0, 0)?;
         conn.flush()?;
-        self.caja = Some(Caja {
+        self.sources.push(Caja {
             window,
             pixmap,
             damage,
@@ -674,8 +732,14 @@ impl State {
             late_sample: (self.desktop == Desktop::Dde).then(|| Instant::now() + LATE_SAMPLE),
         });
         log::info!(
-            "{}: mirroring the desktop icons over the wallpaper",
-            self.desktop.label()
+            "{}: mirroring the desktop icons of window {window:#x} ({}x{}{:+}{:+}, {}-bit) \
+             over the wallpaper",
+            self.desktop.label(),
+            geom.width,
+            geom.height,
+            origin.dst_x,
+            origin.dst_y,
+            geom.depth
         );
         if self.desktop == Desktop::Dde {
             // Children exist only once the source's depth is known.
@@ -747,14 +811,14 @@ impl State {
     /// whether the background change reached the window (and survived its
     /// image cache).
     fn late_diagnostics(&mut self) {
-        let due = match &self.caja {
-            Some(c) => c.late_sample.is_some_and(|t| Instant::now() >= t),
-            None => false,
-        };
-        if !due {
+        let now = Instant::now();
+        let Some(caja) = self
+            .sources
+            .iter_mut()
+            .find(|c| c.late_sample.is_some_and(|t| now >= t))
+        else {
             return;
-        }
-        let Some(caja) = &mut self.caja else { return };
+        };
         caja.late_sample = None;
         let window = caja.window;
         let Some(geom) = self
@@ -777,7 +841,7 @@ impl State {
 
     /// Sample the redirected window: 16 evenly spaced rows, every 4th pixel.
     fn sample_pixmap(&self) -> Option<Sample> {
-        let caja = self.caja.as_ref()?;
+        let caja = self.sources.first()?;
         let (w, h) = (caja.rect.width, caja.rect.height);
         if w == 0 || h == 0 {
             return None;
@@ -819,15 +883,38 @@ impl State {
         Some(s)
     }
 
-    fn find_caja(&self) -> Option<Window> {
-        let stack = self.stack();
-        stack.into_iter().find(|&w| {
-            self.conn
+    /// The desktop windows to mirror, lowest in the stack first: the first
+    /// match for Caja and dde-shell (one window each), every match for
+    /// xfdesktop (one per monitor). An xfdesktop window must also be of type
+    /// `DESKTOP`: its dialogs share the WM_CLASS and must not be mirrored.
+    fn find_sources(&self) -> Vec<Window> {
+        let many = self.desktop == Desktop::Xfce;
+        let mut found = Vec::new();
+        for w in self.stack() {
+            let class_ok = self
+                .conn
                 .get_property(false, w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 1024)
                 .ok()
                 .and_then(|c| c.reply().ok())
-                .is_some_and(|p| self.desktop.matches(&p.value))
-        })
+                .is_some_and(|p| self.desktop.matches(&p.value));
+            if class_ok && (!many || self.is_desktop_type(w)) {
+                found.push(w);
+                if !many {
+                    break;
+                }
+            }
+        }
+        found
+    }
+
+    /// Whether `window`'s `_NET_WM_WINDOW_TYPE` lists `_NET_WM_WINDOW_TYPE_DESKTOP`.
+    fn is_desktop_type(&self, window: Window) -> bool {
+        self.conn
+            .get_property(false, window, self.wm_type, AtomEnum::ATOM, 0, 32)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .and_then(|r| r.value32().map(|mut v| v.any(|a| a == self.type_desktop)))
+            .unwrap_or(false)
     }
 
     /// `_NET_CLIENT_LIST_STACKING`, bottom-most first; empty when unreadable.
@@ -848,7 +935,11 @@ impl State {
     /// own windows are raised as well — the move verified on Deepin 25 — and
     /// the stack is looked at again shortly after, in case KWin was slow.
     fn guard_stacking(&mut self, woke: Instant) -> Result<()> {
-        let Some(caja) = &self.caja else {
+        // Xfce: nothing to guard. xfwm4 keeps xfdesktop in a layer below ours.
+        if self.desktop == Desktop::Xfce {
+            return Ok(());
+        }
+        let Some(caja) = self.sources.first() else {
             return Ok(());
         };
         let window = caja.window;
@@ -915,7 +1006,7 @@ impl State {
     /// When the loop next has to wake without an event, and how often to look
     /// for one meanwhile. `None` means block until something arrives.
     fn next_wake(&self) -> Option<(Instant, Duration)> {
-        let late = self.caja.as_ref().and_then(|c| c.late_sample);
+        let late = self.sources.iter().filter_map(|c| c.late_sample).min();
         let recheck = self.rechecks.iter().min().copied();
         let deadline = [late, recheck].into_iter().flatten().min()?;
         // A re-check is worth a finer poll than the diagnostic sample.
@@ -942,7 +1033,7 @@ impl State {
     /// created before the source window is attached, because the children need
     /// its depth and visual.
     fn sync_children(&mut self) -> Result<()> {
-        if self.desktop == Desktop::Dde && self.caja.is_none() {
+        if self.desktop == Desktop::Dde && self.sources.is_empty() {
             return Ok(());
         }
         let parents = self.parents.clone();
@@ -964,13 +1055,19 @@ impl State {
             match self.create_child(p) {
                 Ok(c) => self.children.push(c),
                 Err(e) => log::warn!(
-                    "MATE: could not add icons over window {:#x}: {e:#}",
+                    "{}: could not add icons over window {:#x}: {e:#}",
+                    self.desktop.label(),
                     p.window
                 ),
             }
         }
-        if let Some(caja) = &self.caja {
-            let r = caja.rect;
+        // Everything the sources cover, in one go; `refresh` cuts it back to
+        // each source.
+        let all = self
+            .sources
+            .iter()
+            .fold(None, |acc, s| Some(union(acc, s.rect)));
+        if let Some(r) = all {
             self.refresh(r)?;
         }
         self.conn.flush()?;
@@ -1082,16 +1179,14 @@ impl State {
     ) -> Result<()> {
         match ev {
             Event::DamageNotify(e) => {
-                if let Some(caja) = &self.caja {
-                    if e.damage == caja.damage {
-                        self.conn.damage_subtract(caja.damage, NONE, NONE)?;
-                        let area = Rectangle {
-                            x: caja.rect.x.saturating_add(e.area.x),
-                            y: caja.rect.y.saturating_add(e.area.y),
-                            ..e.area
-                        };
-                        *dirty = Some(union(*dirty, area));
-                    }
+                if let Some(caja) = self.sources.iter().find(|c| c.damage == e.damage) {
+                    self.conn.damage_subtract(caja.damage, NONE, NONE)?;
+                    let area = Rectangle {
+                        x: caja.rect.x.saturating_add(e.area.x),
+                        y: caja.rect.y.saturating_add(e.area.y),
+                        ..e.area
+                    };
+                    *dirty = Some(union(*dirty, area));
                 }
             }
             Event::PropertyNotify(e) if e.window == self.root && e.atom == self.stacking => {
@@ -1113,27 +1208,34 @@ impl State {
                 }
             }
             Event::ConfigureNotify(e) => {
-                let Some(caja) = &self.caja else {
+                let Some(i) = self
+                    .sources
+                    .iter()
+                    .position(|c| c.window == e.window || c.frame == Some(e.window))
+                else {
                     return Ok(());
                 };
-                let is_desktop = e.window == caja.window;
-                if is_desktop || caja.frame == Some(e.window) {
-                    // Restacked (or moved): look at the stack without waiting
-                    // for the window manager to update the property.
-                    self.stack_dirty = true;
-                }
-                if is_desktop {
-                    self.desktop_reconfigured(e.width, e.height, dirty)?;
+                // Restacked (or moved): look at the stack without waiting
+                // for the window manager to update the property.
+                self.stack_dirty = true;
+                if self.sources[i].window == e.window {
+                    self.desktop_reconfigured(i, e.width, e.height, dirty)?;
                 }
             }
             Event::DestroyNotify(e) => {
-                if self.caja.as_ref().is_some_and(|c| c.window == e.window) {
+                if let Some(i) = self.sources.iter().position(|c| c.window == e.window) {
                     log::info!(
-                        "{}: the desktop window went away; waiting for it to return",
-                        self.desktop.label()
+                        "{}: the desktop window {:#x} went away; waiting for it to return",
+                        self.desktop.label(),
+                        e.window
                     );
-                    if let Some(caja) = self.caja.take() {
-                        let _ = self.conn.free_pixmap(caja.pixmap);
+                    let gone = self.sources.remove(i);
+                    let _ = self.conn.free_pixmap(gone.pixmap);
+                    // Xfce: the other monitors' windows are still there. Their
+                    // masks are cleared below with the rest, so have them read
+                    // again what they cover.
+                    for s in &self.sources {
+                        *dirty = Some(union(*dirty, s.rect));
                     }
                     // The window took its opacity with it; only the file is left.
                     if let Some(h) = self.hider.take() {
@@ -1175,11 +1277,12 @@ impl State {
     /// origin is asked for rather than read from the event.
     fn desktop_reconfigured(
         &mut self,
+        source: usize,
         width: u16,
         height: u16,
         dirty: &mut Option<Rectangle>,
     ) -> Result<()> {
-        let Some(caja) = &mut self.caja else {
+        let Some(caja) = self.sources.get_mut(source) else {
             return Ok(());
         };
         let origin = self
@@ -1210,10 +1313,10 @@ impl State {
         Ok(())
     }
 
-    /// Re-read `area` (root coordinates) of Caja's offscreen copy and bring
-    /// every icon window it touches up to date.
+    /// Re-read `area` (root coordinates) of the sources' offscreen copies and
+    /// bring every icon window it touches up to date.
     ///
-    /// Per icon window: read the new pixels and work out which of them are
+    /// Per source and icon window: read the new pixels and work out which of them are
     /// visible; copy them into the staging pixmap that is the window's
     /// background; change the shape only if the visible pixels differ from
     /// what the shape already has; then clear the window, which has the server
@@ -1221,51 +1324,50 @@ impl State {
     /// from pixels already in place, so the result does not hang on any later
     /// Expose.
     fn refresh(&mut self, area: Rectangle) -> Result<()> {
-        let Some(caja) = &self.caja else {
-            return Ok(());
-        };
-        let Some(area) = intersect(area, caja.rect) else {
-            return Ok(());
-        };
         let conn = &self.conn;
         let (desktop, msb_first) = (self.desktop, self.msb_first);
-        for c in &mut self.children {
-            let Some(part) = intersect(area, c.parent.rect()) else {
+        for caja in &self.sources {
+            let Some(area) = intersect(area, caja.rect) else {
                 continue;
             };
-            let Some(changed) = read_part(conn, caja, c, part, desktop, msb_first)? else {
-                // One unreadable child must not poison the rest: skip it only
-                // (its cache is untouched, so it catches up on the next
-                // damage) instead of abandoning this and every later parent —
-                // that skew read as "only some icons repaint" on multi-monitor
-                // desktops (issue #33).
-                continue;
-            };
-            let (dst_x, dst_y) = (part.x - c.parent.x, part.y - c.parent.y);
-            conn.copy_area(
-                caja.pixmap,
-                c.staging,
-                c.gc,
-                part.x - caja.rect.x,
-                part.y - caja.rect.y,
-                dst_x,
-                dst_y,
-                part.width,
-                part.height,
-            )?;
-            if changed {
-                let rects = mask_rects(&c.mask, c.parent.width, c.parent.height);
-                conn.shape_rectangles(
-                    shape::SO::SET,
-                    shape::SK::BOUNDING,
-                    ClipOrdering::YX_SORTED,
-                    c.window,
-                    0,
-                    0,
-                    &rects,
+            for c in &mut self.children {
+                let Some(part) = intersect(area, c.parent.rect()) else {
+                    continue;
+                };
+                let Some(changed) = read_part(conn, caja, c, part, desktop, msb_first)? else {
+                    // One unreadable child must not poison the rest: skip it only
+                    // (its cache is untouched, so it catches up on the next
+                    // damage) instead of abandoning this and every later parent —
+                    // that skew read as "only some icons repaint" on multi-monitor
+                    // desktops (issue #33).
+                    continue;
+                };
+                let (dst_x, dst_y) = (part.x - c.parent.x, part.y - c.parent.y);
+                conn.copy_area(
+                    caja.pixmap,
+                    c.staging,
+                    c.gc,
+                    part.x - caja.rect.x,
+                    part.y - caja.rect.y,
+                    dst_x,
+                    dst_y,
+                    part.width,
+                    part.height,
                 )?;
+                if changed {
+                    let rects = mask_rects(&c.mask, c.parent.width, c.parent.height);
+                    conn.shape_rectangles(
+                        shape::SO::SET,
+                        shape::SK::BOUNDING,
+                        ClipOrdering::YX_SORTED,
+                        c.window,
+                        0,
+                        0,
+                        &rects,
+                    )?;
+                }
+                conn.clear_area(false, c.window, dst_x, dst_y, part.width, part.height)?;
             }
-            conn.clear_area(false, c.window, dst_x, dst_y, part.width, part.height)?;
         }
         conn.flush()?;
         Ok(())
@@ -1327,7 +1429,7 @@ fn read_part(
             for (dx, px) in line.chunks_exact(4).enumerate() {
                 let i = py * pw + px0 + dx;
                 match desktop {
-                    Desktop::Caja => {
+                    Desktop::Caja | Desktop::Xfce => {
                         if let Some(m) = c.mask.get_mut(i) {
                             let visible = !is_key(px, msb_first, desktop);
                             changed |= *m != visible;
@@ -1403,15 +1505,15 @@ fn pixel_rgb(px: &[u8], msb_first: bool) -> [u8; 3] {
 
 /// Whether a 32-bit ZPixmap pixel is the key colour, for either byte order.
 ///
-/// Caja: the three colour bytes must equal the key exactly (the pad byte is
-/// ignored). Deepin: alpha is ignored and each channel may be off by
+/// Caja and xfdesktop: the three colour bytes must equal the key exactly (the
+/// pad byte is ignored). Deepin: alpha is ignored and each channel may be off by
 /// [`DDE_TOLERANCE`] — which also means near-black (0..=3) counts as key there,
 /// so a pure-black label shadow on Deepin is dropped; the icons themselves and
 /// their white labels are unaffected.
 fn is_key(px: &[u8], msb_first: bool, desktop: Desktop) -> bool {
     let rgb = pixel_rgb(px, msb_first);
     match desktop {
-        Desktop::Caja => rgb == KEY,
+        Desktop::Caja | Desktop::Xfce => rgb == KEY,
         Desktop::Dde => rgb
             .iter()
             .zip(KEY)
@@ -1558,13 +1660,20 @@ pub fn apply_key(desktop: Desktop, monitors: &[String]) -> bool {
             KEY_ACTIVE.store(true, Ordering::SeqCst);
             true
         }
+        Desktop::Xfce => {
+            if !xfconf::apply(monitors) {
+                return false;
+            }
+            KEY_ACTIVE.store(true, Ordering::SeqCst);
+            true
+        }
     }
 }
 
 /// Undo [`apply_key`] for `desktop`. Idempotent; a no-op when nothing was saved.
 pub fn restore_key_background(desktop: Desktop) {
     match desktop {
-        Desktop::Caja => restore_background(),
+        Desktop::Caja | Desktop::Xfce => restore_background(),
         Desktop::Dde => {
             KEY_ACTIVE.store(false, Ordering::SeqCst);
             super::dde::restore();
@@ -1598,11 +1707,12 @@ fn apply_key_mate() -> bool {
     true
 }
 
-/// Put the user's MATE background back. A no-op when nothing was saved — so it
-/// is safe on every desktop and at every start, which is how a crashed run's
-/// key colour gets cleaned up.
+/// Put the user's MATE background back, and Xfce's xfconf backdrop. A no-op
+/// when nothing was saved — so it is safe on every desktop and at every start,
+/// which is how a crashed run's key colour gets cleaned up.
 pub fn restore_background() {
     KEY_ACTIVE.store(false, Ordering::SeqCst);
+    xfconf::restore();
     let sf = bg_state_file();
     let Ok(text) = std::fs::read_to_string(&sf) else {
         return;
@@ -1686,6 +1796,23 @@ mod tests {
         assert!(Desktop::Caja.matches(caja));
         assert!(!Desktop::Caja.matches(dde));
         assert!(!Desktop::Dde.matches(b"dde-shell/dock\0org.deepin.dde-shell\0"));
+        let xfdesktop = b"xfdesktop\0Xfdesktop\0";
+        assert!(Desktop::Xfce.matches(xfdesktop));
+        assert!(!Desktop::Xfce.matches(caja));
+        assert!(!Desktop::Xfce.matches(dde));
+        assert!(!Desktop::Caja.matches(xfdesktop));
+        assert!(!Desktop::Dde.matches(xfdesktop));
+    }
+
+    #[test]
+    fn xfce_matches_the_key_exactly_like_mate() {
+        let x = Desktop::Xfce;
+        assert!(is_key(&[1, 1, 1, 0], false, x));
+        assert!(is_key(&[0, 1, 1, 1], true, x));
+        // A near miss and pure black are icon pixels, not the key.
+        assert!(!is_key(&[3, 3, 3, 255], false, x));
+        assert!(!is_key(&[0, 0, 0, 0], false, x));
+        assert_eq!(x.label(), "Xfce");
     }
 
     #[test]

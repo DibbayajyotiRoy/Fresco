@@ -4,6 +4,99 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.49] — 2026-10-10
+
+### Added
+- **`fresco next`, `fresco prev` and `fresco random` switch the wallpaper
+  from a keybinding, without opening the app** (issue #45). They step through
+  your library in the order the gallery shows it (the folder you have open is
+  respected, and under the Recently used sort they follow your manual order),
+  and `random` never picks the wallpaper that is already playing. If the
+  service isn't running they start it. `docs/SCRIPTING.md` has a Sway
+  `bindsym` example.
+- **`fresco --version`, `-V`, `-v` and `version` (and the same for `frescod`)
+  print the version and exit** (issue #46).
+- **The lock screen can have its own wallpaper, separate from the desktop**
+  (issue #37). On the Lock Screen page, "Lock screen wallpaper" is either
+  "Same as desktop wallpaper" (the default, so nothing changes until you pick)
+  or any image or video from your library. It applies to Sway, Hyprland and
+  the other wlroots compositors, KDE Plasma and deepin.
+- **A "Pause when an app is maximized" switch** (off by default). Fullscreen
+  apps always pause the wallpaper; with this on, a maximized window that
+  covers a display pauses it too, which saves CPU and GPU on integrated
+  graphics. It works on X11, wlroots compositors and COSMIC, and a covered
+  display also stops redrawing its widgets. Flipping it applies within about
+  two seconds, without restarting the video.
+- **On KDE Plasma the desktop video now pauses while an app is fullscreen on
+  that screen**, and while one is maximized when the new switch is on. The
+  pausing is done by the Plasma wallpaper plugin itself.
+- **`fresco doctor` now has rows for the GTK media backend and ffmpeg**, the
+  two things hover previews need.
+
+### Changed
+- **On KDE Plasma (X11 and Wayland) the wallpaper is now shown through
+  Fresco's own Plasma wallpaper plugin** (issue #44). Plasma paints the
+  desktop and its icons into one opaque window that covered Fresco's, so the
+  video never showed. Fresco now selects the plugin on every screen through
+  plasmashell, and puts your previous Plasma wallpaper back when you press
+  Stop. The plugin is now named "Fresco" in Plasma's wallpaper picker, and
+  `qml6-module-qtmultimedia` is a Recommends of the `.deb`. This path plays
+  video with Qt rather than mpv, so on Plasma there is no hardware-decode
+  tuning, crop, rotation or transitions, a playlist plays its first file, and
+  every screen shows the same wallpaper. `FRESCO_KDE_DESKTOP=0` keeps the old
+  backend.
+- **On deepin, the lock-screen picture now carries only your dim.** Deepin
+  applies its own blur and tint on top, so Fresco no longer bakes the blur in
+  as well.
+- **The `.deb` now depends on `libgtk-4-media-gstreamer`** (issue #42).
+- **`--check` install hints use your distro's package manager** (apt, dnf,
+  pacman or zypper) instead of assuming apt (issue #41). The AUR packages no
+  longer list the obsolete `libva-intel-driver` as an optional dependency.
+- **The app now prints warnings to the terminal by default**, where it used
+  to print only errors.
+
+### Fixed
+- **Video previews on hover never played on deepin** (issue #42). GTK's media
+  backend is a separate package that deepin's installer skips (it ignores
+  Recommends), and GTK failed without saying so, so every card stayed on its
+  still frame. The package is now a dependency, and a preview that can't play
+  logs why.
+- **The deepin 25 lock screen still showed deepin's own background** (issue
+  #37). Deepin's sandboxed blur service couldn't read the frame Fresco wrote,
+  so the lock screen quietly fell back to its default picture even though
+  Fresco reported success. The frame is now copied into deepin's own
+  wallpaper store (one copy, removed on Stop), and the log says if the blur
+  service still can't read it.
+- **The deepin Lock Screen preview now shows your own desktop wallpaper when
+  you haven't chosen a Fresco wallpaper**, instead of Fresco's own lock frame.
+- **Desktop icons were hidden at login on Cinnamon (X11)** — still broken in
+  1.1.48 (issue #39). At login Cinnamon's compositor doesn't re-sort the
+  desktop windows until a normal window appears, so the wallpaper kept
+  painting over the icons. Fresco now briefly shows an invisible helper
+  window to force the re-sort.
+- **On Xfce the desktop icons are now visible over the live wallpaper.**
+  xfdesktop's icons are mirrored onto the video on each monitor; while the
+  wallpaper plays, the Xfce backdrop is set to a key colour, and your own
+  backdrop is restored on Stop.
+- **On KDE Plasma, the "Fresco-lockscreen" entry in the wallpaper picker
+  turned the desktop black.** It is now a working wallpaper named "Fresco".
+- **`frescod --check` no longer reports VA-API as missing just because the
+  `vainfo` tool isn't installed** (issue #41). It also reports NVDEC on
+  NVIDIA, and its decode line shows the decoder mpv is really using, or
+  "software".
+- **The docs no longer claim that KWin supports the wlr fullscreen protocol.**
+  It doesn't expose it to ordinary apps, which is why Plasma pauses through
+  its plugin instead.
+- **The Pause on battery switch now takes effect while a wallpaper is
+  playing.** It used to wait for the next wallpaper change; both pause
+  switches now apply within about two seconds.
+
+### Notes for testers
+Not yet confirmed on real hardware, and the most useful things to check:
+Cinnamon desktop icons at login (#39), Plasma 6 video and the fullscreen
+auto-pause (#44), the deepin 25 lock screen (#37), and Xfce 4.20 desktop
+icons.
+
 ## [1.1.48] — 2026-10-05
 
 ### Changed

@@ -807,9 +807,11 @@ pub struct Daemon {
     /// after the user clicks the desktop, instead of burying them again on the
     /// next stacking pass.
     dde_peek: dde::IconPeek,
-    /// MATE (issue #18) [`dde::Mode::CajaMirror`] and Deepin (issue #33)
-    /// [`dde::Mode::DdeMirror`] only: the thread that copies the desktop's icons onto the wallpaper windows and keeps Caja below
-    /// them. `None` in every other mode, and before the first rebuild.
+    /// MATE (issue #18) [`dde::Mode::CajaMirror`], Deepin (issue #33)
+    /// [`dde::Mode::DdeMirror`] and Xfce [`dde::Mode::XfceMirror`] only: the
+    /// thread that copies the desktop's icons onto the wallpaper windows (and,
+    /// on MATE and Deepin, keeps the desktop window below them). `None` in
+    /// every other mode, and before the first rebuild.
     caja_mirror: Option<caja_mirror::Mirror>,
     /// Set once the icon mirror has failed (a desktop window it cannot copy,
     /// a background it cannot set). Every later rebuild then stays in restack mode
@@ -1133,7 +1135,11 @@ impl Daemon {
         // Deepin DDE (issue #2): dde-shell's own opaque desktop window covers
         // ours. Make DDE's wallpaper transparent (or restack above it). MATE
         // (issue #18): Caja's desktop window does the same, and is restacked.
-        if (crate::capability::is_deepin_dde() || crate::capability::is_mate())
+        // Xfce: xfdesktop's windows sit in a layer below ours instead, and
+        // only their icons need bringing over.
+        if (crate::capability::is_deepin_dde()
+            || crate::capability::is_mate()
+            || crate::capability::is_xfce())
             && !self.renderers.is_empty()
         {
             let monitors: Vec<String> = self.monitors.iter().map(|m| m.connector.clone()).collect();
@@ -1180,16 +1186,20 @@ impl Daemon {
     ///
     /// Outside [`dde::Mode::CajaMirror`] (and with no renderers, where there is
     /// nothing to draw the icons on) any running mirror is stopped and the
-    /// user's MATE background put back. That restore is a no-op when nothing
-    /// was saved, so it is also what cleans up the key colour a crashed run
-    /// left behind when this run does not mirror.
+    /// user's MATE (or Xfce) background put back. That restore is a no-op when
+    /// nothing was saved, so it is also what cleans up the key colour a
+    /// crashed run left behind when this run does not mirror.
     fn sync_caja_mirror(&mut self) {
-        if self.dde_mode.mirror_desktop().is_some() && self.caja_mirror_gave_up {
+        if let Some(d) = self
+            .dde_mode
+            .mirror_desktop()
+            .filter(|_| self.caja_mirror_gave_up)
+        {
             // `dde::apply` re-offers the mirror on every rebuild; it already
             // failed once in this session, and nothing about it has changed.
             // The windows are raised above the desktop already (restack is the
             // first half of the mirror mode), so restack just takes over.
-            self.dde_mode = dde::Mode::Restack;
+            self.dde_mode = mode_after_mirror_gave_up(d);
         }
         let Some(desktop) = self
             .dde_mode
@@ -1259,22 +1269,29 @@ impl Daemon {
     /// The icon mirror cannot run: stop it, give the desktop the user's
     /// background back, and hide the icons behind the wallpaper the verified
     /// way, [`dde::Mode::Restack`], where a click on the desktop peeks at them.
+    /// (Xfce has no peek: its icons stay hidden, and the stacking is left as
+    /// it always was — see [`mode_after_mirror_gave_up`].)
     /// No retry: `caja_mirror_gave_up` keeps every later rebuild in restack.
     fn fall_back_to_restack(&mut self, desktop: caja_mirror::Desktop, reason: &str) {
         let name = match desktop {
             caja_mirror::Desktop::Caja => "MATE",
             caja_mirror::Desktop::Dde => "DDE",
+            caja_mirror::Desktop::Xfce => "Xfce",
+        };
+        let peek = if desktop == caja_mirror::Desktop::Xfce {
+            ""
+        } else {
+            " — clicking the desktop brings them back for `dde_icon_peek_secs` seconds"
         };
         log::warn!(
             "{name}: cannot draw the desktop icons over the wallpaper ({reason}); they are \
-             hidden while it plays — clicking the desktop brings them back for \
-             `dde_icon_peek_secs` seconds"
+             hidden while it plays{peek}"
         );
         if let Some(m) = self.caja_mirror.take() {
             m.stop(&self.conn);
         }
         self.caja_mirror_gave_up = true;
-        self.dde_mode = dde::Mode::Restack;
+        self.dde_mode = mode_after_mirror_gave_up(desktop);
         caja_mirror::restore_key_background(desktop);
         if desktop == caja_mirror::Desktop::Caja {
             // Caja shows the still frame during every peek.
@@ -1998,7 +2015,8 @@ impl Daemon {
         // undoes the redirect, so Caja renders on screen again), then swap the
         // key colour back for the user's own background. After
         // `overview::restore`, so the last word in `org.mate.background` is
-        // the user's saved picture; a no-op when the mirror never ran.
+        // the user's saved picture; a no-op when the mirror never ran. The
+        // same call puts Xfce's xfconf backdrop back.
         if let Some(m) = self.caja_mirror.take() {
             m.stop(&self.conn);
         }
@@ -2014,6 +2032,18 @@ impl Daemon {
         self.teardown_renderers();
         std::fs::remove_file(crate::ipc::socket_path()).ok();
         log::info!("frescod stopped");
+    }
+}
+
+/// The stacking mode that takes over once the icon mirror has given up.
+/// MATE and Deepin: [`dde::Mode::Restack`], the verified way to keep the
+/// wallpaper above the desktop window. Xfce: [`dde::Mode::Inactive`] — the
+/// wallpaper is above xfdesktop already, by layer, and the periodic raise
+/// would only stir xfwm4's stack for nothing.
+fn mode_after_mirror_gave_up(desktop: caja_mirror::Desktop) -> dde::Mode {
+    match desktop {
+        caja_mirror::Desktop::Xfce => dde::Mode::Inactive,
+        caja_mirror::Desktop::Caja | caja_mirror::Desktop::Dde => dde::Mode::Restack,
     }
 }
 
@@ -2388,9 +2418,9 @@ fn run_x11() -> Result<()> {
         if crate::capability::is_deepin_dde() {
             dde::restore();
         }
-        // And for MATE: a crashed icon-mirror run leaves Caja painting the
-        // key colour, with the user's background saved on disk (no-op
-        // otherwise, so it needs no desktop check).
+        // And for MATE and Xfce: a crashed icon-mirror run leaves Caja (or
+        // xfdesktop) painting the key colour, with the user's background saved
+        // on disk (no-op otherwise, so it needs no desktop check).
         caja_mirror::restore_background();
         log::info!("wallpaper disabled (enabled=false) — exiting");
         return Ok(());
@@ -4717,6 +4747,15 @@ mod tests {
     };
     use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_failed_mirror_restacks_everywhere_but_xfce() {
+        use super::{caja_mirror::Desktop, dde::Mode, mode_after_mirror_gave_up as after};
+        assert_eq!(after(Desktop::Caja), Mode::Restack);
+        assert_eq!(after(Desktop::Dde), Mode::Restack);
+        // Xfce has no peek and nothing to raise above: the stack stays alone.
+        assert_eq!(after(Desktop::Xfce), Mode::Inactive);
+    }
 
     /// Smart Sleep, from the loops' side. The widget engine knows when the next
     /// lyric line or minute boundary is due; the loops know when they next have

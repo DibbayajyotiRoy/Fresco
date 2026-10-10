@@ -329,7 +329,7 @@
   "Of day": "От дня",
   "Off": "Выключено",
   "On AC power only": "Только от сети",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "В Deepin экран блокировки получает статичный кадр с вашими настройками затемнения и размытия. Виджеты видны только в предпросмотре.",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "В Deepin экран блокировки получает статичный кадр с вашим затемнением. Размытие и оттенок добавляет сам Deepin. Виджеты видны только в предпросмотре.",
   "On {desktop}: {summary}": "На {desktop}: {summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "Отдельная запись для каждого файла. Держите одни обои неделями и меняйте по настроению.",
   "One entry per image or video in the folder, so you can pick between them.": "Отдельная запись для каждого изображения или видео в папке — можно выбирать между ними.",

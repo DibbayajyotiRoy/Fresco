@@ -329,7 +329,7 @@
   "Of day": "दिन का",
   "Off": "बंद",
   "On AC power only": "केवल चार्जिंग पर",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "Deepin पर लॉक स्क्रीन को आपके डिम और ब्लर के साथ एक स्थिर फ़्रेम मिलता है। विजेट केवल पूर्वावलोकन में दिखाई देते हैं।",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "Deepin पर लॉक स्क्रीन को आपके डिम के साथ एक स्थिर फ़्रेम मिलता है। ब्लर और टिंट Deepin खुद जोड़ता है। विजेट केवल पूर्वावलोकन में दिखाई देते हैं।",
   "On {desktop}: {summary}": "{desktop} पर: {summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "हर फ़ाइल के लिए एक अलग प्रविष्टि। एक वॉलपेपर को दिनों तक लगा रहने दें और मन करे तो बदल लें।",
   "One entry per image or video in the folder, so you can pick between them.": "फ़ोल्डर के हर इमेज या वीडियो के लिए एक अलग प्रविष्टि, ताकि आप उनमें से चुन सकें।",

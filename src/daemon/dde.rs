@@ -337,11 +337,13 @@ pub(super) fn parse_first_string(out: &str) -> Option<String> {
     }
 }
 
-/// Ask DDE for the current wallpaper of `monitor`, trying each service.
+/// Ask DDE for the current wallpaper of `monitor`, trying each service. Bounded
+/// ([`GDBUS_TIMEOUT_SECS`]): the lock-screen preview calls this on the daemon's
+/// main loop.
 fn get_background(monitor: &str) -> Option<String> {
     for (dest, path, iface) in SERVICES {
         let method = format!("{iface}.GetCurrentWorkspaceBackgroundForMonitor");
-        if let Some(out) = gdbus_call(dest, path, &method, &[monitor]) {
+        if let Some(out) = gdbus_call_on(Bus::Session, dest, path, &method, &[monitor]) {
             if let Some(uri) = parse_first_string(&out) {
                 if !uri.is_empty() {
                     return Some(uri);
@@ -350,6 +352,46 @@ fn get_background(monitor: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Whether `path` is a picture Fresco itself puts in DDE's wallpaper or
+/// lock-screen slot (the transparent / key-colour PNG, a lock-screen frame), and
+/// so not something the user chose. `copies` are the frames' copies in Deepin's
+/// wallpaper store (`<md5>.png`, no recognisable name).
+fn is_fresco_picture(path: &std::path::Path, copies: &[PathBuf]) -> bool {
+    copies.iter().any(|c| c == path)
+        || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+            n == "dde-transparent.png"
+                || n == "dde-key.png"
+                || (n.starts_with(super::dde_lock::FRAME_PREFIX) && n.ends_with(".png"))
+        })
+}
+
+/// The first of `uris` that names an existing local picture which is not one of
+/// Fresco's own (see [`is_fresco_picture`]).
+fn first_user_picture(
+    uris: impl IntoIterator<Item = String>,
+    copies: &[PathBuf],
+) -> Option<PathBuf> {
+    uris.into_iter()
+        .filter_map(|u| super::dde_lock::uri_to_path(&u))
+        .find(|p| !is_fresco_picture(p, copies) && p.is_file())
+}
+
+/// The user's own desktop wallpaper (what they picked in Settings ->
+/// Personalization -> Wallpaper), for the lock-screen preview: the original
+/// Fresco saved when it swapped DDE's wallpaper for its own PNG ([`save_original`]
+/// never records Fresco's pictures), else what DDE reports now for `monitors` —
+/// minus Fresco's own pictures, which DDE reports while Fresco has them set.
+pub(super) fn user_wallpaper(monitors: &[String]) -> Option<PathBuf> {
+    let copies = super::dde_lock::our_copies();
+    let saved = std::fs::read(saved_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<SavedWallpapers>(&b).ok())
+        .map(|s| s.monitors.into_values().collect::<Vec<_>>())
+        .unwrap_or_default();
+    first_user_picture(saved, &copies)
+        .or_else(|| first_user_picture(monitors.iter().filter_map(|m| get_background(m)), &copies))
 }
 
 /// Set the wallpaper of `monitor`, trying each service. True on success.
@@ -1189,6 +1231,43 @@ mod tests {
         assert_eq!(back, s);
         assert_eq!(back.monitors.len(), 2);
         assert_eq!(back.monitors["eDP-1"], "file:///home/u/b.png".to_string());
+    }
+
+    #[test]
+    fn user_picture_skips_fresco_pictures_and_missing_files() {
+        let dir = std::env::temp_dir().join(format!("fresco-dde-userpic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let touch = |name: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, b"x").unwrap();
+            format!("file://{}", p.display())
+        };
+        let mine = touch("my wall.jpg");
+        let ours = [
+            touch("dde-transparent.png"),
+            touch("dde-key.png"),
+            touch("dde-lock-1700000000000.png"),
+        ];
+        let gone = format!("file://{}/gone.jpg", dir.display());
+        // A frame's copy in Deepin's wallpaper store: only the state file's
+        // list says it is ours.
+        let copy = touch("0123456789abcdef.png");
+        let copies = [dir.join("0123456789abcdef.png")];
+
+        let uris = ours
+            .iter()
+            .cloned()
+            .chain([copy.clone(), gone, mine.replace(' ', "%20")]);
+        let found = first_user_picture(uris, &copies).expect("the user's own picture");
+        assert_eq!(found, dir.join("my wall.jpg"));
+        assert_eq!(first_user_picture(ours, &copies), None);
+        assert_eq!(first_user_picture([copy.clone()], &copies), None);
+        assert!(
+            first_user_picture([copy], &[]).is_some(),
+            "unlisted: not ours"
+        );
+        assert_eq!(first_user_picture([String::new()], &copies), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -19,7 +19,10 @@
 //! first, the Library's cached thumbnail next — and **always returns a
 //! picture**: if every source is missing or undecodable it returns a
 //! generated gradient ([`fallback_gradient`]) rather than an error, and says
-//! why in the daemon log. [`fit_background`] then shrinks whatever was found
+//! why in the daemon log. With no Fresco wallpaper chosen at all, the plan ends
+//! in the user's own desktop wallpaper ([`BgSource::Desktop`], Deepin only)
+//! ahead of that gradient: it is what their lock screen shows in that case.
+//! [`fit_background`] then shrinks whatever was found
 //! to the size the canvas can actually draw, and [`flatten_opaque`] makes the
 //! final PNG opaque so that even a drawing failure further down can never
 //! show through as a black window.
@@ -91,12 +94,18 @@ pub(super) enum BgSource {
     /// The Library's cached thumbnail of this wallpaper: small, but already on
     /// disk and decodable without any external tool.
     Thumbnail(PathBuf),
+    /// The user's own desktop wallpaper, for when Fresco has none to show (see
+    /// `dde::user_wallpaper`): a still image, decoded like [`BgSource::Image`].
+    Desktop(PathBuf),
 }
 
 impl BgSource {
     fn path(&self) -> &Path {
         match self {
-            BgSource::Image(p) | BgSource::Frame(p) | BgSource::Thumbnail(p) => p,
+            BgSource::Image(p)
+            | BgSource::Frame(p)
+            | BgSource::Thumbnail(p)
+            | BgSource::Desktop(p) => p,
         }
     }
 
@@ -105,6 +114,7 @@ impl BgSource {
             BgSource::Image(_) => "image",
             BgSource::Frame(_) => "video frame",
             BgSource::Thumbnail(_) => "library thumbnail",
+            BgSource::Desktop(_) => "desktop wallpaper",
         }
     }
 }
@@ -116,6 +126,8 @@ pub(super) enum BgOrigin {
     Wallpaper,
     /// The Library thumbnail: right picture, low resolution.
     Thumbnail,
+    /// The user's own desktop wallpaper: Fresco had no picture of its own.
+    Desktop,
     /// The generated gradient: no usable source at all.
     Placeholder,
 }
@@ -353,7 +365,7 @@ fn load(
         return Err("file does not exist".to_string());
     }
     match src {
-        BgSource::Image(_) => decode_still(path).or_else(|e| {
+        BgSource::Image(_) | BgSource::Desktop(_) => decode_still(path).or_else(|e| {
             // gif/bmp/tiff/avif are not compiled into `image`; ffmpeg reads
             // them. Say why the first attempt failed if this one does too.
             frames(path).map_err(|e2| format!("{e}; frame extraction also failed ({e2})"))
@@ -399,10 +411,10 @@ pub(super) fn resolve(
         }
         match load(src, frames) {
             Ok(image) => {
-                let origin = if is_thumb {
-                    BgOrigin::Thumbnail
-                } else {
-                    BgOrigin::Wallpaper
+                let origin = match src {
+                    BgSource::Thumbnail(_) => BgOrigin::Thumbnail,
+                    BgSource::Desktop(_) => BgOrigin::Desktop,
+                    _ => BgOrigin::Wallpaper,
                 };
                 return Resolved {
                     image,
@@ -849,6 +861,23 @@ mod tests {
         assert_eq!(r.image.get_pixel(1, 1).0, [10, 120, 200, 255]);
         assert!(r.failures.iter().any(|f| f.contains("does not exist")));
         let _ = std::fs::remove_file(thumb);
+    }
+
+    #[test]
+    fn the_desktop_wallpaper_beats_the_gradient_and_is_marked_degraded() {
+        let desk = write_png("desk", &solid(16, 9, [30, 140, 60, 255]));
+        let r = resolve(&[BgSource::Desktop(desk.clone())], far(), &never);
+        assert_eq!(r.origin, BgOrigin::Desktop);
+        assert_eq!(r.image.get_pixel(1, 1).0, [30, 140, 60, 255]);
+        // A missing one still ends at the gradient, reported.
+        let r = resolve(
+            &[BgSource::Desktop(p("/definitely/gone.jpg"))],
+            far(),
+            &never,
+        );
+        assert_eq!(r.origin, BgOrigin::Placeholder);
+        assert!(r.failures[0].starts_with("desktop wallpaper"));
+        let _ = std::fs::remove_file(desk);
     }
 
     #[test]

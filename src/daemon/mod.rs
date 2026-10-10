@@ -406,6 +406,8 @@ impl LockRuntime {
             };
         };
         let wallpaper = ctx.config.lock_source(None);
+        self.preview
+            .set_monitors(ctx.outputs.iter().map(|o| o.connector.clone()));
         match self
             .preview
             .render(self.kind, wallpaper, &resolved, np, theme, width, height)

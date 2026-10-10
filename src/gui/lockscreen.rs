@@ -461,13 +461,13 @@ fn cosmic_hint(host: &str) -> Option<String> {
     })
 }
 
-/// Deepin's real lock screen only receives a still frame — with the dim and
-/// blur sliders baked in, but no widgets (a frozen clock would be wrong a
-/// minute later) — so the widgets show in Fresco's preview only. `None` for
-/// every other host.
+/// Deepin's real lock screen only receives a still frame — with the dim slider
+/// baked in (Deepin adds its own blur and tint on top), but no widgets (a frozen
+/// clock would be wrong a minute later) — so the widgets show in Fresco's
+/// preview only. `None` for every other host.
 fn deepin_hint(host: &str) -> Option<String> {
     (host == "deepin").then(|| {
-        t!("On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.")
+        t!("On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.")
             .to_string()
     })
 }

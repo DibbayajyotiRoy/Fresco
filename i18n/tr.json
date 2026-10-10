@@ -329,7 +329,7 @@
   "Of day": "Gün ilerlemesi",
   "Off": "Kapalı",
   "On AC power only": "Yalnızca güç adaptöründeyken",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "Deepin’de kilit ekranı, karartma ve bulanıklık ayarlarınızın uygulandığı sabit bir kare alır. Widget’lar yalnızca önizlemede görünür.",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "Deepin’de kilit ekranı, karartma ayarınızın uygulandığı sabit bir kare alır. Bulanıklığı ve rengi Deepin kendisi ekler. Widget’lar yalnızca önizlemede görünür.",
   "On {desktop}: {summary}": "{desktop} üzerinde: {summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "Her dosya için ayrı bir kayıt. Birini günlerce açık tutup canınız istediğinde değiştirebilirsiniz.",
   "One entry per image or video in the folder, so you can pick between them.": "Klasördeki her görsel veya video için ayrı bir kayıt; böylece aralarından seçim yapabilirsiniz.",

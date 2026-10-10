@@ -329,7 +329,7 @@
   "Of day": "Progresul zilei",
   "Off": "Dezactivat",
   "On AC power only": "Doar la priză",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "Pe Deepin, ecranul de blocare primește un cadru static cu întunecarea și neclaritatea dvs. Widgeturile apar doar în previzualizare.",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "Pe Deepin, ecranul de blocare primește un cadru static cu întunecarea dvs. Neclaritatea și nuanța le adaugă Deepin însuși. Widgeturile apar doar în previzualizare.",
   "On {desktop}: {summary}": "Pe {desktop}: {summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "Câte o intrare pentru fiecare fișier. Păstrați una activă zile în șir și schimbați-o după cum aveți chef.",
   "One entry per image or video in the folder, so you can pick between them.": "Câte o intrare pentru fiecare imagine sau videoclip din dosar, ca să puteți alege între ele.",

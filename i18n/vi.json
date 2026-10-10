@@ -329,7 +329,7 @@
   "Of day": "Trong ngày",
   "Off": "Tắt",
   "On AC power only": "Chỉ khi cắm sạc",
-  "On Deepin the lock screen gets a still frame with your dim and blur. Widgets appear in the preview only.": "Trên Deepin, màn hình khóa nhận một khung hình tĩnh với độ tối và độ mờ của bạn. Widget chỉ xuất hiện trong phần xem trước.",
+  "On Deepin the lock screen gets a still frame with your dim. Deepin adds its own blur and tint. Widgets appear in the preview only.": "Trên Deepin, màn hình khóa nhận một khung hình tĩnh với độ tối của bạn. Deepin tự thêm độ mờ và sắc thái riêng. Widget chỉ xuất hiện trong phần xem trước.",
   "On {desktop}: {summary}": "Trên {desktop}: {summary}",
   "One entry per file. Keep one up for days and switch when the mood strikes.": "Mỗi tệp là một mục riêng. Có thể dùng một hình nền trong nhiều ngày rồi đổi khi muốn.",
   "One entry per image or video in the folder, so you can pick between them.": "Mỗi ảnh hoặc video trong thư mục là một mục riêng, để bạn dễ dàng chọn lựa.",

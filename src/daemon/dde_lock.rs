@@ -127,7 +127,7 @@ use super::overview::{encode_file_uri, gvariant_string_literal};
 use crate::config::Config;
 
 /// Prefix of every frame this module writes; what [`is_our_frame`] keys on.
-const FRAME_PREFIX: &str = "dde-lock-";
+pub(super) const FRAME_PREFIX: &str = "dde-lock-";
 
 /// State file name (under `dde::state_dir()`).
 const SAVED_FILE: &str = "dde-saved-lock-background.json";
@@ -559,7 +559,7 @@ fn percent_decode(s: &str) -> String {
 /// The local path a greeter-background value names: `file:///a%20b.png` and
 /// `/a b.png` both give `/a b.png`. `None` for anything that is not an
 /// absolute local path.
-fn uri_to_path(value: &str) -> Option<PathBuf> {
+pub(super) fn uri_to_path(value: &str) -> Option<PathBuf> {
     let value = value.trim();
     let raw = value.strip_prefix("file://").unwrap_or(value);
     raw.starts_with('/')
@@ -701,6 +701,15 @@ fn set_tracked_copies(path: &Path, copies: Vec<String>) {
         saved.copies = copies;
         write_saved(path, &saved);
     }
+}
+
+/// The copies of our frames now in Deepin's wallpaper store, as paths. They sit
+/// beside the user's own wallpapers there, so `dde::user_wallpaper` skips them.
+pub(super) fn our_copies() -> Vec<PathBuf> {
+    tracked_copies(&saved_path())
+        .iter()
+        .filter_map(|c| uri_to_path(c))
+        .collect()
 }
 
 // -- sync / restore flows ------------------------------------------------------

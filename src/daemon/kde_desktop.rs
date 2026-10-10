@@ -243,9 +243,8 @@ fn js_str(s: &str) -> String {
 
 /// The plugin's `PauseMode` (`contents/config/main.xml`): 0 pauses the video
 /// while a window is fullscreen, 1 also while one is maximized, 2 never.
-fn kde_pause_mode(_config: &Config) -> i32 {
-    // wire to config.pause_on_maximized once feat/pause-on-maximized lands
-    0
+fn kde_pause_mode(config: &Config) -> i32 {
+    i32::from(config.pause_on_maximized)
 }
 
 /// The script `plasma-apply-wallpaperimage` sends, with our plugin and its
@@ -395,6 +394,14 @@ mod tests {
         );
         // An image wallpaper has nothing to play.
         assert!(apply_script("", "file:///s.png", 0).contains("writeConfig('PlayVideo',false)"));
+    }
+
+    #[test]
+    fn pause_mode_follows_the_maximized_switch() {
+        let mut config = Config::default();
+        assert_eq!(kde_pause_mode(&config), 0);
+        config.pause_on_maximized = true;
+        assert_eq!(kde_pause_mode(&config), 1);
     }
 
     #[test]

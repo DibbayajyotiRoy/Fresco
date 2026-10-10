@@ -36,7 +36,9 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::Screen;
 use x11rb::rust_connection::RustConnection;
 
+use crate::cli::which;
 use crate::config::{Config, Kind, PowerSaving, Scaling, Transition, Wallpaper};
+use crate::hwdecode::{self, install_hint, HwDecode, Pm};
 use crate::ipc::{LockReply, LockSocket, LockStatus, MonitorInfo, Request, Response, StatusReply};
 
 use lock::engine::LockEngine;
@@ -4376,13 +4378,20 @@ pub fn check() {
         }
     }
 
-    let vainfo = which("vainfo");
-    match classify_vaapi(vainfo, render_node_present(), va_driver_present()) {
-        VaApi::Verifiable => println!("VA-API (vainfo) : {G}available{X}"),
-        VaApi::DriversPresent => println!(
-            "VA-API (vainfo) : {G}drivers present{X} (render node and VA driver found; the vainfo diagnostic tool is not installed - install the 'vainfo' package to verify)"
+    let pm = Pm::detect();
+    match hwdecode::probe() {
+        HwDecode::Nvdec => println!(
+            "NVDEC           : {G}available{X} (NVIDIA GPU with libnvcuvid; Fresco decodes with NVDEC here)"
         ),
-        VaApi::Missing => println!("VA-API (vainfo) : {Y}not installed{X} (apt install intel-media-va-driver mesa-va-drivers)"),
+        HwDecode::Vainfo => println!("VA-API (vainfo) : {G}available{X}"),
+        HwDecode::DriversPresent => println!(
+            "VA-API (vainfo) : {G}drivers present{X} (render node and VA driver found; the vainfo diagnostic tool is not installed - {} to verify)",
+            install_hint(pm, hwdecode::VAINFO_PKG)
+        ),
+        HwDecode::Missing => println!(
+            "VA-API (vainfo) : {Y}no render node or VA driver found{X} ({})",
+            install_hint(pm, hwdecode::DRIVER_PKGS)
+        ),
     }
 
     // The widget helpers. Both fail as *silence* — a widget that is enabled in
@@ -4392,13 +4401,14 @@ pub fn check() {
     if which("gdbus") {
         println!("MPRIS (gdbus)   : {G}available{X}");
     } else {
-        println!("MPRIS (gdbus)   : {Y}not installed{X} (apt install libglib2.0-bin — lyrics, album art and the track-synced clock need it)");
+        println!("MPRIS (gdbus)   : {Y}not installed{X} ({} — lyrics, album art and the track-synced clock need it)", install_hint(pm, hwdecode::GDBUS_PKG));
     }
     match (which("pw-cat"), which("parec")) {
         (true, _) => println!("Audio capture   : {G}pw-cat{X}"),
         (false, true) => println!("Audio capture   : {G}parec{X}"),
         (false, false) => println!(
-            "Audio capture   : {Y}not installed{X} (apt install pipewire-bin or pulseaudio-utils — needed by the audio visualiser widget)"
+            "Audio capture   : {Y}not installed{X} ({} — needed by the audio visualiser widget)",
+            install_hint(pm, hwdecode::AUDIO_PKGS)
         ),
     }
 
@@ -4410,10 +4420,7 @@ pub fn check() {
     match crate::ipc::request(&Request::Status) {
         Ok(Response::Status(s)) => {
             println!("Daemon          : {G}running{X}");
-            println!(
-                "  decode        : {}",
-                decode_display(s.hwdec.as_deref(), vainfo)
-            );
+            println!("  decode        : {}", decode_display(s.hwdec.as_deref()));
             println!(
                 "  wallpaper     : {}",
                 s.wallpaper.as_deref().unwrap_or("(none)")
@@ -4427,71 +4434,14 @@ pub fn check() {
     }
 }
 
-/// What `--check` can say about VA-API without the `vainfo` tool.
-#[derive(Debug, PartialEq, Eq)]
-enum VaApi {
-    /// `vainfo` is installed, so the user can verify decode themselves.
-    Verifiable,
-    /// No `vainfo`, but a render node and a VA driver are both on disk. The
-    /// stack is most likely fine; only the diagnostic tool is missing.
-    DriversPresent,
-    /// No render node or no driver: hardware decode genuinely cannot work.
-    Missing,
-}
-
-fn classify_vaapi(vainfo: bool, render_node: bool, driver: bool) -> VaApi {
-    match (vainfo, render_node && driver) {
-        (true, _) => VaApi::Verifiable,
-        (false, true) => VaApi::DriversPresent,
-        (false, false) => VaApi::Missing,
-    }
-}
-
-/// The `decode` line of `--check`. mpv reporting `no` means "software", but
-/// without `vainfo` that is not something the user can confirm or refute, so
-/// it is shown as unverified rather than as a verdict.
-fn decode_display(hwdec: Option<&str>, vainfo: bool) -> String {
+/// The `decode` line of `--check`: mpv's `hwdec-current` is the truthful
+/// source, so `no` is a real software-decode verdict and is labelled as one.
+fn decode_display(hwdec: Option<&str>) -> String {
     match hwdec {
-        None => "(none)".into(),
-        Some("no" | "") if !vainfo => "unverified (vainfo not installed)".into(),
+        None => "no wallpaper playing".into(),
+        Some("no" | "") => "software (mpv is not using hardware decode)".into(),
         Some(h) => h.into(),
     }
-}
-
-fn dir_has(dir: &std::path::Path, pred: impl Fn(&str) -> bool) -> bool {
-    std::fs::read_dir(dir)
-        .map(|rd| rd.flatten().any(|e| pred(&e.file_name().to_string_lossy())))
-        .unwrap_or(false)
-}
-
-fn render_node_present() -> bool {
-    dir_has(std::path::Path::new("/dev/dri"), |n| {
-        n.starts_with("renderD")
-    })
-}
-
-/// A libva driver (`*_drv_video.so`) in `$LIBVA_DRIVERS_PATH` or the usual
-/// per-distro directories.
-fn va_driver_present() -> bool {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("LIBVA_DRIVERS_PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
-    dirs.extend(
-        [
-            "/usr/lib/x86_64-linux-gnu/dri",
-            "/usr/lib64/dri",
-            "/usr/lib/dri",
-        ]
-        .map(PathBuf::from),
-    );
-    dirs.iter()
-        .any(|d| dir_has(d, |n| n.ends_with("_drv_video.so")))
-}
-
-fn which(bin: &str) -> bool {
-    std::env::var("PATH")
-        .map(|path| std::env::split_paths(&path).any(|dir| dir.join(bin).is_file()))
-        .unwrap_or(false)
 }
 
 /// How long a run loop may wait, given what it wants for itself and what the
@@ -4698,9 +4648,8 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_vaapi, decode_display, parse_stat_ticks, presentation_confirmed, stall_step,
-        widget_wait, VaApi, WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL,
-        STALL_STRIKES, TICK,
+        decode_display, parse_stat_ticks, presentation_confirmed, stall_step, widget_wait,
+        WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL, STALL_STRIKES, TICK,
     };
     use crate::config::{Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
@@ -5447,23 +5396,16 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
         let _ = std::fs::remove_file(&img_b);
     }
 
-    /// Issue #41: a missing `vainfo` binary must not read as "no VA-API" when
-    /// the render node and a driver are right there, and must not turn mpv's
-    /// `no` into a software-decode verdict nobody can check.
+    /// Issue #41: mpv's `no` is a real software verdict, whatever tools are
+    /// installed, and no player is not a verdict at all.
     #[test]
-    fn missing_vainfo_is_not_reported_as_missing_vaapi() {
-        assert_eq!(classify_vaapi(true, false, false), VaApi::Verifiable);
-        assert_eq!(classify_vaapi(false, true, true), VaApi::DriversPresent);
-        assert_eq!(classify_vaapi(false, true, false), VaApi::Missing);
-        assert_eq!(classify_vaapi(false, false, true), VaApi::Missing);
-
-        assert_eq!(decode_display(Some("vaapi"), false), "vaapi");
-        assert_eq!(decode_display(Some("no"), true), "no");
+    fn decode_label_reports_what_mpv_says() {
+        assert_eq!(decode_display(Some("vaapi")), "vaapi");
         assert_eq!(
-            decode_display(Some("no"), false),
-            "unverified (vainfo not installed)"
+            decode_display(Some("no")),
+            "software (mpv is not using hardware decode)"
         );
-        assert_eq!(decode_display(None, false), "(none)");
+        assert_eq!(decode_display(None), "no wallpaper playing");
     }
 }
 

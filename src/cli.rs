@@ -256,6 +256,36 @@ fn doctor() -> i32 {
         );
     }
 
+    // Library hover previews. Both are `warn`: the app is fine without them,
+    // the cards just stay on their still frame. The GTK media backend is the
+    // one that bit deepin (issue #42): its own package on Debian-family
+    // systems, merely *recommended* by libgtk-4-1, so a system that skips
+    // recommends has none and GTK silently plays nothing. Skipped in Flatpak,
+    // where the runtime supplies both and these paths do not apply.
+    if !crate::is_flatpak() {
+        if gtk_media_backend_present() {
+            check(
+                "Hover previews (GTK media backend)",
+                true,
+                "",
+                &mut problems,
+            );
+        } else {
+            warn(
+                "Hover previews (GTK media backend)",
+                "install libgtk-4-media-gstreamer — until then video cards stay on their still frame",
+            );
+        }
+        if which("ffmpeg") && which("ffprobe") {
+            check("Hover previews (ffmpeg)", true, "", &mut problems);
+        } else {
+            warn(
+                "Hover previews (ffmpeg)",
+                "install ffmpeg — large videos keep their still frame on hover and library details stay empty",
+            );
+        }
+    }
+
     let configured = Config::load()
         .map(|c| {
             c.enabled && (c.wallpaper.effective_path().is_some() || !c.wallpaper.paths.is_empty())
@@ -416,6 +446,23 @@ pub(crate) fn which(bin: &str) -> bool {
     std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
         .unwrap_or(false)
+}
+
+/// Whether GTK's GStreamer media backend (`libmedia-gstreamer.so`) is
+/// installed — the module `GtkMediaFile` needs to play anything. Looked for
+/// where distros put it: `/usr/lib`, `/usr/lib64` and the multiarch
+/// `/usr/lib/<triplet>` directories.
+fn gtk_media_backend_present() -> bool {
+    const MODULE: &str = "gtk-4.0/4.0.0/media/libmedia-gstreamer.so";
+    ["/usr/lib", "/usr/lib64"].iter().any(|base| {
+        let base = std::path::Path::new(base);
+        base.join(MODULE).is_file()
+            || std::fs::read_dir(base)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|e| e.path().join(MODULE).is_file())
+    })
 }
 
 /// The GTK runtime version, e.g. `4.14.5`. Needs no `gtk::init`.

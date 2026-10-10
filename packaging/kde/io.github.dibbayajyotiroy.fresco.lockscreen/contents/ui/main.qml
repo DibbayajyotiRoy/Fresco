@@ -17,8 +17,12 @@
  *      Local file:// reads (our video, still image, and widget-layer PNGs)
  *      are unaffected: KProtocolInfo classifies "file" as a local protocol,
  *      which the factory always lets through.
- *   2. plasmashell, if someone also picks this plugin as their *desktop*
- *      wallpaper. Nothing below branches on which host it is running under:
+ *   2. plasmashell, as the *desktop* wallpaper. plasmashell paints the
+ *      desktop (icons included) into one opaque window, so a Fresco window
+ *      can never show the video there; instead Fresco's daemon selects this
+ *      plugin on every desktop through plasmashell's scripting DBus API and
+ *      writes VideoPath/StillPath/PlayVideo (src/daemon/kde_desktop.rs,
+ *      issue #44). Nothing below branches on which host it is running under:
  *      the plugin only ever reads local files Fresco already wrote, so it
  *      has nothing that needs to behave differently between the two.
  *

@@ -4,8 +4,10 @@ Fresco runs on Debian-based distributions (Pop!_OS, Ubuntu, Linux Mint, Debian,
 elementary OS) running an **X11** or **Wayland** session.
 
 - **X11:** full live wallpapers (embedded mpv).
-- **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6): live
+- **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway): live
   wallpapers via the bundled `mpvpaper` backend.
+- **KDE Plasma 6** (X11 or Wayland): Fresco's Plasma wallpaper plugin, set through
+  plasmashell (see [X11 vs Wayland](#x11-vs-wayland)).
 - **GNOME Wayland:** still frame only (Mutter has no live wallpaper surface). See
   [X11 vs Wayland](#x11-vs-wayland) for what that means on your release.
 
@@ -89,8 +91,17 @@ echo $XDG_SESSION_TYPE     # x11 or wayland
 ```
 
 - **X11:** everything works out of the box.
-- **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway, KDE Plasma 6): live
+- **Wayland layer-shell compositors** (COSMIC, Hyprland, Sway): live
   wallpapers work out of the box using the bundled `mpvpaper` backend.
+- **KDE Plasma 6 (X11 and Wayland):** plasmashell paints the desktop and its
+  icons into one opaque window, so Fresco sets its own Plasma wallpaper plugin
+  on every desktop instead of opening a window. Install
+  `qml6-module-qtmultimedia` (Debian/Ubuntu) for video; without it you get a
+  still frame. Playback is Qt's: muted, no hwdec tuning, crop or transitions;
+  a playlist plays its first file, a slideshow shows its first frame. Set
+  `FRESCO_KDE_DESKTOP=0` to use the window backend instead (it only shows in
+  the Overview). `frescod --check` prints what plasmashell currently shows;
+  the log is `~/.local/state/fresco/frescod.log`.
 - **GNOME Wayland:** Fresco sets a still frame as the desktop background and
   says so in the app (the status pill reads "STILL FRAME"). Whether live video is
   possible depends on your release:

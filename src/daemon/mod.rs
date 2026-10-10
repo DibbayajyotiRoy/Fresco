@@ -8,6 +8,7 @@ mod cosmic_bg;
 mod dde;
 mod dde_lock;
 mod fullscreen;
+mod kde_desktop;
 mod lock;
 mod signals;
 // Public so the widget engine's API stays visible while the daemon-loop call
@@ -1073,6 +1074,13 @@ impl Daemon {
         let screen = self.screen();
         self.monitors = monitors::list_monitors(&self.conn, screen.root)?;
 
+        // KDE Plasma (issue #44): plasmashell's opaque desktop window covers
+        // any window of ours (or hides the icons if we sit above it), so the
+        // wallpaper is applied through plasmashell instead — see `kde_desktop`.
+        if kde_desktop::enabled() {
+            return Ok(());
+        }
+
         // Deepin DDE (issue #2) needs a differently declared window, and the
         // declaration can only be chosen at creation time. Off Deepin this is
         // `WindowKind::Desktop` — the window Fresco has always created — with
@@ -1292,6 +1300,7 @@ impl Daemon {
         overview::apply(&self.config.wallpaper);
         cosmic_bg::apply(&self.config);
         dde_lock::apply(&self.config);
+        kde_desktop::apply(&self.config.wallpaper);
         log::info!("frescod started with {} renderer(s)", self.renderers.len());
         crate::telemetry::heartbeat(
             Some("x11"),
@@ -1315,6 +1324,7 @@ impl Daemon {
                     overview::apply(&self.config.wallpaper);
                     cosmic_bg::apply(&self.config);
                     dde_lock::apply(&self.config);
+                    kde_desktop::apply(&self.config.wallpaper);
                 }
                 if is_stop {
                     self.shutdown();
@@ -1769,6 +1779,7 @@ impl Daemon {
         overview::apply(&self.config.wallpaper);
         cosmic_bg::apply(&self.config);
         dde_lock::apply(&self.config);
+        kde_desktop::apply(&self.config.wallpaper);
     }
 
     /// Re-seat clones of the same video on one clock (see SYNC_INTERVAL): the
@@ -1838,6 +1849,9 @@ impl Daemon {
     /// global wallpaper stands in for "at least one", so an empty RandR answer
     /// at login still counts as short.
     fn expected_renderers(&self) -> usize {
+        if kde_desktop::enabled() {
+            return 0; // plasmashell draws the wallpaper; we create no window
+        }
         let wants = |w: &Wallpaper| w.effective_path().is_some() || w.kind == Kind::Slideshow;
         if self.monitors.is_empty() {
             let any = wants(&self.config.wallpaper) || self.config.monitors.values().any(wants);
@@ -1954,6 +1968,7 @@ impl Daemon {
         overview::restore();
         cosmic_bg::restore();
         dde_lock::restore();
+        kde_desktop::restore();
         // MATE: stop copying Caja's icons (closing the thread's connection
         // undoes the redirect, so Caja renders on screen again), then swap the
         // key colour back for the user's own background. After
@@ -2340,6 +2355,8 @@ fn run_x11() -> Result<()> {
         cosmic_bg::restore();
         // And the Deepin lock-screen background (no-op off Deepin).
         dde_lock::restore();
+        // And the Plasma desktop wallpaper plugin (no-op off KDE).
+        kde_desktop::restore();
         // Same for DDE: a crashed run may have left the transparent wallpaper
         // applied with the original saved on disk — restore it (no-op
         // otherwise).
@@ -2547,6 +2564,7 @@ fn run_wayland_layershell() -> Result<()> {
         // Stopped may have left cosmic-bg pointed at our still frame.
         cosmic_bg::restore();
         dde_lock::restore();
+        kde_desktop::restore();
         log::info!("wallpaper disabled (enabled=false) — exiting");
         return Ok(());
     }
@@ -2658,7 +2676,12 @@ fn run_wayland_layershell() -> Result<()> {
 
     // One supervised mpvpaper per output, keyed by connector name.
     let mut outputs: BTreeMap<String, WlOutput> = BTreeMap::new();
-    for m in &monitors {
+    // KDE Plasma (issue #44): plasmashell's desktop surface is a layer-shell
+    // background too, and an opaque one — an mpvpaper surface is never seen
+    // (or hides the icons), so Plasma gets its wallpaper through plasmashell
+    // instead (`kde_desktop`) and no output is spawned.
+    let plasma = kde_desktop::enabled();
+    for m in monitors.iter().filter(|_| !plasma) {
         let wallpaper = config.wallpaper_for(&m.connector).clone();
         if wallpaper.effective_path().is_none()
             && wallpaper.paths.is_empty()
@@ -2677,6 +2700,7 @@ fn run_wayland_layershell() -> Result<()> {
     // `dde_lock`'s module doc. No-op on every other compositor. (COSMIC's
     // `cosmic-bg` sync already ran above, before any mpvpaper existed.)
     dde_lock::apply(&config);
+    kde_desktop::apply(&config.wallpaper);
     log::info!(
         "frescod started (Wayland layer-shell / mpvpaper, {} output(s))",
         outputs.len()
@@ -2749,9 +2773,10 @@ fn run_wayland_layershell() -> Result<()> {
                             // Reconcile config × the current output set.
                             for m in &monitors {
                                 let wp = config.wallpaper_for(&m.connector).clone();
-                                let has = wp.effective_path().is_some()
-                                    || !wp.paths.is_empty()
-                                    || wp.kind == Kind::Slideshow;
+                                let has = !plasma
+                                    && (wp.effective_path().is_some()
+                                        || !wp.paths.is_empty()
+                                        || wp.kind == Kind::Slideshow);
                                 let effective_ps = wp.effective_power_saving(config.power_saving);
                                 match (outputs.get_mut(&m.connector), has) {
                                     (Some(o), true) => {
@@ -2803,10 +2828,12 @@ fn run_wayland_layershell() -> Result<()> {
                             let synced = cosmic_bg::apply(&config);
                             cosmic_reloads.note(&synced, Instant::now());
                             dde_lock::apply(&config);
+                            kde_desktop::apply(&config.wallpaper);
                         } else {
                             cosmic_bg::restore();
                             cosmic_reloads.reset();
                             dde_lock::restore();
+                            kde_desktop::restore();
                         }
                         Response::Ok
                     }
@@ -3054,6 +3081,7 @@ fn run_wayland_layershell() -> Result<()> {
                     config.wallpaper.rotation = want.rotation;
                     config.wallpaper.crop = want.crop;
                     sched.applied = Some(path);
+                    kde_desktop::apply(&config.wallpaper);
                 }
             }
 
@@ -3250,6 +3278,7 @@ fn run_wayland_layershell() -> Result<()> {
     outputs.clear(); // kill every mpvpaper before we exit
     cosmic_bg::restore();
     dde_lock::restore();
+    kde_desktop::restore();
     std::fs::remove_file(crate::ipc::socket_path()).ok();
     log::info!("frescod stopped");
     Ok(())
@@ -4332,6 +4361,11 @@ pub fn check() {
         "Session         : {session_color}{session}{X} ({})",
         cap.id()
     );
+    // KDE Plasma (issue #44): the wallpaper goes through plasmashell, not a
+    // window — say which path this session is on and what plasmashell shows.
+    if crate::capability::is_kde() {
+        println!("KDE Plasma      : {}", kde_desktop::report());
+    }
 
     if matches!(cap, Capability::WaylandLayerShell) {
         match crate::mpvpaper_resolved() {
@@ -4404,6 +4438,10 @@ pub fn check() {
         Ok(c) => println!("Config          : {G}valid{X} (enabled={})", c.enabled),
         Err(e) => println!("Config          : {R}invalid{X} ({e})"),
     }
+    println!(
+        "Log file        : {}",
+        dde::state_dir().join("frescod.log").display()
+    );
 
     match crate::ipc::request(&Request::Status) {
         Ok(Response::Status(s)) => {

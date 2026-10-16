@@ -14,17 +14,19 @@ use std::io::{ErrorKind, Write};
 use std::os::fd::AsFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
+use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_output, wl_region, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, EventQueue, QueueHandle, WEnum};
-use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{Layer, ZwlrLayerShellV1};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
+    Layer, ZwlrLayerShellV1,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
     self as ls, Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1,
 };
@@ -33,11 +35,8 @@ use crate::config::{LyricAnchor, WorldClock};
 use crate::widgetkit::cards::worldclock::{render_pixmap, to_bgra_premul};
 use crate::widgetkit::{scale_for_output, FontStack};
 
-/// How often the thread looks at the socket and the stop flag.
-// ponytail: nix's `poll` feature is not enabled, so there is no poll(2) to sleep
-// on; a 10 Hz non-blocking read costs microseconds. Enable it and poll the
-// connection fd for the slice if the idle wakeups ever matter.
-const SLICE: Duration = Duration::from_millis(100);
+/// Longest the thread sleeps in `poll(2)`, so a `stop` is noticed within it.
+const MAX_WAIT_MS: i64 = 500;
 
 struct Out {
     proxy: wl_output::WlOutput,
@@ -100,7 +99,12 @@ fn render(fonts: &mut FontStack, cfg: &WorldClock, (bs, logical_h): (i32, u32)) 
     for y in 0..h {
         px[y * bw * 4..][..w * 4].copy_from_slice(&src[y * w * 4..][..w * 4]);
     }
-    Some(Frame { px, w: bw as i32, h: bh as i32, bs })
+    Some(Frame {
+        px,
+        w: bw as i32,
+        h: bh as i32,
+        bs,
+    })
 }
 
 fn anchor(a: LyricAnchor) -> Anchor {
@@ -166,15 +170,20 @@ impl Overlay {
         Ok(())
     }
 
-    /// Flush, read whatever the compositor sent without blocking, dispatch it.
-    fn pump(&mut self) -> Result<()> {
+    /// Flush, then sleep in `poll(2)` on the connection until the compositor
+    /// sends something or `wait_ms` passes, and dispatch what arrived.
+    fn pump(&mut self, wait_ms: u16) -> Result<()> {
         self.queue.dispatch_pending(&mut self.st)?;
         self.conn.flush()?;
         if let Some(guard) = self.queue.prepare_read() {
-            match guard.read() {
-                Err(WaylandError::Io(e)) if e.kind() == ErrorKind::WouldBlock => {}
-                r => {
-                    r?;
+            let mut fds = [PollFd::new(guard.connection_fd(), PollFlags::POLLIN)];
+            // Timeout or EINTR: drop the guard, which cancels the read.
+            if poll(&mut fds, wait_ms).is_ok_and(|n| n > 0) {
+                match guard.read() {
+                    Err(WaylandError::Io(e)) if e.kind() == ErrorKind::WouldBlock => {}
+                    r => {
+                        r?;
+                    }
                 }
             }
         }
@@ -196,11 +205,16 @@ fn run(mut ov: Overlay, stop: Arc<AtomicBool>) {
         } else {
             Ok(())
         };
-        if let Err(e) = drawn.and_then(|()| ov.pump()) {
+        // Sleep until the compositor speaks or the minute turns (at least 1 ms,
+        // so a boundary we are a hair short of cannot spin).
+        let wait = (tick - Utc::now())
+            .num_milliseconds()
+            .clamp(0, MAX_WAIT_MS - 1) as u16
+            + 1;
+        if let Err(e) = drawn.and_then(|()| ov.pump(wait)) {
             log::warn!("world clock overlay (wayland): {e:#}");
             break;
         }
-        std::thread::sleep(SLICE);
     }
     ov.layer.destroy();
     ov.surface.destroy();
@@ -220,9 +234,13 @@ pub fn try_start(
     conn.display().get_registry(&qh, ());
 
     let mut st = State::default();
-    queue.roundtrip(&mut st).context("wayland registry roundtrip")?;
+    queue
+        .roundtrip(&mut st)
+        .context("wayland registry roundtrip")?;
     // Second trip: each wl_output's mode/scale events.
-    queue.roundtrip(&mut st).context("wayland output roundtrip")?;
+    queue
+        .roundtrip(&mut st)
+        .context("wayland output roundtrip")?;
     let (Some(compositor), Some(shell), true) =
         (st.compositor.take(), st.shell.take(), st.shm.is_some())
     else {
@@ -257,7 +275,9 @@ pub fn try_start(
     let size = (first.w / first.bs, first.h / first.bs);
     layer.set_size(size.0 as u32, size.1 as u32);
     surface.commit(); // buffer-less commit; the compositor answers with configure
-    queue.roundtrip(&mut st).context("creating the layer surface")?;
+    queue
+        .roundtrip(&mut st)
+        .context("creating the layer surface")?;
     if st.closed {
         bail!("compositor refused the layer surface");
     }
@@ -288,7 +308,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         _: &Connection,
         qh: &QueueHandle<State>,
     ) {
-        let wl_registry::Event::Global { name, interface, version } = event else {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
             return;
         };
         match interface.as_str() {
@@ -318,9 +343,11 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
             return;
         };
         match event {
-            wl_output::Event::Mode { flags, height, .. }
-                if matches!(flags, WEnum::Value(m) if m.contains(wl_output::Mode::Current)) =>
-            {
+            wl_output::Event::Mode {
+                flags: WEnum::Value(m),
+                height,
+                ..
+            } if m.contains(wl_output::Mode::Current) => {
                 o.height = height;
             }
             wl_output::Event::Scale { factor } => o.scale = factor,
@@ -394,13 +421,17 @@ delegate_noop!(State: ignore wl_region::WlRegion);
 mod tests {
     use super::*;
     use crate::config::WorldZone;
+    use std::time::Duration;
 
     /// Needs a live Wayland session. Either starts (and you see two clock rows
     /// for 3 s in the top-right corner) or errs cleanly when there is no layer-shell.
     #[test]
     #[ignore = "needs a Wayland session"]
     fn overlay_starts_and_stops_or_errs_cleanly() {
-        let zone = |tz: &str| WorldZone { tz: tz.into(), label: String::new() };
+        let zone = |tz: &str| WorldZone {
+            tz: tz.into(),
+            label: String::new(),
+        };
         let cfg = WorldClock {
             enabled: true,
             zones: vec![zone("Asia/Tokyo"), zone("America/New_York")],

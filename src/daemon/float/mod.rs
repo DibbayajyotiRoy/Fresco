@@ -31,6 +31,27 @@ pub fn start(cfg: &crate::config::WorldClock) -> anyhow::Result<Overlay> {
     })
 }
 
+impl Overlay {
+    /// False once the overlay thread has ended by itself (the compositor closed
+    /// the surface, the X connection died): nothing is on screen any more.
+    pub fn is_alive(&self) -> bool {
+        self.join.as_ref().is_some_and(|j| !j.is_finished())
+    }
+
+    /// An overlay whose thread has already ended, for the engine's tests.
+    #[cfg(test)]
+    pub fn dead() -> Overlay {
+        let join = std::thread::spawn(|| {});
+        while !join.is_finished() {
+            std::thread::yield_now();
+        }
+        Overlay {
+            stop: Default::default(),
+            join: Some(join),
+        }
+    }
+}
+
 /// Dropping the overlay stops its thread and waits for it, which takes the
 /// window down with it.
 impl Drop for Overlay {

@@ -3123,12 +3123,30 @@ impl WidgetEngine {
                 ),
             }
         }
+        self.draw_world_on_wallpaper();
+    }
+
+    /// Start (or re-push) the wallpaper-layer world clock, if that is where it
+    /// belongs: enabled and not floating.
+    fn draw_world_on_wallpaper(&mut self) {
         if self.world_on_wallpaper() {
             match &mut self.world {
                 Some(w) => w.bmp.dirty = true,
                 None => self.world = Some(WorldClockState::new(Instant::now())),
             }
             self.fonts.prime();
+        }
+    }
+
+    /// The floating overlay's thread ended on its own (surface closed, X error):
+    /// drop it and let the wallpaper layer draw the clock.
+    fn reap_dead_float(&mut self) {
+        if self.float.as_ref().is_some_and(|f| !f.is_alive()) {
+            log::info!(
+                "widgets: the floating world clock stopped; drawing it on the wallpaper instead"
+            );
+            self.float = None;
+            self.draw_world_on_wallpaper();
         }
     }
 
@@ -3249,7 +3267,7 @@ impl WidgetEngine {
     pub fn is_active(&self) -> bool {
         self.lyrics_cfg.enabled
             || self.clock_cfg.enabled
-            || self.world_on_wallpaper()
+            || self.world_cfg.enabled // floating or not: `tick` must run to see the overlay end
             || self.visual_cfg.enabled
             || self.disc_cfg.enabled
     }
@@ -3289,6 +3307,7 @@ impl WidgetEngine {
     /// — and which is what the loop calls on renderer teardown and on wallpaper
     /// swap, i.e. at every point where our belief could be wrong.
     pub fn tick(&mut self) -> Vec<WidgetUpdate> {
+        self.reap_dead_float();
         if !self.lyrics_live()
             && !self.clock_live()
             && !self.world_live()
@@ -5121,6 +5140,19 @@ mod tests {
             vec![WidgetUpdate::remove(WORLD_CLOCK_OVERLAY)]
         );
         assert!(engine.tick_at(None, t0, Some(at(14, 33, 2))).is_empty());
+    }
+
+    #[test]
+    fn a_floating_world_clock_that_dies_is_drawn_on_the_wallpaper() {
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        // Pose as "floating" without opening a window: enabled, overlay present.
+        engine.world_cfg = world_cfg();
+        engine.float = Some(float::Overlay::dead());
+        assert!(engine.is_active() && !engine.world_on_wallpaper());
+
+        let pushed = engine.tick();
+        assert!(engine.float.is_none());
+        assert_eq!(ids(&pushed), vec![WORLD_CLOCK_OVERLAY]);
     }
 
     #[test]

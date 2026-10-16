@@ -2,9 +2,7 @@
 //!
 //! `x11` and `wayland` each own one backend; [`start`] picks between them.
 
-#[allow(dead_code)]
 mod wayland;
-#[allow(dead_code)]
 mod x11;
 
 pub struct Overlay {
@@ -13,8 +11,24 @@ pub struct Overlay {
 }
 
 /// Try to float the world clock above all windows. Err => caller falls back to the wallpaper widget layer.
-pub fn start(_cfg: &crate::config::WorldClock) -> anyhow::Result<Overlay> {
-    anyhow::bail!("floating overlay not implemented")
+///
+/// Each backend's `try_start` returns `Err` synchronously when the session
+/// cannot float (GNOME Wayland has no layer-shell) and `Ok` once its thread is
+/// running; that thread ends when `stop` is set.
+pub fn start(cfg: &crate::config::WorldClock) -> anyhow::Result<Overlay> {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let set = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
+    let join = if set("WAYLAND_DISPLAY") {
+        wayland::try_start(cfg, stop.clone())?
+    } else if set("DISPLAY") {
+        x11::try_start(cfg, stop.clone())?
+    } else {
+        anyhow::bail!("neither WAYLAND_DISPLAY nor DISPLAY is set");
+    };
+    Ok(Overlay {
+        stop,
+        join: Some(join),
+    })
 }
 
 /// Dropping the overlay stops its thread and waits for it, which takes the

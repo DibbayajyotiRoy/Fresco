@@ -1686,6 +1686,9 @@ impl Daemon {
     /// one decision per renderer, and talk to mpv only on change — the same
     /// single-authority shape as `WlOutput::reconcile_pause`.
     fn reconcile_pause(&self) {
+        // Plasma has no renderers: the plugin handles fullscreen itself, so only
+        // the user and battery sources go to it.
+        kde_desktop::set_paused(self.user_paused || self.battery_paused);
         for r in &self.renderers {
             let desired = self.user_paused
                 || self.battery_paused
@@ -3389,6 +3392,9 @@ fn run_wayland_layershell() -> Result<()> {
             && LockRuntime::resolved(&config)
                 .is_some_and(|r| !r.live_video.plays(crate::battery::on_battery()));
         let base_paused = user_paused || battery_paused || lock_forces_pause;
+        // Plasma has no outputs: the plugin handles fullscreen itself, so only
+        // the user and battery sources go to it.
+        kde_desktop::set_paused(user_paused || battery_paused);
         for (connector, o) in &outputs {
             o.reconcile_pause(base_paused || hidden.contains(connector));
         }

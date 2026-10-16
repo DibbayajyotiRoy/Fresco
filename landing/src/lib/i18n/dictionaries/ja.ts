@@ -274,6 +274,8 @@ export const ja: Dictionary = {
       compositorOff: "合成無効時のみ",
       cropOnly: "切り抜きのみ",
       workshop: "Workshop",
+      unclear: "不明",
+      na: "該当なし",
     },
   },
 

@@ -49,10 +49,21 @@ export const DISTROS = [
 
 /**
  * Competitor comparison. Cells: true (yes), false (no), or a qualifier ID
- * resolved through `dict.compare.cells`. Sourced from README.md. Komorebi is
- * unmaintained; Wallpaper Engine is a paid, Windows-first product.
+ * resolved through `dict.compare.cells`. Sourced from README.md's comparison
+ * table (checked 2026-10-16). The gui, x11, wayland and foss rows mirror its
+ * Interface, X11, Wayland and License columns: "unclear" is its "—" (the
+ * project's docs do not clearly say) and "na" its "n/a" (Wallpaper Engine is
+ * Windows-only, no official Linux version). The other rows have no column
+ * there.
  */
-export type CompareCellId = "partial" | "manual" | "compositorOff" | "cropOnly" | "workshop";
+export type CompareCellId =
+  | "partial"
+  | "manual"
+  | "compositorOff"
+  | "cropOnly"
+  | "workshop"
+  | "unclear"
+  | "na";
 export type CompareCell = boolean | CompareCellId;
 
 export type CompareRowId =
@@ -77,8 +88,8 @@ export const COMPARISON: {
   tools: ["Fresco", "Hidamari", "Komorebi", "mpvpaper", "Wallpaper Engine"],
   rows: [
     { id: "gui", values: [true, true, true, false, true] },
-    { id: "x11", values: [true, true, true, false, "compositorOff"] },
-    { id: "wayland", values: [true, "partial", false, true, false] },
+    { id: "x11", values: [true, true, "unclear", false, "na"] },
+    { id: "wayland", values: [true, "partial", "unclear", true, "na"] },
     { id: "hwDecode", values: [true, "partial", "partial", true, true] },
     { id: "cropRotate", values: [true, false, false, false, "cropOnly"] },
     { id: "playlists", values: [true, false, false, "manual", true] },

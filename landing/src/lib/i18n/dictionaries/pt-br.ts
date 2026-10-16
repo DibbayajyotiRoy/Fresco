@@ -278,6 +278,8 @@ export const ptBr: Dictionary = {
       compositorOff: "Sem compositor",
       cropOnly: "Só recorte",
       workshop: "Workshop",
+      unclear: "Não informado",
+      na: "n/d",
     },
   },
 

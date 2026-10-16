@@ -285,6 +285,8 @@ export const en = {
       compositorOff: "Compositor off",
       cropOnly: "Crop only",
       workshop: "Workshop",
+      unclear: "Unclear",
+      na: "n/a",
     },
   },
 

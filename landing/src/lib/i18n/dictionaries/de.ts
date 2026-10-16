@@ -278,6 +278,8 @@ export const de: Dictionary = {
       compositorOff: "Ohne Compositor",
       cropOnly: "Nur Zuschneiden",
       workshop: "Workshop",
+      unclear: "Unklar",
+      na: "n. v.",
     },
   },
 

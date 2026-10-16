@@ -849,6 +849,26 @@ pub struct Clock {
     /// set false to get plain white, which some wallpapers need.
     #[serde(default = "default_true")]
     pub accent_follow: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_hex_colour"
+    )]
+    pub number_colour: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_hex_colour"
+    )]
+    pub dot_colour: Option<String>,
+    #[serde(default = "default_clock_opacity")]
+    pub opacity: u8,
+    #[serde(default = "default_true")]
+    pub show_day_left: bool,
+}
+
+fn default_clock_opacity() -> u8 {
+    255
 }
 
 fn default_clock_anchor() -> LyricAnchor {
@@ -875,6 +895,10 @@ impl Default for Clock {
             show_date: false,
             use_24h: true,
             accent_follow: true,
+            number_colour: None,
+            dot_colour: None,
+            opacity: 255,
+            show_day_left: true,
         }
     }
 }
@@ -2629,6 +2653,7 @@ mod tests {
                     show_date: true,
                     use_24h: false,
                     accent_follow: false,
+                    ..Clock::default()
                 },
                 visualizer: Visualizer {
                     enabled: true,
@@ -2857,6 +2882,7 @@ accent_follow = false
             show_date: true,
             use_24h: false,
             accent_follow: false,
+            ..Clock::default()
         };
         let cfg = Config {
             widgets: Some(Widgets {

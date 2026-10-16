@@ -347,11 +347,7 @@ fn layout(fonts: &mut FontStack, t: &Theme, d: &ClockData, scale: f32) -> Layout
 
     let micro = typo::nearest_ladder_step(0.05 * side).max(Step::Micro.size());
     let has_micro = !micro_text(d).is_empty();
-    // The caption under the hero — the ring's value, in words — is
-    // `ClockData::secondary`, which `crate::clock::secondary_line` writes for
-    // this theme whatever `show_date` says and leaves empty only when the user
-    // turned `show_day_left` off. That is stable per config, so it never flips
-    // between ticks and re-fits the card.
+    // Empty only when show_day_left is off; stable per config, so the card never re-fits.
     let has_caption = !d.secondary.is_empty();
     let micro_cap = typo::cap_height(micro, Script::Latin);
     let gap = t.metrics.gap_m;

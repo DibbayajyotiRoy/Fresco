@@ -772,7 +772,7 @@ pub enum LyricAnchor {
 /// grows a knob we do not want to promise users forever. Two fields of
 /// `ClockStyle` are intentionally absent here: `colour` (the general fill is a
 /// theming decision Fresco makes from [`Config::accent`], not a text field to
-/// mistype — the NOS-only `dot_colour`/`number_colour` below are the opt-in
+/// mistype — the opt-in `number_colour`/`dot_colour` below are the
 /// exception) and anything not listed below.
 ///
 /// The clock does *not* need MPRIS, a network, or anything playing — unlike
@@ -851,7 +851,8 @@ pub struct Clock {
     #[serde(default = "default_true")]
     pub accent_follow: bool,
     /// Colour of the hero digits as `#RRGGBB`. Absent means the theme's own
-    /// ink, so a config written before this key renders the same.
+    /// ink, so a config written before this key renders the same. When set it
+    /// wins over `accent_follow`.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -870,9 +871,8 @@ pub struct Clock {
     /// by default; the card is faded as one object, as [`Disc::opacity`] is.
     #[serde(default = "default_clock_opacity")]
     pub opacity: u8,
-    /// NOS only: show the "time left today" caption under the digits. On by
-    /// default — it is the label of the ring; off drops the row and the ring is
-    /// left unlabelled.
+    /// Show the "time left today" line. On by default; off drops the row (on
+    /// NOS, the ring's caption, so the ring is left unlabelled).
     #[serde(default = "default_true")]
     pub show_day_left: bool,
 }
@@ -2845,10 +2845,7 @@ folder = "/srv/lyrics"
         );
         assert!(c.accent_follow, "matches Lyrics::accent_follow");
         // NOS customisation is opt-in: unset means the theme's own look.
-        assert_eq!(
-            (c.number_colour.as_deref(), c.dot_colour.as_deref()),
-            (None, None)
-        );
+        assert!(c.number_colour.is_none() && c.dot_colour.is_none());
         assert_eq!(c.opacity, 255);
         assert!(c.show_day_left);
         // A [widgets.clock] table with nothing in it must produce exactly that.
@@ -2857,6 +2854,20 @@ folder = "/srv/lyrics"
         // And an unset colour is not written out, so the file stays as it was.
         let written = toml::to_string(&c).unwrap();
         assert!(!written.contains("colour"), "{written}");
+    }
+
+    #[test]
+    fn a_clock_table_from_before_the_customisation_keys_renders_the_same() {
+        let cfg: Config =
+            toml::from_str("[widgets.clock]\nenabled = true\ntheme = \"nos\"\nuse_24h = false\n")
+                .unwrap();
+        let c = cfg.widgets.unwrap().clock;
+        assert!(c.enabled && !c.use_24h);
+        assert_eq!(c.theme, ClockThemeCfg::Nos);
+        assert_eq!(
+            (c.number_colour, c.dot_colour, c.opacity, c.show_day_left),
+            (None, None, 255, true)
+        );
     }
 
     #[test]

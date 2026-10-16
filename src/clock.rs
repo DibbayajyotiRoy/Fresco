@@ -191,7 +191,7 @@ pub struct ClockStyle {
     /// Take the fill colour from the desktop accent instead of `colour`.
     #[serde(default)]
     pub accent_follow: bool,
-    /// NOS only: show the "time left today" caption that labels the ring.
+    /// Show the "time left today" line (on NOS, the caption that labels the ring).
     #[serde(default = "default_show_day_left")]
     pub show_day_left: bool,
 }
@@ -678,12 +678,11 @@ pub fn date_line(now: DateTime<Local>, s: &ClockStyle) -> String {
 /// least that often — [`next_change`] is unaffected.
 ///
 /// Tied to [`shows_date`], except on NOS where the ring needs it whatever the
-/// switch says — unless `show_day_left` is off, which leaves the ring
-/// unlabelled by choice. Empty removes the row and the card's height
-/// recomputes; it never renders an empty band.
+/// switch says. `show_day_left` off empties it on every theme — on NOS that
+/// leaves the ring unlabelled by choice. Empty removes the row and the card's
+/// height recomputes; it never renders an empty band.
 pub fn secondary_line(now: DateTime<Local>, s: &ClockStyle) -> String {
-    let nos = matches!(s.theme, ClockTheme::Nos);
-    if (nos && !s.show_day_left) || (!shows_date(s) && !nos) {
+    if !s.show_day_left || (!shows_date(s) && !matches!(s.theme, ClockTheme::Nos)) {
         return String::new();
     }
     day_remaining(now, tick_secs(s))
@@ -1380,14 +1379,23 @@ mod tests {
     }
 
     #[test]
-    fn turning_the_day_left_off_empties_only_the_nos_secondary() {
-        let off = |theme| ClockStyle {
+    fn turning_the_day_left_off_empties_the_secondary_on_every_theme() {
+        for theme in ClockTheme::ALL {
+            let on = ClockStyle {
+                show_date: true,
+                ..style(theme)
+            };
+            let off = ClockStyle {
+                show_day_left: false,
+                ..on.clone()
+            };
+            assert!(secondary_line(at(21, 5, 0), &off).is_empty(), "{theme:?}");
+        }
+        let card = ClockStyle {
             show_date: true,
-            show_day_left: false,
-            ..style(theme)
+            ..style(ClockTheme::Card)
         };
-        assert!(secondary_line(at(21, 5, 0), &off(ClockTheme::Nos)).is_empty());
-        assert!(!secondary_line(at(21, 5, 0), &off(ClockTheme::Card)).is_empty());
+        assert!(!secondary_line(at(21, 5, 0), &card).is_empty());
     }
 
     #[test]

@@ -7064,7 +7064,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let day_left_row = clock_switch_row(
         &state,
         t!("Show time left today"),
-        t!("NOS theme only: a line under the clock showing how much of the day is left."),
+        t!("A line under the clock showing how much of the day is left."),
         cur.show_day_left,
         |c, on| c.show_day_left = on,
     );

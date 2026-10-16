@@ -4852,7 +4852,8 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
             use_24h: c.use_24h,
             // No colour key in the config on purpose; accent-follow is the path.
             colour: "#FFFFFF".to_string(),
-            accent_follow: c.accent_follow,
+            // A colour the user picked beats the accent, or it would do nothing.
+            accent_follow: c.accent_follow && c.number_colour.is_none(),
             show_day_left: c.show_day_left,
         },
         number_colour: c.number_colour.as_deref().and_then(Color::from_hex),
@@ -4870,6 +4871,22 @@ mod tests {
     };
     use crate::config::{Config, Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_picked_number_colour_beats_the_accent_and_unset_changes_nothing() {
+        let mut c = crate::config::Clock::default();
+        let w = super::widget_clock_cfg(&c);
+        assert!(w.style.accent_follow && w.number_colour.is_none() && w.opacity == 255);
+        c.number_colour = Some("#112233".into());
+        c.dot_colour = Some("nonsense".into());
+        let w = super::widget_clock_cfg(&c);
+        assert!(!w.style.accent_follow);
+        assert_eq!(
+            w.number_colour,
+            crate::widgetkit::Color::from_hex("#112233")
+        );
+        assert!(w.dot_colour.is_none(), "a bad hex falls back to the theme");
+    }
 
     #[test]
     fn a_saved_pause_switch_is_adopted_without_touching_anything_else() {

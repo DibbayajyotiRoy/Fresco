@@ -4572,6 +4572,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_clock_opacity_caps_the_alpha_of_the_pushed_pixels() {
+        let mut engine = WidgetEngine::new(Some(&widgets(false)), ACCENT);
+        let t0 = Instant::now();
+        let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
+        let wall = Some(at(14, 32, 30));
+        let mut max_alpha = |opacity: u8| {
+            engine.set_clock(Some(&ClockCfg {
+                opacity,
+                ..clock_cfg()
+            }));
+            let updates = engine.tick_at(Some(&snap), t0, wall);
+            let b = frame_for(&updates, CLOCK_OVERLAY);
+            let bytes = std::fs::read(&b.path).unwrap();
+            let bgra = &bytes[..b.h as usize * b.stride as usize];
+            bgra.chunks_exact(4).map(|p| p[3]).max().unwrap()
+        };
+        assert!(max_alpha(255) > 101, "a solid card has solid pixels");
+        assert!(max_alpha(100) <= 101, "faded pixels must not exceed 100");
+    }
+
     // -- tracks -------------------------------------------------------------
 
     #[test]

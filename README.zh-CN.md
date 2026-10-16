@@ -12,7 +12,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
 
-**已有 110+ 个国家/地区的 1,500+ 人在使用。**
+**已有 127 个国家/地区的 2,500+ 人在使用。**
 
 [官网](https://fresco.dibbayajyoti.com) · [安装](#安装) · [支持的环境](#支持的环境) · [对比](#fresco-与其他动态壁纸方案的对比) · [常见问题](#常见问题) · [更新日志](CHANGELOG.md) · [问题反馈](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -49,7 +49,7 @@ Fresco 是一款免费、开源的 Linux 动态壁纸应用，可将任意视频
 | **价格** | 免费——采用 GPL-3.0-or-later 许可证，无广告，无需注册账号 |
 | **技术栈** | Rust、GTK4 / libadwaita、libmpv |
 | **安装** | Deepin 应用商店、`.deb` 安装包或一行脚本命令 |
-| **用户规模** | 来自 110+ 国家/地区的 1,500+ 名用户 |
+| **用户规模** | 来自 127 国家/地区的 2,500+ 名用户 |
 | **语言** | 英文及 12 种翻译语言 |
 | **最新版本** | 1.1.49 |
 
@@ -331,4 +331,4 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ---
 
-<sub>Fresco——面向 Linux（X11 与 Wayland）的动态壁纸、视频壁纸与动画桌面背景，带有绘制进壁纸的桌面挂件：桌面歌词、桌面时钟挂件、音频可视化（音乐可视化壁纸）与专辑封面。可作为 Ubuntu、Pop!_OS、Linux Mint、Debian、elementary OS、Deepin 与 Kali Linux 的 Wallpaper Engine 替代品，也是 COSMIC 与 Wayland 上壁纸挂件的 Conky 替代品。已有 110+ 国家/地区的 1,500+ 人在使用。最后更新：2026-10-11。</sub>
+<sub>Fresco——面向 Linux（X11 与 Wayland）的动态壁纸、视频壁纸与动画桌面背景，带有绘制进壁纸的桌面挂件：桌面歌词、桌面时钟挂件、音频可视化（音乐可视化壁纸）与专辑封面。可作为 Ubuntu、Pop!_OS、Linux Mint、Debian、elementary OS、Deepin 与 Kali Linux 的 Wallpaper Engine 替代品，也是 COSMIC 与 Wayland 上壁纸挂件的 Conky 替代品。已有 127 国家/地区的 2,500+ 人在使用。最后更新：2026-10-11。</sub>

@@ -6891,6 +6891,46 @@ fn clock_spin_row(
     })
 }
 
+/// [`widget_colour_row`] for an optional clock colour. Unset means the theme
+/// paints its own, so the picker starts on `theme_hex` and a clear button (as on
+/// the lyric colour row) hands the colour back to the theme.
+fn clock_colour_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    cur: Option<&str>,
+    theme_hex: &'static str,
+    field: fn(&mut Clock) -> &mut Option<String>,
+) -> adw::ActionRow {
+    let (row, btn) = {
+        let state = state.clone();
+        widget_colour_row(title, subtitle, cur.unwrap_or(theme_hex), move |hex| {
+            edit_clock(&state, |c| *field(c) = Some(hex));
+        })
+    };
+    let clear = gtk4::Button::from_icon_name("edit-clear-symbolic");
+    clear.add_css_class("flat");
+    clear.set_valign(gtk4::Align::Center);
+    clear.set_tooltip_text(Some(t!("Use the colour the theme picks")));
+    clear.set_visible(cur.is_some());
+    row.add_prefix(&clear);
+    {
+        let state = state.clone();
+        let btn = btn.clone();
+        clear.connect_clicked(move |clear| {
+            // Reset the swatch first: it notifies, which re-sets the colour.
+            btn.set_rgba(&hex_to_rgba(theme_hex));
+            edit_clock(&state, |c| *field(c) = None);
+            clear.set_visible(false);
+        });
+    }
+    {
+        let clear = clear.clone();
+        btn.connect_rgba_notify(move |_| clear.set_visible(true));
+    }
+    row
+}
+
 /// "Clock" preferences group (WIDGETS_ROADMAP W1 GUI). Built exactly like
 /// [`add_lyrics_group`]: off by default, and every row below the master switch
 /// is insensitive until it is on, so the group reads as one feature rather than
@@ -6961,8 +7001,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let hour_row = clock_switch_row(
         &state,
         t!("24-hour time"),
-        "Show 13:00 rather than 1:00 PM. Fixed width, so a clock in a corner does not \
-         shift as the hour changes.",
+        t!("Show 13:00 rather than 1:00 PM. Fixed width, so a clock in a corner does not shift as the hour changes."),
         cur.use_24h,
         |c, on| c.use_24h = on,
     );
@@ -6991,6 +7030,43 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         t!("Draw the clock in the app accent colour instead of plain white."),
         cur.accent_follow,
         |c, on| c.accent_follow = on,
+    );
+
+    // Theme defaults, dark variant: white digits and the NOS ring red.
+    let number_row = clock_colour_row(
+        &state,
+        t!("Number colour"),
+        t!("Colour of the time digits. The clear button gives the theme its own colour back."),
+        cur.number_colour.as_deref(),
+        "#FFFFFF",
+        |c| &mut c.number_colour,
+    );
+    let dot_row = clock_colour_row(
+        &state,
+        t!("Dot colour"),
+        t!("Colour of the ring of dots in the NOS theme. The clear button gives the theme its own colour back."),
+        cur.dot_colour.as_deref(),
+        "#F2555A",
+        |c| &mut c.dot_colour,
+    );
+
+    let opacity_row = {
+        let state = state.clone();
+        super::lockscreen::lock_slider_row(
+            t!("Opacity"),
+            t!("How see-through the whole clock is. 100% is fully solid."),
+            (0.1, 1.0, 0.01),
+            f64::from(cur.opacity) / 255.0,
+            move |v| edit_clock(&state, |c| c.opacity = (v * 255.0).round() as u8),
+        )
+    };
+
+    let day_left_row = clock_switch_row(
+        &state,
+        t!("Show time left today"),
+        t!("NOS theme only: a line under the clock showing how much of the day is left."),
+        cur.show_day_left,
+        |c, on| c.show_day_left = on,
     );
 
     // Combos last: set_selected above would otherwise fire these while the
@@ -7023,6 +7099,10 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         date_row.clone().upcast(),
         seconds_row.clone().upcast(),
         accent_row.clone().upcast(),
+        number_row.clone().upcast(),
+        dot_row.clone().upcast(),
+        opacity_row.clone().upcast(),
+        day_left_row.clone().upcast(),
     ];
     let sync_sensitive = move |on: bool| {
         for row in &dependents {
@@ -7048,6 +7128,10 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     group.add(&date_row);
     group.add(&seconds_row);
     group.add(&accent_row);
+    group.add(&number_row);
+    group.add(&dot_row);
+    group.add(&opacity_row);
+    group.add(&day_left_row);
     page.add(&group);
 }
 

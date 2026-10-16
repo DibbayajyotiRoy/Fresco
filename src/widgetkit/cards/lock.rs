@@ -119,14 +119,12 @@ fn date_text(d: &ClockData) -> String {
 /// time and reads as two words shouting. A lock screen sets it small, on the
 /// figures' baseline, and so does this.
 fn split_meridiem(time: &str) -> (&str, &str) {
-    match time.rsplit_once(' ') {
-        Some((figures, suffix))
-            if !figures.is_empty()
-                && !suffix.is_empty()
-                && suffix.chars().all(char::is_alphabetic) =>
-        {
-            (figures, suffix)
-        }
+    // After the last digit, so a localised suffix ("a. m.", "上午") splits too.
+    let end = time
+        .rfind(|c: char| c.is_ascii_digit())
+        .map_or(0, |i| i + 1);
+    match time[end..].strip_prefix(' ') {
+        Some(suffix) if end > 0 && !suffix.is_empty() => (&time[..end], suffix),
         _ => (time, ""),
     }
 }
@@ -393,6 +391,8 @@ mod tests {
     fn a_meridiem_is_split_off_and_nothing_else_is() {
         assert_eq!(split_meridiem("9:41 AM"), ("9:41", "AM"));
         assert_eq!(split_meridiem("11:05:09 pm"), ("11:05:09", "pm"));
+        assert_eq!(split_meridiem("9:41 a. m."), ("9:41", "a. m."));
+        assert_eq!(split_meridiem("9:41 上午"), ("9:41", "上午"));
         assert_eq!(split_meridiem("23:55"), ("23:55", ""));
         assert_eq!(split_meridiem(" AM"), (" AM", ""));
         assert_eq!(split_meridiem("9:41 "), ("9:41 ", ""));

@@ -238,21 +238,6 @@ fn fit_micro(
     None
 }
 
-/// The caption under the hero — the ring's value, in words.
-///
-/// `ClockData::secondary` carries it (`crate::clock::secondary_line` writes it
-/// for this theme whatever `show_date` says, because on this card it is not a
-/// third row of trivia, it is the arc's label). The fallback is §8.3's own
-/// centre caption, reused rather than invented: a percentage and what it is a
-/// percentage *of*, which is the one thing an arc must never leave unsaid.
-fn caption_text(d: &ClockData) -> String {
-    if !d.secondary.is_empty() {
-        return d.secondary.to_string();
-    }
-    let pct = (day_fraction(d) * 100.0).round() as i32;
-    format!("{pct}% {}", crate::t!("Of day"))
-}
-
 fn day_fraction(d: &ClockData) -> f32 {
     if d.day_fraction.is_finite() {
         d.day_fraction.clamp(0.0, 1.0)
@@ -362,12 +347,18 @@ fn layout(fonts: &mut FontStack, t: &Theme, d: &ClockData, scale: f32) -> Layout
 
     let micro = typo::nearest_ladder_step(0.05 * side).max(Step::Micro.size());
     let has_micro = !micro_text(d).is_empty();
-    let has_caption = true;
+    // The caption under the hero — the ring's value, in words — is
+    // `ClockData::secondary`, which `crate::clock::secondary_line` writes for
+    // this theme whatever `show_date` says and leaves empty only when the user
+    // turned `show_day_left` off. That is stable per config, so it never flips
+    // between ticks and re-fits the card.
+    let has_caption = !d.secondary.is_empty();
     let micro_cap = typo::cap_height(micro, Script::Latin);
     let gap = t.metrics.gap_m;
 
     // The hero gets whatever the two label rows leave, and no more.
-    let rows_h = if has_micro { micro_cap + gap } else { 0.0 } + micro_cap + gap;
+    let rows_h = if has_micro { micro_cap + gap } else { 0.0 }
+        + if has_caption { micro_cap + gap } else { 0.0 };
     let hero_room = (content_h - rows_h).max(6.0);
 
     let widest = sizing_time(d);
@@ -410,7 +401,9 @@ fn layout(fonts: &mut FontStack, t: &Theme, d: &ClockData, scale: f32) -> Layout
         }
     }
 
-    let block_h = if has_micro { micro_cap + gap } else { 0.0 } + l.hero_cap + gap + micro_cap;
+    let block_h = if has_micro { micro_cap + gap } else { 0.0 }
+        + l.hero_cap
+        + if has_caption { gap + micro_cap } else { 0.0 };
     l.block = Rect::new(
         side / 2.0 - content_w / 2.0,
         side / 2.0 - block_h / 2.0,
@@ -585,12 +578,12 @@ fn draw_content(
     }
     // The caption, with the legend dot that binds it to the arc. Measured as
     // one unit and centred as one, or the dot drifts off the phrase it labels.
-    let text = caption_text(d);
-    let s = Script::of(&text);
+    let text = d.secondary;
+    let s = Script::of(text);
     let dot = l.dot * k;
     // The baseline end of the caption is its furthest point from the centre.
     let w = chord(inner_r, y + typo::cap_height(micro, s) - mid).max(1.0);
-    let run = typo::styled(&text, micro, 500, false, fonts)
+    let run = typo::styled(text, micro, 500, false, fonts)
         .color(t.text_secondary)
         .max_width((w - dot * 2.0).max(1.0));
     let m = fonts.measure(&run, c.scale());
@@ -831,17 +824,25 @@ mod tests {
     }
 
     #[test]
-    fn the_caption_never_leaves_the_arc_unlabelled() {
-        // The clock supplies the phrase; when it does not, the fallback still
-        // says what the arc is a fraction of.
-        let with = caption_text(&sample());
-        assert_eq!(with, "9h 27m left today");
-        let without = caption_text(&ClockData {
-            secondary: "",
-            ..sample()
-        });
-        assert!(without.contains("61"), "{without}");
-        assert!(without.len() > 4, "{without}");
+    fn an_empty_caption_drops_the_row_and_nothing_else_moves() {
+        let mut f = fonts();
+        if !f.has_fonts() {
+            return;
+        }
+        let t = theme(Mode::Dark);
+        let with = layout(&mut f, &t, &sample(), 1.0);
+        let without = layout(
+            &mut f,
+            &t,
+            &ClockData {
+                secondary: "",
+                ..sample()
+            },
+            1.0,
+        );
+        assert!(with.has_caption && !without.has_caption);
+        assert!(without.block.h < with.block.h, "the row kept its space");
+        assert_eq!(with.side, without.side, "the card resized");
     }
 
     #[test]

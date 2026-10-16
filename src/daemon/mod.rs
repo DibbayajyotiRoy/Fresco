@@ -4820,6 +4820,7 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
     use crate::clock::{ClockStyle, ClockTheme};
     use crate::config::{ClockThemeCfg, LyricAnchor};
     use crate::lyrics::Anchor;
+    use crate::widgetkit::Color;
     widgets::ClockCfg {
         enabled: c.enabled,
         style: ClockStyle {
@@ -4852,7 +4853,11 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
             // No colour key in the config on purpose; accent-follow is the path.
             colour: "#FFFFFF".to_string(),
             accent_follow: c.accent_follow,
+            show_day_left: c.show_day_left,
         },
+        number_colour: c.number_colour.as_deref().and_then(Color::from_hex),
+        dot_colour: c.dot_colour.as_deref().and_then(Color::from_hex),
+        opacity: c.opacity,
     }
 }
 

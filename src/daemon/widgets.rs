@@ -487,7 +487,7 @@ impl BitmapOverlay {
 /// A loop that never calls [`WidgetEngine::set_clock`] gets no clock and pays
 /// nothing for it, which is also exactly what a user who never enables one
 /// should get.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClockCfg {
     /// Master switch. **False by default**: an overlay nobody asked for is a bug
     /// report, and the power budget only holds because nothing is created until
@@ -497,6 +497,24 @@ pub struct ClockCfg {
     /// [`ClockStyle::show_seconds`] is the one field that costs power, turning
     /// one redraw a minute into sixty.
     pub style: ClockStyle,
+    /// Hero digit colour, replacing the theme's `text_primary`. `None` keeps it.
+    pub number_colour: Option<Color>,
+    /// NOS ring dot colour, replacing the theme's `nos_red`. `None` keeps it.
+    pub dot_colour: Option<Color>,
+    /// 0..=255, applied as a fade over the finished card.
+    pub opacity: u8,
+}
+
+impl Default for ClockCfg {
+    fn default() -> Self {
+        ClockCfg {
+            enabled: false,
+            style: ClockStyle::default(),
+            number_colour: None,
+            dot_colour: None,
+            opacity: 255,
+        }
+    }
 }
 
 /// The audio visualiser's settings.
@@ -3612,7 +3630,11 @@ impl WidgetEngine {
         let repush = self.repush;
         let cfg = self.clock_cfg.clone();
         let geoms = self.outputs.clone();
-        let theme = self.theme;
+        let theme = Theme {
+            nos_red: cfg.dot_colour.unwrap_or(self.theme.nos_red),
+            text_primary: cfg.number_colour.unwrap_or(self.theme.text_primary),
+            ..self.theme
+        };
         let due = clock_is_due(self.clock_due, wall, clock::tick_secs(&cfg.style));
         let next_due = clock::next_change(wall, &cfg.style);
         // The gauge's value, deliberately computed here and deliberately *not*
@@ -3657,6 +3679,7 @@ impl WidgetEngine {
                 let size = cards::clock::measure(fonts, &theme, &data, scale);
                 let canvas = canvas.get(size.buffer(), scale)?;
                 cards::clock::draw_at(canvas, fonts, &theme, &data, size.card_rect());
+                canvas.fade(canvas.bounds(), 0.0, f32::from(cfg.opacity) / 255.0);
                 let (x, y) = place(&size, cfg.style.anchor, cfg.style.margin_px, scale, geom);
                 Some(BitmapFrame {
                     bgra: canvas.to_bgra(),
@@ -4097,6 +4120,7 @@ mod tests {
         ClockCfg {
             enabled: true,
             style: ClockStyle::default(),
+            ..ClockCfg::default()
         }
     }
 
@@ -4449,6 +4473,7 @@ mod tests {
                 theme: crate::clock::ClockTheme::Wordy,
                 ..Default::default()
             },
+            ..ClockCfg::default()
         }));
         let themed = engine.tick_at(Some(&snap), t0, wall);
         assert_eq!(ids(&themed), vec![CLOCK_OVERLAY]);
@@ -4463,6 +4488,7 @@ mod tests {
                 theme: crate::clock::ClockTheme::Wordy,
                 ..Default::default()
             },
+            ..ClockCfg::default()
         }));
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
     }
@@ -4478,6 +4504,7 @@ mod tests {
                 accent_follow: true,
                 ..Default::default()
             },
+            ..ClockCfg::default()
         }));
         let t0 = Instant::now();
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
@@ -4511,6 +4538,38 @@ mod tests {
         assert_eq!(placement(amber_clock), placement(blue_clock));
         // And one repaint, not a permanent one.
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
+    }
+
+    #[test]
+    fn each_nos_customisation_repaints_the_card_and_undoing_it_restores_it() {
+        let mut engine = WidgetEngine::new(Some(&widgets(false)), ACCENT);
+        let base_cfg = ClockCfg {
+            style: ClockStyle {
+                theme: crate::clock::ClockTheme::Nos,
+                ..Default::default()
+            },
+            ..clock_cfg()
+        };
+        let t0 = Instant::now();
+        let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
+        let wall = Some(at(14, 32, 30));
+        let mut render = |cfg: &ClockCfg| {
+            engine.set_clock(Some(cfg));
+            picture_for(&engine.tick_at(Some(&snap), t0, wall), CLOCK_OVERLAY)
+        };
+        let base = render(&base_cfg);
+        let tweaks: [fn(&mut ClockCfg); 4] = [
+            |c| c.dot_colour = Some(Color::rgb8(0, 200, 0)),
+            |c| c.number_colour = Some(Color::rgb8(0, 200, 0)),
+            |c| c.opacity = 100,
+            |c| c.style.show_day_left = false,
+        ];
+        for (i, tweak) in tweaks.iter().enumerate() {
+            let mut cfg = base_cfg.clone();
+            tweak(&mut cfg);
+            assert_ne!(render(&cfg), base, "tweak {i} did not repaint the card");
+            assert_eq!(render(&base_cfg), base, "undoing tweak {i} left a trace");
+        }
     }
 
     // -- tracks -------------------------------------------------------------

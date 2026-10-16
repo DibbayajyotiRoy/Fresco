@@ -7,6 +7,7 @@ mod control;
 mod cosmic_bg;
 mod dde;
 mod dde_lock;
+pub mod float;
 mod fullscreen;
 mod kde_desktop;
 mod lock;

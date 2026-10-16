@@ -9,7 +9,7 @@ authors = ["Dibbayajyoti Roy"]
 
 [features]
 default = ["gui", "daemon"]
-gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel", "dep:semver"]
+gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel", "dep:semver", "dep:chrono-tz"]
 daemon = [
     "dep:x11rb", "dep:libloading", "dep:nix", "dep:wayland-client",
     "dep:wayland-protocols-wlr", "dep:cosmic-protocols",
@@ -20,6 +20,8 @@ daemon = [
     "dep:image",
     # widgetkit: the 2D rasteriser behind the bitmap widgets (see src/widgetkit).
     "dep:tiny-skia", "dep:cosmic-text",
+    # World-clock widget: IANA zone names -> UTC offsets (see src/worldclock.rs).
+    "dep:chrono-tz",
 ]
 
 [[bin]]
@@ -40,6 +42,9 @@ serde_json = "1"
 # Local wall-clock handling for scheduled wallpapers (std has no local tz).
 # Non-optional: the schedule engine is shared core (daemon evaluates, GUI edits).
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+# IANA time zones for the world-clock widget: neither std nor chrono ships a tz
+# database. Optional: the GUI validates zone names, the daemon renders them.
+chrono-tz = { version = "0.10", optional = true }
 dirs = "6"
 anyhow = "1"
 log = "0.4"

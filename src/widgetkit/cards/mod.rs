@@ -46,6 +46,7 @@ pub mod media;
 pub mod nos;
 pub mod nowplaying;
 pub mod visualizer;
+pub mod worldclock;
 
 pub use battery::BatteryData;
 pub use clock::{ClockData, ClockVariant};
@@ -54,3 +55,4 @@ pub use greeting::{GreetingData, GreetingLayout};
 pub use media::{MediaData, MediaLayer, PlayState};
 pub use nowplaying::NowPlayingData;
 pub use visualizer::{VisualizerData, VisualizerVariant};
+pub use worldclock::WorldClockData;

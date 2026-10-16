@@ -41,6 +41,8 @@ pub mod userinfo;
 pub mod visualizer;
 #[cfg(feature = "daemon")]
 pub mod widgetkit;
+#[cfg(any(feature = "gui", feature = "daemon"))]
+pub mod worldclock;
 
 /// Application ID used for the desktop file, autostart entry, and GTK app.
 pub const APP_ID: &str = "io.github.dibbayajyotiroy.Fresco";

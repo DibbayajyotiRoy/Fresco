@@ -7,6 +7,7 @@ mod control;
 mod cosmic_bg;
 mod dde;
 mod dde_lock;
+pub mod float;
 mod fullscreen;
 mod kde_desktop;
 mod lock;
@@ -4816,8 +4817,22 @@ fn apply_widget_config(engine: &mut widgets::WidgetEngine, config: &Config) {
     let w = config.widgets.as_ref();
     engine.set_config(w, config.accent);
     engine.set_clock(w.map(|w| widget_clock_cfg(&w.clock)).as_ref());
+    engine.set_world_clock(w.map(|w| widget_world_clock_cfg(&w.world_clock)).as_ref());
     engine.set_visualizer(w.map(|w| widget_visual_cfg(&w.visualizer)).as_ref());
     engine.set_disc(w.map(|w| widget_disc_cfg(&w.disc)).as_ref());
+}
+
+/// `config::WorldClock` -> the widget engine's settings. Enabled with no zone
+/// that parses draws nothing, so it is treated as disabled: no overlay window,
+/// no timer.
+fn widget_world_clock_cfg(c: &crate::config::WorldClock) -> widgets::WorldClockCfg {
+    widgets::WorldClockCfg {
+        enabled: c.enabled
+            && c.zones
+                .iter()
+                .any(|z| crate::worldclock::parse_zone(&z.tz).is_some()),
+        clock: c.clone(),
+    }
 }
 
 /// `config::Clock` -> the widget engine's clock settings. The mapping
@@ -4920,6 +4935,25 @@ mod tests {
             cached.wallpaper.path.as_deref(),
             Some(std::path::Path::new("/scheduled.mp4"))
         );
+    }
+
+    #[test]
+    fn a_world_clock_with_no_valid_zone_is_off() {
+        use crate::config::{WorldClock, WorldZone};
+        let zone = |tz: &str| WorldZone {
+            tz: tz.into(),
+            label: String::new(),
+        };
+        let mut c = WorldClock {
+            enabled: true,
+            zones: vec![zone("Not/AZone")],
+            ..Default::default()
+        };
+        assert!(!super::widget_world_clock_cfg(&c).enabled);
+        c.zones.push(zone("Asia/Tokyo"));
+        assert!(super::widget_world_clock_cfg(&c).enabled);
+        c.enabled = false;
+        assert!(!super::widget_world_clock_cfg(&c).enabled);
     }
 
     #[test]

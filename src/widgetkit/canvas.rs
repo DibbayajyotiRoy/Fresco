@@ -1045,6 +1045,13 @@ impl Canvas {
         }
     }
 
+    /// Consume the canvas and hand over its pixmap (premultiplied **RGBA**, as
+    /// tiny-skia keeps it). For callers that convert the bytes themselves; see
+    /// [`cards::worldclock::to_bgra_premul`](super::cards::worldclock::to_bgra_premul).
+    pub fn into_pixmap(self) -> Pixmap {
+        self.pixmap
+    }
+
     /// Consume the canvas and hand over its buffer as premultiplied BGRA.
     ///
     /// Cheaper than [`Canvas::to_bgra`] — the pixel `Vec` is moved and swapped
@@ -1341,7 +1348,7 @@ fn blend_over(dst: PremultipliedColorU8, src: Color) -> PremultipliedColorU8 {
 /// belt-and-braces — but this is the exact byte layout mpv reads, the swap is
 /// the only place a stray write could break it, and the cost is three `min`s
 /// per pixel.
-fn to_bgra_in_place(data: &mut [u8]) {
+pub(crate) fn to_bgra_in_place(data: &mut [u8]) {
     for px in data.chunks_exact_mut(4) {
         px.swap(0, 2);
         let a = px[3];

@@ -1,8 +1,10 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/DibbayajyotiRoy/fresco/main/data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png" width="112" alt="Fresco application icon — a free, open-source live wallpaper app for Linux" />
+<img src="./data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png" width="112" alt="Fresco application icon — a free, open-source live wallpaper app for Linux" />
 
 # Fresco — Live Wallpapers for Linux
+
+English | [简体中文](README.zh-CN.md)
 
 **Fresco is a free, open-source live wallpaper app for Linux that sets any video, GIF or image as an animated desktop wallpaper on X11 and Wayland.** A **Wallpaper Engine alternative for Linux**, working on COSMIC, Hyprland, Sway, KDE Plasma 6, and Deepin DDE.
 
@@ -15,7 +17,7 @@
 
 [Website](https://fresco.dibbayajyoti.com) · [Install](#install) · [Supported environments](#supported-environments) · [Comparison](#fresco-vs-other-live-wallpaper-options) · [FAQ](#faq) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
-<img src="https://raw.githubusercontent.com/DibbayajyotiRoy/fresco/main/data/screenshots/gallery.png" alt="Fresco wallpaper library window showing a grid of video wallpapers on a Linux desktop" width="800" />
+<img src="./data/screenshots/gallery.png" alt="Fresco wallpaper library window showing a grid of video wallpapers on a Linux desktop" width="800" />
 
 </div>
 
@@ -175,7 +177,7 @@ Fresco decodes video on the GPU (VA-API / NVDEC), so CPU usage stays near idle. 
 
 ### Does Fresco work on Wayland?
 
-Yes, on compositors that implement the layer-shell protocol — COSMIC, Hyprland, Sway, and KDE Plasma 6. GNOME on Wayland is the exception: Mutter exposes no wallpaper surface, so Fresco shows a still frame there and says so in the app. X11 sessions are fully supported.
+Yes, on compositors that implement the layer-shell protocol — COSMIC, Hyprland, and Sway — and on KDE Plasma 6 (X11 and Wayland) through plasmashell's own wallpaper plugin. GNOME on Wayland is the exception: Mutter exposes no wallpaper surface, so Fresco shows a still frame there and says so in the app. X11 sessions are fully supported.
 
 ### Is Fresco free?
 

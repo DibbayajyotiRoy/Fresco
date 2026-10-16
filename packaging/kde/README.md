@@ -286,6 +286,7 @@ expects:
 | `StillPath` | String | `""` | Absolute path; empty = no still fallback |
 | `PlayVideo` | Bool | `true` | If false, goes straight to `StillPath` |
 | `PauseMode` | Int | `0` | Desktop only: `0` pause while a window is fullscreen, `1` also while one is maximized, `2` never. Windows on other screens/desktops/activities and minimized ones are ignored |
+| `Paused` | Bool | `false` | Desktop only: Fresco's own pause (its Pause button, pause on battery); ORed with the fullscreen/maximized auto-pause |
 | `Dim` | Double | `0.2` | Clamped to `[0, 0.8]` in both the schema (`<min>`/`<max>`) and `main.qml` |
 | `LayerDir` | String | `""` | Directory Fresco rewrites; see contract above |
 | `RefreshMs` | Int | `1000` | Widget-layer poll interval |

@@ -64,5 +64,8 @@ Item {
         // Also keeps a source change from restarting playback mid-pause.
         autoPlay: !videoLayer.paused
         loops: MediaPlayer.Infinite
+        // autoPlay only covers the first load: setSource() on a live player
+        // stops it, and the next video stayed black (#63). Start it again.
+        onSourceChanged: if (!videoLayer.paused) play()
     }
 }

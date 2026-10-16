@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -101,6 +101,10 @@ pub fn report() -> String {
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Serialises plasmashell calls: applies from the loops, and the final restore.
 static BUSY: Mutex<()> = Mutex::new(());
+/// Fresco's own pause (Pause button, pause on battery) as last sent to the
+/// plugin's `Paused` key. Every apply writes it too, so a new wallpaper keeps
+/// the pause — as on the mpv backends.
+static PAUSED: AtomicBool = AtomicBool::new(false);
 
 /// Show `wallpaper` as every Plasma desktop's wallpaper. No-op off Plasma.
 /// Runs on a detached thread: waiting for plasmashell at login, rendering the
@@ -129,11 +133,29 @@ pub fn set_pause_mode(config: &Config) {
     if !enabled() {
         return;
     }
-    let script = pause_mode_script(kde_pause_mode(config));
+    let script = plugin_key_script("PauseMode", kde_pause_mode(config));
     std::thread::spawn(move || {
         let _busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = evaluate(&script) {
             log::warn!("KDE Plasma: could not update the pause mode: {e}");
+        }
+    });
+}
+
+/// Pause or resume the video the plugin plays (the `Paused` key, apart from its
+/// own window auto-pause). The plasmashell backend has no mpv to pause, so the
+/// daemons' pause sources come through here. No-op off Plasma and when
+/// unchanged; detached like [`apply`].
+pub fn set_paused(paused: bool) {
+    if !enabled() || PAUSED.swap(paused, Ordering::SeqCst) == paused {
+        return;
+    }
+    std::thread::spawn(|| {
+        let _busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
+        // Read here, not at the call: flips queued behind BUSY all write the latest.
+        let script = plugin_key_script("Paused", PAUSED.load(Ordering::SeqCst));
+        if let Err(e) = evaluate(&script) {
+            log::warn!("KDE Plasma: could not pause/resume the wallpaper: {e}");
         }
     });
 }
@@ -160,7 +182,13 @@ fn apply_now(wallpaper: &Wallpaper, pause_mode: i32, generation: u64) -> Result<
             overview::encode_file_uri(std::path::Path::new(p))
         }
     };
-    evaluate(&apply_script(&uri(&video), &uri(&still), pause_mode))?;
+    let paused = PAUSED.load(Ordering::SeqCst);
+    evaluate(&apply_script(
+        &uri(&video),
+        &uri(&still),
+        pause_mode,
+        paused,
+    ))?;
     log::info!(
         "KDE Plasma: applied via plasmashell wallpaper plugin ({})",
         if video.is_empty() { &still } else { &video }
@@ -267,12 +295,13 @@ fn kde_pause_mode(config: &Config) -> i32 {
 /// The script `plasma-apply-wallpaperimage` sends, with our plugin and its
 /// config keys (`contents/config/main.xml`). No veil, no widget layer on the
 /// desktop.
-fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32) -> String {
+fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32, paused: bool) -> String {
     let id = js_str(PLUGIN_ID);
     format!(
         "desktops().forEach(function(d){{\
          d.wallpaperPlugin={id};\
          d.currentConfigGroup=['Wallpaper',{id},'General'];\
+         d.writeConfig('Paused',{paused});\
          d.writeConfig('VideoPath',{video});\
          d.writeConfig('StillPath',{still});\
          d.writeConfig('PlayVideo',{play});\
@@ -285,15 +314,15 @@ fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32) -> String {
     )
 }
 
-/// The script behind [`set_pause_mode`]: `PauseMode` only, and only on the
-/// desktops that show our plugin.
-fn pause_mode_script(pause_mode: i32) -> String {
+/// The script behind [`set_pause_mode`] and [`set_paused`]: one plugin key
+/// (`PauseMode`, `Paused`), and only on the desktops that show our plugin.
+fn plugin_key_script(key: &str, value: impl std::fmt::Display) -> String {
     let id = js_str(PLUGIN_ID);
     format!(
         "desktops().forEach(function(d){{\
          if(d.wallpaperPlugin=={id}){{\
          d.currentConfigGroup=['Wallpaper',{id},'General'];\
-         d.writeConfig('PauseMode',{pause_mode});\
+         d.writeConfig('{key}',{value});\
          }}}});"
     )
 }
@@ -396,7 +425,7 @@ mod tests {
 
     #[test]
     fn hostile_paths_stay_inside_their_string_literal() {
-        let benign = apply_script("file:///a.mp4", "file:///a.png", 0);
+        let benign = apply_script("file:///a.mp4", "file:///a.png", 0, false);
         for evil in [
             "x');d.wallpaperPlugin=('evil",
             "x\");evil();(\"",
@@ -405,25 +434,37 @@ mod tests {
             "x\u{2028}evil();//",
             "x</script>",
         ] {
-            let s = apply_script(evil, evil, 0);
+            let s = apply_script(evil, evil, 0, false);
             assert_eq!(skeleton(&s), skeleton(&benign), "{evil:?}");
         }
     }
 
     #[test]
     fn apply_script_selects_our_plugin_and_writes_the_plugin_keys() {
-        let s = apply_script("file:///v.mp4", "file:///s.png", 1);
+        let s = apply_script("file:///v.mp4", "file:///s.png", 1, true);
         assert!(s.starts_with("desktops().forEach(function(d){d.wallpaperPlugin=\"io.github."));
-        for key in ["VideoPath", "StillPath", "PlayVideo", "PauseMode", "Dim"] {
+        for key in [
+            "VideoPath",
+            "StillPath",
+            "PlayVideo",
+            "PauseMode",
+            "Paused",
+            "Dim",
+        ] {
             assert!(s.contains(&format!("writeConfig('{key}'")), "{key}");
         }
+        // A new wallpaper keeps the user's pause (or lack of it).
+        assert!(s.contains("writeConfig('Paused',true)"));
+        assert!(apply_script("", "", 0, false).contains("writeConfig('Paused',false)"));
         assert!(s.contains("writeConfig('PlayVideo',true)"));
         assert!(s.contains("writeConfig('PauseMode',1)"));
         assert!(
             s.contains("['Wallpaper',\"io.github.dibbayajyotiroy.fresco.lockscreen\",'General']")
         );
         // An image wallpaper has nothing to play.
-        assert!(apply_script("", "file:///s.png", 0).contains("writeConfig('PlayVideo',false)"));
+        assert!(
+            apply_script("", "file:///s.png", 0, false).contains("writeConfig('PlayVideo',false)")
+        );
     }
 
     #[test]
@@ -435,14 +476,17 @@ mod tests {
     }
 
     #[test]
-    fn pause_mode_script_writes_only_the_pause_mode_on_our_desktops() {
-        let s = pause_mode_script(1);
+    fn plugin_key_script_writes_only_its_key_on_our_desktops() {
+        let s = plugin_key_script("PauseMode", 1);
         assert!(s.contains("if(d.wallpaperPlugin==\"io.github."));
         assert!(s.contains("writeConfig('PauseMode',1)"));
-        for key in ["VideoPath", "StillPath", "PlayVideo", "Dim"] {
+        for key in ["VideoPath", "StillPath", "PlayVideo", "Paused", "Dim"] {
             assert!(!s.contains(key), "{key}");
         }
-        assert!(pause_mode_script(0).contains("writeConfig('PauseMode',0)"));
+        assert!(plugin_key_script("PauseMode", 0).contains("writeConfig('PauseMode',0)"));
+        let s = plugin_key_script("Paused", true);
+        assert!(s.contains("writeConfig('Paused',true)"));
+        assert!(!s.contains("PauseMode"));
     }
 
     #[test]
@@ -464,7 +508,7 @@ mod tests {
     fn script_survives_gdbus_argument_quoting() {
         // gdbus parses the argument as a GVariant string: quotes and
         // backslashes in the script must round-trip through the literal.
-        let script = apply_script("file:///it's.mp4", "", 0);
+        let script = apply_script("file:///it's.mp4", "", 0, false);
         let lit = overview::gvariant_string_literal(&script);
         let inner = &lit[1..lit.len() - 1];
         let mut un = String::new();

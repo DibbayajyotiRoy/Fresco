@@ -154,7 +154,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local, TimeDelta};
+use chrono::{DateTime, Local, TimeDelta, Utc};
 use image::RgbaImage;
 
 use crate::artwork::{self, Bgra, DiscCfg};
@@ -168,7 +168,9 @@ use crate::visualizer::{self, VisualStyle, VisualStyleCfg};
 use crate::widgetkit::{
     self, cards, BarPaint, Canvas, Color, FontStack, Mode, Size, SpectrumStyle, Theme, WidgetSize,
 };
+use crate::worldclock;
 
+use super::float;
 use super::lyrics_runtime::{self, Action, LyricsRuntime};
 use super::widget_anchor;
 
@@ -196,6 +198,10 @@ pub const VISUALIZER_OVERLAY: u32 = 3;
 /// id is distinct anyway, because a reader tracing "which widget owns overlay
 /// 2" should never have to know that.
 pub const DISC_OVERLAY: u32 = 4;
+
+/// Overlay id of the world clock. See [`LYRICS_OVERLAY`]. (The lock screen's
+/// ids start at 101, so there is room.)
+pub const WORLD_CLOCK_OVERLAY: u32 = 5;
 
 /// `res_x` every `osd-overlay` call must carry. Re-exported from
 /// [`crate::lyrics`] so a call site never has to remember which coordinate
@@ -233,8 +239,8 @@ pub const RES_Y: u32 = lyrics::PLAY_RES_Y;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetUpdate {
-    /// [`LYRICS_OVERLAY`], [`CLOCK_OVERLAY`], [`VISUALIZER_OVERLAY`] or
-    /// [`DISC_OVERLAY`].
+    /// [`LYRICS_OVERLAY`], [`CLOCK_OVERLAY`], [`VISUALIZER_OVERLAY`],
+    /// [`DISC_OVERLAY`] or [`WORLD_CLOCK_OVERLAY`].
     pub overlay_id: u32,
     /// The `ass-events` payload, or empty to clear. Always empty when `bitmap`
     /// is `Some` — the two payloads are alternatives, not layers.
@@ -487,7 +493,7 @@ impl BitmapOverlay {
 /// A loop that never calls [`WidgetEngine::set_clock`] gets no clock and pays
 /// nothing for it, which is also exactly what a user who never enables one
 /// should get.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClockCfg {
     /// Master switch. **False by default**: an overlay nobody asked for is a bug
     /// report, and the power budget only holds because nothing is created until
@@ -497,6 +503,37 @@ pub struct ClockCfg {
     /// [`ClockStyle::show_seconds`] is the one field that costs power, turning
     /// one redraw a minute into sixty.
     pub style: ClockStyle,
+    /// Hero digit colour, replacing the theme's `text_primary`. `None` keeps it.
+    pub number_colour: Option<Color>,
+    /// NOS ring dot colour, replacing the theme's `nos_red`. `None` keeps it.
+    pub dot_colour: Option<Color>,
+    /// 0..=255, applied as a fade over the finished card.
+    pub opacity: u8,
+}
+
+impl Default for ClockCfg {
+    fn default() -> Self {
+        ClockCfg {
+            enabled: false,
+            style: ClockStyle::default(),
+            number_colour: None,
+            dot_colour: None,
+            opacity: 255,
+        }
+    }
+}
+
+/// The world clock's settings.
+///
+/// `config::WorldClock` is already the shape the renderer wants, so it is
+/// carried whole; the daemon's mapping only decides `enabled`, which is false
+/// for a block with no zone that parses -- there is nothing to draw, so nothing
+/// is created. See [`WidgetEngine::set_world_clock`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WorldClockCfg {
+    /// Master switch. **False by default**, like every widget.
+    pub enabled: bool,
+    pub clock: config::WorldClock,
 }
 
 /// The audio visualiser's settings.
@@ -1992,6 +2029,29 @@ impl ClockState {
     }
 }
 
+/// The world clock's runtime: the rows it is showing and where those pixels
+/// are. The wallpaper-layer twin of [`ClockState`]; it exists only while the
+/// widget is drawn on the wallpaper, never while it floats.
+struct WorldClockState {
+    /// `None` until the first render; refreshed only when `world_due` says the
+    /// minute has turned.
+    rows: Option<Vec<worldclock::Row>>,
+    /// Reused across frames; see [`Surface`].
+    canvas: Surface,
+    /// Files, per-output placement, the redraw gate and the rate cap.
+    bmp: BitmapState,
+}
+
+impl WorldClockState {
+    fn new(now: Instant) -> Self {
+        WorldClockState {
+            rows: None,
+            canvas: Surface::default(),
+            bmp: BitmapState::new("widget-worldclock", now),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The album-art disc
 // ---------------------------------------------------------------------------
@@ -2721,6 +2781,7 @@ pub struct WidgetEngine {
     /// Owned copy of the lyric config; the daemon reloads `config.toml` under us.
     lyrics_cfg: config::Lyrics,
     clock_cfg: ClockCfg,
+    world_cfg: WorldClockCfg,
     visual_cfg: VisualCfg,
     disc_cfg: DiscWidgetCfg,
     monitor: Option<String>,
@@ -2762,6 +2823,12 @@ pub struct WidgetEngine {
     lyrics_view: Option<LyricsView>,
     /// `Some` exactly while the clock is enabled.
     clock: Option<ClockState>,
+    /// `Some` exactly while the world clock is drawn on the wallpaper layer.
+    world: Option<WorldClockState>,
+    /// The world clock's always-on-top window, when `float_on_top` is on and
+    /// this session can do it. While it is `Some` the wallpaper-layer world
+    /// clock is not drawn; dropping it takes the window down.
+    float: Option<float::Overlay>,
     /// `Some` exactly while the visualiser is enabled. Holds the capture, so
     /// dropping it stops recording.
     visual: Option<VisualState>,
@@ -2770,6 +2837,8 @@ pub struct WidgetEngine {
     /// Wall-clock instant at which the clock's *text* next differs. Between now
     /// and then, the clock branch does not render, allocate or compare.
     clock_due: Option<DateTime<Local>>,
+    /// [`Self::clock_due`] for the world clock.
+    world_due: Option<DateTime<Local>>,
     /// Re-*push* everything on the next tick, whatever we believe is on screen
     /// — see [`WidgetEngine::invalidate`]. Deliberately not "re-render": the
     /// pixels on disk are still valid, and re-rasterising four bitmap widgets
@@ -2784,7 +2853,7 @@ pub struct WidgetEngine {
 }
 
 /// How many overlay ids this engine owns. See [`overlay_slot`].
-const OVERLAY_SLOTS: usize = 4;
+const OVERLAY_SLOTS: usize = 5;
 
 /// Index of `overlay_id` in the engine's per-overlay arrays, or `None` for an
 /// id this engine does not own.
@@ -2797,6 +2866,7 @@ fn overlay_slot(overlay_id: u32) -> Option<usize> {
         CLOCK_OVERLAY => Some(1),
         VISUALIZER_OVERLAY => Some(2),
         DISC_OVERLAY => Some(3),
+        WORLD_CLOCK_OVERLAY => Some(4),
         _ => None,
     }
 }
@@ -2816,6 +2886,7 @@ impl WidgetEngine {
         let mut engine = WidgetEngine {
             lyrics_cfg: config::Lyrics::default(),
             clock_cfg: ClockCfg::default(),
+            world_cfg: WorldClockCfg::default(),
             visual_cfg: VisualCfg::default(),
             disc_cfg: DiscWidgetCfg::default(),
             monitor: None,
@@ -2835,9 +2906,12 @@ impl WidgetEngine {
             track_seq: None,
             lyrics_view: None,
             clock: None,
+            world: None,
+            float: None,
             visual: None,
             disc: None,
             clock_due: None,
+            world_due: None,
             repush: false,
             on_screen: [None; OVERLAY_SLOTS],
         };
@@ -3001,6 +3075,9 @@ impl WidgetEngine {
         if let Some(c) = &mut self.clock {
             c.bmp.dirty = true;
         }
+        if let Some(w) = &mut self.world {
+            w.bmp.dirty = true;
+        }
         if let Some(v) = &mut self.visual {
             v.bmp.dirty = true;
         }
@@ -3036,6 +3113,58 @@ impl WidgetEngine {
             // Off the tick: this is a config setter, and the font scan is tens
             // to hundreds of milliseconds.
             self.fonts.prime();
+        }
+    }
+
+    /// Adopt the world clock's settings. `None` disables it.
+    ///
+    /// **This is where the floating overlay starts and stops.** With
+    /// `float_on_top` it tries [`float::start`]; on success the overlay owns the
+    /// clock and the wallpaper layer draws nothing. If the session cannot float
+    /// (no layer-shell, no display) it logs once and the clock is drawn on the
+    /// wallpaper layer instead. An identical config returns early, so the
+    /// overlay is rebuilt only when the block really changed.
+    pub fn set_world_clock(&mut self, cfg: Option<&WorldClockCfg>) {
+        let cfg = cfg.cloned().unwrap_or_default();
+        if cfg == self.world_cfg {
+            return;
+        }
+        self.world_cfg = cfg;
+        self.world_due = None;
+        self.float = None;
+        if self.world_cfg.enabled && self.world_cfg.clock.float_on_top {
+            match float::start(&self.world_cfg.clock) {
+                Ok(overlay) => self.float = Some(overlay),
+                Err(e) => log::info!(
+                    "widgets: the world clock cannot float above windows here ({e:#}); \
+                     drawing it on the wallpaper instead"
+                ),
+            }
+        }
+        self.draw_world_on_wallpaper();
+    }
+
+    /// Start (or re-push) the wallpaper-layer world clock, if that is where it
+    /// belongs: enabled and not floating.
+    fn draw_world_on_wallpaper(&mut self) {
+        if self.world_on_wallpaper() {
+            match &mut self.world {
+                Some(w) => w.bmp.dirty = true,
+                None => self.world = Some(WorldClockState::new(Instant::now())),
+            }
+            self.fonts.prime();
+        }
+    }
+
+    /// The floating overlay's thread ended on its own (surface closed, X error):
+    /// drop it and let the wallpaper layer draw the clock.
+    fn reap_dead_float(&mut self) {
+        if self.float.as_ref().is_some_and(|f| !f.is_alive()) {
+            log::info!(
+                "widgets: the floating world clock stopped; drawing it on the wallpaper instead"
+            );
+            self.float = None;
+            self.draw_world_on_wallpaper();
         }
     }
 
@@ -3156,6 +3285,7 @@ impl WidgetEngine {
     pub fn is_active(&self) -> bool {
         self.lyrics_cfg.enabled
             || self.clock_cfg.enabled
+            || self.world_cfg.enabled // floating or not: `tick` must run to see the overlay end
             || self.visual_cfg.enabled
             || self.disc_cfg.enabled
     }
@@ -3195,7 +3325,13 @@ impl WidgetEngine {
     /// — and which is what the loop calls on renderer teardown and on wallpaper
     /// swap, i.e. at every point where our belief could be wrong.
     pub fn tick(&mut self) -> Vec<WidgetUpdate> {
-        if !self.lyrics_live() && !self.clock_live() && !self.visual_live() && !self.disc_live() {
+        self.reap_dead_float();
+        if !self.lyrics_live()
+            && !self.clock_live()
+            && !self.world_live()
+            && !self.visual_live()
+            && !self.disc_live()
+        {
             return Vec::new();
         }
         let snapshot = if self.lyrics_live() || self.disc_live() {
@@ -3204,7 +3340,7 @@ impl WidgetEngine {
             None
         };
         // Read a clock only for a widget that is switched on.
-        let wall = self.clock_live().then(Local::now);
+        let wall = (self.clock_live() || self.world_live()).then(Local::now);
         self.tick_at(snapshot.as_ref(), Instant::now(), wall)
     }
 
@@ -3232,7 +3368,7 @@ impl WidgetEngine {
         } else {
             None
         };
-        let wall = self.clock_cfg.enabled.then(Local::now);
+        let wall = (self.clock_cfg.enabled || self.world_on_wallpaper()).then(Local::now);
         self.next_deadline_at(snapshot.as_ref(), Instant::now(), wall)
     }
 
@@ -3279,6 +3415,7 @@ impl WidgetEngine {
         let live = [
             (LYRICS_OVERLAY, self.lyrics_cfg.enabled, clear_lyrics),
             (CLOCK_OVERLAY, self.clock_cfg.enabled, clear_clock),
+            (WORLD_CLOCK_OVERLAY, self.world_on_wallpaper(), clear_clock),
             (VISUALIZER_OVERLAY, self.visual_cfg.enabled, clear_visual),
             (DISC_OVERLAY, self.disc_cfg.enabled, clear_disc),
         ];
@@ -3318,6 +3455,10 @@ impl WidgetEngine {
             if let Some(c) = &mut self.clock {
                 c.bmp.forget();
             }
+            self.world_due = None;
+            if let Some(w) = &mut self.world {
+                w.bmp.forget();
+            }
         }
         if clear_visual {
             if let Some(v) = &mut self.visual {
@@ -3344,9 +3485,8 @@ impl WidgetEngine {
     /// the other at runtime stays correct without touching this at all.
     fn substrate(&self, overlay_id: u32) -> OverlayKind {
         match overlay_id {
-            LYRICS_OVERLAY | CLOCK_OVERLAY | VISUALIZER_OVERLAY | DISC_OVERLAY => {
-                OverlayKind::Bitmap
-            }
+            LYRICS_OVERLAY | CLOCK_OVERLAY | WORLD_CLOCK_OVERLAY | VISUALIZER_OVERLAY
+            | DISC_OVERLAY => OverlayKind::Bitmap,
             _ => OverlayKind::Ass,
         }
     }
@@ -3492,6 +3632,7 @@ impl WidgetEngine {
 
         if let Some(wall) = wall {
             self.clock_tick(wall, now, &mut out);
+            self.world_clock_tick(wall, now, &mut out);
         }
 
         self.visual_tick(now, &mut out);
@@ -3612,7 +3753,11 @@ impl WidgetEngine {
         let repush = self.repush;
         let cfg = self.clock_cfg.clone();
         let geoms = self.outputs.clone();
-        let theme = self.theme;
+        let theme = Theme {
+            nos_red: cfg.dot_colour.unwrap_or(self.theme.nos_red),
+            text_primary: cfg.number_colour.unwrap_or(self.theme.text_primary),
+            ..self.theme
+        };
         let due = clock_is_due(self.clock_due, wall, clock::tick_secs(&cfg.style));
         let next_due = clock::next_change(wall, &cfg.style);
         // The gauge's value, deliberately computed here and deliberately *not*
@@ -3657,7 +3802,76 @@ impl WidgetEngine {
                 let size = cards::clock::measure(fonts, &theme, &data, scale);
                 let canvas = canvas.get(size.buffer(), scale)?;
                 cards::clock::draw_at(canvas, fonts, &theme, &data, size.card_rect());
+                canvas.fade(canvas.bounds(), 0.0, f32::from(cfg.opacity) / 255.0);
                 let (x, y) = place(&size, cfg.style.anchor, cfg.style.margin_px, scale, geom);
+                Some(BitmapFrame {
+                    bgra: canvas.to_bgra(),
+                    x,
+                    y,
+                })
+            },
+            out,
+        );
+    }
+
+    /// Advance the world clock, on the clock's discipline: nothing happens
+    /// between `world_due` and now, and the content key is the rows' text.
+    fn world_clock_tick(
+        &mut self,
+        wall: DateTime<Local>,
+        now: Instant,
+        out: &mut Vec<WidgetUpdate>,
+    ) {
+        if self.world.is_none() {
+            return;
+        }
+        let repush = self.repush;
+        let on = self.world_on_wallpaper();
+        let theme = self.theme;
+        let cfg = &self.world_cfg.clock;
+        let utc = wall.with_timezone(&Utc);
+        let due = clock_is_due(self.world_due, wall, 60);
+        let next_due = worldclock::next_change(utc).with_timezone(&Local);
+
+        let fonts = &mut self.fonts;
+        let Some(state) = &mut self.world else { return };
+        if !on {
+            // Switched off, or lifted into the floating overlay: take the
+            // wallpaper-layer frame down, once, then throw the runtime away.
+            state.bmp.retire(WORLD_CLOCK_OVERLAY, out);
+            self.world = None;
+            self.world_due = None;
+            return;
+        }
+        if due {
+            state.rows = Some(worldclock::rows(cfg, utc));
+            self.world_due = Some(next_due);
+        }
+        let WorldClockState { rows, canvas, bmp } = state;
+        let Some(rows) = rows.as_ref() else { return };
+        let key = ContentKey::of(rows.iter().map(|r| (&r.label, &r.time)).collect::<Vec<_>>());
+        bmp.push(
+            Push {
+                overlay_id: WORLD_CLOCK_OVERLAY,
+                key,
+                repush,
+                stepped: false,
+                now,
+                period: CLOCK_PERIOD,
+                retry: CLOCK_RETRY,
+            },
+            &self.outputs,
+            |geom| {
+                let scale = widgetkit::scale_for_output(geom.h);
+                let data = cards::WorldClockData {
+                    rows,
+                    font_size: cfg.font_size_pt as f32,
+                };
+                let fonts = fonts.get();
+                let size = cards::worldclock::measure(fonts, &theme, &data, scale);
+                let canvas = canvas.get(size.buffer(), scale)?;
+                cards::worldclock::draw_at(canvas, fonts, &theme, &data, size.card_rect());
+                let (x, y) = place(&size, widget_anchor(cfg.anchor), cfg.margin_px, scale, geom);
                 Some(BitmapFrame {
                     bgra: canvas.to_bgra(),
                     x,
@@ -3930,6 +4144,19 @@ impl WidgetEngine {
             }
         }
 
+        if self.world_on_wallpaper() {
+            if let Some(wall) = wall {
+                let wait = match self.world_due {
+                    Some(due) if !clock_is_due(Some(due), wall, 60) => due
+                        .signed_duration_since(wall)
+                        .to_std()
+                        .unwrap_or(Duration::ZERO),
+                    _ => Duration::ZERO,
+                };
+                best = min_instant(best, now + wait);
+            }
+        }
+
         // The visualiser has no schedule to sleep until, so it publishes its
         // own rate cap — 24 Hz with audio, 4 Hz in silence, and *nothing* when
         // it is off or has no capture behind it, which is what keeps an
@@ -3967,6 +4194,17 @@ impl WidgetEngine {
     /// The same question for the clock.
     fn clock_live(&self) -> bool {
         self.clock_cfg.enabled || self.clock.is_some()
+    }
+
+    /// The world clock is drawn on the wallpaper layer: enabled, and not lifted
+    /// into the floating overlay.
+    fn world_on_wallpaper(&self) -> bool {
+        self.world_cfg.enabled && self.float.is_none()
+    }
+
+    /// The same question for the world clock.
+    fn world_live(&self) -> bool {
+        self.world_on_wallpaper() || self.world.is_some()
     }
 
     /// The same question for the visualiser.
@@ -4097,6 +4335,7 @@ mod tests {
         ClockCfg {
             enabled: true,
             style: ClockStyle::default(),
+            ..ClockCfg::default()
         }
     }
 
@@ -4449,6 +4688,7 @@ mod tests {
                 theme: crate::clock::ClockTheme::Wordy,
                 ..Default::default()
             },
+            ..ClockCfg::default()
         }));
         let themed = engine.tick_at(Some(&snap), t0, wall);
         assert_eq!(ids(&themed), vec![CLOCK_OVERLAY]);
@@ -4463,6 +4703,7 @@ mod tests {
                 theme: crate::clock::ClockTheme::Wordy,
                 ..Default::default()
             },
+            ..ClockCfg::default()
         }));
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
     }
@@ -4478,6 +4719,7 @@ mod tests {
                 accent_follow: true,
                 ..Default::default()
             },
+            ..ClockCfg::default()
         }));
         let t0 = Instant::now();
         let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
@@ -4511,6 +4753,59 @@ mod tests {
         assert_eq!(placement(amber_clock), placement(blue_clock));
         // And one repaint, not a permanent one.
         assert!(engine.tick_at(Some(&snap), t0, wall).is_empty());
+    }
+
+    #[test]
+    fn each_nos_customisation_repaints_the_card_and_undoing_it_restores_it() {
+        let mut engine = WidgetEngine::new(Some(&widgets(false)), ACCENT);
+        let base_cfg = ClockCfg {
+            style: ClockStyle {
+                theme: crate::clock::ClockTheme::Nos,
+                ..Default::default()
+            },
+            ..clock_cfg()
+        };
+        let t0 = Instant::now();
+        let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
+        let wall = Some(at(14, 32, 30));
+        let mut render = |cfg: &ClockCfg| {
+            engine.set_clock(Some(cfg));
+            picture_for(&engine.tick_at(Some(&snap), t0, wall), CLOCK_OVERLAY)
+        };
+        let base = render(&base_cfg);
+        let tweaks: [fn(&mut ClockCfg); 4] = [
+            |c| c.dot_colour = Some(Color::rgb8(0, 200, 0)),
+            |c| c.number_colour = Some(Color::rgb8(0, 200, 0)),
+            |c| c.opacity = 100,
+            |c| c.style.show_day_left = false,
+        ];
+        for (i, tweak) in tweaks.iter().enumerate() {
+            let mut cfg = base_cfg.clone();
+            tweak(&mut cfg);
+            assert_ne!(render(&cfg), base, "tweak {i} did not repaint the card");
+            assert_eq!(render(&base_cfg), base, "undoing tweak {i} left a trace");
+        }
+    }
+
+    #[test]
+    fn the_clock_opacity_caps_the_alpha_of_the_pushed_pixels() {
+        let mut engine = WidgetEngine::new(Some(&widgets(false)), ACCENT);
+        let t0 = Instant::now();
+        let snap = snapshot_at(t0, Some(fixture()), us(10.0), PlaybackStatus::Playing, 1);
+        let wall = Some(at(14, 32, 30));
+        let mut max_alpha = |opacity: u8| {
+            engine.set_clock(Some(&ClockCfg {
+                opacity,
+                ..clock_cfg()
+            }));
+            let updates = engine.tick_at(Some(&snap), t0, wall);
+            let b = frame_for(&updates, CLOCK_OVERLAY);
+            let bytes = std::fs::read(&b.path).unwrap();
+            let bgra = &bytes[..b.h as usize * b.stride as usize];
+            bgra.chunks_exact(4).map(|p| p[3]).max().unwrap()
+        };
+        assert!(max_alpha(255) > 101, "a solid card has solid pixels");
+        assert!(max_alpha(100) <= 101, "faded pixels must not exceed 100");
     }
 
     // -- tracks -------------------------------------------------------------
@@ -4881,6 +5176,63 @@ mod tests {
         // And the public tick, which decides for itself whether to read a clock,
         // agrees that there is nothing left to do.
         assert!(engine.tick().is_empty());
+    }
+
+    fn world_cfg() -> WorldClockCfg {
+        let zone = config::WorldZone {
+            tz: "Asia/Tokyo".into(),
+            label: String::new(),
+        };
+        WorldClockCfg {
+            enabled: true,
+            clock: config::WorldClock {
+                enabled: true,
+                zones: vec![zone],
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn the_world_clock_pushes_once_a_minute_and_comes_down_once() {
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        engine.set_world_clock(Some(&world_cfg()));
+        let t0 = Instant::now();
+
+        let first = engine.tick_at(None, t0, Some(at(14, 32, 0)));
+        assert_eq!(ids(&first), vec![WORLD_CLOCK_OVERLAY]);
+        let at_32 = picture_for(&first, WORLD_CLOCK_OVERLAY);
+        // The next wake is the top of the next minute, and nothing is pushed
+        // until then.
+        assert_eq!(
+            engine.next_deadline_at(None, t0, Some(at(14, 32, 30))),
+            Some(t0 + Duration::from_secs(30))
+        );
+        assert!(engine.tick_at(None, t0, Some(at(14, 32, 59))).is_empty());
+        let next = engine.tick_at(None, t0, Some(at(14, 33, 0)));
+        assert_eq!(ids(&next), vec![WORLD_CLOCK_OVERLAY]);
+        assert_ne!(at_32, picture_for(&next, WORLD_CLOCK_OVERLAY));
+
+        engine.set_world_clock(None);
+        assert!(!engine.is_active());
+        assert_eq!(
+            engine.tick_at(None, t0, Some(at(14, 33, 1))),
+            vec![WidgetUpdate::remove(WORLD_CLOCK_OVERLAY)]
+        );
+        assert!(engine.tick_at(None, t0, Some(at(14, 33, 2))).is_empty());
+    }
+
+    #[test]
+    fn a_floating_world_clock_that_dies_is_drawn_on_the_wallpaper() {
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        // Pose as "floating" without opening a window: enabled, overlay present.
+        engine.world_cfg = world_cfg();
+        engine.float = Some(float::Overlay::dead());
+        assert!(engine.is_active() && !engine.world_on_wallpaper());
+
+        let pushed = engine.tick();
+        assert!(engine.float.is_none());
+        assert_eq!(ids(&pushed), vec![WORLD_CLOCK_OVERLAY]);
     }
 
     #[test]

@@ -21,7 +21,7 @@
  *      desktop (icons included) into one opaque window, so a Fresco window
  *      can never show the video there; instead Fresco's daemon selects this
  *      plugin on every desktop through plasmashell's scripting DBus API and
- *      writes VideoPath/StillPath/PlayVideo/PauseMode (src/daemon/
+ *      writes VideoPath/StillPath/PlayVideo/PauseMode/Paused (src/daemon/
  *      kde_desktop.rs, issue #44). The plugin only ever reads local files
  *      Fresco already wrote, so almost nothing differs between the two; the
  *      one exception is the desktop-only auto-pause (WindowWatcher.qml).
@@ -160,7 +160,7 @@ WallpaperItem {
     Binding {
         target: videoLoader.item
         property: "paused"
-        value: root.windowPaused
+        value: root.windowPaused || root.configuration.Paused
         when: videoLoader.status === Loader.Ready && videoLoader.item !== null
     }
 

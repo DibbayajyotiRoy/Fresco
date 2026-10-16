@@ -19,7 +19,7 @@ use crate::{
     config::{
         Accent, Clock, ClockThemeCfg, Config, Disc, Fit, GradientMode, Kind, LyricAnchor,
         LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition, Visualizer,
-        VisualizerStyleCfg, WidgetTheme, Widgets,
+        VisualizerStyleCfg, WidgetTheme, Widgets, WorldClock, WorldZone,
     },
     t, tf, APP_ID,
 };
@@ -5690,6 +5690,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());
     add_clock_group(&page, state.clone());
+    add_world_clock_group(&page, state.clone());
     add_visualizer_group(&page, state.clone());
     add_deepin_group(&page, state.clone());
     add_disc_group(&page, state);
@@ -6891,6 +6892,46 @@ fn clock_spin_row(
     })
 }
 
+/// [`widget_colour_row`] for an optional clock colour. Unset means the theme
+/// paints its own, so the picker starts on `theme_hex` and a clear button (as on
+/// the lyric colour row) hands the colour back to the theme.
+fn clock_colour_row(
+    state: &Rc<RefCell<AppState>>,
+    title: &str,
+    subtitle: &str,
+    cur: Option<&str>,
+    theme_hex: &'static str,
+    field: fn(&mut Clock) -> &mut Option<String>,
+) -> adw::ActionRow {
+    let (row, btn) = {
+        let state = state.clone();
+        widget_colour_row(title, subtitle, cur.unwrap_or(theme_hex), move |hex| {
+            edit_clock(&state, |c| *field(c) = Some(hex));
+        })
+    };
+    let clear = gtk4::Button::from_icon_name("edit-clear-symbolic");
+    clear.add_css_class("flat");
+    clear.set_valign(gtk4::Align::Center);
+    clear.set_tooltip_text(Some(t!("Use the colour the theme picks")));
+    clear.set_visible(cur.is_some());
+    row.add_prefix(&clear);
+    {
+        let state = state.clone();
+        let btn = btn.clone();
+        clear.connect_clicked(move |clear| {
+            // Reset the swatch first: it notifies, which re-sets the colour.
+            btn.set_rgba(&hex_to_rgba(theme_hex));
+            edit_clock(&state, |c| *field(c) = None);
+            clear.set_visible(false);
+        });
+    }
+    {
+        let clear = clear.clone();
+        btn.connect_rgba_notify(move |_| clear.set_visible(true));
+    }
+    row
+}
+
 /// "Clock" preferences group (WIDGETS_ROADMAP W1 GUI). Built exactly like
 /// [`add_lyrics_group`]: off by default, and every row below the master switch
 /// is insensitive until it is on, so the group reads as one feature rather than
@@ -6961,8 +7002,7 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     let hour_row = clock_switch_row(
         &state,
         t!("24-hour time"),
-        "Show 13:00 rather than 1:00 PM. Fixed width, so a clock in a corner does not \
-         shift as the hour changes.",
+        t!("Show 13:00 rather than 1:00 PM. Fixed width, so a clock in a corner does not shift as the hour changes."),
         cur.use_24h,
         |c, on| c.use_24h = on,
     );
@@ -6991,6 +7031,43 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         t!("Draw the clock in the app accent colour instead of plain white."),
         cur.accent_follow,
         |c, on| c.accent_follow = on,
+    );
+
+    // Theme defaults, dark variant: white digits and the NOS ring red.
+    let number_row = clock_colour_row(
+        &state,
+        t!("Number colour"),
+        t!("Colour of the time digits. The clear button gives the theme its own colour back."),
+        cur.number_colour.as_deref(),
+        "#FFFFFF",
+        |c| &mut c.number_colour,
+    );
+    let dot_row = clock_colour_row(
+        &state,
+        t!("Dot colour"),
+        t!("Colour of the ring of dots in the NOS theme. The clear button gives the theme its own colour back."),
+        cur.dot_colour.as_deref(),
+        "#F2555A",
+        |c| &mut c.dot_colour,
+    );
+
+    let opacity_row = {
+        let state = state.clone();
+        super::lockscreen::lock_slider_row(
+            t!("Opacity"),
+            t!("How see-through the whole clock is. 100% is fully solid."),
+            (0.1, 1.0, 0.01),
+            f64::from(cur.opacity) / 255.0,
+            move |v| edit_clock(&state, |c| c.opacity = (v * 255.0).round() as u8),
+        )
+    };
+
+    let day_left_row = clock_switch_row(
+        &state,
+        t!("Show time left today"),
+        t!("A line under the clock showing how much of the day is left."),
+        cur.show_day_left,
+        |c, on| c.show_day_left = on,
     );
 
     // Combos last: set_selected above would otherwise fire these while the
@@ -7023,6 +7100,10 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
         date_row.clone().upcast(),
         seconds_row.clone().upcast(),
         accent_row.clone().upcast(),
+        number_row.clone().upcast(),
+        dot_row.clone().upcast(),
+        opacity_row.clone().upcast(),
+        day_left_row.clone().upcast(),
     ];
     let sync_sensitive = move |on: bool| {
         for row in &dependents {
@@ -7048,6 +7129,354 @@ fn add_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
     group.add(&date_row);
     group.add(&seconds_row);
     group.add(&accent_row);
+    group.add(&number_row);
+    group.add(&dot_row);
+    group.add(&opacity_row);
+    group.add(&day_left_row);
+    page.add(&group);
+}
+
+// ─── World clock widget ───────────────────────────────────────────────────────
+
+/// The most zones the list takes. The card is drawn onto a canvas with a
+/// fixed ceiling, so a ninth row would be clipped; stopping the list here is
+/// kinder than a row that silently never shows.
+const MAX_WORLD_ZONES: usize = 8;
+
+/// The world-clock settings currently in force — see [`clock_settings`].
+fn world_clock_settings(state: &Rc<RefCell<AppState>>) -> WorldClock {
+    state
+        .borrow()
+        .config
+        .widgets
+        .as_ref()
+        .map(|w| w.world_clock.clone())
+        .unwrap_or_default()
+}
+
+/// Apply one edit to the world-clock settings — see [`edit_widgets`].
+fn edit_world_clock(state: &Rc<RefCell<AppState>>, edit: impl FnOnce(&mut WorldClock)) {
+    edit_widgets(state, |w| edit(&mut w.world_clock));
+}
+
+/// Why a zone cannot join the list.
+#[derive(Debug, PartialEq, Eq)]
+enum ZoneBlock {
+    Full,
+    Duplicate,
+    /// Not an IANA name. The picker only offers real ones, so this guards
+    /// anything that reaches the list another way.
+    Unknown,
+}
+
+/// `None` when `tz` may be added to `zones`.
+fn zone_block(zones: &[WorldZone], tz: &str) -> Option<ZoneBlock> {
+    use crate::worldclock::parse_zone;
+    let zone = parse_zone(tz);
+    if zones.len() >= MAX_WORLD_ZONES {
+        Some(ZoneBlock::Full)
+    } else if zone.is_none() {
+        Some(ZoneBlock::Unknown)
+    } else if zones.iter().any(|z| parse_zone(&z.tz) == zone) {
+        Some(ZoneBlock::Duplicate)
+    } else {
+        None
+    }
+}
+
+/// Append a zone if [`zone_block`] allows it. Returns whether it did.
+fn push_zone(w: &mut WorldClock, tz: &str, label: &str) -> bool {
+    if zone_block(&w.zones, tz).is_some() {
+        return false;
+    }
+    w.zones.push(WorldZone {
+        tz: tz.trim().to_string(),
+        label: label.trim().to_string(),
+    });
+    true
+}
+
+/// The zone currently picked in the dropdown, if any.
+fn picked_zone(pick: &gtk4::DropDown) -> Option<&'static str> {
+    chrono_tz::TZ_VARIANTS
+        .get(pick.selected() as usize)
+        .map(|z| z.name())
+}
+
+/// "World clock" preferences group. Same shape as [`add_clock_group`] — off by
+/// default, everything under the master switch insensitive until it is on —
+/// plus a zone list. The zone rows are rebuilt from `config` after every
+/// change (the `SelfRebuild` pattern the slideshow editor uses), so they can
+/// never drift from what was saved.
+///
+/// Zones are picked from the tz database in a searchable `GtkDropDown`, never
+/// typed free-hand, so a typo cannot reach the config. The dropdown lives in
+/// this dialog's own window, not in the header-menu popover, so the nested
+/// popup trap documented on [`build_language_row`] does not apply.
+fn add_world_clock_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let cur = world_clock_settings(&state);
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title(t!("World clock"));
+    group.set_description(Some(t!(
+        "Show the time in several cities at once, as plain text."
+    )));
+
+    let float_row = widget_switch_row(
+        t!("Float above windows"),
+        t!("Stays on top of every app and lets clicks pass through. Needs X11 with a compositor, or KDE, COSMIC, Sway/Hyprland on Wayland. Elsewhere it stays on the wallpaper."),
+        cur.float_on_top,
+        {
+            let state = state.clone();
+            move |on| edit_world_clock(&state, |c| c.float_on_top = on)
+        },
+    );
+
+    // The same nine anchors as every other widget.
+    let anchor_row = adw::ComboRow::new();
+    anchor_row.set_title(t!("Position"));
+    anchor_row.set_subtitle(t!("Where the clock sits on the screen"));
+    anchor_row.set_model(Some(&gtk4::StringList::new(&table_labels(&LYRIC_ANCHORS))));
+    anchor_row.set_selected(table_index(&LYRIC_ANCHORS, cur.anchor));
+
+    let size_row = widget_spin_row(
+        t!("Text size"),
+        t!("In points at 1080p, and scaled with the screen."),
+        (12.0, 96.0, 1.0),
+        f64::from(cur.font_size_pt),
+        {
+            let state = state.clone();
+            move |v| edit_world_clock(&state, |c| c.font_size_pt = v.max(0) as u32)
+        },
+    );
+
+    let margin_row = widget_spin_row(
+        t!("Margin"),
+        t!("Pixels from the screen edge. Raise it to clear a panel, dock or rounded corner."),
+        (0.0, 300.0, 1.0),
+        f64::from(cur.margin_px),
+        {
+            let state = state.clone();
+            move |v| edit_world_clock(&state, |c| c.margin_px = v.max(0) as u32)
+        },
+    );
+
+    // ── Add-a-zone rows ──
+    // "Tokyo · Asia/Tokyo": city first, because before GTK 4.12 the dropdown's
+    // search can only match from the start of the text, and people type the
+    // city. Items stay in `TZ_VARIANTS` order, which is how `picked_zone`
+    // maps a selection back to a zone.
+    let items: Vec<String> = chrono_tz::TZ_VARIANTS
+        .iter()
+        .map(|z| {
+            let name = z.name();
+            let city = crate::worldclock::label_for(&WorldZone {
+                tz: name.to_string(),
+                label: String::new(),
+            });
+            if city == name {
+                city
+            } else {
+                format!("{city} · {name}")
+            }
+        })
+        .collect();
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let pick = gtk4::DropDown::new(Some(gtk4::StringList::new(&items)), gtk4::Expression::NONE);
+    // Search needs an expression to read each item's text from.
+    pick.set_expression(Some(gtk4::PropertyExpression::new(
+        gtk4::StringObject::static_type(),
+        None::<gtk4::Expression>,
+        "string",
+    )));
+    pick.set_enable_search(true);
+    // From GTK 4.12 the match can be anywhere in the text, so "asia" and
+    // "york" work too. Older GTK has no such property and keeps the prefix
+    // match, which the city-first text above already serves.
+    if pick.find_property("search-match-mode").is_some() {
+        pick.set_property("search-match-mode", gtk4::StringFilterMatchMode::Substring);
+    }
+    // Start empty: "Africa/Abidjan" is not a sensible default to offer.
+    pick.set_selected(gtk4::INVALID_LIST_POSITION);
+    pick.set_valign(gtk4::Align::Center);
+    pick.set_size_request(240, -1);
+
+    let pick_row = adw::ActionRow::new();
+    pick_row.set_title(t!("Add time zone"));
+    pick_row.set_subtitle(t!("Pick a zone, or start typing to search"));
+    pick_row.add_suffix(&pick);
+
+    let label_entry = gtk4::Entry::new();
+    label_entry.set_valign(gtk4::Align::Center);
+    label_entry.set_max_length(24);
+    label_entry.set_width_chars(14);
+    let add_btn = gtk4::Button::with_label(t!("Add"));
+    add_btn.add_css_class("suggested-action");
+    add_btn.set_valign(gtk4::Align::Center);
+    let label_row = adw::ActionRow::new();
+    label_row.set_title(t!("Label (optional)"));
+    label_row.add_suffix(&label_entry);
+    label_row.add_suffix(&add_btn);
+
+    // Add is available only for a picked zone that is not already listed and
+    // while there is room. The tooltip says why when it is not.
+    let sync_add: Rc<dyn Fn()> = {
+        let (state, pick, add_btn) = (state.clone(), pick.clone(), add_btn.clone());
+        Rc::new(move || {
+            let zones = world_clock_settings(&state).zones;
+            let block =
+                picked_zone(&pick).map_or(Some(ZoneBlock::Unknown), |tz| zone_block(&zones, tz));
+            add_btn.set_sensitive(block.is_none());
+            add_btn.set_tooltip_text(match block {
+                Some(ZoneBlock::Full) => {
+                    Some(t!("The list is full. Remove a zone to add another."))
+                }
+                Some(ZoneBlock::Duplicate) => Some(t!("Already in the list")),
+                _ => None,
+            });
+        })
+    };
+
+    // ── Zone list ──
+    let fixed: Vec<gtk4::Widget> = vec![
+        float_row.clone().upcast(),
+        anchor_row.clone().upcast(),
+        size_row.clone().upcast(),
+        margin_row.clone().upcast(),
+        pick_row.clone().upcast(),
+        label_row.clone().upcast(),
+    ];
+    let zone_rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::new(RefCell::new(Vec::new()));
+    let rebuild: SelfRebuild = Rc::new(RefCell::new(None));
+    let refresh: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let group = group.clone();
+        let rebuild = rebuild.clone();
+        let sync_add = sync_add.clone();
+        let (pick_row, label_row) = (pick_row.clone(), label_row.clone());
+        Rc::new(move || {
+            let cur = world_clock_settings(&state);
+            for row in zone_rows.borrow_mut().drain(..) {
+                group.remove(&row);
+            }
+            // The add rows must stay below the zones, and a group only appends.
+            group.remove(&pick_row);
+            group.remove(&label_row);
+
+            let mut rows = Vec::new();
+            if cur.zones.is_empty() {
+                let empty = adw::ActionRow::new();
+                empty.set_title(t!("No time zones yet"));
+                rows.push(empty);
+            }
+            for (i, zone) in cur.zones.iter().enumerate() {
+                let row = adw::ActionRow::new();
+                row.set_title(&glib::markup_escape_text(&crate::worldclock::label_for(
+                    zone,
+                )));
+                row.set_subtitle(&glib::markup_escape_text(&zone.tz));
+                let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
+                remove.add_css_class("flat");
+                remove.set_valign(gtk4::Align::Center);
+                remove.set_tooltip_text(Some(t!("Remove")));
+                let state = state.clone();
+                let rebuild = rebuild.clone();
+                remove.connect_clicked(move |_| {
+                    edit_world_clock(&state, |c| {
+                        if i < c.zones.len() {
+                            c.zones.remove(i);
+                        }
+                    });
+                    let f = rebuild.borrow().clone();
+                    if let Some(f) = f {
+                        f();
+                    }
+                });
+                row.add_suffix(&remove);
+                rows.push(row);
+            }
+            for row in &rows {
+                group.add(row);
+                row.set_sensitive(cur.enabled);
+            }
+            group.add(&pick_row);
+            group.add(&label_row);
+            *zone_rows.borrow_mut() = rows;
+            sync_add();
+        })
+    };
+    *rebuild.borrow_mut() = Some(refresh.clone());
+
+    // Only the Add button reacts to a pick: rebuilding the row that holds the
+    // dropdown while its popup is closing would be asking for trouble.
+    {
+        let sync_add = sync_add.clone();
+        pick.connect_selected_notify(move |_| sync_add());
+    }
+    {
+        let (state, refresh, label_entry, pick) = (
+            state.clone(),
+            refresh.clone(),
+            label_entry.clone(),
+            pick.clone(),
+        );
+        add_btn.connect_clicked(move |_| {
+            let Some(tz) = picked_zone(&pick) else { return };
+            let mut cur = world_clock_settings(&state);
+            if !push_zone(&mut cur, tz, &label_entry.text()) {
+                return;
+            }
+            edit_world_clock(&state, |c| c.zones = cur.zones);
+            label_entry.set_text("");
+            // Ready for the next one.
+            pick.set_selected(gtk4::INVALID_LIST_POSITION);
+            refresh();
+        });
+    }
+    {
+        let add_btn = add_btn.clone();
+        label_entry.connect_activate(move |_| add_btn.emit_clicked());
+    }
+    {
+        let state = state.clone();
+        anchor_row.connect_selected_notify(move |row| {
+            let Some((anchor, _)) = LYRIC_ANCHORS.get(row.selected() as usize).copied() else {
+                return;
+            };
+            edit_world_clock(&state, |c| c.anchor = anchor);
+        });
+    }
+
+    // Everything under the master switch follows it. The zone rows are
+    // re-sensitised by `refresh`, so the switch just rebuilds them.
+    let enable = widget_switch_row(
+        t!("Show a world clock"),
+        t!("Draws the time in each zone below as plain text."),
+        cur.enabled,
+        {
+            let (state, refresh, fixed) = (state.clone(), refresh.clone(), fixed.clone());
+            move |on| {
+                edit_world_clock(&state, |c| c.enabled = on);
+                for w in &fixed {
+                    w.set_sensitive(on);
+                }
+                refresh();
+            }
+        },
+    );
+
+    group.add(&enable);
+    group.add(&float_row);
+    group.add(&anchor_row);
+    group.add(&size_row);
+    group.add(&margin_row);
+    // In place before the first `refresh`, which re-adds them after the zones.
+    group.add(&pick_row);
+    group.add(&label_row);
+    for w in &fixed {
+        w.set_sensitive(cur.enabled);
+    }
+    refresh();
     page.add(&group);
 }
 
@@ -10992,6 +11421,30 @@ mod tests {
         );
         assert_eq!(table_labels(&LYRIC_STYLES).len(), LYRIC_STYLES.len());
         assert_eq!(table_labels(&LYRIC_ANCHORS).len(), 9);
+    }
+
+    /// The world-clock list refuses what the renderer could not draw: unknown
+    /// names, repeats (however the name is spelled around whitespace) and a
+    /// ninth zone.
+    #[test]
+    fn world_zone_list_rejects_unknown_duplicate_and_overflow() {
+        let mut w = WorldClock::default();
+        assert!(push_zone(&mut w, "Asia/Tokyo", "  Home "));
+        assert_eq!(w.zones[0].label, "Home");
+        assert!(!push_zone(&mut w, "Mars/Olympus", ""));
+        assert!(!push_zone(&mut w, " Asia/Tokyo ", ""));
+        assert_eq!(
+            zone_block(&w.zones, "Asia/Tokyo"),
+            Some(ZoneBlock::Duplicate)
+        );
+        assert_eq!(zone_block(&w.zones, "Nope"), Some(ZoneBlock::Unknown));
+        for tz in chrono_tz::TZ_VARIANTS.iter().take(10) {
+            if w.zones.len() < MAX_WORLD_ZONES {
+                assert!(push_zone(&mut w, tz.name(), ""));
+            }
+        }
+        assert_eq!(w.zones.len(), MAX_WORLD_ZONES);
+        assert_eq!(zone_block(&w.zones, "Europe/Paris"), Some(ZoneBlock::Full));
     }
 
     /// Same trap as the lyric tables, for the clock's theme combo.

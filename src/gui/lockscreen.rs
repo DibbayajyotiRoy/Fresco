@@ -1517,7 +1517,7 @@ fn snippet_row(label: &'static str, command: &str) -> gtk4::Box {
 /// delaying the other's write past a still-in-memory value (see
 /// `edit_lockscreen`, which always reads and writes the *current* in-memory
 /// state, never a stale snapshot).
-fn lock_slider_row(
+pub(super) fn lock_slider_row(
     title: &str,
     subtitle: &str,
     range: (f64, f64, f64),

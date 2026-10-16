@@ -7,6 +7,7 @@ mod control;
 mod cosmic_bg;
 mod dde;
 mod dde_lock;
+pub mod float;
 mod fullscreen;
 mod kde_desktop;
 mod lock;
@@ -1686,6 +1687,9 @@ impl Daemon {
     /// one decision per renderer, and talk to mpv only on change — the same
     /// single-authority shape as `WlOutput::reconcile_pause`.
     fn reconcile_pause(&self) {
+        // Plasma has no renderers: the plugin handles fullscreen itself, so only
+        // the user and battery sources go to it.
+        kde_desktop::set_paused(self.user_paused || self.battery_paused);
         for r in &self.renderers {
             let desired = self.user_paused
                 || self.battery_paused
@@ -3389,6 +3393,9 @@ fn run_wayland_layershell() -> Result<()> {
             && LockRuntime::resolved(&config)
                 .is_some_and(|r| !r.live_video.plays(crate::battery::on_battery()));
         let base_paused = user_paused || battery_paused || lock_forces_pause;
+        // Plasma has no outputs: the plugin handles fullscreen itself, so only
+        // the user and battery sources go to it.
+        kde_desktop::set_paused(user_paused || battery_paused);
         for (connector, o) in &outputs {
             o.reconcile_pause(base_paused || hidden.contains(connector));
         }
@@ -4810,8 +4817,22 @@ fn apply_widget_config(engine: &mut widgets::WidgetEngine, config: &Config) {
     let w = config.widgets.as_ref();
     engine.set_config(w, config.accent);
     engine.set_clock(w.map(|w| widget_clock_cfg(&w.clock)).as_ref());
+    engine.set_world_clock(w.map(|w| widget_world_clock_cfg(&w.world_clock)).as_ref());
     engine.set_visualizer(w.map(|w| widget_visual_cfg(&w.visualizer)).as_ref());
     engine.set_disc(w.map(|w| widget_disc_cfg(&w.disc)).as_ref());
+}
+
+/// `config::WorldClock` -> the widget engine's settings. Enabled with no zone
+/// that parses draws nothing, so it is treated as disabled: no overlay window,
+/// no timer.
+fn widget_world_clock_cfg(c: &crate::config::WorldClock) -> widgets::WorldClockCfg {
+    widgets::WorldClockCfg {
+        enabled: c.enabled
+            && c.zones
+                .iter()
+                .any(|z| crate::worldclock::parse_zone(&z.tz).is_some()),
+        clock: c.clone(),
+    }
 }
 
 /// `config::Clock` -> the widget engine's clock settings. The mapping
@@ -4820,6 +4841,7 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
     use crate::clock::{ClockStyle, ClockTheme};
     use crate::config::{ClockThemeCfg, LyricAnchor};
     use crate::lyrics::Anchor;
+    use crate::widgetkit::Color;
     widgets::ClockCfg {
         enabled: c.enabled,
         style: ClockStyle {
@@ -4851,8 +4873,13 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
             use_24h: c.use_24h,
             // No colour key in the config on purpose; accent-follow is the path.
             colour: "#FFFFFF".to_string(),
-            accent_follow: c.accent_follow,
+            // A colour the user picked beats the accent, or it would do nothing.
+            accent_follow: c.accent_follow && c.number_colour.is_none(),
+            show_day_left: c.show_day_left,
         },
+        number_colour: c.number_colour.as_deref().and_then(Color::from_hex),
+        dot_colour: c.dot_colour.as_deref().and_then(Color::from_hex),
+        opacity: c.opacity,
     }
 }
 
@@ -4865,6 +4892,22 @@ mod tests {
     };
     use crate::config::{Config, Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_picked_number_colour_beats_the_accent_and_unset_changes_nothing() {
+        let mut c = crate::config::Clock::default();
+        let w = super::widget_clock_cfg(&c);
+        assert!(w.style.accent_follow && w.number_colour.is_none() && w.opacity == 255);
+        c.number_colour = Some("#112233".into());
+        c.dot_colour = Some("nonsense".into());
+        let w = super::widget_clock_cfg(&c);
+        assert!(!w.style.accent_follow);
+        assert_eq!(
+            w.number_colour,
+            crate::widgetkit::Color::from_hex("#112233")
+        );
+        assert!(w.dot_colour.is_none(), "a bad hex falls back to the theme");
+    }
 
     #[test]
     fn a_saved_pause_switch_is_adopted_without_touching_anything_else() {
@@ -4892,6 +4935,25 @@ mod tests {
             cached.wallpaper.path.as_deref(),
             Some(std::path::Path::new("/scheduled.mp4"))
         );
+    }
+
+    #[test]
+    fn a_world_clock_with_no_valid_zone_is_off() {
+        use crate::config::{WorldClock, WorldZone};
+        let zone = |tz: &str| WorldZone {
+            tz: tz.into(),
+            label: String::new(),
+        };
+        let mut c = WorldClock {
+            enabled: true,
+            zones: vec![zone("Not/AZone")],
+            ..Default::default()
+        };
+        assert!(!super::widget_world_clock_cfg(&c).enabled);
+        c.zones.push(zone("Asia/Tokyo"));
+        assert!(super::widget_world_clock_cfg(&c).enabled);
+        c.enabled = false;
+        assert!(!super::widget_world_clock_cfg(&c).enabled);
     }
 
     #[test]

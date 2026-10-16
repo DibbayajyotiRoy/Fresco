@@ -532,6 +532,9 @@ pub struct Widgets {
     /// Spinning album-art disc; see [`Disc`].
     #[serde(default)]
     pub disc: Disc,
+    /// Several time zones as text-only digital times; see [`WorldClock`].
+    #[serde(default)]
+    pub world_clock: WorldClock,
     /// Which output the widgets are drawn on, by RandR/wl-output connector name
     /// (e.g. "DP-1"). `None` = **every** output.
     ///
@@ -770,9 +773,10 @@ pub enum LyricAnchor {
 /// is free to change. The daemon owns the one small mapping between the two, and
 /// pays for it by being the only place that has to change when the renderer
 /// grows a knob we do not want to promise users forever. Two fields of
-/// `ClockStyle` are intentionally absent here: `colour` (an exact hex is a
+/// `ClockStyle` are intentionally absent here: `colour` (the general fill is a
 /// theming decision Fresco makes from [`Config::accent`], not a text field to
-/// mistype) and anything not listed below.
+/// mistype — the opt-in `number_colour`/`dot_colour` below are the
+/// exception) and anything not listed below.
 ///
 /// The clock does *not* need MPRIS, a network, or anything playing — unlike
 /// [`Lyrics`] it always has something to draw. That makes the power discipline
@@ -849,6 +853,35 @@ pub struct Clock {
     /// set false to get plain white, which some wallpapers need.
     #[serde(default = "default_true")]
     pub accent_follow: bool,
+    /// Colour of the hero digits as `#RRGGBB`. Absent means the theme's own
+    /// ink, so a config written before this key renders the same. When set it
+    /// wins over `accent_follow`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_hex_colour"
+    )]
+    pub number_colour: Option<String>,
+    /// NOS only: colour of the lit ring dots and the caption's legend dot as
+    /// `#RRGGBB`. Absent means the theme's NOS red; the unlit dots never change.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_hex_colour"
+    )]
+    pub dot_colour: Option<String>,
+    /// 0 (invisible) to 255 (solid) for the whole card, shadow included. Solid
+    /// by default; the card is faded as one object, as [`Disc::opacity`] is.
+    #[serde(default = "default_clock_opacity")]
+    pub opacity: u8,
+    /// Show the "time left today" line. On by default; off drops the row (on
+    /// NOS, the ring's caption, so the ring is left unlabelled).
+    #[serde(default = "default_true")]
+    pub show_day_left: bool,
+}
+
+fn default_clock_opacity() -> u8 {
+    255
 }
 
 fn default_clock_anchor() -> LyricAnchor {
@@ -875,6 +908,10 @@ impl Default for Clock {
             show_date: false,
             use_24h: true,
             accent_follow: true,
+            number_colour: None,
+            dot_colour: None,
+            opacity: default_clock_opacity(),
+            show_day_left: true,
         }
     }
 }
@@ -1325,6 +1362,65 @@ impl Default for Disc {
             opacity: default_disc_opacity(),
         }
     }
+}
+
+/// World-clock overlay settings: a few cities, each as `Tokyo  9:41 PM`.
+///
+/// Text only — no card, scrim or background; legibility comes from a soft text
+/// shadow alone (see `widgetkit::cards::worldclock`). It repaints at most once a
+/// minute, since every zone's displayed time changes on a minute boundary.
+///
+/// Two homes, one setting. By default it is drawn on the wallpaper widget layer
+/// like the other widgets, which means windows cover it. [`float_on_top`]
+/// instead lifts it into its own always-on-top, click-through window; where the
+/// session cannot do that (no layer-shell, no X11 override-redirect) the daemon
+/// falls back to the widget layer rather than dropping the clock.
+///
+/// [`float_on_top`]: WorldClock::float_on_top
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldClock {
+    /// Master switch. **False by default**, like every widget: nothing is
+    /// created and no timer runs until this is true.
+    pub enabled: bool,
+    /// The zones to show, top to bottom. Empty draws nothing even when enabled.
+    pub zones: Vec<WorldZone>,
+    /// "Float above windows": draw as an always-on-top, click-through overlay
+    /// instead of on the wallpaper layer. **Off by default**: it is the only
+    /// widget that sits over the user's work, so it is strictly opt-in.
+    pub float_on_top: bool,
+    /// Where on the screen the block sits (the shared 9-point grid). Top-right,
+    /// like [`Clock`].
+    pub anchor: LyricAnchor,
+    /// Size of the time column in points (logical units at 1080p).
+    pub font_size_pt: u32,
+    /// Distance in pixels from the anchored screen edge(s).
+    pub margin_px: u32,
+}
+
+impl Default for WorldClock {
+    fn default() -> Self {
+        WorldClock {
+            enabled: false,
+            zones: Vec::new(),
+            float_on_top: false,
+            anchor: LyricAnchor::TopRight,
+            font_size_pt: 22,
+            margin_px: 48,
+        }
+    }
+}
+
+/// One row of the [`WorldClock`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldZone {
+    /// IANA zone name, e.g. `"Asia/Tokyo"`. An unknown name is kept in the file
+    /// (the GUI validates on entry) and simply skipped when drawing.
+    pub tz: String,
+    /// Text shown before the time. Empty means derive it from [`WorldZone::tz`]
+    /// (`"America/New_York"` -> `"New York"`); see `crate::worldclock::label_for`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
 }
 
 /// `[lockscreen]` — Fresco's own widgets drawn on the OS lock screen, in place
@@ -2629,6 +2725,7 @@ mod tests {
                     show_date: true,
                     use_24h: false,
                     accent_follow: false,
+                    ..Clock::default()
                 },
                 visualizer: Visualizer {
                     enabled: true,
@@ -2652,6 +2749,23 @@ mod tests {
                     margin_px: 8,
                     spin: false,
                     opacity: 90,
+                },
+                world_clock: WorldClock {
+                    enabled: true,
+                    zones: vec![
+                        WorldZone {
+                            tz: "Asia/Tokyo".into(),
+                            label: "Home".into(),
+                        },
+                        WorldZone {
+                            tz: "America/New_York".into(),
+                            label: String::new(),
+                        },
+                    ],
+                    float_on_top: true,
+                    anchor: LyricAnchor::BottomLeft,
+                    font_size_pt: 30,
+                    margin_px: 12,
                 },
                 monitor: Some("DP-1".into()),
             }),
@@ -2809,15 +2923,36 @@ folder = "/srv/lyrics"
             "fixed-width HH:MM, and the rest of the config agrees"
         );
         assert!(c.accent_follow, "matches Lyrics::accent_follow");
+        // NOS customisation is opt-in: unset means the theme's own look.
+        assert!(c.number_colour.is_none() && c.dot_colour.is_none());
+        assert_eq!(c.opacity, 255);
+        assert!(c.show_day_left);
         // A [widgets.clock] table with nothing in it must produce exactly that.
         let cfg: Config = toml::from_str("[widgets.clock]\n").unwrap();
         assert_eq!(cfg.widgets.unwrap().clock, c);
+        // And an unset colour is not written out, so the file stays as it was.
+        let written = toml::to_string(&c).unwrap();
+        assert!(!written.contains("colour"), "{written}");
+    }
+
+    #[test]
+    fn a_clock_table_from_before_the_customisation_keys_renders_the_same() {
+        let cfg: Config =
+            toml::from_str("[widgets.clock]\nenabled = true\ntheme = \"nos\"\nuse_24h = false\n")
+                .unwrap();
+        let c = cfg.widgets.unwrap().clock;
+        assert!(c.enabled && !c.use_24h);
+        assert_eq!(c.theme, ClockThemeCfg::Nos);
+        assert_eq!(
+            (c.number_colour, c.dot_colour, c.opacity, c.show_day_left),
+            (None, None, 255, true)
+        );
     }
 
     #[test]
     fn fully_populated_clock_parses() {
         let cfg: Config = toml::from_str(
-            r#"
+            r##"
 [widgets.clock]
 enabled = true
 theme = "stacked"
@@ -2828,10 +2963,18 @@ show_seconds = true
 show_date = true
 use_24h = false
 accent_follow = false
-"#,
+number_colour = "#abc"
+dot_colour = "1c1c1e"
+opacity = 128
+show_day_left = false
+"##,
         )
         .unwrap();
         let c = cfg.widgets.unwrap().clock;
+        assert_eq!(c.number_colour.as_deref(), Some("#AABBCC"));
+        assert_eq!(c.dot_colour.as_deref(), Some("#1C1C1E"));
+        assert_eq!(c.opacity, 128);
+        assert!(!c.show_day_left);
         assert!(c.enabled);
         assert_eq!(c.theme, ClockThemeCfg::Stacked);
         assert_eq!(c.anchor, LyricAnchor::BottomRight);
@@ -2857,6 +3000,10 @@ accent_follow = false
             show_date: true,
             use_24h: false,
             accent_follow: false,
+            number_colour: Some("#AABBCC".into()),
+            dot_colour: Some("#1C1C1E".into()),
+            opacity: 128,
+            show_day_left: false,
         };
         let cfg = Config {
             widgets: Some(Widgets {
@@ -3088,6 +3235,48 @@ opacity = 200
         let w = back.widgets.unwrap();
         assert_eq!(w.visualizer, v);
         assert_eq!(w.disc, d);
+    }
+
+    #[test]
+    fn world_clock_defaults_and_old_configs() {
+        let w = WorldClock::default();
+        assert!(
+            !w.enabled && !w.float_on_top,
+            "off, and on the wallpaper layer"
+        );
+        assert!(w.zones.is_empty());
+        assert_eq!(w.anchor, LyricAnchor::TopRight);
+        assert_eq!((w.font_size_pt, w.margin_px), (22, 48));
+        // An old config has no key at all; an empty table must give the same.
+        let old: Config = toml::from_str("[widgets]\nmonitor = \"DP-1\"\n").unwrap();
+        assert_eq!(old.widgets.unwrap().world_clock, w);
+        let empty: Config = toml::from_str("[widgets.world_clock]\n").unwrap();
+        assert_eq!(empty.widgets.unwrap().world_clock, w);
+    }
+
+    #[test]
+    fn world_clock_zones_parse_and_round_trip() {
+        let cfg: Config = toml::from_str(
+            r#"
+[widgets.world_clock]
+enabled = true
+float_on_top = true
+
+[[widgets.world_clock.zones]]
+tz = "Asia/Tokyo"
+label = "Home"
+
+[[widgets.world_clock.zones]]
+tz = "Europe/London"
+"#,
+        )
+        .unwrap();
+        let w = cfg.widgets.clone().unwrap().world_clock;
+        assert_eq!(w.zones.len(), 2);
+        assert_eq!(w.zones[0].label, "Home");
+        assert_eq!(w.zones[1].label, "", "label is optional");
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back, cfg);
     }
 
     #[test]

@@ -707,6 +707,32 @@ fn peek_nos() -> Result<()> {
             clock::draw_at(&mut c, &mut fonts, &t, &d, at);
             c.save_png(dir.join(format!("peek-nos-{name}-{tag}.png")))?;
         }
+        // The #54 customisation as the daemon applies it: recoloured theme copy,
+        // no caption, 12-hour time, the whole card faded. On a bare canvas,
+        // because the fade would otherwise take a backdrop with it.
+        let custom = Theme {
+            nos_red: Color::rgb8(0x2E, 0xC4, 0xB6),
+            text_primary: Color::rgb8(0xFF, 0xD1, 0x66),
+            ..t
+        };
+        let d = clock::ClockData {
+            time: "9:05 PM",
+            widest_time: "00:00 AM",
+            weekday: "Tuesday",
+            date: "28 July",
+            secondary: "",
+            font_size: 64.0,
+            variant: clock::ClockVariant::Nos,
+            accent_follow: false,
+            day_fraction: 0.605,
+        };
+        let size = clock::measure(&mut fonts, &custom, &d, 1.0);
+        let buf = size.buffer();
+        let mut c = Canvas::for_logical(Size::new(buf.w + 32.0, buf.h + 32.0), 2.0)?;
+        let at = size.card_in(c.bounds());
+        clock::draw_at(&mut c, &mut fonts, &custom, &d, at);
+        c.fade(c.bounds(), 0.0, 0.7);
+        c.save_png(dir.join(format!("peek-nos-{name}-custom.png")))?;
     }
     Ok(())
 }

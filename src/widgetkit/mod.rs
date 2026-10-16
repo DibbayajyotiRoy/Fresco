@@ -173,7 +173,7 @@ pub use blur::blur_alpha;
 pub use canvas::{scale_for_output, Canvas, MAX_CANVAS_AREA, MAX_CANVAS_PX, REFERENCE_HEIGHT};
 pub use cards::{
     BatteryData, ClockData, ClockVariant, DiscData, GreetingData, GreetingLayout, MediaData,
-    MediaLayer, NowPlayingData, PlayState, VisualizerData, VisualizerVariant,
+    MediaLayer, NowPlayingData, PlayState, VisualizerData, VisualizerVariant, WorldClockData,
 };
 pub use color::{linear_to_srgb, srgb_to_linear, Color};
 pub use geom::{HAlign, Point, Rect, Size, Stack, VAlign};

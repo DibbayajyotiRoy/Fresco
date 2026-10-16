@@ -770,9 +770,10 @@ pub enum LyricAnchor {
 /// is free to change. The daemon owns the one small mapping between the two, and
 /// pays for it by being the only place that has to change when the renderer
 /// grows a knob we do not want to promise users forever. Two fields of
-/// `ClockStyle` are intentionally absent here: `colour` (an exact hex is a
+/// `ClockStyle` are intentionally absent here: `colour` (the general fill is a
 /// theming decision Fresco makes from [`Config::accent`], not a text field to
-/// mistype) and anything not listed below.
+/// mistype — the NOS-only `dot_colour`/`number_colour` below are the opt-in
+/// exception) and anything not listed below.
 ///
 /// The clock does *not* need MPRIS, a network, or anything playing — unlike
 /// [`Lyrics`] it always has something to draw. That makes the power discipline
@@ -849,6 +850,35 @@ pub struct Clock {
     /// set false to get plain white, which some wallpapers need.
     #[serde(default = "default_true")]
     pub accent_follow: bool,
+    /// Colour of the hero digits as `#RRGGBB`. Absent means the theme's own
+    /// ink, so a config written before this key renders the same.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_hex_colour"
+    )]
+    pub number_colour: Option<String>,
+    /// NOS only: colour of the lit ring dots and the caption's legend dot as
+    /// `#RRGGBB`. Absent means the theme's NOS red; the unlit dots never change.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_hex_colour"
+    )]
+    pub dot_colour: Option<String>,
+    /// 0 (invisible) to 255 (solid) for the whole card, shadow included. Solid
+    /// by default; the card is faded as one object, as [`Disc::opacity`] is.
+    #[serde(default = "default_clock_opacity")]
+    pub opacity: u8,
+    /// NOS only: show the "time left today" caption under the digits. On by
+    /// default — it is the label of the ring; off drops the row and the ring is
+    /// left unlabelled.
+    #[serde(default = "default_true")]
+    pub show_day_left: bool,
+}
+
+fn default_clock_opacity() -> u8 {
+    255
 }
 
 fn default_clock_anchor() -> LyricAnchor {
@@ -875,6 +905,10 @@ impl Default for Clock {
             show_date: false,
             use_24h: true,
             accent_follow: true,
+            number_colour: None,
+            dot_colour: None,
+            opacity: default_clock_opacity(),
+            show_day_left: true,
         }
     }
 }
@@ -2629,6 +2663,7 @@ mod tests {
                     show_date: true,
                     use_24h: false,
                     accent_follow: false,
+                    ..Clock::default()
                 },
                 visualizer: Visualizer {
                     enabled: true,
@@ -2809,15 +2844,25 @@ folder = "/srv/lyrics"
             "fixed-width HH:MM, and the rest of the config agrees"
         );
         assert!(c.accent_follow, "matches Lyrics::accent_follow");
+        // NOS customisation is opt-in: unset means the theme's own look.
+        assert_eq!(
+            (c.number_colour.as_deref(), c.dot_colour.as_deref()),
+            (None, None)
+        );
+        assert_eq!(c.opacity, 255);
+        assert!(c.show_day_left);
         // A [widgets.clock] table with nothing in it must produce exactly that.
         let cfg: Config = toml::from_str("[widgets.clock]\n").unwrap();
         assert_eq!(cfg.widgets.unwrap().clock, c);
+        // And an unset colour is not written out, so the file stays as it was.
+        let written = toml::to_string(&c).unwrap();
+        assert!(!written.contains("colour"), "{written}");
     }
 
     #[test]
     fn fully_populated_clock_parses() {
         let cfg: Config = toml::from_str(
-            r#"
+            r##"
 [widgets.clock]
 enabled = true
 theme = "stacked"
@@ -2828,10 +2873,18 @@ show_seconds = true
 show_date = true
 use_24h = false
 accent_follow = false
-"#,
+number_colour = "#abc"
+dot_colour = "1c1c1e"
+opacity = 128
+show_day_left = false
+"##,
         )
         .unwrap();
         let c = cfg.widgets.unwrap().clock;
+        assert_eq!(c.number_colour.as_deref(), Some("#AABBCC"));
+        assert_eq!(c.dot_colour.as_deref(), Some("#1C1C1E"));
+        assert_eq!(c.opacity, 128);
+        assert!(!c.show_day_left);
         assert!(c.enabled);
         assert_eq!(c.theme, ClockThemeCfg::Stacked);
         assert_eq!(c.anchor, LyricAnchor::BottomRight);
@@ -2857,6 +2910,10 @@ accent_follow = false
             show_date: true,
             use_24h: false,
             accent_follow: false,
+            number_colour: Some("#AABBCC".into()),
+            dot_colour: Some("#1C1C1E".into()),
+            opacity: 128,
+            show_day_left: false,
         };
         let cfg = Config {
             widgets: Some(Widgets {

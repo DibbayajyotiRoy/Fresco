@@ -191,6 +191,9 @@ pub struct ClockStyle {
     /// Take the fill colour from the desktop accent instead of `colour`.
     #[serde(default)]
     pub accent_follow: bool,
+    /// NOS only: show the "time left today" caption that labels the ring.
+    #[serde(default = "default_show_day_left")]
+    pub show_day_left: bool,
 }
 
 /// Top-right: desktop icons start at the *top-left* on every desktop Fresco
@@ -215,6 +218,10 @@ fn default_use_24h() -> bool {
     true
 }
 
+fn default_show_day_left() -> bool {
+    true
+}
+
 fn default_colour() -> String {
     "#FFFFFF".to_string()
 }
@@ -231,6 +238,7 @@ impl Default for ClockStyle {
             use_24h: default_use_24h(),
             colour: default_colour(),
             accent_follow: false,
+            show_day_left: default_show_day_left(),
         }
     }
 }
@@ -323,15 +331,21 @@ fn numeric_time(now: DateTime<Local>, s: &ClockStyle) -> String {
     }
     if !s.use_24h {
         out.push(' ');
-        // Lower case for `Minimal` — a quiet clock should not shout "PM".
-        out.push_str(match (matches!(s.theme, ClockTheme::Minimal), h24 < 12) {
-            (true, true) => "am",
-            (true, false) => "pm",
-            (false, true) => "AM",
-            (false, false) => "PM",
-        });
+        out.push_str(&meridiem(s, h24 >= 12));
     }
     out
+}
+
+/// The 12-hour suffix, localised. Lower case for `Minimal` — a quiet clock
+/// should not shout "PM". A suffix the dot-matrix face has no glyphs for
+/// (e.g. `上午`) simply sends the NOS hero to its font fallback.
+fn meridiem(s: &ClockStyle, pm: bool) -> String {
+    let m = if pm { crate::t!("PM") } else { crate::t!("AM") };
+    if matches!(s.theme, ClockTheme::Minimal) {
+        m.to_lowercase()
+    } else {
+        m.to_string()
+    }
 }
 
 /// 0..=23 → the 1..=12 a person reads off a dial. Midnight and noon are both
@@ -598,11 +612,13 @@ pub fn widest_time(s: &ClockStyle) -> String {
         out.push_str(":00");
     }
     if !s.use_24h {
+        // Whichever suffix is longer in this language, so the card never re-fits.
+        let (am, pm) = (meridiem(s, false), meridiem(s, true));
         out.push(' ');
-        out.push_str(if matches!(s.theme, ClockTheme::Minimal) {
-            "am"
+        out.push_str(if pm.chars().count() > am.chars().count() {
+            &pm
         } else {
-            "AM"
+            &am
         });
     }
     out
@@ -662,10 +678,12 @@ pub fn date_line(now: DateTime<Local>, s: &ClockStyle) -> String {
 /// least that often — [`next_change`] is unaffected.
 ///
 /// Tied to [`shows_date`], except on NOS where the ring needs it whatever the
-/// switch says. Empty removes the row and the card's height recomputes; it
-/// never renders an empty band.
+/// switch says — unless `show_day_left` is off, which leaves the ring
+/// unlabelled by choice. Empty removes the row and the card's height
+/// recomputes; it never renders an empty band.
 pub fn secondary_line(now: DateTime<Local>, s: &ClockStyle) -> String {
-    if !shows_date(s) && !matches!(s.theme, ClockTheme::Nos) {
+    let nos = matches!(s.theme, ClockTheme::Nos);
+    if (nos && !s.show_day_left) || (!shows_date(s) && !nos) {
         return String::new();
     }
     day_remaining(now, tick_secs(s))
@@ -1362,6 +1380,17 @@ mod tests {
     }
 
     #[test]
+    fn turning_the_day_left_off_empties_only_the_nos_secondary() {
+        let off = |theme| ClockStyle {
+            show_date: true,
+            show_day_left: false,
+            ..style(theme)
+        };
+        assert!(secondary_line(at(21, 5, 0), &off(ClockTheme::Nos)).is_empty());
+        assert!(!secondary_line(at(21, 5, 0), &off(ClockTheme::Card)).is_empty());
+    }
+
+    #[test]
     fn the_card_is_sized_from_the_widest_string_the_settings_can_produce() {
         // The width-stability contract (`ClockData::widest_time`). If the card
         // were sized from the current string it would resize once a second with
@@ -1517,6 +1546,7 @@ mod tests {
         let s = ClockStyle {
             theme: ClockTheme::Segment,
             show_seconds: true,
+            show_day_left: false,
             ..Default::default()
         };
         let text = toml_like(&s);

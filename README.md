@@ -13,7 +13,7 @@ English | [简体中文](README.zh-CN.md)
 [![CI](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
 
-**Used by 1,500+ people in 110+ countries.**
+**Used by 2,500+ people in 127 countries.**
 
 [Website](https://fresco.dibbayajyoti.com) · [Install](#install) · [Supported environments](#supported-environments) · [Comparison](#fresco-vs-other-live-wallpaper-options) · [FAQ](#faq) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -50,9 +50,9 @@ Fresco is a free, open-source live wallpaper app for Linux that sets any video, 
 | **Price** | Free — GPL-3.0-or-later, no ads, no account |
 | **Built with** | Rust, GTK4 / libadwaita, libmpv |
 | **Install** | Deepin App Store, `.deb` package, or one-line script |
-| **Users** | 1,500+ people in 110+ countries |
+| **Users** | 2,500+ people in 127 countries |
 | **Languages** | English plus 12 translations |
-| **Latest version** | 1.1.49 |
+| **Latest version** | 1.1.50 |
 
 ## Install
 
@@ -426,4 +426,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin, and Kali Linux, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Used by 1,500+ people in 110+ countries. Last updated: 2026-10-11.</sub>
+<sub>Fresco — live wallpaper, video wallpaper, and animated desktop background for Linux (X11 and Wayland), with desktop widgets drawn into the wallpaper: desktop lyrics, a desktop clock widget, an audio visualiser (music visualizer wallpaper), and album art. A Wallpaper Engine alternative for Ubuntu, Pop!_OS, Linux Mint, Debian, elementary OS, Deepin, and Kali Linux, and a Conky alternative for wallpaper widgets on COSMIC and Wayland. Used by 2,500+ people in 127 countries. Last updated: 2026-10-16.</sub>

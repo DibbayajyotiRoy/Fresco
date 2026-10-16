@@ -4,9 +4,17 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.50] — 2026-10-16
 
 ### Added
+- **The clock widget can be customised further** (issue #54). The clock
+  settings now have separate colours for the numbers and for the dots (the
+  ring of dots on the NOS style), an opacity slider, and a switch to hide the
+  "time left today" line, which now works on every clock style rather than
+  only NOS. On the 12-hour clock, AM and PM are written the local way (for
+  example "上午" or "a. m."), including on the lock-screen clock. A number
+  colour you pick now wins over "follow accent colour"; before, on the card
+  styles it had no effect while that switch was on.
 - **A World clock widget** (Advanced settings, off by default). It shows the
   time in several cities at once, picked from the full list of time zones, as
   plain 12-hour text with no card behind it (for example `Tokyo  9:41 PM`),
@@ -17,6 +25,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on Wayland compositors with layer-shell (KDE Plasma, COSMIC, Sway, Hyprland).
   Where a session can't float it, such as GNOME on Wayland, the clock stays on
   the wallpaper instead of disappearing.
+
+### Fixed
+- **On KDE Plasma, the Pause/Play button now pauses and resumes the
+  wallpaper** (issue #62). Plasma's video is played by Fresco's wallpaper
+  plugin, which the button never reached, so the button changed but the video
+  kept playing and Play did nothing. The plugin now has its own Paused state,
+  separate from the fullscreen and maximized auto-pause. Pause on battery
+  reaches Plasma the same way, and the button shows what is really on screen.
+- **On KDE Plasma, picking a different video while Fresco's wallpaper is
+  showing no longer turns the desktop black** (issue #63). Loading a new
+  video stopped playback, and the plugin only started it the first time, so
+  the desktop stayed black until you reselected the plugin. It now restarts
+  playback on every change (unless a fullscreen or maximized app is pausing
+  it).
+
+### Notes for testers
+Not yet confirmed on real hardware, and the most useful things to check:
+the KDE Plasma Pause/Play button and switching videos (#62, #63), and the
+world clock's "Float above windows" with click-through on X11, KDE Plasma,
+Sway and Hyprland, including at fractional scaling.
 
 ## [1.1.49] — 2026-10-10
 

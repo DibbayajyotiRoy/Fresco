@@ -267,6 +267,8 @@ export const zhCn: Dictionary = {
       compositorOff: "需关闭合成",
       cropOnly: "仅裁剪",
       workshop: "创意工坊",
+      unclear: "未说明",
+      na: "不适用",
     },
   },
 

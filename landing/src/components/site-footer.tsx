@@ -53,9 +53,25 @@ export function SiteFooter({ dict }: { dict: Dictionary }) {
           </div>
 
           <div className="mt-10 flex flex-col-reverse gap-4 border-t border-hairline pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-ink-faint">
-              © {new Date().getFullYear()} Fresco · GPL-3.0
-            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <p className="text-sm text-ink-faint">
+                © {new Date().getFullYear()} Fresco · GPL-3.0
+              </p>
+              <a
+                href="https://shipx.live/products/fresco?ref=badge"
+                target="_blank"
+                rel="noopener"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="https://shipx.live/api/badge/fresco"
+                  alt="Featured on ShipX"
+                  width="176"
+                  height="54"
+                  loading="lazy"
+                />
+              </a>
+            </div>
             <FooterDownloadLink label={dict.nav.cta} />
           </div>
         </div>

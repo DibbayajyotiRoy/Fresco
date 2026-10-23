@@ -13,6 +13,7 @@
 //!      reconciliation read on connect, not a poll.
 //!   2. **Subscribe** — open the websocket, join the channel, then block on reads.
 //!   3. On disconnect/error, back off and reconnect (which re-runs the catch-up).
+//!      A 429 from the handshake backs off far longer — see [`Backoff`].
 //!
 //! Dedup is kept in the daemon's own state file so it never races the GUI's
 //! config writes. `update` rows are semver-gated against the running version.
@@ -25,7 +26,8 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use tungstenite::client::IntoClientRequest;
-use tungstenite::Message;
+use tungstenite::http::StatusCode;
+use tungstenite::{HandshakeError, Message};
 
 use crate::{t, tf};
 
@@ -74,21 +76,130 @@ pub fn spawn() {
         .ok();
 }
 
-/// Reconnect loop with exponential backoff. A session that stays up for a while
-/// resets the backoff so transient drops don't ramp it up forever.
+/// Wait this long (plus jitter) before the first connect. `spawn()` runs at the
+/// top of the daemon, before the single-instance lock and the `enabled = false`
+/// early exit, so without this every aborted start (a second `frescod`, a
+/// disabled wallpaper) still opened a connection to the backend and then died.
+/// It also spreads logins instead of stampeding the backend at session start.
+const STARTUP_DELAY: Duration = Duration::from_secs(15);
+
+/// A session must stay up this long before earlier failures are forgiven.
+/// Connecting is not health: a server that accepts the socket and then drops it
+/// would otherwise reset the schedule on every attempt.
+const BACKOFF_RESET_AFTER: Duration = Duration::from_secs(5 * 60);
+
+/// Ladder for ordinary drops: 5 s doubling up to 5 min.
+const DROP_BACKOFF: (Duration, Duration) = (Duration::from_secs(5), Duration::from_secs(5 * 60));
+/// Ladder after a 429: 1 min doubling up to 30 min. A rate limit is the
+/// backend telling us to go away, so the ordinary ladder is far too eager.
+const LIMITED_BACKOFF: (Duration, Duration) =
+    (Duration::from_secs(60), Duration::from_secs(30 * 60));
+/// Longest `Retry-After` we will honour.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(60 * 60);
+
+/// The handshake was answered `429 Too Many Requests`; carries the server's
+/// `Retry-After` when it sent one in seconds.
+#[derive(Debug, Clone, Copy)]
+struct RateLimited(Option<Duration>);
+
+impl std::fmt::Display for RateLimited {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HTTP error: 429 Too Many Requests")
+    }
+}
+
+impl std::error::Error for RateLimited {}
+
+/// `Retry-After` as a delay in seconds. The HTTP-date form is not parsed: it
+/// falls back to our own ladder, which is already at least a minute.
+fn retry_after_secs(v: &str) -> Option<Duration> {
+    v.trim().parse().ok().map(Duration::from_secs)
+}
+
+/// Reconnect pacing. Pure apart from the jitter the caller applies, so the whole
+/// schedule is unit-tested without a socket.
+#[derive(Default)]
+struct Backoff {
+    failures: u32,
+}
+
+impl Backoff {
+    /// Delay (before jitter) to wait after a session that ran for `ran` and
+    /// ended with `limited` set if it was a 429. Counts consecutive failures; a
+    /// session that stayed up for [`BACKOFF_RESET_AFTER`] starts the ladder over.
+    ///
+    /// A `Retry-After` is a floor on top of the ladder, never a shortcut under
+    /// it: waiting longer than asked is always allowed, and with thousands of
+    /// clients sharing one backend "retry in 1 s" must not mean "all at once".
+    fn next(&mut self, ran: Duration, limited: Option<RateLimited>) -> Duration {
+        if ran >= BACKOFF_RESET_AFTER {
+            self.failures = 0;
+        }
+        let n = self.failures.min(16);
+        self.failures = self.failures.saturating_add(1);
+        let (base, cap) = if limited.is_some() {
+            LIMITED_BACKOFF
+        } else {
+            DROP_BACKOFF
+        };
+        let step = base.saturating_mul(1 << n).min(cap);
+        match limited {
+            Some(RateLimited(Some(ra))) => step.max(ra.min(MAX_RETRY_AFTER)),
+            _ => step,
+        }
+    }
+}
+
+/// Stretch `d` by up to +50% (`j` in `[0, 1)`) so clients that dropped together
+/// do not return together. Never shortens it: a `Retry-After` stays a floor.
+fn with_jitter(d: Duration, j: f64) -> Duration {
+    d.mul_f64(1.0 + 0.5 * j.clamp(0.0, 1.0))
+}
+
+/// Uniform-ish value in `[0, 1)` from std's per-process random hasher keys (no
+/// `rand` dependency for one number).
+fn jitter() -> f64 {
+    use std::hash::BuildHasher;
+    let r = std::collections::hash_map::RandomState::new().hash_one(0u8);
+    (r >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// Reconnect loop. Ordinary drops retry on a short ladder; a 429 backs off for
+/// much longer (see [`Backoff`]). The first 429 of each backoff step is logged
+/// at `warn`; a repeat of the same step (the ladder has hit its cap) at `debug`,
+/// so a long outage does not fill the log.
 fn run_forever() {
-    let mut backoff = Duration::from_secs(5);
+    std::thread::sleep(with_jitter(STARTUP_DELAY, jitter()));
+    let mut backoff = Backoff::default();
     let mut seen = Seen::load();
+    let mut last_limited = None;
     loop {
         let started = Instant::now();
-        if let Err(e) = run_session(&mut seen) {
-            log::warn!("notifier: session ended: {e:#}");
+        let limited = match run_session(&mut seen) {
+            Err(e) => match e.downcast_ref::<RateLimited>() {
+                Some(r) => Some(*r),
+                None => {
+                    log::warn!("notifier: session ended: {e:#}");
+                    None
+                }
+            },
+            Ok(()) => None,
+        };
+        let step = backoff.next(started.elapsed(), limited);
+        let wait = with_jitter(step, jitter());
+        if limited.is_some() {
+            let msg = format!(
+                "notifier: rate limited (429); retrying in {}s",
+                wait.as_secs()
+            );
+            if last_limited == Some(step) {
+                log::debug!("{msg}");
+            } else {
+                log::warn!("{msg}");
+            }
+            last_limited = Some(step);
         }
-        if started.elapsed() > Duration::from_secs(120) {
-            backoff = Duration::from_secs(5);
-        }
-        std::thread::sleep(backoff);
-        backoff = (backoff * 2).min(Duration::from_secs(300));
+        std::thread::sleep(wait);
     }
 }
 
@@ -105,7 +216,19 @@ fn run_session(seen: &mut Seen) -> anyhow::Result<()> {
     // WouldBlock/TimedOut, which we use as the cue to send the next heartbeat.
     let tcp = TcpStream::connect((HOST, 443))?;
     tcp.set_read_timeout(Some(HEARTBEAT))?;
-    let (mut socket, _resp) = tungstenite::client_tls(request, tcp)?;
+    let (mut socket, _resp) = match tungstenite::client_tls(request, tcp) {
+        Err(HandshakeError::Failure(tungstenite::Error::Http(resp)))
+            if resp.status() == StatusCode::TOO_MANY_REQUESTS =>
+        {
+            let wait = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(retry_after_secs);
+            return Err(RateLimited(wait).into());
+        }
+        other => other?,
+    };
 
     // Join the channel and ask for INSERTs on public.notifications.
     let join = serde_json::json!({
@@ -587,4 +710,88 @@ fn state_path() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
         .join("fresco")
         .join("seen-notifications.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    fn limited(retry_after: Option<u64>) -> Option<RateLimited> {
+        Some(RateLimited(retry_after.map(s)))
+    }
+
+    #[test]
+    fn limited_without_retry_after_starts_at_a_minute_and_doubles_to_the_cap() {
+        let mut b = Backoff::default();
+        let got: Vec<u64> = (0..8)
+            .map(|_| b.next(s(1), limited(None)).as_secs())
+            .collect();
+        assert_eq!(got, [60, 120, 240, 480, 960, 1800, 1800, 1800]);
+    }
+
+    #[test]
+    fn ordinary_drops_keep_the_short_ladder() {
+        let mut b = Backoff::default();
+        let got: Vec<u64> = (0..8).map(|_| b.next(s(1), None).as_secs()).collect();
+        assert_eq!(got, [5, 10, 20, 40, 80, 160, 300, 300]);
+    }
+
+    #[test]
+    fn retry_after_is_a_floor_clamped_to_an_hour() {
+        let mut b = Backoff::default();
+        assert_eq!(b.next(s(1), limited(Some(600))), s(600));
+        // A short Retry-After never undercuts our own ladder (second step = 120 s).
+        assert_eq!(b.next(s(1), limited(Some(1))), s(120));
+        assert_eq!(b.next(s(1), limited(Some(0))), s(240));
+        assert_eq!(b.next(s(1), limited(Some(86_400))), MAX_RETRY_AFTER);
+    }
+
+    #[test]
+    fn never_overflows_however_long_the_outage() {
+        let mut b = Backoff::default();
+        for _ in 0..10_000 {
+            assert!(b.next(s(1), limited(None)) <= LIMITED_BACKOFF.1);
+        }
+    }
+
+    #[test]
+    fn only_a_healthy_session_resets_the_ladder() {
+        let mut b = Backoff::default();
+        for _ in 0..4 {
+            b.next(s(1), limited(None));
+        }
+        // Up for just under the threshold: not healthy, keeps climbing.
+        assert_eq!(b.next(BACKOFF_RESET_AFTER - s(1), limited(None)), s(960));
+        // Healthy: forgiven, so the next failure is a plain first step.
+        assert_eq!(b.next(BACKOFF_RESET_AFTER, None), s(5));
+        assert_eq!(b.next(s(1), limited(None)), s(120));
+    }
+
+    #[test]
+    fn jitter_only_lengthens_and_stays_within_half() {
+        let d = s(60);
+        assert_eq!(with_jitter(d, 0.0), d);
+        assert_eq!(with_jitter(d, 1.0), s(90));
+        assert!(with_jitter(d, 0.5) > d && with_jitter(d, 0.5) < s(90));
+        // Out-of-range input is clamped: never shorter, never past +50%.
+        assert_eq!(with_jitter(d, -3.0), d);
+        assert_eq!(with_jitter(d, 9.0), s(90));
+        for _ in 0..1000 {
+            let j = jitter();
+            assert!((0.0..1.0).contains(&j), "jitter {j} out of range");
+        }
+    }
+
+    #[test]
+    fn retry_after_header_parsing() {
+        assert_eq!(retry_after_secs("30"), Some(s(30)));
+        assert_eq!(retry_after_secs(" 45 "), Some(s(45)));
+        assert_eq!(retry_after_secs("Wed, 21 Oct 2015 07:28:00 GMT"), None);
+        assert_eq!(retry_after_secs("-5"), None);
+        assert_eq!(retry_after_secs(""), None);
+    }
 }

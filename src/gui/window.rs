@@ -225,6 +225,75 @@ fn remember_window_state(window: &adw::ApplicationWindow) {
     }
 }
 
+/// Take `disk` as the in-memory config; true when what is on screen moved (the
+/// default wallpaper, per-monitor overrides or the on/off switch), so the
+/// library's active card needs a rebuild.
+///
+/// Every settings change saves this whole struct, so a copy that missed
+/// another process's write would put the old wallpaper back (#45). Our own
+/// saves land here too, equal to memory, and change nothing.
+fn adopt_external_config(mem: &mut Config, disk: Config) -> bool {
+    let moved = mem.wallpaper != disk.wallpaper
+        || mem.monitors != disk.monitors
+        || mem.enabled != disk.enabled;
+    *mem = disk;
+    moved
+}
+
+/// Keep `state.config` in step with config.toml while the window is open:
+/// `fresco next/prev/random` and hand edits rewrite it behind the GUI's back.
+fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) {
+    let path = Config::path();
+    // A monitor needs the directory; a fresh install has none until the first save.
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    let monitor = match gio::File::for_path(&path)
+        .monitor_file(gio::FileMonitorFlags::NONE, None::<&gio::Cancellable>)
+    {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("not watching {}: {e}", path.display());
+            return;
+        }
+    };
+    let state = state.clone();
+    monitor.connect_changed(move |_, _, _, event| {
+        // A save is a rename over the file: GIO reports deleted, created, then
+        // this hint once it is whole. Waiting for it also skips a half-written
+        // hand edit.
+        if event != gio::FileMonitorEvent::ChangesDoneHint {
+            return;
+        }
+        // A file that does not parse keeps what the window has.
+        let Ok(disk) = Config::load() else {
+            return;
+        };
+        let (moved, refresh) = {
+            // Held elsewhere (a handler mid-edit): the next change event retries.
+            let Ok(mut s) = state.try_borrow_mut() else {
+                return;
+            };
+            (
+                adopt_external_config(&mut s.config, disk),
+                s.refresh.clone(),
+            )
+        };
+        if moved {
+            log::debug!("config.toml changed on disk: wallpaper moved, rebuilding the grid");
+            status::forget_playing_path();
+            if let Some(r) = refresh {
+                r();
+            }
+            status::poll_soon();
+        }
+    });
+    // Dropping a monitor cancels it: hand it to the application for its lifetime.
+    app.connect_shutdown(move |_| {
+        let _ = &monitor;
+    });
+}
+
 fn build_ui(app: &adw::Application) {
     // The app id makes us D-Bus-unique: launching fresco again re-activates
     // this process. Present the existing window instead of building a
@@ -299,6 +368,8 @@ fn build_ui(app: &adw::Application) {
         collections,
         view,
     }));
+
+    watch_external_config(app, &state);
 
     // Re-apply the palette when the system light/dark resolution flips (System
     // mode). Resolve via the chosen mode so an explicit Light/Dark isn't undone
@@ -11830,6 +11901,73 @@ mod tests {
         // The entry the disk config actually names does read as playing.
         let playing = entry("/playing.mp4");
         assert!(entry_is_playing(&playing, &disk));
+    }
+
+    fn config_playing(path: &str) -> Config {
+        let mut c = Config {
+            enabled: true,
+            ..Default::default()
+        };
+        c.wallpaper.path = Some(PathBuf::from(path));
+        c
+    }
+
+    /// Issue #45: `fresco random` switched w1 -> w2 on disk while the window
+    /// still held w1; the next clock tweak saved the stale copy over it.
+    #[test]
+    fn a_settings_change_after_a_cli_switch_keeps_the_cli_wallpaper() {
+        let dir = std::env::temp_dir().join(format!("fresco-stale-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        // The window's copy: w1, clock just switched on, saved.
+        let mut gui = config_playing("/w1.mp4");
+        gui.widgets = Some(Widgets::default());
+        gui.widgets.as_mut().unwrap().clock.enabled = true;
+        gui.save_to(&path).unwrap();
+
+        // `fresco random`: reads the file, swaps the wallpaper, saves.
+        let mut cli = Config::load_from(&path).unwrap();
+        cli.wallpaper.path = Some(PathBuf::from("/w2.mp4"));
+        cli.save_to(&path).unwrap();
+
+        // The window notices, then the user changes a clock setting.
+        let moved = adopt_external_config(&mut gui, Config::load_from(&path).unwrap());
+        assert!(moved, "the active card must be rebuilt");
+        gui.widgets.as_mut().unwrap().clock.show_seconds = true;
+        gui.save_to(&path).unwrap();
+
+        let saved = Config::load_from(&path).unwrap();
+        assert_eq!(saved.wallpaper.path, Some(PathBuf::from("/w2.mp4")));
+        assert!(saved.widgets.unwrap().clock.show_seconds);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The window's own saves fire the file monitor too: they must not look
+    /// like an external change (that would rebuild the grid on every click).
+    #[test]
+    fn the_windows_own_save_is_not_an_external_change() {
+        let dir = std::env::temp_dir().join(format!("fresco-own-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        let mut gui = config_playing("/w1.mp4");
+        gui.widgets = Some(Widgets::default());
+        gui.save_to(&path).unwrap();
+
+        let before = gui.clone();
+        assert!(!adopt_external_config(
+            &mut gui,
+            Config::load_from(&path).unwrap()
+        ));
+        assert_eq!(gui, before, "a save must round-trip to the same config");
+
+        // A change that leaves the screen alone adopts the file, no rebuild.
+        let mut other = before.clone();
+        other.scaling = Scaling::High;
+        assert!(!adopt_external_config(&mut gui, other));
+        assert_eq!(gui.scaling, Scaling::High);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     // ─── Folders, sorting and batch import ───────────────────────────────

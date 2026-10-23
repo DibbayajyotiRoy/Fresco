@@ -59,6 +59,12 @@ WallpaperItem {
         (videoLoader.status === Loader.Error ||
          (videoLoader.item !== null && videoLoader.item.hasError))
 
+    // Fresco's fit option (Cover/Contain/Stretch) as Qt's fillMode enum, which
+    // Image and VideoOutput share: 0 Stretch, 1 PreserveAspectFit, 2
+    // PreserveAspectCrop. Clamped like Dim -- an out-of-range value would
+    // otherwise select Image's tiling modes.
+    readonly property int mediaFillMode: Math.max(0, Math.min(root.configuration.FillMode, 2))
+
     // Bottom-most and always present. If both VideoPath and StillPath are
     // unset (or the video fails and there is no still to fall back to),
     // this is the only thing on screen -- a plain dark background rather
@@ -75,7 +81,7 @@ WallpaperItem {
         // there is no (usable) video at all, or it errored out.
         visible: (!root.haveVideo || root.videoFailed) && root.haveStill && status === Image.Ready
         source: root.haveStill ? Qt.resolvedUrl(root.configuration.StillPath) : ""
-        fillMode: Image.PreserveAspectCrop
+        fillMode: root.mediaFillMode
         asynchronous: true // decode off the UI thread; the greeter must stay responsive to keypresses
         // The still is a large, mostly-static photo scaled down to fit the
         // output. smooth+mipmap avoid the moire/aliasing "smoothing
@@ -113,6 +119,13 @@ WallpaperItem {
         target: videoLoader.item
         property: "videoSource"
         value: Qt.resolvedUrl(root.configuration.VideoPath)
+        when: videoLoader.status === Loader.Ready && videoLoader.item !== null
+    }
+
+    Binding {
+        target: videoLoader.item
+        property: "fillMode"
+        value: root.mediaFillMode
         when: videoLoader.status === Loader.Ready && videoLoader.item !== null
     }
 

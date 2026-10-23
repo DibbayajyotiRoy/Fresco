@@ -403,6 +403,45 @@ export const DISC = (() => {
   };
 })();
 
+/* ---- cards/worldclock.rs: the world clock ------------------------------- */
+
+/**
+ * Text only: no card, no scrim. Each row is a label (left, medium) and a time
+ * (right, bold) on one shared baseline; one soft shadow is the only ground.
+ * The time is drawn at 56 pt, not the default 22, so the three rows read at
+ * the size of this screen; every other number is the renderer's own formula.
+ * The cities and times are placeholders (one instant, 12:41 UTC).
+ */
+export const WC = (() => {
+  const time = 56;
+  const label = Math.min(Math.max(ladderStep(0.62 * time), 11), time);
+  const cap = capHeight(time);
+  // Cap top to cap top of consecutive rows (ROW_GAP 0.55 of the time size).
+  const pitch = cap + 0.55 * time;
+  const margin = 48;
+  return {
+    time,
+    label,
+    // Row line height as a ratio of the time size, so a row is exactly `pitch`.
+    lineHeight: r3(pitch / time),
+    colGap: 0.9 * time,
+    timeTrack: `${tracking(time)}em`,
+    labelTrack: `${tracking(label)}em`,
+    // `shadow()`: blur 0.18 em clamped to 3..14, drop 0.06 em clamped to 1..3.
+    blur: clamp(0.18 * time, 3, 14),
+    drop: clamp(0.06 * time, 1, 3),
+    rows: [
+      { label: "Tokyo", time: "9:41 PM" },
+      { label: "London", time: "1:41 PM" },
+      { label: "New York", time: "8:41 AM" },
+    ],
+    // Top-right anchor. The first row's cap top sits on the margin; the line
+    // box starts `pitch / 2 - 0.3638 em` above that (see `textRow`).
+    right: margin,
+    top: margin - (pitch / 2 - 0.3638 * time),
+  };
+})();
+
 /* ---- clock.rs: the strings the clock shows ------------------------------ */
 
 const WEEKDAYS = [

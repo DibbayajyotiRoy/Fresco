@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DISC, NOS, NP, VIZ, lu } from "@/components/showcase/desk";
+import { DISC, NOS, NP, VIZ, WC, lu } from "@/components/showcase/desk";
 import {
   Disc,
   NosClock,
   NowPlaying,
   Visualiser,
+  WorldClock,
 } from "@/components/showcase/widgets";
 import type { WidgetId } from "@/components/showcase/widget-ids";
 
@@ -24,9 +25,9 @@ const LINE_SECONDS = 4;
 
 /**
  * The What's New screen: the demo wallpaper in a plain window frame, with
- * replicas of Fresco's four widgets laid out as they sit on the real desktop
- * (clock top right, record mid right, lyric card bottom left, visualiser
- * bottom right). Decoration only: the whole frame is aria-hidden, and the
+ * replicas of Fresco's five widgets laid out as they sit on the real desktop
+ * (clock and world clock top right, record mid right, lyric card bottom left,
+ * visualiser bottom right). Decoration only: the whole frame is aria-hidden, and the
  * hero carries the labelled video.
  *
  * Widgets are plain DOM layers marked `data-widget`; only the `active` one
@@ -146,6 +147,13 @@ export function Viewscreen({ active }: { active: WidgetId }) {
               lyric={LYRICS[line]}
               next={LYRICS[(line + 1) % LYRICS.length]}
             />
+          </div>
+          <div
+            data-widget="worldClock"
+            className="sc-widget absolute"
+            style={{ right: lu(WC.right), top: lu(WC.top), opacity: active === "worldClock" ? 1 : 0 }}
+          >
+            <WorldClock />
           </div>
           <div
             data-widget="visualizer"

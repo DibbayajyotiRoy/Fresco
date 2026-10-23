@@ -8,6 +8,7 @@ import {
   NOS,
   NP,
   VIZ,
+  WC,
   clockLabel,
   clockTime,
   dayRemaining,
@@ -18,7 +19,7 @@ import {
 } from "@/components/showcase/desk";
 
 /*
- * DOM replicas of Fresco's four on-wallpaper widgets, drawn the way
+ * DOM replicas of Fresco's five on-wallpaper widgets, drawn the way
  * src/widgetkit draws them: same geometry (desk.ts), same dark palette, same
  * layer order. Pure decoration; the viewscreen that holds them is aria-hidden.
  */
@@ -398,6 +399,49 @@ export const Visualiser = memo(function Visualiser() {
           background: "rgb(255 255 255 / 0.09)",
         }}
       />
+    </div>
+  );
+});
+
+/* ---- World clock -------------------------------------------------------- */
+
+/**
+ * Plain text rows, no card: labels left, times right on one baseline, with a
+ * single soft shadow cast by the whole block (the shadow is inherited, so it
+ * is the same colour and spread on every glyph). Static placeholder times.
+ */
+export const WorldClock = memo(function WorldClock() {
+  return (
+    <div
+      className="flex flex-col whitespace-nowrap"
+      style={{
+        color: INK.primary,
+        fontSize: lu(WC.time),
+        lineHeight: WC.lineHeight,
+        textShadow: `0 ${lu(WC.drop)} ${lu(WC.blur)} rgb(0 0 0 / 0.6)`,
+      }}
+    >
+      {WC.rows.map((row) => (
+        <div
+          key={row.label}
+          className="flex items-baseline justify-between"
+          style={{ columnGap: lu(WC.colGap) }}
+        >
+          <span
+            style={{
+              fontSize: lu(WC.label),
+              fontWeight: 500,
+              letterSpacing: WC.labelTrack,
+              lineHeight: 1,
+            }}
+          >
+            {row.label}
+          </span>
+          <span style={{ fontWeight: 700, letterSpacing: WC.timeTrack }}>
+            {row.time}
+          </span>
+        </div>
+      ))}
     </div>
   );
 });

@@ -125,6 +125,12 @@ export const ja: Dictionary = {
     lead: "Fresco は動画・GIF・画像・スライドショー・プレイリストを X11 と Wayland の壁紙に設定します。デコードは GPU が担当するため、ライブ壁紙のコストは静止画とほぼ同じです。",
     /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
     widgetsTitle: "壁紙に描かれる、5 つのデスクトップ ウィジェット。",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "世界時計",
+      body:
+        "複数の都市の時刻を、カードなしの 12 時間表記のシンプルなテキストで同時に表示します。やわらかい影で読みやすく、タイムゾーンは自由に選べて、ラベルも付けられます。再描画は 1 分に 1 回。オプションのモードで、クリックを通したままウィンドウの上に浮かせることもできます。",
+    },
     manifest: (n: number) => `マニフェスト: ${n} 機能`,
     /** Sentence-final mark after each row title. */
     titleSuffix: "。",

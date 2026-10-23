@@ -94,10 +94,13 @@ const ROW_ICONS: Record<RowId, LucideIcon> = {
  * is the live one from GitHub.
  */
 export function Features({ dict }: { dict: Dictionary }) {
+  // The pinned 1.1.36 copy covers four widgets; the world clock's card lives
+  // under `features` so that copy stays untouched.
+  const items = { ...dict.whatsNew.items, worldClock: dict.features.worldClock };
   const steps = WIDGET_IDS.map((id) => ({
     id,
-    title: dict.whatsNew.items[id].title,
-    body: dict.whatsNew.items[id].body,
+    title: items[id].title,
+    body: items[id].body,
   }));
 
   return (

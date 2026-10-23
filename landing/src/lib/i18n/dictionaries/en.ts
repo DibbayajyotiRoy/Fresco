@@ -126,7 +126,7 @@ export const en = {
     platforms:
       "Any X11 desktop (Ubuntu, Pop!_OS, Linux Mint, Debian, Kali Linux), plus Wayland layer-shell compositors: COSMIC, Hyprland, Sway, KDE Plasma 6. GNOME Wayland shows a still frame only until a Fresco GNOME extension ships.",
     widgets:
-      "Four widgets painted into the wallpaper itself, not into a window: time-synced song lyrics, a clock with six themes, an audio visualiser, and album art on a turning record. Nothing floats over your windows and nothing intercepts a click. All off by default; unavailable on GNOME Wayland, which has no live wallpaper surface.",
+      "Five widgets painted into the wallpaper itself, not into a window: time-synced song lyrics, a clock with eight themes, a world clock, an audio visualiser, and album art on a turning record. Nothing floats over your windows unless you turn on the world clock's optional Float above windows mode, and nothing intercepts a click. All off by default; unavailable on GNOME Wayland, which has no live wallpaper surface.",
     licenseLead: "GPL-3.0, free forever.",
     licenseLink: "Source on GitHub",
     licenseTail: "Built with Rust, GTK4, and mpv.",
@@ -136,6 +136,8 @@ export const en = {
     kicker: "Features",
     title: "Any media. Any monitor. No CPU drama.",
     lead: "Fresco sets video, GIF, image, slideshow, and playlist wallpapers on X11 and Wayland, decoded on the GPU so a live wallpaper costs about as much as a static one.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Five desktop widgets, painted into the wallpaper.",
     manifest: (n: number) => `Manifest: ${n} capabilities`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
@@ -168,6 +170,20 @@ export const en = {
           "Browse curated, licensed wallpapers in-app (menu, then Browse wallpapers) and set one in two clicks. You can also paste a direct link.",
         status: "In-app",
       },
+      linkedFolders: {
+        tag: "Folders",
+        title: "Link a folder",
+        description:
+          "Use a wallpaper folder you already have (images, GIFs and videos) without importing it. It stays in sync as you add and remove files, subfolders are optional, and your favourites and edits are kept per file.",
+        status: "No import",
+      },
+      bigLibrary: {
+        tag: "Library",
+        title: "Thousands of wallpapers",
+        description:
+          "The library only draws what is on screen. A 4,000-wallpaper test library opened in about 2 seconds and used about 325 MB, down from 9 to 13 seconds and 1.6 GB.",
+        status: "On demand",
+      },
       video: {
         tag: "Video · GIF",
         title: "Video & GIF wallpapers",
@@ -191,7 +207,7 @@ export const en = {
         tag: "Lyrics · clock",
         title: "Lyrics and clock widgets",
         description:
-          "Time-synced song lyrics for whatever is playing over MPRIS (local .lrc first, then LRCLIB), and a clock in one of six themes. Drawn into the wallpaper, so nothing floats over your windows. Off by default.",
+          "Time-synced song lyrics for whatever is playing over MPRIS (local .lrc first, then LRCLIB), a clock in one of eight themes, and a world clock for several cities at once. Drawn into the wallpaper, so nothing floats over your windows unless you switch on the world clock's Float above windows mode. Off by default.",
         status: "Off by default",
       },
       visualiser: {
@@ -468,6 +484,14 @@ export const en = {
         a: "Looping video (mp4, webm, mkv, avi, mov), animated GIFs, static images (jpg, png, webp), a folder of images as a slideshow with crossfade, fade, slide, or Ken Burns transitions, and multi-video playlists.",
       },
       {
+        q: "Can Fresco use my existing wallpaper folder without importing?",
+        a: "Yes. Use Link a folder to point Fresco at a folder you already keep wallpapers in. Its images, GIFs and videos show up in your library where they are, without being imported, and the library stays in sync as you add and remove files in that folder. Subfolders are optional, and your favourites and edits are remembered per file. Add still imports individual files as before.",
+      },
+      {
+        q: "Can Fresco handle thousands of wallpapers?",
+        a: "Yes. The library only builds the cards for the wallpapers near where you are scrolling, instead of every wallpaper at once, so a big collection does not weigh the app down. On a 4,000-wallpaper test library (half images, half videos) the library appeared in about 2 seconds instead of 9 to 13, and the app used roughly 325 MB of memory instead of 1.6 GB. Those figures come from a development build under load on one machine, so read them as a guide rather than a promise.",
+      },
+      {
         q: "Does it support multiple monitors?",
         a: "Yes. You can set a different wallpaper on each display, and Fresco pauses the wallpaper per output when a window there goes fullscreen. Monitor hotplug is live on X11; on Wayland a newly plugged display picks up on the next apply (automatic hotplug lands with the v1.0 engine).",
       },
@@ -497,11 +521,11 @@ export const en = {
       },
       {
         q: "Does Linux have desktop widgets like Conky?",
-        a: "Yes, and Fresco adds four of them that need no panel, no extension, and no support from your desktop: synced song lyrics, a clock with six themes, an audio visualiser with five styles, and the current track's cover art on a turning record. They are painted into the wallpaper itself rather than into a window, so they never sit above your windows, never intercept a click, and work on desktops that have no widget layer of their own, including COSMIC, Hyprland, and Sway. All four are off by default. Unlike Conky there are no system-monitor widgets yet, so no CPU, RAM, or network readouts. GNOME on Wayland is the one place widgets cannot run, because there is no live wallpaper surface to draw into.",
+        a: "Yes, and Fresco adds five of them that need no panel, no extension, and no support from your desktop: synced song lyrics, a clock with eight themes, a world clock for several cities at once, an audio visualiser with five styles, and the current track's cover art on a turning record. They are painted into the wallpaper itself rather than into a window, so they sit behind your windows, never intercept a click, and work on desktops that have no widget layer of their own, including COSMIC, Hyprland, and Sway. The one exception is the world clock's optional Float above windows mode, which lifts it above every app with clicks passing through. All five are off by default. Unlike Conky there are no system-monitor widgets yet, so no CPU, RAM, or network readouts. GNOME on Wayland is the one place widgets cannot run, because there is no live wallpaper surface to draw into.",
       },
       {
         q: "Can I get a music visualiser on my desktop background?",
-        a: "Yes. Fresco's audio visualiser reacts to whatever your system is playing, in one of five styles (Bars, Mirror, Wave, Dots, Ring) with a colour picker, a two-colour blend, or rainbow. It is off by default and asks for consent the first time you enable it, because it has to listen to your audio output. With music playing and all four widgets on, the measured cost was 0.8% of one CPU core, nearly all of it the audio capture, because nothing repaints unless its content changed.",
+        a: "Yes. Fresco's audio visualiser reacts to whatever your system is playing, in one of five styles (Bars, Mirror, Wave, Dots, Ring) with a colour picker, a two-colour blend, or rainbow. It is off by default and asks for consent the first time you enable it, because it has to listen to your audio output. With music playing and the lyrics, clock, visualiser and album-art widgets on, the measured cost was 0.8% of one CPU core, nearly all of it the audio capture, because nothing repaints unless its content changed.",
       },
       {
         q: "Is Fresco in the deepin App Store?",
@@ -535,7 +559,7 @@ export const en = {
   featureList: [
     "Built-in catalog of curated, licensed wallpapers",
     "Video, GIF, image, slideshow, and playlist wallpapers",
-    "Desktop widgets drawn into the wallpaper: synced song lyrics, clock, audio visualiser, album art",
+    "Desktop widgets drawn into the wallpaper: synced song lyrics, clock, world clock, audio visualiser, album art",
     "Add wallpapers from a direct URL",
     "Day and night wallpaper schedules (plus time slots and solar via config)",
     "Per-display wallpapers from the GUI",
@@ -547,6 +571,8 @@ export const en = {
     "Per-wallpaper sound and volume",
     "Slideshow transitions (crossfade, fade, slide, Ken Burns)",
     "Wallpaper library with search",
+    "Link an existing wallpaper folder without importing it, kept in sync as files change",
+    "Library that stays quick with thousands of wallpapers",
     "Different wallpaper per monitor",
     "Pause on battery and auto-pause on fullscreen",
     "Restores automatically on login",
@@ -555,7 +581,7 @@ export const en = {
 
   /** SoftwareApplication.description in the JSON-LD graph. */
   softwareDescription:
-    "Fresco is a free, open-source live-wallpaper app for Linux. It sets video, GIF, image, slideshow, and playlist wallpapers as your animated desktop background, with hardware-accelerated playback, and can draw four desktop widgets into the wallpaper itself: time-synced song lyrics, a clock, an audio visualiser, and album art on a turning record. A free Wallpaper Engine alternative for Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux, and elementary OS, on X11 and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6).",
+    "Fresco is a free, open-source live-wallpaper app for Linux. It sets video, GIF, image, slideshow, and playlist wallpapers as your animated desktop background, with hardware-accelerated playback, and can draw five desktop widgets into the wallpaper itself: time-synced song lyrics, a clock, a world clock, an audio visualiser, and album art on a turning record. A free Wallpaper Engine alternative for Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux, and elementary OS, on X11 and on Wayland layer-shell compositors (COSMIC, Hyprland, Sway, KDE Plasma 6).",
 };
 
 /**

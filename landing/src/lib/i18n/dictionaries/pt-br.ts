@@ -116,7 +116,7 @@ export const ptBr: Dictionary = {
     platforms:
       "Qualquer área de trabalho X11 (Ubuntu, Pop!_OS, Linux Mint, Debian, Kali Linux), além dos compositores Wayland com layer-shell: COSMIC, Hyprland, Sway e KDE Plasma 6. No GNOME com Wayland ele mostra só um quadro estático até existir uma extensão do Fresco para GNOME.",
     widgets:
-      "Quatro widgets desenhados no próprio papel de parede, e não em uma janela: letras de música sincronizadas, um relógio com seis temas, um visualizador de áudio e a capa do álbum em um disco girando. Nada flutua sobre as suas janelas e nada intercepta cliques. Todos vêm desativados. Indisponíveis no GNOME com Wayland, que não tem superfície de papel de parede animado.",
+      "Cinco widgets desenhados no próprio papel de parede, e não em uma janela: letras de música sincronizadas, um relógio com oito temas, um relógio mundial, um visualizador de áudio e a capa do álbum em um disco girando. Nada flutua sobre as suas janelas, a menos que você ative o modo opcional do relógio mundial que o faz flutuar por cima, e nada intercepta cliques. Todos vêm desativados. Indisponíveis no GNOME com Wayland, que não tem superfície de papel de parede animado.",
     licenseLead: "GPL-3.0, gratuito para sempre.",
     licenseLink: "Código no GitHub",
     licenseTail: "Feito com Rust, GTK4 e mpv.",
@@ -126,6 +126,8 @@ export const ptBr: Dictionary = {
     kicker: "Recursos",
     title: "Qualquer mídia. Qualquer monitor. Sem drama de CPU.",
     lead: "O Fresco define papéis de parede em vídeo, GIF, imagem, apresentação de slides e playlist no X11 e no Wayland, decodificados na GPU, de modo que um papel de parede animado custa quase o mesmo que um estático.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Cinco widgets, pintados no papel de parede.",
     manifest: (n: number) => `Manifesto: ${n} recursos`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
@@ -158,6 +160,20 @@ export const ptBr: Dictionary = {
           "Navegue por papéis de parede selecionados e licenciados dentro do app (menu, depois Procurar papéis de parede) e defina um em dois cliques. Você também pode colar um link direto.",
         status: "No app",
       },
+      linkedFolders: {
+        tag: "Pastas",
+        title: "Vincular uma pasta",
+        description:
+          "Use uma pasta de papéis de parede que você já tem (imagens, GIFs e vídeos) sem importá-la. Ela fica sincronizada quando você adiciona ou remove arquivos, as subpastas são opcionais e seus favoritos e edições são guardados por arquivo.",
+        status: "Sem importar",
+      },
+      bigLibrary: {
+        tag: "Biblioteca",
+        title: "Milhares de papéis de parede",
+        description:
+          "A biblioteca só desenha o que está na tela. Uma biblioteca de teste com 4.000 papéis de parede abriu em cerca de 2 segundos e usou cerca de 325 MB, contra 9 a 13 segundos e 1,6 GB antes.",
+        status: "Sob demanda",
+      },
       video: {
         tag: "Vídeo · GIF",
         title: "Papéis de parede em vídeo e GIF",
@@ -183,7 +199,7 @@ export const ptBr: Dictionary = {
         tag: "Letras · relógio",
         title: "Widgets de letra e relógio",
         description:
-          "Letras sincronizadas com o que estiver tocando via MPRIS (primeiro o .lrc local, depois o LRCLIB) e um relógio em um de seis temas. Desenhados no papel de parede, então nada flutua sobre as suas janelas. Desativados por padrão.",
+          "Letras sincronizadas com o que estiver tocando via MPRIS (primeiro o .lrc local, depois o LRCLIB), um relógio em um de oito temas e um relógio mundial para várias cidades ao mesmo tempo. Desenhados no papel de parede, então nada flutua sobre as suas janelas, a menos que você ative o modo opcional do relógio mundial. Desativados por padrão.",
         status: "Desativado por padrão",
       },
       visualiser: {
@@ -460,6 +476,14 @@ export const ptBr: Dictionary = {
         a: "Vídeo em loop (mp4, webm, mkv, avi, mov), GIFs animados, imagens estáticas (jpg, png, webp), uma pasta de imagens como apresentação de slides com transições crossfade, fade, slide ou Ken Burns, e playlists com vários vídeos.",
       },
       {
+        q: "O Fresco pode usar minha pasta de papéis de parede existente sem importar?",
+        a: "Pode. Com Vincular uma pasta, você aponta o Fresco para uma pasta onde já guarda papéis de parede. As imagens, GIFs e vídeos dela aparecem na sua biblioteca onde estão, sem serem importados, e a biblioteca fica sincronizada quando você adiciona ou remove arquivos nessa pasta. As subpastas são opcionais, e seus favoritos e edições são lembrados por arquivo. Adicionar continua importando arquivos individuais, como antes.",
+      },
+      {
+        q: "O Fresco aguenta milhares de papéis de parede?",
+        a: "Aguenta. A biblioteca só monta os cartões dos papéis de parede perto de onde você está rolando, em vez de todos de uma vez, então uma coleção grande não pesa no app. Em uma biblioteca de teste com 4.000 papéis de parede (metade imagens, metade vídeos), a biblioteca apareceu em cerca de 2 segundos em vez de 9 a 13, e o app usou cerca de 325 MB de memória em vez de 1,6 GB. Esses números vêm de uma versão de desenvolvimento sob carga, em uma única máquina, então encare-os como uma referência, não como uma promessa.",
+      },
+      {
         q: "Ele suporta vários monitores?",
         a: "Suporta. Você pode definir um papel de parede diferente em cada tela, e o Fresco pausa o papel de parede daquela saída quando uma janela ali entra em tela cheia. A troca de monitor a quente é imediata no X11; no Wayland uma tela recém-conectada é reconhecida na próxima aplicação (a detecção automática chega com o motor v1.0).",
       },
@@ -489,11 +513,11 @@ export const ptBr: Dictionary = {
       },
       {
         q: "O Linux tem widgets de área de trabalho como o Conky?",
-        a: "Tem, e o Fresco adiciona quatro deles que não precisam de painel, de extensão nem de suporte do seu ambiente: letras sincronizadas, um relógio com seis temas, um visualizador de áudio com cinco estilos e a capa da faixa atual em um disco girando. Eles são pintados no próprio papel de parede em vez de em uma janela, então nunca ficam sobre as suas janelas, nunca interceptam um clique e funcionam em ambientes que não têm camada de widgets própria, incluindo COSMIC, Hyprland e Sway. Os quatro vêm desativados. Diferente do Conky, ainda não há widgets de monitoramento do sistema, então nada de CPU, RAM ou rede. O GNOME com Wayland é o único lugar onde os widgets não rodam, porque não existe superfície de papel de parede animado para desenhar.",
+        a: "Tem, e o Fresco adiciona cinco deles que não precisam de painel, de extensão nem de suporte do seu ambiente: letras sincronizadas, um relógio com oito temas, um relógio mundial para várias cidades ao mesmo tempo, um visualizador de áudio com cinco estilos e a capa da faixa atual em um disco girando. Eles são pintados no próprio papel de parede em vez de em uma janela, então ficam atrás das suas janelas, nunca interceptam um clique e funcionam em ambientes que não têm camada de widgets própria, incluindo COSMIC, Hyprland e Sway. A única exceção é o modo opcional do relógio mundial, que o coloca acima de todos os apps deixando os cliques passarem. Os cinco vêm desativados. Diferente do Conky, ainda não há widgets de monitoramento do sistema, então nada de CPU, RAM ou rede. O GNOME com Wayland é o único lugar onde os widgets não rodam, porque não existe superfície de papel de parede animado para desenhar.",
       },
       {
         q: "Dá para ter um visualizador de música no plano de fundo?",
-        a: "Dá. O visualizador de áudio do Fresco reage ao que o seu sistema estiver tocando, em um de cinco estilos (Bars, Mirror, Wave, Dots, Ring) com seletor de cor, mistura de duas cores ou arco-íris. Ele vem desativado e pede consentimento na primeira vez que você o liga, porque precisa escutar a sua saída de áudio. Com música tocando e os quatro widgets ligados, o custo medido foi de 0,8% de um núcleo de CPU, quase tudo por causa da captura de áudio, já que nada é redesenhado a menos que o conteúdo mude.",
+        a: "Dá. O visualizador de áudio do Fresco reage ao que o seu sistema estiver tocando, em um de cinco estilos (Bars, Mirror, Wave, Dots, Ring) com seletor de cor, mistura de duas cores ou arco-íris. Ele vem desativado e pede consentimento na primeira vez que você o liga, porque precisa escutar a sua saída de áudio. Com música tocando e os widgets de letras, relógio, visualizador e capa do álbum ligados, o custo medido foi de 0,8% de um núcleo de CPU, quase tudo por causa da captura de áudio, já que nada é redesenhado a menos que o conteúdo mude.",
       },
       {
         q: "O Fresco está na loja de apps do deepin?",
@@ -526,7 +550,7 @@ export const ptBr: Dictionary = {
   featureList: [
     "Catálogo embutido de papéis de parede selecionados e licenciados",
     "Papéis de parede em vídeo, GIF, imagem, apresentação e playlist",
-    "Widgets desenhados no papel de parede: letras sincronizadas, relógio, visualizador de áudio, capa do álbum",
+    "Widgets desenhados no papel de parede: letras sincronizadas, relógio, relógio mundial, visualizador de áudio, capa do álbum",
     "Adicionar papéis de parede por URL direta",
     "Agendamento de papel de parede de dia e noite (mais faixas de horário e modo solar via configuração)",
     "Papel de parede por monitor pela interface gráfica",
@@ -538,6 +562,8 @@ export const ptBr: Dictionary = {
     "Som e volume por papel de parede",
     "Transições de apresentação (crossfade, fade, slide, Ken Burns)",
     "Biblioteca de papéis de parede com busca",
+    "Vincular uma pasta de papéis de parede existente sem importá-la, sincronizada quando os arquivos mudam",
+    "Biblioteca ágil mesmo com milhares de papéis de parede",
     "Papel de parede diferente em cada monitor",
     "Pausa na bateria e pausa automática em tela cheia",
     "Restaura automaticamente no login",
@@ -545,5 +571,5 @@ export const ptBr: Dictionary = {
   ],
 
   softwareDescription:
-    "O Fresco é um app gratuito e de código aberto de papel de parede animado para Linux. Ele define papéis de parede em vídeo, GIF, imagem, apresentação e playlist como plano de fundo animado, com reprodução acelerada por hardware, e pode desenhar quatro widgets no próprio papel de parede: letras sincronizadas, um relógio, um visualizador de áudio e a capa do álbum em um disco girando. Uma alternativa gratuita ao Wallpaper Engine para Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux e elementary OS, no X11 e em compositores Wayland com layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
+    "O Fresco é um app gratuito e de código aberto de papel de parede animado para Linux. Ele define papéis de parede em vídeo, GIF, imagem, apresentação e playlist como plano de fundo animado, com reprodução acelerada por hardware, e pode desenhar cinco widgets no próprio papel de parede: letras sincronizadas, um relógio, um relógio mundial, um visualizador de áudio e a capa do álbum em um disco girando. Uma alternativa gratuita ao Wallpaper Engine para Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux e elementary OS, no X11 e em compositores Wayland com layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
 };

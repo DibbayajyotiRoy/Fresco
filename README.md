@@ -26,6 +26,7 @@ Fresco turns a video, GIF, image, slideshow or playlist into the wallpaper behin
 - **Plays:** videos (mp4, webm, mkv, avi, mov), animated GIFs, images, image slideshows and video playlists.
 - **Desktops:** X11 sessions (GNOME on Xorg, Cinnamon, Xfce, MATE, Deepin 25) and Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). GNOME on Wayland shows a still frame only — see [Supported environments](#supported-environments).
 - **Hardware decoding:** VA-API (Intel, AMD) and NVDEC (NVIDIA), through mpv.
+- **Library:** link a wallpaper folder you already have instead of importing it, and keep it in sync as files come and go. The library draws only what is on screen, so thousands of wallpapers stay quick and light.
 - **Widgets:** time-synced lyrics, clocks (including a world clock), an audio visualiser and album art, drawn into the wallpaper. All off by default.
 - **Control:** the app, a Ctrl+K command palette, and `fresco next` / `fresco prev` / `fresco random` for keyboard shortcuts.
 - **Install:** a `.deb` for Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali and Deepin (one-line script, manual download or the Deepin App Store); build from source on Fedora, Arch and others — see [Installation](#installation).
@@ -93,13 +94,15 @@ The wallpaper keeps playing after the window closes.
 
 - **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image slideshow, multi-video playlist
 - **Add from a link** — paste a Pinterest pin or any direct video/image URL; Fresco downloads it and opens the crop editor
+- **Link a folder** — use a wallpaper folder you already have (images, GIFs and videos) without importing it; it stays in sync as you add and remove files, subfolders are optional, and your favourites and edits are kept per file
+- **Big libraries** — the library only draws the wallpapers near your scroll position, so thousands of wallpapers open in about two seconds and use a few hundred megabytes (on a 4,000-wallpaper test library: about 2 s and 325 MB, down from 9 to 13 s and 1.6 GB)
 - **Hardware decode** — GPU video decoding (VA-API / NVDEC) keeps CPU usage near idle by moving the work to the video engine, where it is measurably cheaper (not free — see [Performance](#performance-and-battery-life))
 - **Power saving** — cheaper GPU scaling for laptops; measured to roughly halve GPU power (see [Performance](#performance-and-battery-life))
 - **Multi-monitor** — a different wallpaper per display, with synced playback for the same video across monitors
 - **Day & night schedules** — swap wallpapers on a timer, arbitrary time slots, or sunrise/sunset
 - **Desktop widgets** — synced song lyrics, themed clocks, a world clock, an audio visualiser, and a turning album-art disc, drawn into the wallpaper itself so nothing covers your windows (the world clock has an optional float-above-windows mode); all off by default (see [Desktop widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art))
 - **Lock screen** — show your wallpaper and widgets (clock, greeting, now playing, battery, and more) on your real lock screen instead of the stock one — live video and widgets on COSMIC 1.9+ and KDE Plasma 6, wallpaper-and-widgets via `fresco lock` on Sway/Hyprland/niri and X11, a still frame elsewhere. Off by default, and Fresco never sees your password — see [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Keyboard control** — `fresco next`, `fresco prev` and `fresco random` for compositor keybindings, and a Ctrl+K command palette inside the app
+- **Keyboard control** — `fresco next`, `fresco prev` and `fresco random` for compositor keybindings (an open Fresco window picks the change up instead of reverting it), and a Ctrl+K command palette inside the app
 - **Batch management** — select several wallpapers at once and remove them in one step
 - **Built-in catalog** — browse curated, properly licensed wallpapers in-app
 - **Fullscreen auto-pause** — per monitor, on X11, wlroots compositors, COSMIC and KDE Plasma (through its wallpaper plugin); optionally for maximized windows too, plus pause-on-battery
@@ -113,13 +116,14 @@ The wallpaper keeps playing after the window closes.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Embedded renderer. GNOME only where the distro still ships an Xorg session (see the GNOME note below) |
 | Kali Linux (Xfce, X11) | ✅ | Runs on Kali's default Xfce-on-X11 session via the same embedded renderer as other X11 desktops |
+| Xfce (X11) | ✅ | Desktop icons stay visible over the wallpaper, and you can click, select and drag them |
 | MATE (X11) | ✅ | Desktop icons stay visible and clickable over the wallpaper |
 | Deepin 25 (DDE, X11) | ✅ | Automatic DDE adaptation — community-verified on Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 and newer (Wayland) | ✅ | Cinnamon's compositor gained layer-shell in 6.8. Cinnamon 6.6 and older have no layer-shell and keep a still frame on Wayland |
-| KDE Plasma 6 (X11 and Wayland) | ✅ | Set through plasmashell's own wallpaper plugin, so desktop icons stay visible. Needs `qml6-module-qtmultimedia` for video. Playback is Qt's, not mpv's: muted, no hwdec tuning, crop or transitions; a playlist plays its first file and a slideshow shows its first frame |
+| KDE Plasma 6 (X11 and Wayland) | ✅ | Set through plasmashell's own wallpaper plugin, so desktop icons stay visible. Needs `qml6-module-qtmultimedia` for video. Playback is Qt's, not mpv's: muted, no hwdec tuning, crop or transitions; a playlist plays its first file and a slideshow shows its first frame. The Fit option (Cover, Contain, Stretch) is respected |
 | GNOME on Wayland | ⚠️ | Still frame only — Mutter exposes no live wallpaper surface, so no video and no widgets. Live video needs a Fresco GNOME extension (planned) |
 
 Every environment above is exercised headlessly in CI on each release.
@@ -216,15 +220,15 @@ Yes on X11, with the full live wallpaper — video, widgets, everything. On **GN
 
 ### Does Fresco work on KDE Plasma, COSMIC, Hyprland or Sway?
 
-Yes, on all four. COSMIC, Hyprland and Sway play live video through layer-shell. KDE Plasma 6 (X11 and Wayland) uses Fresco's own wallpaper plugin inside plasmashell, which keeps desktop icons visible but plays through Qt instead of mpv: muted, with no crop or transitions, and it needs `qml6-module-qtmultimedia` for video.
+Yes, on all four. COSMIC, Hyprland and Sway play live video through layer-shell. KDE Plasma 6 (X11 and Wayland) uses Fresco's own wallpaper plugin inside plasmashell, which keeps desktop icons visible but plays through Qt instead of mpv: muted, with no crop or transitions, and it needs `qml6-module-qtmultimedia` for video. The Fit option (Cover, Contain or Stretch) applies there too.
 
 ### Does Fresco work on Linux Mint, Xfce, Cinnamon or MATE?
 
-Yes. Cinnamon, Xfce and MATE on X11 use the embedded renderer, and desktop icons stay visible over the wallpaper on Xfce and MATE. Cinnamon on Wayland works from Cinnamon 6.8, which added layer-shell.
+Yes. Cinnamon, Xfce and MATE on X11 use the embedded renderer, and desktop icons stay visible over the wallpaper on Xfce and MATE; on Xfce you can click, select and drag them as usual. Cinnamon on Wayland works from Cinnamon 6.8, which added layer-shell.
 
 ### How do I switch wallpapers with a keyboard shortcut?
 
-Bind `fresco next`, `fresco prev` or `fresco random` to a key in your compositor or desktop settings — they switch the wallpaper without opening the app (`random` never picks the one already playing). They step through your library in the order the app shows it, or through just the folder you have open there, and start the Fresco service if it is not running. Inside the app, Ctrl+K opens a command palette. For example in Sway:
+Bind `fresco next`, `fresco prev` or `fresco random` to a key in your compositor or desktop settings — they switch the wallpaper without opening the app (`random` never picks the one already playing). They step through your library in the order the app shows it, or through just the folder you have open there, and start the Fresco service if it is not running. If the Fresco window is open at the time, it picks up the new wallpaper instead of putting the old one back. Inside the app, Ctrl+K opens a command palette. For example in Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -239,6 +243,14 @@ Yes. Fresco supports per-display wallpapers, and when the same video is used acr
 ### Does it support GIFs and image slideshows?
 
 Yes — animated GIFs, static images, image slideshows with transitions (crossfade, fade, slide, Ken Burns), and multi-video playlists, in addition to video files.
+
+### Can Fresco use my existing wallpaper folder without importing?
+
+Yes. Use **Link a folder** to point Fresco at a folder you already keep wallpapers in. Its images, GIFs and videos show up in your library where they are, without being imported, and the library stays in sync as you add and remove files in that folder. Subfolders are optional, and your favourites and edits are remembered per file. **Add** still imports individual files as before.
+
+### Can Fresco handle thousands of wallpapers?
+
+Yes. The library only builds the cards for the wallpapers near where you are scrolling, instead of every wallpaper at once, so a big collection does not weigh the app down. On a 4,000-wallpaper test library (half images, half videos) the library appeared in about 2 seconds instead of 9 to 13, and the app used roughly 325 MB of memory instead of 1.6 GB. Those figures come from a development build under load on one machine, so read them as a guide rather than a promise.
 
 ### Can I use a YouTube video as my wallpaper?
 
@@ -280,7 +292,7 @@ Fresco draws five optional widgets onto your wallpaper. All are **off by default
 | **Audio visualiser** | Five styles — Bars, Mirror, Wave, Dots, Ring — with a colour picker, a two-colour blend, or rainbow |
 | **Album art** | The current track's cover on a turning record; it stops turning when playback pauses |
 
-Except for the world clock's optional **Float above windows** mode, widgets are painted into the wallpaper through mpv's OSD layer rather than into a window of their own, so they never sit above your windows, never intercept a click, and behave identically on X11 and on every layer-shell compositor. With music playing and the lyrics, clock, visualiser and album-art widgets on, the measured cost was **0.8% of one CPU core** — nearly all of it the audio capture, since nothing repaints unless its content changed.
+Except for the world clock's optional **Float above windows** mode, widgets are painted into the wallpaper through mpv's OSD layer rather than into a window of their own, so they never sit above your windows, never intercept a click, and behave identically on X11 and on every layer-shell compositor. With music playing and the lyrics, clock, visualiser and album-art widgets on, the measured cost was **0.8% of one CPU core** — nearly all of it the audio capture, since nothing repaints unless its content changed. Widgets also come back on their own after the machine suspends and resumes.
 
 Widgets appear on **every display** by default. To keep them on one, add `monitor = "DP-1"` to the `[widgets]` block of `config.toml` (there is no GUI control for this yet). They are **not available on GNOME under Wayland**, which has no live wallpaper surface for Fresco to draw into — the same reason wallpapers fall back to a static frame there.
 

@@ -9,6 +9,8 @@ import {
   Clock,
   Cpu,
   Film,
+  FolderSync,
+  Gauge,
   Globe,
   Images,
   LayoutGrid,
@@ -41,6 +43,8 @@ const ROW_ORDER = [
   "hwDecode",
   "sessions",
   "catalog",
+  "linkedFolders",
+  "bigLibrary",
   "video",
   "slideshow",
   "playlist",
@@ -63,6 +67,8 @@ const ROW_ICONS: Record<RowId, LucideIcon> = {
   hwDecode: Cpu,
   sessions: Layers,
   catalog: LayoutGrid,
+  linkedFolders: FolderSync,
+  bigLibrary: Gauge,
   video: Film,
   slideshow: Images,
   playlist: ListMusic,
@@ -116,7 +122,7 @@ export function Features({ dict }: { dict: Dictionary }) {
                 data-reveal="fade"
                 className="max-w-3xl font-display text-display-sm text-ink [overflow-wrap:anywhere]"
               >
-                {dict.whatsNew.title}
+                {dict.features.widgetsTitle}
               </h3>
               <a
                 href={`${GITHUB_URL}/blob/main/CHANGELOG.md`}

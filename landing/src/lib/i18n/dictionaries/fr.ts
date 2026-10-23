@@ -116,7 +116,7 @@ export const fr: Dictionary = {
     platforms:
       "N'importe quel bureau X11 (Ubuntu, Pop!_OS, Linux Mint, Debian, Kali Linux), ainsi que les compositeurs Wayland avec layer-shell : COSMIC, Hyprland, Sway, KDE Plasma 6. Sous GNOME avec Wayland, Fresco n'affiche qu'une image fixe tant que son extension GNOME n'est pas disponible.",
     widgets:
-      "Quatre widgets dessinés dans le fond d'écran lui-même, pas dans une fenêtre : paroles synchronisées, une horloge à six thèmes, un visualiseur audio et la pochette de l'album sur un disque qui tourne. Rien ne flotte au-dessus de tes fenêtres et rien n'intercepte un clic. Tous désactivés par défaut. Indisponibles sous GNOME avec Wayland, qui n'offre pas de surface de fond animé.",
+      "Cinq widgets dessinés dans le fond d'écran lui-même, pas dans une fenêtre : paroles synchronisées, une horloge à huit thèmes, une horloge mondiale, un visualiseur audio et la pochette de l'album sur un disque qui tourne. Rien ne flotte au-dessus de tes fenêtres, sauf si tu actives le mode optionnel de l'horloge mondiale qui la place par-dessus, et rien n'intercepte un clic. Tous désactivés par défaut. Indisponibles sous GNOME avec Wayland, qui n'offre pas de surface de fond animé.",
     licenseLead: "GPL-3.0, gratuit pour toujours.",
     licenseLink: "Code source sur GitHub",
     licenseTail: "Construit avec Rust, GTK4 et mpv.",
@@ -126,6 +126,8 @@ export const fr: Dictionary = {
     kicker: "Fonctionnalités",
     title: "N'importe quel média. N'importe quel écran. Sans drame côté CPU.",
     lead: "Fresco met des fonds d'écran vidéo, GIF, image, diaporama et playlist sous X11 et Wayland, décodés sur le GPU, si bien qu'un fond animé coûte à peu près autant qu'un fond fixe.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Cinq widgets de bureau, peints dans le fond d'écran.",
     manifest: (n: number) => `Manifeste : ${n} fonctionnalités`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
@@ -158,6 +160,20 @@ export const fr: Dictionary = {
           "Parcours des fonds d'écran sélectionnés et sous licence directement dans l'application (menu, puis Parcourir les fonds d'écran) et applique-en un en deux clics. Tu peux aussi coller un lien direct.",
         status: "Dans l'app",
       },
+      linkedFolders: {
+        tag: "Dossiers",
+        title: "Lier un dossier",
+        description:
+          "Utilise un dossier de fonds d'écran que tu as déjà (images, GIF et vidéos) sans l'importer. Il reste synchronisé quand tu ajoutes ou supprimes des fichiers, les sous-dossiers sont facultatifs, et tes favoris et modifications sont conservés fichier par fichier.",
+        status: "Sans import",
+      },
+      bigLibrary: {
+        tag: "Bibliothèque",
+        title: "Des milliers de fonds d'écran",
+        description:
+          "La bibliothèque ne dessine que ce qui est à l'écran. Une bibliothèque de test de 4 000 fonds d'écran s'est ouverte en environ 2 secondes avec environ 325 Mo de mémoire, contre 9 à 13 secondes et 1,6 Go auparavant.",
+        status: "À la demande",
+      },
       video: {
         tag: "Vidéo · GIF",
         title: "Fonds d'écran vidéo et GIF",
@@ -183,7 +199,7 @@ export const fr: Dictionary = {
         tag: "Paroles · horloge",
         title: "Widgets paroles et horloge",
         description:
-          "Des paroles synchronisées avec ce qui passe via MPRIS (d'abord le .lrc local, puis LRCLIB), et une horloge parmi six thèmes. Dessinées dans le fond d'écran, donc rien ne flotte au-dessus de tes fenêtres. Désactivés par défaut.",
+          "Des paroles synchronisées avec ce qui passe via MPRIS (d'abord le .lrc local, puis LRCLIB), une horloge parmi huit thèmes et une horloge mondiale pour plusieurs villes à la fois. Dessinées dans le fond d'écran, donc rien ne flotte au-dessus de tes fenêtres, sauf si tu actives le mode optionnel de l'horloge mondiale. Désactivés par défaut.",
         status: "Désactivé par défaut",
       },
       visualiser: {
@@ -460,6 +476,14 @@ export const fr: Dictionary = {
         a: "Vidéo en boucle (mp4, webm, mkv, avi, mov), GIF animés, images fixes (jpg, png, webp), un dossier d'images en diaporama avec transitions fondu enchaîné, fondu, glissement ou Ken Burns, et des playlists de plusieurs vidéos.",
       },
       {
+        q: "Fresco peut-il utiliser mon dossier de fonds d'écran existant sans l'importer ?",
+        a: "Oui. Avec Lier un dossier, tu indiques à Fresco un dossier où tu ranges déjà tes fonds d'écran. Ses images, GIF et vidéos apparaissent dans ta bibliothèque là où ils se trouvent, sans être importés, et la bibliothèque reste synchronisée quand tu ajoutes ou supprimes des fichiers dans ce dossier. Les sous-dossiers sont facultatifs, et tes favoris et modifications sont mémorisés fichier par fichier. Ajouter continue d'importer des fichiers individuels comme avant.",
+      },
+      {
+        q: "Fresco peut-il gérer des milliers de fonds d'écran ?",
+        a: "Oui. La bibliothèque ne construit que les cartes des fonds d'écran proches de l'endroit où tu défiles, au lieu de tous à la fois, donc une grosse collection n'alourdit pas l'application. Sur une bibliothèque de test de 4 000 fonds d'écran (moitié images, moitié vidéos), la bibliothèque est apparue en environ 2 secondes au lieu de 9 à 13, et l'application a utilisé environ 325 Mo de mémoire au lieu de 1,6 Go. Ces chiffres viennent d'une version de développement sous charge, sur une seule machine : prends-les comme une indication, pas comme une promesse.",
+      },
+      {
         q: "Prend-il en charge plusieurs écrans ?",
         a: "Oui. Tu peux appliquer un fond d'écran différent sur chaque écran, et Fresco met en pause le fond de cette sortie dès qu'une fenêtre y passe en plein écran. Le branchement à chaud d'un moniteur est immédiat sous X11 ; sous Wayland, un écran fraîchement branché est pris en compte à l'application suivante (la détection automatique arrive avec le moteur v1.0).",
       },
@@ -489,11 +513,11 @@ export const fr: Dictionary = {
       },
       {
         q: "Linux a-t-il des widgets de bureau comme Conky ?",
-        a: "Oui, et Fresco en ajoute quatre qui ne demandent ni tableau de bord, ni extension, ni prise en charge de ton bureau : paroles synchronisées, une horloge à six thèmes, un visualiseur audio à cinq styles et la pochette du morceau en cours sur un disque qui tourne. Ils sont peints dans le fond d'écran lui-même plutôt que dans une fenêtre : ils ne passent jamais au-dessus de tes fenêtres, n'interceptent jamais un clic, et fonctionnent sur des bureaux sans couche de widgets propre, dont COSMIC, Hyprland et Sway. Les quatre sont désactivés par défaut. Contrairement à Conky, il n'y a pas encore de widgets de surveillance système, donc pas d'affichage du processeur, de la mémoire ni du réseau. GNOME sous Wayland est le seul endroit où les widgets ne peuvent pas tourner, faute de surface de fond animé sur laquelle dessiner.",
+        a: "Oui, et Fresco en ajoute cinq qui ne demandent ni tableau de bord, ni extension, ni prise en charge de ton bureau : paroles synchronisées, une horloge à huit thèmes, une horloge mondiale pour plusieurs villes à la fois, un visualiseur audio à cinq styles et la pochette du morceau en cours sur un disque qui tourne. Ils sont peints dans le fond d'écran lui-même plutôt que dans une fenêtre : ils restent derrière tes fenêtres, n'interceptent jamais un clic, et fonctionnent sur des bureaux sans couche de widgets propre, dont COSMIC, Hyprland et Sway. La seule exception est le mode optionnel de l'horloge mondiale, qui la place au-dessus de toutes les applications en laissant passer les clics. Les cinq sont désactivés par défaut. Contrairement à Conky, il n'y a pas encore de widgets de surveillance système, donc pas d'affichage du processeur, de la mémoire ni du réseau. GNOME sous Wayland est le seul endroit où les widgets ne peuvent pas tourner, faute de surface de fond animé sur laquelle dessiner.",
       },
       {
         q: "Puis-je avoir un visualiseur de musique sur mon fond de bureau ?",
-        a: "Oui. Le visualiseur audio de Fresco réagit à ce que joue ton système, dans l'un des cinq styles (Bars, Mirror, Wave, Dots, Ring) avec sélecteur de couleur, dégradé à deux couleurs ou arc-en-ciel. Il est désactivé par défaut et demande ton accord la première fois que tu l'actives, car il doit écouter ta sortie audio. Musique en cours et les quatre widgets activés, le coût mesuré était de 0,8 % d'un cœur de processeur, presque entièrement dû à la capture audio, puisque rien n'est redessiné tant que le contenu ne change pas.",
+        a: "Oui. Le visualiseur audio de Fresco réagit à ce que joue ton système, dans l'un des cinq styles (Bars, Mirror, Wave, Dots, Ring) avec sélecteur de couleur, dégradé à deux couleurs ou arc-en-ciel. Il est désactivé par défaut et demande ton accord la première fois que tu l'actives, car il doit écouter ta sortie audio. Musique en cours et les widgets paroles, horloge, visualiseur et pochette activés, le coût mesuré était de 0,8 % d'un cœur de processeur, presque entièrement dû à la capture audio, puisque rien n'est redessiné tant que le contenu ne change pas.",
       },
       {
         q: "Fresco est-il sur l'App Store de deepin ?",
@@ -526,7 +550,7 @@ export const fr: Dictionary = {
   featureList: [
     "Catalogue intégré de fonds d'écran sélectionnés et sous licence",
     "Fonds d'écran vidéo, GIF, image, diaporama et playlist",
-    "Widgets dessinés dans le fond d'écran : paroles synchronisées, horloge, visualiseur audio, pochette d'album",
+    "Widgets dessinés dans le fond d'écran : paroles synchronisées, horloge, horloge mondiale, visualiseur audio, pochette d'album",
     "Ajout de fonds d'écran depuis une URL directe",
     "Planification jour et nuit du fond d'écran (plus plages horaires et mode solaire via la configuration)",
     "Fond d'écran par écran depuis l'interface graphique",
@@ -538,6 +562,8 @@ export const fr: Dictionary = {
     "Son et volume par fond d'écran",
     "Transitions de diaporama (fondu enchaîné, fondu, glissement, Ken Burns)",
     "Bibliothèque de fonds d'écran avec recherche",
+    "Lier un dossier de fonds d'écran existant sans l'importer, synchronisé quand les fichiers changent",
+    "Bibliothèque fluide même avec des milliers de fonds d'écran",
     "Un fond d'écran différent par moniteur",
     "Pause sur batterie et pause automatique en plein écran",
     "Restauration automatique à la connexion",
@@ -545,5 +571,5 @@ export const fr: Dictionary = {
   ],
 
   softwareDescription:
-    "Fresco est une application gratuite et open source de fond d'écran animé pour Linux. Elle applique des fonds d'écran vidéo, GIF, image, diaporama et playlist comme fond de bureau animé, avec une lecture accélérée par le matériel, et peut dessiner quatre widgets dans le fond d'écran lui-même : paroles synchronisées, une horloge, un visualiseur audio et la pochette d'album sur un disque qui tourne. Une alternative gratuite à Wallpaper Engine pour Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux et elementary OS, sous X11 et sur les compositeurs Wayland avec layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
+    "Fresco est une application gratuite et open source de fond d'écran animé pour Linux. Elle applique des fonds d'écran vidéo, GIF, image, diaporama et playlist comme fond de bureau animé, avec une lecture accélérée par le matériel, et peut dessiner cinq widgets dans le fond d'écran lui-même : paroles synchronisées, une horloge, une horloge mondiale, un visualiseur audio et la pochette d'album sur un disque qui tourne. Une alternative gratuite à Wallpaper Engine pour Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux et elementary OS, sous X11 et sur les compositeurs Wayland avec layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
 };

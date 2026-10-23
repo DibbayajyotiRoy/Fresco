@@ -8,7 +8,8 @@
 //!
 //! * **COSMIC's lockfile** — `cosmic-greeter` creates
 //!   `$XDG_RUNTIME_DIR/cosmic-greeter-$XDG_SESSION_ID.lock` when it starts
-//!   locking and removes it on unlock, and — this is the reason it exists at
+//!   locking (found by pattern: an autostarted daemon has no
+//!   `$XDG_SESSION_ID`) and removes it on unlock, and — this is the reason it exists at
 //!   all in this list — **cosmic-greeter never emits logind's `Unlock`
 //!   signal**, so on COSMIC the lockfile is the only authoritative unlock
 //!   source. Polled at ≤2 Hz ([`LOCKFILE_POLL`]); no `inotify` (no new
@@ -16,8 +17,9 @@
 //!   the mpv IPC traffic this daemon already generates).
 //! * **logind, system bus** — one supervised `gdbus monitor --system --dest
 //!   org.freedesktop.login1` child. `Session.Lock`/`Session.Unlock` on *our*
-//!   session's object path (resolved once via `Manager.GetSession`, falling
-//!   back to `Manager.GetSessionByPID`) and `Manager.PrepareForSleep (true,)`
+//!   session's object path (resolved via `Manager.GetSession`, falling back to
+//!   `Manager.GetSessionByPID`, then to the user's `Display` session; retried
+//!   every [`SESSION_RETRY`] while unresolved) and `Manager.PrepareForSleep (true,)`
 //!   (system-wide, not session-scoped) are the three signals this module
 //!   acts on.
 //! * **The session-bus screensaver interfaces** — one supervised `gdbus
@@ -77,6 +79,15 @@
 //! can finish suspending within milliseconds of that signal, so it commits
 //! **immediately**, bypassing the debounce entirely.
 //!
+//! That immediate "locked" is a placeholder, not a lock: the session is only
+//! *about to* sleep, and nothing votes "unlocked" for a session that was never
+//! locked. So `PrepareForSleep(false)` (the resume) schedules a fall back to
+//! whatever the session was before it slept, after [`WAKE_GRACE`] for the
+//! other sources to report a lock the greeter raised on resume. A session that
+//! really was locked stays locked until its own unlock source fires; one that
+//! was not goes back to unlocked, instead of keeping its desktop widgets
+//! cleared until the daemon restarted.
+//!
 //! # Process supervision
 //!
 //! [`MonitorChild`] owns one `gdbus monitor` child: a reader thread streams
@@ -88,7 +99,7 @@
 //! and IPC sources, just not the bus ones.
 
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
@@ -99,6 +110,20 @@ use super::hosts::HostKind;
 /// module docs' "Debounce" section. `PrepareForSleep(true)` is the one
 /// exception and bypasses this entirely.
 const DEBOUNCE: Duration = Duration::from_millis(250);
+
+/// How long after `PrepareForSleep(false)` the other lock sources get to
+/// report before the machine falls back to its pre-sleep state — see
+/// [`StateMachine::apply`]'s wake branch. A greeter that locks on resume writes
+/// its lockfile within the next poll or two; waiting this long keeps the desktop
+/// widgets from flashing over a lock screen that is about to appear.
+const WAKE_GRACE: Duration = Duration::from_secs(2);
+
+/// How long to wait before asking logind for our session again after a lookup
+/// failed. The lookup forks `gdbus`, so repeating it on every run-loop tick
+/// (about ten a second) cost a process spawn per tick for the whole session on
+/// any daemon logind cannot tie to a session — which is every systemd user
+/// service, i.e. every autostarted daemon.
+const SESSION_RETRY: Duration = Duration::from_secs(30);
 
 /// Ceiling on how often the COSMIC lockfile is `stat`-ed — "≤2 Hz" per the
 /// design brief.
@@ -166,6 +191,12 @@ struct StateMachine {
     locked: Locked,
     pending: Option<Locked>,
     pending_since: Instant,
+    /// What the session was (or was about to become) when `PrepareForSleep(true)`
+    /// arrived — where a resume falls back to. [`Locked::SleepImminent`] is a
+    /// pessimistic placeholder, not a lock: nothing ever votes "unlocked" for a
+    /// session that was never locked, so without this a suspend left the
+    /// machine "locked" until the daemon restarted.
+    before_sleep: Locked,
 }
 
 impl StateMachine {
@@ -175,6 +206,7 @@ impl StateMachine {
             locked: Locked::Unlocked,
             pending: None,
             pending_since: now,
+            before_sleep: Locked::Unlocked,
         }
     }
 
@@ -233,10 +265,27 @@ impl StateMachine {
     /// Feed one event and settle immediately. Returns the new state only when
     /// it actually changed.
     fn apply(&mut self, event: Event, now: Instant) -> Option<Locked> {
+        // Waking is not a vote, but it ends the placeholder: fall back to what
+        // the session was before it slept, once the other sources have had
+        // [`WAKE_GRACE`] to say otherwise. A real lock stays locked (its own
+        // unlock source still has to fire); a session that was never locked
+        // goes back to unlocked instead of staying "locked" until a restart.
+        if matches!(event, Event::LogindPrepareForSleep(false)) {
+            if self.locked == Locked::SleepImminent && self.pending.is_none() {
+                self.pending = Some(self.before_sleep);
+                self.pending_since = now + WAKE_GRACE;
+            }
+            return None;
+        }
         let vote = self.vote_for(&event)?;
         // `PrepareForSleep(true)` bypasses the debounce — see the module
         // docs' "Debounce, and the one signal that skips it".
         if matches!(event, Event::LogindPrepareForSleep(true)) {
+            if self.locked != Locked::SleepImminent {
+                // A vote still settling counts: a lock a few milliseconds from
+                // committing must survive the sleep.
+                self.before_sleep = self.pending.unwrap_or(self.locked);
+            }
             self.pending = None;
             return self.commit(vote);
         }
@@ -262,7 +311,9 @@ impl StateMachine {
 
     fn settle(&mut self, now: Instant) -> Option<Locked> {
         match self.pending {
-            Some(v) if now.duration_since(self.pending_since) >= DEBOUNCE => {
+            // Saturating: a wake fallback is scheduled `WAKE_GRACE` ahead, so
+            // `pending_since` is briefly in the future.
+            Some(v) if now.saturating_duration_since(self.pending_since) >= DEBOUNCE => {
                 self.pending = None;
                 self.commit(v)
             }
@@ -444,13 +495,51 @@ fn gdbus_call_session_path(method: &str, arg: &str) -> Option<String> {
     parse_object_path_reply(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// The session path inside a `Properties.Get ... Display` reply such as
+/// `(<('4', objectpath '/org/freedesktop/login1/session/_34')>,)`.
+fn parse_display_session_reply(out: &str) -> Option<String> {
+    let rest = out.split_once("objectpath '")?.1;
+    let path = &rest[..rest.find('\'')?];
+    // logind answers "/" when the user has no graphical session.
+    (path.starts_with('/') && path.len() > 1).then(|| path.to_string())
+}
+
+/// The user's graphical session, from logind's `User.Display` property.
+///
+/// The fallback for a daemon logind cannot tie to a session: an autostarted one
+/// runs as a systemd *user service*, outside every session scope, so
+/// `GetSessionByPID` answers `NoSessionForPID` and `$XDG_SESSION_ID` is not in
+/// its environment either.
+fn resolve_display_session_path() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let uid = std::fs::metadata("/proc/self").ok()?.uid().to_string();
+    let user = gdbus_call_session_path("GetUser", &uid)?;
+    let out = Command::new("gdbus")
+        .args(["call", "--system", "--timeout", CALL_TIMEOUT_SECS])
+        .args(["--dest", "org.freedesktop.login1", "--object-path", &user])
+        .args([
+            "--method",
+            "org.freedesktop.DBus.Properties.Get",
+            "org.freedesktop.login1.User",
+            "Display",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_display_session_reply(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// Resolve our own logind session object path: `Manager.GetSession` on
 /// `$XDG_SESSION_ID` first (set by every login manager this daemon runs
-/// under), falling back to `Manager.GetSessionByPID` on our own pid when that
-/// variable is unset, stale, or logind doesn't recognise it. `None` — logind
-/// unreachable, or genuinely no session for either lookup — degrades to
-/// "logind's `Lock`/`Unlock` are never matched", not a panic; the COSMIC
-/// lockfile and IPC sources still work.
+/// under), then `Manager.GetSessionByPID` on our own pid, then the user's
+/// graphical session ([`resolve_display_session_path`]) for a daemon that
+/// belongs to no session scope. `None` — logind unreachable, or genuinely no
+/// session — degrades to "logind's `Lock`/`Unlock` are never matched", not a
+/// panic; the COSMIC lockfile and IPC sources still work.
 fn resolve_our_session_path() -> Option<String> {
     if let Ok(id) = std::env::var("XDG_SESSION_ID") {
         if !id.is_empty() {
@@ -460,7 +549,7 @@ fn resolve_our_session_path() -> Option<String> {
         }
     }
     let pid = std::process::id().to_string();
-    gdbus_call_session_path("GetSessionByPID", &pid)
+    gdbus_call_session_path("GetSessionByPID", &pid).or_else(resolve_display_session_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -613,12 +702,17 @@ impl Drop for MonitorChild {
 /// through a spawned child.
 pub struct LockMonitor {
     machine: StateMachine,
-    lockfile: Option<PathBuf>,
+    /// `$XDG_RUNTIME_DIR` — where `cosmic-greeter` drops its lockfile. `Some`
+    /// on COSMIC only.
+    lockfile_dir: Option<PathBuf>,
     lockfile_present: bool,
     last_lockfile_check: Instant,
     logind: MonitorChild,
     screensaver: Option<MonitorChild>,
     our_session: Option<String>,
+    /// Earliest instant the session lookup may run again after a failure; see
+    /// [`SESSION_RETRY`].
+    next_session_try: Instant,
 }
 
 impl LockMonitor {
@@ -628,15 +722,15 @@ impl LockMonitor {
     /// `widgets::WidgetEngine::new`'s own "nothing exists until something is
     /// enabled" rule).
     pub fn new(host: HostKind, now: Instant) -> Self {
-        let lockfile = matches!(host, HostKind::Cosmic { .. })
-            .then(cosmic_lockfile_path)
+        let lockfile_dir = matches!(host, HostKind::Cosmic { .. })
+            .then(dirs::runtime_dir)
             .flatten();
         let screensaver = screensaver_interface(host).map(|iface| {
             MonitorChild::new("gdbus", vec!["monitor", "--session", "--dest", iface], now)
         });
         LockMonitor {
             machine: StateMachine::new(host, now),
-            lockfile,
+            lockfile_dir,
             lockfile_present: false,
             last_lockfile_check: now - LOCKFILE_POLL,
             logind: MonitorChild::new(
@@ -646,6 +740,7 @@ impl LockMonitor {
             ),
             screensaver,
             our_session: None,
+            next_session_try: now,
         }
     }
 
@@ -663,10 +758,10 @@ impl LockMonitor {
         let mut changed = None;
 
         if matches!(self.machine.host, HostKind::Cosmic { .. }) {
-            if let Some(path) = &self.lockfile {
+            if let Some(dir) = &self.lockfile_dir {
                 if now.duration_since(self.last_lockfile_check) >= LOCKFILE_POLL {
                     self.last_lockfile_check = now;
-                    let present = path.exists();
+                    let present = cosmic_lockfile_present(dir);
                     if present != self.lockfile_present {
                         self.lockfile_present = present;
                         if let Some(v) = self.machine.apply(Event::CosmicLockfile(present), now) {
@@ -677,12 +772,14 @@ impl LockMonitor {
             }
         }
 
-        if self.our_session.is_none() {
-            // Best-effort, retried every poll until it succeeds (logind may
-            // not be reachable for a moment right at daemon startup); a
-            // failed attempt is not logged — `login1_event` degrading to "no
-            // match" is silently correct, not an error, until this resolves.
+        if self.our_session.is_none() && now >= self.next_session_try {
+            // Best-effort, retried every `SESSION_RETRY` until it succeeds
+            // (logind may not be reachable for a moment right at daemon
+            // startup); a failed attempt is not logged — `login1_event`
+            // degrading to "no match" is silently correct, not an error,
+            // until this resolves.
             self.our_session = resolve_our_session_path();
+            self.next_session_try = now + SESSION_RETRY;
         }
         for line in self.logind.poll_lines(now) {
             if let Some(parsed) = parse_monitor_line(&line) {
@@ -732,14 +829,21 @@ impl LockMonitor {
     }
 }
 
-/// `$XDG_RUNTIME_DIR/cosmic-greeter-$XDG_SESSION_ID.lock`, or `None` when
-/// either variable a real session always sets is missing — a monitor with
-/// nothing to poll degrades to "the lockfile source never fires", not a
-/// panic or a bogus path under `/`.
-fn cosmic_lockfile_path() -> Option<PathBuf> {
-    let dir = dirs::runtime_dir()?;
-    let session = std::env::var("XDG_SESSION_ID").ok()?;
-    Some(dir.join(format!("cosmic-greeter-{session}.lock")))
+/// Whether `cosmic-greeter` currently holds a lock for this user:
+/// `dir/cosmic-greeter-<session>.lock` exists.
+///
+/// Matched by pattern rather than built from `$XDG_SESSION_ID`: an autostarted
+/// daemon is a systemd user service, which does not inherit that variable, and
+/// the lockfile was then never found — so on COSMIC a lock could never be seen
+/// to end. `$XDG_RUNTIME_DIR` is per user, so any such file is ours.
+fn cosmic_lockfile_present(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("cosmic-greeter-") && name.ends_with(".lock")
+        })
+    })
 }
 
 #[cfg(test)]
@@ -1085,21 +1189,137 @@ mod tests {
     }
 
     #[test]
-    fn prepare_for_sleep_false_is_never_itself_an_unlock() {
+    fn prepare_for_sleep_false_never_unlocks_a_session_that_was_locked() {
+        // The lock was real before the machine slept, so resuming must leave it
+        // exactly as it was: only the host's own unlock source ends it.
         let now = t0();
         let mut m = StateMachine::new(HostKind::Kde, now);
-        m.apply(Event::LogindPrepareForSleep(true), now);
-        assert!(m.current().is_locked());
+        m.apply(Event::LogindLock, now);
+        m.tick(at(now, 260));
+        assert_eq!(m.current(), Locked::Locked);
+        m.apply(Event::LogindPrepareForSleep(true), at(now, 300));
+        assert_eq!(m.current(), Locked::SleepImminent);
         assert_eq!(
-            m.apply(Event::LogindPrepareForSleep(false), at(now, 10)),
+            m.apply(Event::LogindPrepareForSleep(false), at(now, 400)),
             None
         );
-        assert_eq!(m.tick(at(now, 300)), None);
-        assert!(
-            m.current().is_locked(),
-            "resume must not unlock on its own — the real Unlock still has \
-             to arrive"
+        // Past the wake grace, back to the real lock — never to Unlocked.
+        let later = at(now, 400) + WAKE_GRACE + DEBOUNCE;
+        assert_eq!(m.tick(later), Some(Locked::Locked));
+        assert!(m.current().is_locked());
+        assert_eq!(m.tick(later + Duration::from_secs(60)), None);
+        // And the real unlock still unlocks it.
+        m.apply(Event::LogindUnlock, later + Duration::from_secs(61));
+        assert_eq!(
+            m.tick(later + Duration::from_secs(62)),
+            Some(Locked::Unlocked)
         );
+    }
+
+    #[test]
+    fn a_suspend_without_a_lock_does_not_leave_the_session_locked() {
+        // The reported bug: nothing ever votes "unlocked" for a session that was
+        // never locked, so the sleep placeholder stuck for the whole session —
+        // on COSMIC it cleared the desktop widgets and never brought them back.
+        let now = t0();
+        let mut m = StateMachine::new(HostKind::Cosmic { live: true }, now);
+        assert_eq!(
+            m.apply(Event::LogindPrepareForSleep(true), now),
+            Some(Locked::SleepImminent)
+        );
+        m.apply(Event::LogindPrepareForSleep(false), at(now, 5_000));
+        assert_eq!(
+            m.tick(at(now, 5_000) + DEBOUNCE),
+            None,
+            "the wake grace has not elapsed: a lock raised on resume still has \
+             time to be seen"
+        );
+        assert_eq!(
+            m.tick(at(now, 5_000) + WAKE_GRACE + DEBOUNCE),
+            Some(Locked::Unlocked)
+        );
+        assert!(!m.current().is_locked());
+    }
+
+    #[test]
+    fn a_lock_raised_on_resume_wins_over_the_wake_fallback() {
+        // The greeter locks as the machine wakes: its lockfile shows up inside
+        // the grace window, so the desktop widgets never come back over it.
+        let now = t0();
+        let mut m = StateMachine::new(HostKind::Cosmic { live: true }, now);
+        m.apply(Event::LogindPrepareForSleep(true), now);
+        m.apply(Event::LogindPrepareForSleep(false), at(now, 1_000));
+        m.apply(Event::CosmicLockfile(true), at(now, 1_500));
+        assert_eq!(m.tick(at(now, 1_800)), Some(Locked::Locked));
+        assert_eq!(
+            m.tick(at(now, 1_000) + WAKE_GRACE + DEBOUNCE + DEBOUNCE),
+            None,
+            "the cancelled fallback must not unlock a real lock later"
+        );
+        assert_eq!(m.current(), Locked::Locked);
+    }
+
+    #[test]
+    fn a_lock_still_settling_when_the_machine_sleeps_survives_the_sleep() {
+        let now = t0();
+        let mut m = StateMachine::new(HostKind::Gnome, now);
+        m.apply(Event::LogindLock, now); // pending, debounce not yet elapsed
+        m.apply(Event::LogindPrepareForSleep(true), at(now, 100));
+        m.apply(Event::LogindPrepareForSleep(false), at(now, 200));
+        assert_eq!(
+            m.tick(at(now, 200) + WAKE_GRACE + DEBOUNCE),
+            Some(Locked::Locked),
+            "falls back to the lock that was about to commit, not to Unlocked"
+        );
+    }
+
+    #[test]
+    fn waking_when_not_asleep_is_a_no_op() {
+        // A stray PrepareForSleep(false) (the signal is system-wide and the
+        // monitor can start mid-stream) must not disturb a settled state.
+        let now = t0();
+        let mut m = StateMachine::new(HostKind::Kde, now);
+        m.apply(Event::LogindLock, now);
+        m.tick(at(now, 260));
+        m.apply(Event::LogindPrepareForSleep(false), at(now, 300));
+        assert_eq!(m.tick(at(now, 300) + WAKE_GRACE + DEBOUNCE), None);
+        assert_eq!(m.current(), Locked::Locked);
+    }
+
+    #[test]
+    fn the_cosmic_lockfile_is_found_without_a_session_id() {
+        let dir = std::env::temp_dir().join(format!("fresco-lockfile-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!cosmic_lockfile_present(&dir));
+        // Unrelated files in a runtime dir are not a lock.
+        std::fs::write(dir.join("wayland-1.lock"), b"").unwrap();
+        std::fs::write(dir.join("cosmic-greeter-4.txt"), b"").unwrap();
+        assert!(!cosmic_lockfile_present(&dir));
+        std::fs::write(dir.join("cosmic-greeter-4.lock"), b"").unwrap();
+        assert!(cosmic_lockfile_present(&dir));
+        std::fs::remove_file(dir.join("cosmic-greeter-4.lock")).unwrap();
+        assert!(!cosmic_lockfile_present(&dir));
+        assert!(!cosmic_lockfile_present(&dir.join("does-not-exist")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn display_session_is_read_from_the_user_property_reply() {
+        // Captured from `gdbus call --system … Properties.Get
+        // org.freedesktop.login1.User Display` on the affected machine.
+        assert_eq!(
+            parse_display_session_reply(
+                "(<('4', objectpath '/org/freedesktop/login1/session/_34')>,)"
+            ),
+            Some("/org/freedesktop/login1/session/_34".to_string())
+        );
+        assert_eq!(
+            parse_display_session_reply("(<('', objectpath '/')>,)"),
+            None,
+            "'/' is logind's \"no graphical session\""
+        );
+        assert_eq!(parse_display_session_reply("Error: no such property"), None);
+        assert_eq!(parse_display_session_reply(""), None);
     }
 
     #[test]

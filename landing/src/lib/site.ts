@@ -21,16 +21,16 @@ export const AUTHOR_NAME = "Dibbayajyoti Roy";
 export const PORTFOLIO_URL = "https://dibbayajyoti.com/";
 
 /**
- * Opt-in telemetry cohort, shown in the stats band as "2,500+" / "127+".
+ * Opt-in telemetry cohort, shown in the stats band as "3,000+" / "128+".
  * Hand-maintained floors (the static site reads no analytics): distinct
  * install ids and distinct countries in the `installs` table, counted the way
  * the admin Usage page counts them. Floors stay true as the numbers grow;
  * raise them when the next round threshold is crossed.
  *
- * Snapshot 2026-10-16: 2,500+ users in 127 countries, the figures README.md
+ * Snapshot 2026-10-23: 3,000+ users in 128 countries, the figures README.md
  * states.
  */
 export const COHORT = {
-  users: 2500,
-  countries: 127,
+  users: 3000,
+  countries: 128,
 } as const;

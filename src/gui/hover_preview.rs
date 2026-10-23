@@ -624,6 +624,49 @@ fn forget_card(id: CardId) {
     });
 }
 
+/// Initialise GStreamer on a worker thread, once.
+///
+/// GTK's media backend does this itself, but lazily: the first `MediaFile` ever
+/// made, on the first hover that settles on a video, on the UI thread. With no
+/// plugin registry cache (a first run, a GStreamer upgrade, a Flatpak's private
+/// cache dir) that scans every installed plugin, and the window froze for 1-4 s
+/// on that hover. `gst_init` is thread-safe and idempotent, so doing it first
+/// on a worker moves the cost off the UI thread; the backend's own call then
+/// finds it done (or waits for it, no worse than before).
+fn warm_media_backend() {
+    static WARMED: Once = Once::new();
+    WARMED.call_once(|| {
+        std::thread::Builder::new()
+            .name("fresco-gst-warm".into())
+            .spawn(|| {
+                // SAFETY: `gst_init_check(NULL, NULL, NULL)` is the documented
+                // way to initialise the library without argv or an error out.
+                // The library is deliberately leaked: GStreamer must not be
+                // unloaded once initialised.
+                unsafe {
+                    type InitCheck = unsafe extern "C" fn(
+                        *mut std::ffi::c_int,
+                        *mut *mut *mut std::ffi::c_char,
+                        *mut *mut std::ffi::c_void,
+                    ) -> std::ffi::c_int;
+                    // Not installed: there is no media backend to warm.
+                    let Ok(lib) = libloading::Library::new("libgstreamer-1.0.so.0") else {
+                        return;
+                    };
+                    if let Ok(init) = lib.get::<InitCheck>(b"gst_init_check\0") {
+                        init(
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        );
+                    }
+                    std::mem::forget(lib);
+                }
+            })
+            .ok();
+    });
+}
+
 /// Turn hover previews on or off for every card, now. Off releases whatever is
 /// playing; on starts nothing by itself.
 pub fn set_enabled(enabled: bool) {
@@ -851,6 +894,11 @@ pub fn attach(
     thumb: &gtk4::Picture,
     source: impl Fn() -> PreviewSource + 'static,
 ) {
+    // A video card is on screen and previews are on: a hover is coming, so
+    // have GStreamer ready before it settles.
+    if PREVIEWS.with(|previews| !previews.borrow().policy.disabled) {
+        warm_media_backend();
+    }
     // Re-parent the thumbnail into an inner overlay and stack the (initially
     // hidden) video layer above it. Only the thumbnail is measured.
     let inner = gtk4::Overlay::new();

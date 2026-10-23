@@ -7,12 +7,13 @@ use gtk4::{gio, glib, prelude::*};
 use gtk4::{FileChooserAction, GestureClick, PolicyType, ResponseType};
 use libadwaita::{self as adw, prelude::*};
 
+use super::lazy_grid;
 use super::theme;
 use super::window_state;
 use super::{
     daemon_ctl, import_queue,
     library::{self, load_entries, save_entries, LibraryEntry},
-    status,
+    linked, status,
 };
 use crate::{
     autostart,
@@ -133,7 +134,7 @@ fn discard_draft(state: &Rc<RefCell<AppState>>) {
 pub(crate) struct AppState {
     pub(crate) config: Config,
     pub(crate) entries: Vec<LibraryEntry>,
-    editing_idx: Option<usize>,
+    pub(super) editing_idx: Option<usize>,
     /// A freshly built entry that hasn't been committed to the library yet —
     /// kept out of `entries` (and off disk) until "Set as wallpaper" is
     /// clicked, so a file just picked, dropped, or downloaded from a link
@@ -176,6 +177,24 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
+    /// Change `entries` while keeping the editor on the entry it has open.
+    /// Linked folders add and remove entries behind the window's back, which
+    /// shifts the indices the editor holds.
+    pub(crate) fn edit_entries<R>(
+        &mut self,
+        change: impl FnOnce(&mut Vec<LibraryEntry>) -> R,
+    ) -> R {
+        let open = self
+            .editing_idx
+            .and_then(|i| self.entries.get(i))
+            .map(|e| e.id.clone());
+        let result = change(&mut self.entries);
+        if let Some(id) = open {
+            self.editing_idx = self.entries.iter().position(|e| e.id == id);
+        }
+        result
+    }
+
     /// The entry currently shown in the editor: the draft, if one is being
     /// created, else `entries[editing_idx]`. `None` covers both "the editor
     /// isn't open" and "editing_idx points nowhere" (shouldn't happen, but a
@@ -222,6 +241,75 @@ fn remember_window_state(window: &adw::ApplicationWindow) {
     if let Err(e) = window_state::save(&next) {
         log::debug!("could not save window size: {e:#}");
     }
+}
+
+/// Take `disk` as the in-memory config; true when what is on screen moved (the
+/// default wallpaper, per-monitor overrides or the on/off switch), so the
+/// library's active card needs a rebuild.
+///
+/// Every settings change saves this whole struct, so a copy that missed
+/// another process's write would put the old wallpaper back (#45). Our own
+/// saves land here too, equal to memory, and change nothing.
+fn adopt_external_config(mem: &mut Config, disk: Config) -> bool {
+    let moved = mem.wallpaper != disk.wallpaper
+        || mem.monitors != disk.monitors
+        || mem.enabled != disk.enabled;
+    *mem = disk;
+    moved
+}
+
+/// Keep `state.config` in step with config.toml while the window is open:
+/// `fresco next/prev/random` and hand edits rewrite it behind the GUI's back.
+fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) {
+    let path = Config::path();
+    // A monitor needs the directory; a fresh install has none until the first save.
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    let monitor = match gio::File::for_path(&path)
+        .monitor_file(gio::FileMonitorFlags::NONE, None::<&gio::Cancellable>)
+    {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("not watching {}: {e}", path.display());
+            return;
+        }
+    };
+    let state = state.clone();
+    monitor.connect_changed(move |_, _, _, event| {
+        // A save is a rename over the file: GIO reports deleted, created, then
+        // this hint once it is whole. Waiting for it also skips a half-written
+        // hand edit.
+        if event != gio::FileMonitorEvent::ChangesDoneHint {
+            return;
+        }
+        // A file that does not parse keeps what the window has.
+        let Ok(disk) = Config::load() else {
+            return;
+        };
+        let (moved, refresh) = {
+            // Held elsewhere (a handler mid-edit): the next change event retries.
+            let Ok(mut s) = state.try_borrow_mut() else {
+                return;
+            };
+            (
+                adopt_external_config(&mut s.config, disk),
+                s.refresh.clone(),
+            )
+        };
+        if moved {
+            log::debug!("config.toml changed on disk: wallpaper moved, rebuilding the grid");
+            status::forget_playing_path();
+            if let Some(r) = refresh {
+                r();
+            }
+            status::poll_soon();
+        }
+    });
+    // Dropping a monitor cancels it: hand it to the application for its lifetime.
+    app.connect_shutdown(move |_| {
+        let _ = &monitor;
+    });
 }
 
 fn build_ui(app: &adw::Application) {
@@ -299,6 +387,8 @@ fn build_ui(app: &adw::Application) {
         view,
     }));
 
+    watch_external_config(app, &state);
+
     // Re-apply the palette when the system light/dark resolution flips (System
     // mode). Resolve via the chosen mode so an explicit Light/Dark isn't undone
     // by this notify firing with a stale is_dark() right after set_mode.
@@ -339,6 +429,9 @@ fn build_ui(app: &adw::Application) {
     stack.set_transition_duration(220);
 
     let library_view = build_library_view(&window, state.clone(), &stack);
+    // Linked folders are scanned off the UI thread, now that the grid exists
+    // for the results to land in.
+    linked::start(&state);
     let editor_view = build_editor_view(state.clone(), &stack);
 
     stack.add_named(&library_view, Some("library"));
@@ -1420,6 +1513,16 @@ fn build_menu_root(
     )));
     popover_box.append(&url_btn);
 
+    let link_btn = menu_item_opening_window(t!("Link folder…"), popover, {
+        let state_l = state.clone();
+        let win_l = window.clone();
+        move || open_link_folder_picker(&win_l, state_l.clone())
+    });
+    link_btn.set_tooltip_text(Some(t!(
+        "Show a folder of wallpapers where it is, without importing it"
+    )));
+    popover_box.append(&link_btn);
+
     let folders_btn = menu_item_opening_window(t!("Manage folders…"), popover, {
         let state_f = state.clone();
         let win_f = window.clone();
@@ -1831,6 +1934,14 @@ struct SectionPlan {
     /// group by kind (the Images/Videos/GIFs layout) — would move the card
     /// past a neighbour that is not on screen and look like a no-op.
     reorderable: bool,
+    /// The id of the linked folder this section is, if it is one: its heading
+    /// gets Rescan / Unlink, and it is shown even while empty or unreachable.
+    linked: Option<String>,
+}
+
+/// Whether `id` names a linked-folder section.
+fn is_linked_section(collections: &[library::Collection], id: &str) -> bool {
+    collections.iter().any(|c| c.id == id && c.link.is_some())
 }
 
 /// Decide how the grid is laid out: which sections exist, in what order, and
@@ -1874,18 +1985,27 @@ fn plan_sections(
             title: t!("Favorites").to_string(),
             ids: sorted(favs),
             reorderable: false,
+            linked: None,
         });
     }
 
     if view.collection.is_some() || !view.sort.is_manual() {
         let all: Vec<&LibraryEntry> = entries.iter().filter(|e| keep(e)).collect();
-        if !all.is_empty() {
+        let linked = view
+            .collection
+            .as_deref()
+            .filter(|id| is_linked_section(collections, id));
+        // An opened linked folder is shown even while empty, so its note and
+        // its Rescan / Unlink stay reachable.
+        if !all.is_empty() || (linked.is_some() && q.is_empty()) {
             out.push(SectionPlan {
                 title: scope_label(view, collections),
                 // A single scope IS a single group, so the arrows are honest
-                // here — but only while nothing is re-deriving the order.
-                reorderable: view.sort.is_manual() && view.collection.is_some(),
+                // here — but only while nothing is re-deriving the order, and
+                // a linked folder mirrors the disk instead of being arranged.
+                reorderable: view.sort.is_manual() && view.collection.is_some() && linked.is_none(),
                 ids: sorted(all),
+                linked: linked.map(str::to_string),
             });
         }
         return out;
@@ -1904,6 +2024,7 @@ fn plan_sections(
                 title: category_label(cat).to_string(),
                 ids: sorted(v),
                 reorderable: false,
+                linked: None,
             });
         }
         return out;
@@ -1916,13 +2037,15 @@ fn plan_sections(
             .into_iter()
             .filter(|e| keep(e))
             .collect();
-        if v.is_empty() {
+        let is_link = c.link.is_some();
+        if v.is_empty() && !(is_link && q.is_empty()) {
             continue;
         }
         out.push(SectionPlan {
             title: c.name.clone(),
             ids: sorted(v),
-            reorderable: true,
+            reorderable: !is_link,
+            linked: is_link.then(|| c.id.clone()),
         });
     }
     let loose: Vec<&LibraryEntry> = library::uncategorized(entries)
@@ -1934,6 +2057,7 @@ fn plan_sections(
             title: t!("Uncategorized").to_string(),
             ids: sorted(loose),
             reorderable: true,
+            linked: None,
         });
     }
     out
@@ -2224,7 +2348,10 @@ fn populate_library(
     // wallpapers behind config.toml's back, not by the stale saved default.
     let cfg = config_for_active_cards(&cfg, &entries, status::cached_playing_path().as_deref());
 
-    if entries.is_empty() {
+    // A library holding only linked folders is not empty, even before their
+    // first scan lands (or while one is unplugged): their headings must show.
+    let has_links = state.borrow().collections.iter().any(|c| c.link.is_some());
+    if entries.is_empty() && !has_links {
         welcome.set_visible(true);
         recent_label.set_visible(false);
         recent_box.set_visible(false);
@@ -2284,6 +2411,15 @@ fn populate_library(
             .map(|i| (i, &entries[i]))
             .collect();
         if matches.is_empty() {
+            // Only a linked folder keeps its place while it has no cards.
+            let folder = plan
+                .linked
+                .as_deref()
+                .and_then(|id| collections.iter().find(|c| c.id == id));
+            if let Some(note) = folder.and_then(|c| build_linked_note(c, first_section, state)) {
+                sections_box.append(&note);
+                first_section = false;
+            }
             continue;
         }
         sections_box.append(&build_section(
@@ -2295,6 +2431,7 @@ fn populate_library(
             stack,
             bucket,
             plan.reorderable,
+            plan.linked.as_deref(),
         ));
         first_section = false;
     }
@@ -2330,13 +2467,10 @@ fn build_section(
     stack: &gtk4::Stack,
     bucket: LayoutBucket,
     reorderable: bool,
+    linked: Option<&str>,
 ) -> gtk4::Box {
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let header = overline(label);
-    // More air above a section than below its header (overline rhythm).
-    header.set_margin_top(if first_section { 8 } else { 14 });
-    header.set_margin_bottom(6);
-    section.append(&header);
+    section.append(&section_header(label, first_section, state, linked));
 
     let (min_children, max_children) = bucket.flow_caps();
     let flow = gtk4::FlowBox::new();
@@ -2348,20 +2482,132 @@ fn build_section(
     flow.set_row_spacing(12);
     flow.set_column_spacing(12);
     flow.set_margin_bottom(6);
-    for (idx, entry) in matches {
-        let active = entry_is_active(entry, cfg);
-        let card = build_library_card(
-            entry,
-            *idx,
-            state.clone(),
-            stack.clone(),
-            active,
-            reorderable,
-        );
-        flow.append(&card);
-    }
+    // One empty slot per wallpaper; the card itself is built when its slot
+    // nears the viewport (see `lazy_grid`), so a 4,000-wallpaper library does
+    // not mean 100,000 widgets and 4,000 decoded thumbnails.
+    let items: Vec<(usize, String)> = matches.iter().map(|(i, e)| (*i, e.id.clone())).collect();
+    let (cfg, state, stack) = (cfg.clone(), state.clone(), stack.clone());
+    lazy_grid::fill(&flow, items.len(), move |k| {
+        let (idx, id) = &items[k];
+        // The live entry, not the one this section was planned from: an import
+        // may have given it a thumbnail since.
+        let entry = state
+            .borrow()
+            .entries
+            .get(*idx)
+            .filter(|e| e.id == *id)
+            .cloned();
+        match entry {
+            Some(e) => build_library_card(
+                &e,
+                *idx,
+                state.clone(),
+                stack.clone(),
+                entry_is_active(&e, &cfg),
+                reorderable,
+            )
+            .upcast(),
+            None => gtk4::Box::new(gtk4::Orientation::Vertical, 0).upcast(),
+        }
+    });
     section.append(&flow);
     section
+}
+
+/// A section's heading. A linked folder's also carries its Rescan / Unlink menu.
+fn section_header(
+    label: &str,
+    first_section: bool,
+    state: &Rc<RefCell<AppState>>,
+    linked: Option<&str>,
+) -> gtk4::Widget {
+    let header = overline(label);
+    // More air above a section than below its header (overline rhythm).
+    header.set_margin_top(if first_section { 8 } else { 14 });
+    header.set_margin_bottom(6);
+    let Some(id) = linked else {
+        return header.upcast();
+    };
+    header.set_hexpand(true);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    row.append(&header);
+    row.append(&linked_menu(state, id));
+    row.upcast()
+}
+
+/// Rescan / Unlink for a linked folder's heading.
+fn linked_menu(state: &Rc<RefCell<AppState>>, id: &str) -> gtk4::MenuButton {
+    let btn = gtk4::MenuButton::new();
+    btn.set_icon_name("view-more-symbolic");
+    btn.add_css_class("flat");
+    btn.set_valign(gtk4::Align::End);
+    btn.set_tooltip_text(Some(t!("Linked folder options")));
+    btn.update_property(&[gtk4::accessible::Property::Label(t!(
+        "Linked folder options"
+    ))]);
+    let pop = gtk4::Popover::new();
+    pop.add_css_class("fresco-menu");
+    let col = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    col.set_margin_top(6);
+    col.set_margin_bottom(6);
+    col.set_margin_start(6);
+    col.set_margin_end(6);
+    let rescan = menu_item_opening_window(t!("Rescan"), &pop, {
+        let (state, id) = (state.clone(), id.to_string());
+        move || linked::rescan(&state, &id, true)
+    });
+    col.append(&rescan);
+    let unlink = menu_item_opening_window(t!("Unlink folder"), &pop, {
+        let (state, id) = (state.clone(), id.to_string());
+        // Rebuilds the grid this menu lives in: let the click finish first.
+        move || {
+            let (state, id) = (state.clone(), id.clone());
+            glib::idle_add_local_once(move || unlink_folder(&state, &id));
+        }
+    });
+    col.append(&unlink);
+    pop.set_child(Some(&col));
+    btn.set_popover(Some(&pop));
+    btn
+}
+
+/// What a linked folder shows instead of cards: nothing while its first scan
+/// runs, a note when it cannot be read or holds no wallpaper yet.
+fn build_linked_note(
+    folder: &library::Collection,
+    first_section: bool,
+    state: &Rc<RefCell<AppState>>,
+) -> Option<gtk4::Box> {
+    let link = folder.link.as_ref()?;
+    let (title, text) = match link.status {
+        library::LinkStatus::Scanning => return None,
+        library::LinkStatus::Missing => (
+            tf!("{name} (unavailable)", "name" => folder.name.as_str()),
+            tf!(
+                "{path} can’t be read right now. It comes back by itself once the drive is plugged in or the folder returns.",
+                "path" => link.path.display().to_string()
+            ),
+        ),
+        library::LinkStatus::Ready => (
+            folder.name.clone(),
+            t!("No supported wallpapers in this folder yet. New files appear on their own.")
+                .to_string(),
+        ),
+    };
+    let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    section.append(&section_header(
+        &title,
+        first_section,
+        state,
+        Some(&folder.id),
+    ));
+    let note = gtk4::Label::new(Some(&text));
+    note.add_css_class("dialog-sub");
+    note.set_wrap(true);
+    note.set_xalign(0.0);
+    note.set_margin_bottom(12);
+    section.append(&note);
+    Some(section)
 }
 
 /// Compact recent-row card: thumbnail + title scrim, click to apply.
@@ -2450,8 +2696,9 @@ fn thumb_placeholder(kind: Kind) -> gtk4::Box {
     ph
 }
 
-/// Cinematic 16:9 library card: poster thumbnail, gradient title scrim, kind
-/// badge, active-wallpaper accent ring + pill, and a hover-revealed Edit button.
+/// Cinematic library card, placed in a 16:9 `lazy_grid` slot: poster thumbnail,
+/// gradient title scrim, kind badge, active-wallpaper accent ring + pill, and a
+/// hover-revealed Edit button.
 fn build_library_card(
     entry: &LibraryEntry,
     idx: usize,
@@ -2459,7 +2706,7 @@ fn build_library_card(
     stack: gtk4::Stack,
     active: bool,
     reorderable: bool,
-) -> gtk4::AspectFrame {
+) -> gtk4::Overlay {
     let overlay = gtk4::Overlay::new();
     overlay.add_css_class("wp-card");
     if active {
@@ -2481,7 +2728,11 @@ fn build_library_card(
     let pic = gtk4::Picture::new();
     pic.set_can_shrink(true);
     pic.set_keep_aspect_ratio(true);
-    if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
+    let thumb = entry.thumbnail.as_deref().filter(|p| p.exists());
+    // A linked folder's file has no thumbnail until its card is built: it asks
+    // for its own below, and the placeholder stays until it arrives.
+    let lazy = import_queue::wants_lazy_thumbnail(&entry.id, thumb.is_some(), pending);
+    if let Some(thumb) = thumb {
         pic.add_css_class("wp-thumb");
         // Fade the thumbnail in on first map: start invisible, drop the class
         // on idle so the .wp-thumb opacity transition plays (no transform/blur
@@ -2532,9 +2783,9 @@ fn build_library_card(
             meta_row.append(&heart);
         }
         let line = entry.meta_line();
-        // A pending card gets its (possibly empty, hidden) meta label up front
-        // so the import queue can fill it in place when the probe lands.
-        let meta_label = (line.is_some() || pending).then(|| {
+        // A card awaiting its thumbnail gets its (possibly empty, hidden) meta
+        // label up front so it can be filled in place when the work lands.
+        let meta_label = (line.is_some() || pending || lazy).then(|| {
             let meta = gtk4::Label::new(line.as_deref());
             meta.add_css_class("wp-meta");
             meta.set_xalign(0.0);
@@ -2543,8 +2794,11 @@ fn build_library_card(
             meta_row.append(&meta);
             meta
         });
-        if let (true, Some(ph), Some(meta)) = (pending, &placeholder, &meta_label) {
+        if let (true, Some(ph), Some(meta)) = (pending || lazy, &placeholder, &meta_label) {
             import_queue::register_card(&entry.id, &overlay, &pic, ph, meta);
+            if lazy {
+                import_queue::request_thumbnail(&state, &entry.id);
+            }
         }
         if meta_row.first_child().is_some() {
             scrim.append(&meta_row);
@@ -2614,109 +2868,51 @@ fn build_library_card(
             click.connect_released(move |_, _, _, _| toggle_selected(&state_c, &id));
         }
         overlay.add_controller(click);
-
-        let frame = gtk4::AspectFrame::new(0.5, 0.0, 16.0 / 9.0, false);
-        frame.set_size_request(260, 146);
-        frame.set_child(Some(&overlay));
-        return frame;
+        return overlay;
     }
 
-    // Hover-revealed action cluster (bottom-right): heart · edit · menu.
-    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    actions.add_css_class("wp-actions");
-    actions.set_halign(gtk4::Align::End);
-    actions.set_valign(gtk4::Align::End);
-    actions.set_visible(false);
-
-    // Manual-order arrows. Only where the section is one ordering group shown
-    // in manual order (see `SectionPlan::reorderable`) — anywhere else the move
-    // would be written to `order` and instantly overruled by the sort.
-    if reorderable {
-        for (icon, tip, delta) in [
-            ("go-previous-symbolic", t!("Move earlier"), -1i32),
-            ("go-next-symbolic", t!("Move later"), 1i32),
-        ] {
-            let b = gtk4::Button::from_icon_name(icon);
-            b.add_css_class("wp-edit");
-            b.add_css_class("circular");
-            b.set_tooltip_text(Some(tip));
-            let state_r = state.clone();
-            let id = entry.id.clone();
-            b.connect_clicked(move |_| move_entry(&state_r, &id, delta));
-            actions.append(&b);
-        }
-    }
-
-    let fav = gtk4::Button::from_icon_name("emblem-favorite-symbolic");
-    fav.add_css_class("wp-edit");
-    fav.add_css_class("circular");
-    if entry.favorite {
-        fav.add_css_class("fav-on");
-        fav.set_tooltip_text(Some(t!("Unfavorite")));
-    } else {
-        fav.set_tooltip_text(Some(t!("Favorite")));
-    }
-    {
-        let state_f = state.clone();
-        fav.connect_clicked(move |_| toggle_favorite(&state_f, idx));
-    }
-    actions.append(&fav);
-
-    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
-    edit.add_css_class("wp-edit");
-    edit.add_css_class("circular");
-    edit.set_tooltip_text(Some(t!("Edit & crop")));
-    {
-        let state_e = state.clone();
-        let stack_e = stack.clone();
-        edit.connect_clicked(move |_| {
-            open_editor(&state_e, &stack_e, idx);
-        });
-    }
-    actions.append(&edit);
-
-    let more = gtk4::Button::from_icon_name("view-more-symbolic");
-    more.add_css_class("wp-edit");
-    more.add_css_class("circular");
-    more.set_tooltip_text(Some(t!("More actions")));
-    {
-        let state_m = state.clone();
-        let stack_m = stack.clone();
-        let overlay_m = overlay.clone();
-        more.connect_clicked(move |btn| {
-            // Anchor the popover at the button (translate its origin into the
-            // overlay's coordinate space; fall back to the corner).
-            #[allow(deprecated)]
-            let (x, y) = btn
-                .translate_coordinates(&overlay_m, 0.0, 0.0)
-                .unwrap_or((0.0, 0.0));
-            show_card_menu(
-                &overlay_m,
-                state_m.clone(),
-                stack_m.clone(),
-                idx,
-                x,
-                y,
-                reorderable,
-            );
-        });
-    }
-    actions.append(&more);
-    overlay.add_overlay(&actions);
-
+    // Hover-revealed action cluster. Built on the first pointer-enter instead of
+    // with the card: it is about a dozen widgets per card that nobody sees until
+    // they hover, and a card is built every time it scrolls into view.
+    let actions: Rc<RefCell<Option<gtk4::Box>>> = Rc::new(RefCell::new(None));
     let motion = gtk4::EventControllerMotion::new();
     {
         let actions = actions.clone();
-        let id = entry.id.clone();
+        let overlay_w = overlay.downgrade();
+        let (state_a, stack_a) = (state.clone(), stack.clone());
+        let (id, favorite) = (entry.id.clone(), entry.favorite);
         motion.connect_enter(move |_, _, _| {
-            if !import_queue::is_pending(&id) {
-                actions.set_visible(true);
+            if import_queue::is_pending(&id) {
+                return;
             }
+            let Some(overlay) = overlay_w.upgrade() else {
+                return;
+            };
+            actions
+                .borrow_mut()
+                .get_or_insert_with(|| {
+                    let cluster = build_card_actions(
+                        &overlay,
+                        &state_a,
+                        &stack_a,
+                        &id,
+                        idx,
+                        favorite,
+                        reorderable,
+                    );
+                    overlay.add_overlay(&cluster);
+                    cluster
+                })
+                .set_visible(true);
         });
     }
     {
         let actions = actions.clone();
-        motion.connect_leave(move |_| actions.set_visible(false));
+        motion.connect_leave(move |_| {
+            if let Some(a) = actions.borrow().as_ref() {
+                a.set_visible(false);
+            }
+        });
     }
     overlay.add_controller(motion);
 
@@ -2725,12 +2921,15 @@ fn build_library_card(
     {
         let state_c = state.clone();
         let stack_c = stack.clone();
-        let overlay_c = overlay.clone();
+        let overlay_c = overlay.downgrade();
         let id = entry.id.clone();
         click.connect_released(move |_, n_press, _, _| {
             // Inline rename editor is up on this card (#21) — don't let the
             // click fall through to apply/open underneath it.
-            if overlay_c.has_css_class("renaming") {
+            if overlay_c
+                .upgrade()
+                .is_none_or(|o| o.has_css_class("renaming"))
+            {
                 return;
             }
             // Still importing: a half-built card must not act (it used to
@@ -2753,9 +2952,12 @@ fn build_library_card(
     {
         let state_c = state.clone();
         let stack_c = stack.clone();
-        let overlay_c = overlay.clone();
+        let overlay_c = overlay.downgrade();
         let id = entry.id.clone();
         rclick.connect_pressed(move |_, _, x, y| {
+            let Some(overlay_c) = overlay_c.upgrade() else {
+                return;
+            };
             if overlay_c.has_css_class("renaming") || import_queue::is_pending(&id) {
                 return;
             }
@@ -2790,15 +2992,110 @@ fn build_library_card(
         }
     }
 
-    // Minimum 16:9 poster footprint whose height derives from the FlowBox's
-    // allocated cell width, so cards grow with the window instead of being
-    // pinned to a fixed pixel size; homogeneous(true) on the FlowBox gives
-    // every cell in a row the same width, so they all resolve to the same
-    // aspect height too — never stretched or distorted.
-    let frame = gtk4::AspectFrame::new(0.5, 0.0, 16.0 / 9.0, false);
-    frame.set_size_request(260, 146);
-    frame.set_child(Some(&overlay));
-    frame
+    // The 16:9 poster footprint belongs to the slot this card is placed in
+    // (`lazy_grid::new_slot`): its height derives from the FlowBox's allocated
+    // cell width, so cards grow with the window rather than being pinned to a
+    // fixed pixel size, and homogeneous(true) keeps every cell in a row the
+    // same width, so none is stretched or distorted.
+    overlay
+}
+
+/// The hover-revealed buttons of a library card (bottom-right): manual-order
+/// arrows where they mean something, heart, edit, and the "more" menu.
+fn build_card_actions(
+    overlay: &gtk4::Overlay,
+    state: &Rc<RefCell<AppState>>,
+    stack: &gtk4::Stack,
+    id: &str,
+    idx: usize,
+    favorite: bool,
+    reorderable: bool,
+) -> gtk4::Box {
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    actions.add_css_class("wp-actions");
+    actions.set_halign(gtk4::Align::End);
+    actions.set_valign(gtk4::Align::End);
+
+    // Manual-order arrows. Only where the section is one ordering group shown
+    // in manual order (see `SectionPlan::reorderable`) — anywhere else the move
+    // would be written to `order` and instantly overruled by the sort.
+    if reorderable {
+        for (icon, tip, delta) in [
+            ("go-previous-symbolic", t!("Move earlier"), -1i32),
+            ("go-next-symbolic", t!("Move later"), 1i32),
+        ] {
+            let b = gtk4::Button::from_icon_name(icon);
+            b.add_css_class("wp-edit");
+            b.add_css_class("circular");
+            b.set_tooltip_text(Some(tip));
+            let state_r = state.clone();
+            let id = id.to_string();
+            b.connect_clicked(move |_| move_entry(&state_r, &id, delta));
+            actions.append(&b);
+        }
+    }
+
+    let fav = gtk4::Button::from_icon_name("emblem-favorite-symbolic");
+    fav.add_css_class("wp-edit");
+    fav.add_css_class("circular");
+    if favorite {
+        fav.add_css_class("fav-on");
+        fav.set_tooltip_text(Some(t!("Unfavorite")));
+    } else {
+        fav.set_tooltip_text(Some(t!("Favorite")));
+    }
+    {
+        let state_f = state.clone();
+        fav.connect_clicked(move |_| toggle_favorite(&state_f, idx));
+    }
+    actions.append(&fav);
+
+    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
+    edit.add_css_class("wp-edit");
+    edit.add_css_class("circular");
+    edit.set_tooltip_text(Some(t!("Edit & crop")));
+    {
+        let state_e = state.clone();
+        let stack_e = stack.clone();
+        edit.connect_clicked(move |_| {
+            open_editor(&state_e, &stack_e, idx);
+        });
+    }
+    actions.append(&edit);
+
+    let more = gtk4::Button::from_icon_name("view-more-symbolic");
+    more.add_css_class("wp-edit");
+    more.add_css_class("circular");
+    more.set_tooltip_text(Some(t!("More actions")));
+    {
+        let state_m = state.clone();
+        let stack_m = stack.clone();
+        // Weak: this closure lives inside the card, so a strong clone of the
+        // card here is a reference cycle and the card is never freed.
+        let overlay_m = overlay.downgrade();
+        more.connect_clicked(move |btn| {
+            let Some(overlay_m) = overlay_m.upgrade() else {
+                return;
+            };
+            // Anchor the popover at the button (translate its origin into the
+            // overlay's coordinate space; fall back to the corner).
+            #[allow(deprecated)]
+            let (x, y) = btn
+                .translate_coordinates(&overlay_m, 0.0, 0.0)
+                .unwrap_or((0.0, 0.0));
+            show_card_menu(
+                &overlay_m,
+                state_m.clone(),
+                stack_m.clone(),
+                idx,
+                x,
+                y,
+                reorderable,
+            );
+        });
+    }
+    actions.append(&more);
+    actions
 }
 
 /// Home sections, in display order.
@@ -2871,6 +3168,13 @@ fn show_card_menu(
         }
         b
     };
+
+    // Files of a linked folder stay where they are: no filing, no removing.
+    let from_linked_folder = state
+        .borrow()
+        .entries
+        .get(idx)
+        .is_some_and(|e| linked::is_linked_id(&e.id));
 
     let set = item(t!("Set as wallpaper"));
     {
@@ -3038,7 +3342,9 @@ fn show_card_menu(
             }
         });
     }
-    menu.append(&move_to);
+    if !from_linked_folder {
+        menu.append(&move_to);
+    }
 
     // Multi-file entries own a list the user could not edit until now: adding
     // to, removing from or reordering a playlist meant rebuilding it by hand.
@@ -3133,7 +3439,9 @@ fn show_card_menu(
             p.popdown();
         });
     }
-    menu.append(&remove);
+    if !from_linked_folder {
+        menu.append(&remove);
+    }
 
     pop.set_child(Some(&menu));
     pop.connect_closed(|p| p.unparent());
@@ -3351,7 +3659,7 @@ fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     let was_active;
     {
         let mut s = state.borrow_mut();
-        if idx >= s.entries.len() {
+        if idx >= s.entries.len() || linked::is_linked_id(&s.entries[idx].id) {
             return;
         }
         let entry = s.entries.remove(idx);
@@ -3506,6 +3814,27 @@ fn remove_entries_by_ids(state: Rc<RefCell<AppState>>, ids: &std::collections::H
     refresh_selection(&state);
 }
 
+/// `ids` minus the files of linked folders, which can be neither moved nor
+/// removed: the user is told, instead of the selection quietly shrinking.
+fn without_linked(
+    state: &Rc<RefCell<AppState>>,
+    ids: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let all: Vec<String> = ids.into_iter().collect();
+    let kept: Vec<String> = all
+        .iter()
+        .filter(|id| !linked::is_linked_id(id))
+        .cloned()
+        .collect();
+    if kept.len() < all.len() {
+        show_toast(
+            state,
+            t!("Files from a linked folder can’t be moved or removed. Unlink the folder instead."),
+        );
+    }
+    kept
+}
+
 /// Confirm before a bulk delete. Removing many wallpapers at once can't be
 /// undone, and the single-card path is already one click behind a menu, so the
 /// batch path gets an explicit count to check against.
@@ -3514,6 +3843,10 @@ fn confirm_remove_selected(
     state: Rc<RefCell<AppState>>,
     ids: std::collections::HashSet<String>,
 ) {
+    let ids: std::collections::HashSet<String> = without_linked(&state, ids).into_iter().collect();
+    if ids.is_empty() {
+        return;
+    }
     let n = ids.len();
     let active_hit = {
         let s = state.borrow();
@@ -3882,12 +4215,22 @@ fn show_collections_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<Ap
                 let del = gtk4::Button::from_icon_name("user-trash-symbolic");
                 del.add_css_class("flat");
                 del.set_valign(gtk4::Align::Center);
-                del.set_tooltip_text(Some(t!("Delete folder (wallpapers are kept)")));
+                let is_link = c.link.is_some();
+                del.set_tooltip_text(Some(if is_link {
+                    t!("Unlink folder (files are kept)")
+                } else {
+                    t!("Delete folder (wallpapers are kept)")
+                }));
                 {
                     let state2 = state.clone();
                     let id = c.id.clone();
                     let again = again.clone();
                     del.connect_clicked(move |_| {
+                        if is_link {
+                            unlink_folder(&state2, &id);
+                            again();
+                            return;
+                        }
                         {
                             let mut s = state2.borrow_mut();
                             // Mutates BOTH vectors — the members are handed
@@ -4047,6 +4390,7 @@ fn show_move_to_collection_dialog(
     state: Rc<RefCell<AppState>>,
     ids: Vec<String>,
 ) {
+    let ids = without_linked(&state, ids);
     if ids.is_empty() {
         return;
     }
@@ -4078,7 +4422,8 @@ fn show_move_to_collection_dialog(
         s.collections.clone()
     };
     let ids = Rc::new(ids);
-    for c in &collections {
+    // A linked folder mirrors the disk: nothing can be filed into it.
+    for c in collections.iter().filter(|c| c.link.is_none()) {
         let btn = menu_item(&c.name);
         let state2 = state.clone();
         let ids = ids.clone();
@@ -4858,6 +5203,235 @@ fn add_folder_options(
         });
     }
     options.append(&individual);
+
+    let link = gtk4::Button::new();
+    link.set_child(Some(&two_line_choice(
+        t!("Link this folder"),
+        t!("Shows it where it is, without importing. New files appear on their own."),
+    )));
+    {
+        let state = state.clone();
+        let folder = folder.to_path_buf();
+        let d = dialog.clone();
+        link.connect_clicked(move |_| {
+            link_folder(&state, folder.clone(), deep);
+            d.close();
+        });
+    }
+    options.append(&link);
+}
+
+// ─── Linked folders ──────────────────────────────────────────────────────────
+
+/// Folder picker → [`show_link_folder_dialog`].
+fn open_link_folder_picker(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    let chooser = gtk4::FileChooserNative::new(
+        Some(t!("Choose a folder to link")),
+        Some(window),
+        FileChooserAction::SelectFolder,
+        Some(t!("Select")),
+        Some(t!("Cancel")),
+    );
+    let state_cb = state.clone();
+    let win_cb = window.clone();
+    chooser.connect_response(move |ch, resp| {
+        state_cb.borrow_mut().current_picker = None;
+        if resp != ResponseType::Accept {
+            return;
+        }
+        if let Some(folder) = ch.file().and_then(|f| f.path()) {
+            show_link_folder_dialog(&win_cb, state_cb.clone(), folder);
+        }
+    });
+    state.borrow_mut().current_picker = Some(chooser.clone());
+    chooser.show();
+}
+
+/// Confirm linking `folder`, with the "Include subfolders" choice.
+fn show_link_folder_dialog(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    folder: PathBuf,
+) {
+    let (dialog, content) = glass_dialog(window, t!("Link folder"), 460, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let heading = gtk4::Label::new(Some(
+        &folder
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| folder.to_string_lossy().into_owned()),
+    ));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    body.append(&heading);
+
+    let sub = gtk4::Label::new(Some(t!(
+        "Fresco shows what is in this folder where it is. Nothing is copied or imported: new files appear on their own, and files you delete or move away disappear. Unlinking never deletes anything."
+    )));
+    sub.add_css_class("dialog-sub");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    body.append(&sub);
+
+    let recursive = gtk4::CheckButton::with_label(t!("Include subfolders"));
+    body.append(&recursive);
+
+    let count = gtk4::Label::new(None);
+    count.add_css_class("dialog-sub");
+    count.set_xalign(0.0);
+    body.append(&count);
+    // The scan walks the tree (stat per file): off the UI thread, with a
+    // placeholder until it lands. Link stays usable meanwhile.
+    let counts = Rc::new(RefCell::new(linked::CountState::default()));
+    let show_count = {
+        let (count, folder) = (count.clone(), folder.clone());
+        move |deep: bool| {
+            let generation = match counts.borrow_mut().request(deep) {
+                Ok(n) => return count.set_text(&wallpaper_count_text(n)),
+                Err(g) => g,
+            };
+            count.set_text(t!("Loading…"));
+            let link = library::Link {
+                path: folder.clone(),
+                recursive: deep,
+                status: library::LinkStatus::default(),
+            };
+            let (tx, rx) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send_blocking(linked::scan(&link).map_or(0, |s| s.files.len()));
+            });
+            let (counts, count) = (counts.clone(), count.clone());
+            glib::spawn_future_local(async move {
+                if let Ok(n) = rx.recv().await {
+                    if counts.borrow_mut().finish(generation, deep, n) {
+                        count.set_text(&wallpaper_count_text(n));
+                    }
+                }
+            });
+        }
+    };
+    show_count(false);
+    recursive.connect_toggled(move |cb| show_count(cb.is_active()));
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    actions.set_margin_top(8);
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    actions.append(&cancel);
+    let link = gtk4::Button::with_label(t!("Link folder"));
+    link.add_css_class("suggested-action");
+    {
+        let d = dialog.clone();
+        link.connect_clicked(move |_| {
+            link_folder(&state, folder.clone(), recursive.is_active());
+            d.close();
+        });
+    }
+    actions.append(&link);
+    body.append(&actions);
+
+    content.append(&body);
+    dialog.present();
+}
+
+fn wallpaper_count_text(n: usize) -> String {
+    match n {
+        0 => t!("No supported media in that folder").to_string(),
+        1 => t!("1 wallpaper").to_string(),
+        n => tf!("{count} wallpapers", "count" => n.to_string()),
+    }
+}
+
+/// Link `folder` as a section of the library. The scan runs in the background;
+/// the section fills in when it lands.
+fn link_folder(state: &Rc<RefCell<AppState>>, folder: PathBuf, recursive: bool) {
+    let folder = std::fs::canonicalize(&folder).unwrap_or(folder);
+    let taken = state
+        .borrow()
+        .collections
+        .iter()
+        .filter_map(|c| c.link.as_ref())
+        .any(|l| linked::overlaps(l, &folder, recursive));
+    if taken {
+        show_toast(
+            state,
+            t!("That folder is already linked, or overlaps one that is."),
+        );
+        return;
+    }
+    let name = folder.file_name().map_or_else(
+        || folder.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let id = {
+        let mut s = state.borrow_mut();
+        let link = library::Link {
+            path: folder,
+            recursive,
+            status: library::LinkStatus::Scanning,
+        };
+        let id = library::create_linked(&mut s.collections, &name, link);
+        sort_collections_in_place(&mut s.collections);
+        library::save_collections(&s.collections).ok();
+        id
+    };
+    show_toast(state, &tf!("Linked “{name}”", "name" => name));
+    redraw_library(state);
+    linked::rescan(state, &id, false);
+}
+
+/// Remove a linked folder from the library. Only Fresco's record of it goes:
+/// the folder and every file in it are left alone.
+fn unlink_folder(state: &Rc<RefCell<AppState>>, id: &str) {
+    let name = {
+        let mut s = state.borrow_mut();
+        let Some(pos) = s
+            .collections
+            .iter()
+            .position(|c| c.id == id && c.link.is_some())
+        else {
+            return;
+        };
+        let folder = s.collections.remove(pos);
+        library::renumber_collections(&mut s.collections);
+        let gone = s.edit_entries(|entries| {
+            let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(entries)
+                .into_iter()
+                .partition(|e| e.collection.as_deref() == Some(id));
+            *entries = kept;
+            gone
+        });
+        // Thumbnails and preview clips are Fresco's own cache of those files.
+        for e in &gone {
+            if let Some(thumb) = &e.thumbnail {
+                std::fs::remove_file(thumb).ok();
+            }
+            super::preview_proxy::remove_for(&e.id);
+        }
+        library::save_collections(&s.collections).ok();
+        if let Some(link) = &folder.link {
+            linked::forget_tweaks(&link.path);
+        }
+        s.view = normalize_view(s.view.clone(), &s.collections);
+        library::save_view(&s.view).ok();
+        s.selection = None;
+        folder.name
+    };
+    linked::stop(id);
+    show_toast(
+        state,
+        &tf!("Unlinked “{name}”. Your files were not touched.", "name" => name),
+    );
+    refresh_selection(state);
 }
 
 /// The pre-1.2 "Add folder" outcome: one folder-backed slideshow, then the
@@ -11777,6 +12351,73 @@ mod tests {
         assert!(entry_is_playing(&playing, &disk));
     }
 
+    fn config_playing(path: &str) -> Config {
+        let mut c = Config {
+            enabled: true,
+            ..Default::default()
+        };
+        c.wallpaper.path = Some(PathBuf::from(path));
+        c
+    }
+
+    /// Issue #45: `fresco random` switched w1 -> w2 on disk while the window
+    /// still held w1; the next clock tweak saved the stale copy over it.
+    #[test]
+    fn a_settings_change_after_a_cli_switch_keeps_the_cli_wallpaper() {
+        let dir = std::env::temp_dir().join(format!("fresco-stale-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        // The window's copy: w1, clock just switched on, saved.
+        let mut gui = config_playing("/w1.mp4");
+        gui.widgets = Some(Widgets::default());
+        gui.widgets.as_mut().unwrap().clock.enabled = true;
+        gui.save_to(&path).unwrap();
+
+        // `fresco random`: reads the file, swaps the wallpaper, saves.
+        let mut cli = Config::load_from(&path).unwrap();
+        cli.wallpaper.path = Some(PathBuf::from("/w2.mp4"));
+        cli.save_to(&path).unwrap();
+
+        // The window notices, then the user changes a clock setting.
+        let moved = adopt_external_config(&mut gui, Config::load_from(&path).unwrap());
+        assert!(moved, "the active card must be rebuilt");
+        gui.widgets.as_mut().unwrap().clock.show_seconds = true;
+        gui.save_to(&path).unwrap();
+
+        let saved = Config::load_from(&path).unwrap();
+        assert_eq!(saved.wallpaper.path, Some(PathBuf::from("/w2.mp4")));
+        assert!(saved.widgets.unwrap().clock.show_seconds);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The window's own saves fire the file monitor too: they must not look
+    /// like an external change (that would rebuild the grid on every click).
+    #[test]
+    fn the_windows_own_save_is_not_an_external_change() {
+        let dir = std::env::temp_dir().join(format!("fresco-own-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        let mut gui = config_playing("/w1.mp4");
+        gui.widgets = Some(Widgets::default());
+        gui.save_to(&path).unwrap();
+
+        let before = gui.clone();
+        assert!(!adopt_external_config(
+            &mut gui,
+            Config::load_from(&path).unwrap()
+        ));
+        assert_eq!(gui, before, "a save must round-trip to the same config");
+
+        // A change that leaves the screen alone adopts the file, no rebuild.
+        let mut other = before.clone();
+        other.scaling = Scaling::High;
+        assert!(!adopt_external_config(&mut gui, other));
+        assert_eq!(gui.scaling, Scaling::High);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     // ─── Folders, sorting and batch import ───────────────────────────────
 
     /// A video entry named after `name`, filed into `collection`.
@@ -11831,6 +12472,109 @@ mod tests {
             plans.iter().all(|p| p.reorderable),
             "each of these sections is exactly one ordering group"
         );
+    }
+
+    /// A linked folder: its collection (with a link) and its files, as a scan
+    /// would have built them.
+    fn linked_folder(name: &str, files: &[&str]) -> (library::Collection, Vec<LibraryEntry>) {
+        let mut col = library::Collection::new(name, 0);
+        col.link = Some(library::Link {
+            path: PathBuf::from("/linked"),
+            recursive: false,
+            status: library::LinkStatus::Ready,
+        });
+        let found = files
+            .iter()
+            .map(|f| linked::Found {
+                path: PathBuf::from(format!("/linked/{f}")),
+                size: 1,
+                mtime: 1,
+            })
+            .collect();
+        let entries = linked::build(&col.id, found, &linked::TweakMap::new());
+        (col, entries)
+    }
+
+    /// A linked folder is one more section, in folder order, that mirrors the
+    /// disk: no arrows, and it keeps its place while it has nothing to show.
+    #[test]
+    fn a_linked_folder_is_its_own_section_that_cannot_be_reordered() {
+        let (mut photos, files) = linked_folder("Photos", &["b.jpg", "a.jpg"]);
+        photos.position = 1;
+        let mut mine = library::Collection::new("Mine", 0);
+        mine.position = 0;
+        let mut entries = files.clone();
+        entries.push(filed("x", Some(&mine.id), 0));
+        entries.push(filed("loose", None, 0));
+        let cols = [photos.clone(), mine];
+        let view = library::LibraryView::default();
+
+        let plans = plan_sections(&entries, &cols, &view, "");
+        let titles: Vec<&str> = plans.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, vec!["Mine", "Photos", t!("Uncategorized")]);
+        let linked_plan = &plans[1];
+        assert_eq!(linked_plan.linked.as_deref(), Some(photos.id.as_str()));
+        assert!(!linked_plan.reorderable, "a linked folder mirrors the disk");
+        let names: Vec<&str> = linked_plan
+            .ids
+            .iter()
+            .map(|id| entries.iter().find(|e| &e.id == id).unwrap().name.as_str())
+            .collect();
+        assert_eq!(names, ["a", "b"], "file-name order");
+        assert!(plans[0].reorderable && plans[2].reorderable);
+        assert_eq!(plans.iter().filter(|p| p.linked.is_some()).count(), 1);
+
+        // Opened on its own: flat, still not reorderable.
+        let open = library::LibraryView {
+            collection: Some(photos.id.clone()),
+            ..view.clone()
+        };
+        let plans = plan_sections(&entries, &cols, &open, "");
+        assert_eq!(plans.len(), 1);
+        assert!(!plans[0].reorderable && plans[0].linked.is_some());
+    }
+
+    /// An unplugged drive or an empty folder is a section with a note, not a
+    /// section that quietly disappears; a search that matches nothing in it
+    /// hides it like any other.
+    #[test]
+    fn an_empty_or_unreachable_linked_folder_keeps_its_section() {
+        let (mut photos, _) = linked_folder("Photos", &[]);
+        photos.link.as_mut().unwrap().status = library::LinkStatus::Missing;
+        let loose = filed("loose", None, 0);
+        let view = library::LibraryView::default();
+
+        let plans = plan_sections(
+            std::slice::from_ref(&loose),
+            std::slice::from_ref(&photos),
+            &view,
+            "",
+        );
+        assert_eq!(plans[0].title, "Photos");
+        assert!(plans[0].ids.is_empty() && plans[0].linked.is_some());
+        let plans = plan_sections(
+            std::slice::from_ref(&loose),
+            std::slice::from_ref(&photos),
+            &view,
+            "zzz",
+        );
+        assert!(plans.is_empty(), "nothing in it matches the search");
+
+        let open = library::LibraryView {
+            collection: Some(photos.id.clone()),
+            ..view
+        };
+        let plans = plan_sections(&[loose], &[photos], &open, "");
+        assert_eq!(plans.len(), 1, "opened, it still says what is wrong");
+    }
+
+    /// Linked sections add no behaviour to the plain layout.
+    #[test]
+    fn plain_sections_are_never_marked_linked() {
+        let nature = library::Collection::new("Nature", 0);
+        let entries = vec![filed("a", Some(&nature.id), 0), filed("b", None, 0)];
+        let plans = plan_sections(&entries, &[nature], &library::LibraryView::default(), "");
+        assert!(plans.iter().all(|p| p.linked.is_none()));
     }
 
     /// Nobody who never makes a folder may notice this feature exists.

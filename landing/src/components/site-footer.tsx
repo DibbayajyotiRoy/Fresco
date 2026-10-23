@@ -14,6 +14,7 @@ export function SiteFooter({ dict }: { dict: Dictionary }) {
   const links = [
     { href: GITHUB_URL, label: dict.footer.github },
     { href: LICENSE_URL, label: dict.footer.license },
+    { href: `${GITHUB_URL}/issues/new/choose`, label: dict.footer.reportIssue },
   ];
 
   return (
@@ -32,8 +33,8 @@ export function SiteFooter({ dict }: { dict: Dictionary }) {
               <span className="font-display text-xl text-ink">Fresco</span>
             </div>
 
-            <div className="flex items-center gap-6">
-              <ul className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <ul className="flex flex-wrap items-center gap-x-6 gap-y-2">
                 {links.map((link) => (
                   <li key={link.label}>
                     <a

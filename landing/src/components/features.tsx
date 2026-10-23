@@ -9,6 +9,8 @@ import {
   Clock,
   Cpu,
   Film,
+  FolderSync,
+  Gauge,
   Globe,
   Images,
   LayoutGrid,
@@ -41,6 +43,8 @@ const ROW_ORDER = [
   "hwDecode",
   "sessions",
   "catalog",
+  "linkedFolders",
+  "bigLibrary",
   "video",
   "slideshow",
   "playlist",
@@ -63,6 +67,8 @@ const ROW_ICONS: Record<RowId, LucideIcon> = {
   hwDecode: Cpu,
   sessions: Layers,
   catalog: LayoutGrid,
+  linkedFolders: FolderSync,
+  bigLibrary: Gauge,
   video: Film,
   slideshow: Images,
   playlist: ListMusic,
@@ -88,10 +94,13 @@ const ROW_ICONS: Record<RowId, LucideIcon> = {
  * is the live one from GitHub.
  */
 export function Features({ dict }: { dict: Dictionary }) {
+  // The pinned 1.1.36 copy covers four widgets; the world clock's card lives
+  // under `features` so that copy stays untouched.
+  const items = { ...dict.whatsNew.items, worldClock: dict.features.worldClock };
   const steps = WIDGET_IDS.map((id) => ({
     id,
-    title: dict.whatsNew.items[id].title,
-    body: dict.whatsNew.items[id].body,
+    title: items[id].title,
+    body: items[id].body,
   }));
 
   return (
@@ -116,7 +125,7 @@ export function Features({ dict }: { dict: Dictionary }) {
                 data-reveal="fade"
                 className="max-w-3xl font-display text-display-sm text-ink [overflow-wrap:anywhere]"
               >
-                {dict.whatsNew.title}
+                {dict.features.widgetsTitle}
               </h3>
               <a
                 href={`${GITHUB_URL}/blob/main/CHANGELOG.md`}

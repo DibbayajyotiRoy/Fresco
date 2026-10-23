@@ -31,7 +31,7 @@ Fresco; bir videoyu, GIF’i, görseli, slayt gösterisini veya çalma listesini
 - **Kontrol:** uygulamanın kendisi, Ctrl+K komut paleti ve klavye kısayolları için `fresco next` / `fresco prev` / `fresco random`.
 - **Kurulum:** Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali ve Deepin için bir `.deb` paketi (tek satırlık betik, elle indirme veya Deepin Uygulama Mağazası); Fedora, Arch ve diğerlerinde kaynaktan derleme — bkz. [Kurulum](#kurulum).
 - **Lisans:** [GPL-3.0-or-later](LICENSE) altında ücretsiz ve açık kaynaklı; reklam yok, hesap yok.
-- **Kullanıcılar:** 128 ülkede 3.000’den fazla kişi. Son sürüm: 1.1.50.
+- **Kullanıcılar:** 128 ülkede 3.000’den fazla kişi. Son sürüm: 1.1.51.
 
 ## Kurulum
 
@@ -473,7 +473,7 @@ Konuşma, telemetriden ayrı üretilen ve farklı bir dosyada saklanan rastgele 
 | **Lisans** | [GPL-3.0-or-later](LICENSE) — ücretsiz ve açık kaynaklı, reklam yok, hesap yok |
 | **Dil ve yığın** | Rust, GTK4 / libadwaita, libmpv; Wayland’de pakete dahil bir mpvpaper oluşturucusu |
 | **İlk sürüm** | v0.0.1, Haziran 2026 |
-| **Son sürüm** | 1.1.50 (2026-10-16) — en yenisi için [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) sayfasına bakın |
+| **Son sürüm** | 1.1.51 (2026-10-23) — en yenisi için [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) sayfasına bakın |
 | **Paketler** | `.deb` (amd64), tek satırlık kurulum betiği, Deepin Uygulama Mağazası; diğer yerlerde kaynaktan derleme |
 | **Arayüz dilleri** | İngilizce artı 12 çeviri: Basitleştirilmiş Çince, Rusça, İspanyolca, Fransızca, Almanca, Portekizce (Brezilya), Türkçe, Vietnamca, Endonezce, Hintçe, Bengalce ve Romence |
 | **Kullanıcılar** | 128 ülkede 3.000’den fazla kişi |
@@ -491,4 +491,4 @@ Hata raporları, özellik istekleri ve PR’lar memnuniyetle karşılanır — b
 
 ---
 
-<sub>Fresco, Linux (X11 ve Wayland) için ücretsiz, açık kaynaklı bir canlı duvar kağıdı ve video duvar kağıdı uygulamasıdır; duvar kağıdının içine çizilen şarkı sözü, saat, ses görselleştirici ve albüm kapağı widget’ları vardır. Linux için yerel bir Wallpaper Engine alternatifidir ve Conky gibi araçlara bir müzik ve saat yoldaşıdır. 128 ülkede 3.000’den fazla kişi tarafından kullanılıyor. Son güncelleme: 2026-10-16.</sub>
+<sub>Fresco, Linux (X11 ve Wayland) için ücretsiz, açık kaynaklı bir canlı duvar kağıdı ve video duvar kağıdı uygulamasıdır; duvar kağıdının içine çizilen şarkı sözü, saat, ses görselleştirici ve albüm kapağı widget’ları vardır. Linux için yerel bir Wallpaper Engine alternatifidir ve Conky gibi araçlara bir müzik ve saat yoldaşıdır. 128 ülkede 3.000’den fazla kişi tarafından kullanılıyor. Son güncelleme: 2026-10-23.</sub>

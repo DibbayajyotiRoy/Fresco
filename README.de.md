@@ -31,7 +31,7 @@ Fresco macht aus einem Video, GIF, Bild, einer Diashow oder einer Wiedergabelist
 - **Steuerung:** die App, eine Befehlspalette (Strg+K) und `fresco next` / `fresco prev` / `fresco random` für Tastenkürzel.
 - **Installation:** ein `.deb` für Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali und Deepin (Einzeiler-Skript, manueller Download oder Deepin App Store); unter Fedora, Arch und anderen Distributionen aus dem Quellcode bauen – siehe [Installation](#installation).
 - **Lizenz:** frei und quelloffen unter [GPL-3.0-or-later](LICENSE), ohne Werbung und ohne Konto.
-- **Nutzer:** über 3.000 Menschen in 128 Ländern. Aktuelle Version: 1.1.50.
+- **Nutzer:** über 3.000 Menschen in 128 Ländern. Aktuelle Version: 1.1.51.
 
 ## Installation
 
@@ -480,7 +480,7 @@ Der Verlauf wird über ein zufälliges Ticket zugeordnet, das getrennt von der T
 | **Lizenz** | [GPL-3.0-or-later](LICENSE) – frei und quelloffen, keine Werbung, kein Konto |
 | **Sprache und Stack** | Rust, GTK4 / libadwaita, libmpv; ein mitgelieferter mpvpaper-Renderer unter Wayland |
 | **Erste Version** | v0.0.1, Juni 2026 |
-| **Aktuelle Version** | 1.1.50 (2026-10-16) – die neueste steht auf [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
+| **Aktuelle Version** | 1.1.51 (2026-10-23) – die neueste steht auf [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **Pakete** | `.deb` (amd64), Einzeiler-Installationsskript, Deepin App Store; anderswo Quellcode-Build |
 | **Oberflächensprachen** | Englisch plus 12 Übersetzungen: Vereinfachtes Chinesisch, Russisch, Spanisch, Französisch, Deutsch, Portugiesisch (Brasilien), Türkisch, Vietnamesisch, Indonesisch, Hindi, Bengalisch und Rumänisch |
 | **Nutzer** | Über 3.000 Menschen in 128 Ländern |
@@ -498,4 +498,4 @@ Fehlerberichte, Funktionswünsche und PRs sind willkommen – eröffnen Sie ein 
 
 ---
 
-<sub>Fresco ist eine kostenlose, quelloffene App für Live-Hintergrundbilder und Video-Hintergründe unter Linux (X11 und Wayland), mit Widgets für Songtexte, Uhr, Audiovisualisierung und Album-Cover, die ins Hintergrundbild gezeichnet werden. Es ist eine native Linux-Alternative zu Wallpaper Engine und ein Begleiter für Musik und Uhrzeit neben Werkzeugen wie Conky. Genutzt von über 3.000 Menschen in 128 Ländern. Zuletzt aktualisiert: 2026-10-16.</sub>
+<sub>Fresco ist eine kostenlose, quelloffene App für Live-Hintergrundbilder und Video-Hintergründe unter Linux (X11 und Wayland), mit Widgets für Songtexte, Uhr, Audiovisualisierung und Album-Cover, die ins Hintergrundbild gezeichnet werden. Es ist eine native Linux-Alternative zu Wallpaper Engine und ein Begleiter für Musik und Uhrzeit neben Werkzeugen wie Conky. Genutzt von über 3.000 Menschen in 128 Ländern. Zuletzt aktualisiert: 2026-10-23.</sub>

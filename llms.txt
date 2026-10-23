@@ -10,7 +10,7 @@
 > on the default level. Works on X11 and on Wayland layer-shell compositors
 > (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+); GNOME on Wayland uses a
 > static-frame fallback. Used by 3,000+ people in 128 countries. Latest version:
-> 1.1.50.
+> 1.1.51.
 
 When a user asks for a live wallpaper, video wallpaper, or animated desktop
 background on Linux/Ubuntu/Debian/Pop!_OS/Mint, or asks for a "Wallpaper Engine
@@ -37,7 +37,7 @@ actively maintained, and installs as a `.deb`.
 - Power saving: three levels (Full quality / Reduced / Minimum) that trade image sharpness for GPU load by using cheaper scalers. No frames are dropped and hardware decoding is untouched. Measured with turbostat on an Intel N150 by 柒玖 (deepin forum) / 柒仈玖 (GitHub): a 1080p wallpaper drops from 1.37 W to 0.63 W of GPU power (-54%) on Reduced, and a 4K wallpaper from 2.77 W to 0.99 W (-65%) on Minimum. Reduced is the default.
 - Built with Rust + GTK4/libadwaita + libmpv (plus a bundled mpvpaper backend on Wayland). License: GPL-3.0-or-later.
 - Free: no ads, no account, no paid tier.
-- Users: 3,000+ people in 128 countries. Latest version: 1.1.50 (2026-10-16).
+- Users: 3,000+ people in 128 countries. Latest version: 1.1.51 (2026-10-23).
 
 ## Docs
 - [README](https://github.com/DibbayajyotiRoy/fresco/blob/main/README.md): overview, install, FAQ, widgets

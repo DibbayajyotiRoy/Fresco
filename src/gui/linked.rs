@@ -18,6 +18,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -94,12 +95,23 @@ pub fn scan(link: &Link) -> Option<Scan> {
         0
     };
     let mut out = Scan::default();
-    walk(&link.path, depth, &mut out).ok()?;
+    walk(&link.path, depth, &mut HashSet::new(), &mut out).ok()?;
     Some(out)
 }
 
-fn walk(dir: &Path, depth: usize, out: &mut Scan) -> std::io::Result<()> {
+fn walk(
+    dir: &Path,
+    depth: usize,
+    seen: &mut HashSet<(u64, u64)>,
+    out: &mut Scan,
+) -> std::io::Result<()> {
     let rd = fs::read_dir(dir)?;
+    // A folder reached twice (a symlink back up the tree) is listed once:
+    // otherwise each lap of a loop would list every file again.
+    let id = fs::metadata(dir)?;
+    if !seen.insert((id.dev(), id.ino())) {
+        return Ok(());
+    }
     out.dirs.push(dir.to_path_buf());
     for e in rd.flatten() {
         if is_hidden(&e.file_name()) {
@@ -113,7 +125,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Scan) -> std::io::Result<()> {
         };
         if meta.is_dir() {
             if depth > 0 {
-                walk(&path, depth - 1, out).ok();
+                walk(&path, depth - 1, seen, out).ok();
             }
         } else if media::is_supported(&path) && path.to_str().is_some() {
             let mtime = meta
@@ -530,7 +542,29 @@ fn apply(
         let Some(link) = c.link.as_mut() else { return };
         let status_moved = std::mem::replace(&mut link.status, status) != status;
         let (link, name) = (link.clone(), c.name.clone());
-        let changed = s.edit_entries(|entries| sync_source(entries, id, fresh));
+        let (changed, gone) = s.edit_entries(|entries| {
+            // Only a folder that could be read has really lost files; an
+            // unplugged drive keeps its cache for when it comes back.
+            let gone: Vec<(String, Option<PathBuf>)> = if status == LinkStatus::Ready {
+                let alive: HashSet<&str> = fresh.iter().map(|f| f.id.as_str()).collect();
+                entries
+                    .iter()
+                    .filter(|e| {
+                        e.collection.as_deref() == Some(id) && !alive.contains(e.id.as_str())
+                    })
+                    .map(|e| (e.id.clone(), e.thumbnail.clone()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            (sync_source(entries, id, fresh), gone)
+        });
+        for (gone_id, thumb) in gone {
+            if let Some(thumb) = thumb {
+                fs::remove_file(thumb).ok();
+            }
+            super::preview_proxy::remove_for(&gone_id);
+        }
         // Cards for new files start as placeholders; thumbnails fill in as the
         // import queue gets to them. Files already queued are left alone.
         let new_ids: Vec<String> = if changed {
@@ -733,6 +767,17 @@ mod tests {
             media::MAX_SCAN_DEPTH
         );
         assert!(scan(&link(&dir.join("missing"), true)).is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_symlink_loop_does_not_list_files_twice() {
+        let dir = tree("loop", &["a.jpg", "sub/b.jpg"]);
+        std::os::unix::fs::symlink("..", dir.join("sub/up")).unwrap();
+        std::os::unix::fs::symlink(dir.join("sub"), dir.join("again")).unwrap();
+        let got = names(&scan(&link(&dir, true)).unwrap(), &dir);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got.contains(&"a.jpg".to_string()));
         fs::remove_dir_all(&dir).ok();
     }
 

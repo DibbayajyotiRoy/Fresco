@@ -3,7 +3,7 @@
 
 # Fresco — 免费开源的 Linux 动态壁纸与视频壁纸软件
 
-[English](README.md) | 简体中文
+[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | **简体中文**
 
 **Fresco 是一款免费、开源的 Linux 动态壁纸应用，可将任意视频、GIF 或图片设为动态桌面壁纸，同时支持 X11 与 Wayland。** 它是原生 Linux 平台上 Wallpaper Engine 的替代品，提供图形界面、GPU 硬件加速播放和桌面挂件，适合用来做 Linux 桌面美化。
 
@@ -25,11 +25,12 @@ Fresco 通过 GTK4 / libadwaita 图形界面，把视频、GIF、图片、幻灯
 - **支持的媒体：** 视频（mp4、webm、mkv、avi、mov）、动态 GIF、图片、图片幻灯片和视频播放列表。
 - **支持的桌面：** X11 会话（Xorg 下的 GNOME、Cinnamon、Xfce、MATE、Deepin 25）与 Wayland（COSMIC、Hyprland、Sway、KDE Plasma 6、Cinnamon 6.8 及以上）。GNOME on Wayland 只能显示静帧——见[支持的环境](#支持的环境)。
 - **硬件解码：** 通过 mpv 使用 VA-API（Intel、AMD）和 NVDEC（NVIDIA）。
+- **壁纸库：** 可直接链接你已有的壁纸文件夹而无需导入，文件增删后自动保持同步。壁纸库只绘制屏幕上可见的部分，数千张壁纸也依然流畅轻量。
 - **桌面挂件：** 逐句同步的歌词、时钟（含世界时钟）、音频可视化与专辑封面，均绘制在壁纸内部，默认全部关闭。
 - **操作方式：** 应用界面、Ctrl+K 命令面板，以及可绑定快捷键的 `fresco next` / `fresco prev` / `fresco random`。
 - **安装：** 面向 Ubuntu、Debian、Linux Mint、Pop!_OS、elementary OS、Kali 与 Deepin 的 `.deb` 包（一行脚本、手动下载或 Deepin 应用商店）；Fedora、Arch 等发行版从源码构建——见[安装](#安装)。
 - **许可证：** 免费开源，采用 [GPL-3.0-or-later](LICENSE)，无广告，无需注册账号。
-- **用户规模：** 来自 127 个国家/地区的 2,500+ 名用户。最新版本：1.1.50。
+- **用户规模：** 来自 128 个国家/地区的 3,000+ 名用户。最新版本：1.1.50。
 
 ## 安装
 
@@ -92,13 +93,15 @@ Fresco 目前不在 AUR 或 Flathub 上——AUR 中名为 `fresco` 的包是一
 
 - **任意媒体**——循环视频（mp4/webm/mkv）、动态 GIF、静态图片、图片幻灯片、多视频播放列表
 - **从链接添加**——粘贴 Pinterest 图钉链接或任意视频/图片的直接 URL；Fresco 会自动下载并打开裁剪编辑器
+- **链接文件夹**——直接使用你已有的壁纸文件夹（图片、GIF 和视频），无需导入；增删文件后自动保持同步，子文件夹可选，收藏与编辑按文件分别保留
+- **大型壁纸库**——壁纸库只绘制滚动位置附近的壁纸，因此数千张壁纸约两秒即可打开，内存占用只有几百兆（在 4,000 张壁纸的测试库上：约 2 秒、325 MB，此前为 9 到 13 秒、1.6 GB）
 - **硬件解码**——通过 GPU 进行视频解码（VA-API / NVDEC），将解码工作转移到视频引擎上，让 CPU 占用率接近空闲水平。实测显示这种方式成本明显更低（但并非零开销——详见[性能](#性能与续航)部分）
 - **省电模式**——为笔记本提供更低的 GPU 缩放开销；实测可将 GPU 功耗降低约一半（见[性能](#性能与续航)）
 - **多显示器**——每块屏幕可设不同壁纸，同一视频可跨屏同步播放
 - **昼夜壁纸**——按定时、任意时间段或日出/日落切换壁纸
 - **桌面挂件**——同步歌词、主题时钟、世界时钟、音频可视化、旋转的专辑封面圆盘，直接绘制在壁纸内部，不会遮挡你的窗口（世界时钟另有可选的“悬浮在窗口之上”模式）；默认全部关闭（见[桌面挂件](#桌面挂件)）
 - **锁屏**——在你的真实锁屏上显示壁纸和挂件（时钟、问候语、正在播放、电池等），替代系统默认锁屏——COSMIC 1.9+ 与 KDE Plasma 6 支持动态视频与挂件，Sway/Hyprland/niri 与 X11 通过 `fresco lock` 显示壁纸与挂件，其他环境显示静帧。默认关闭，且 Fresco 永远看不到你的密码——见 [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **键盘控制**——`fresco next`、`fresco prev`、`fresco random` 可绑定到合成器快捷键，应用内还有 Ctrl+K 命令面板
+- **键盘控制**——`fresco next`、`fresco prev`、`fresco random` 可绑定到合成器快捷键（Fresco 窗口已打开时，它会采用新壁纸而不会改回去），应用内还有 Ctrl+K 命令面板
 - **批量管理**——一次选中多张壁纸，一键移除
 - **内置目录**——在应用内浏览精选的、授权合规的壁纸
 - **全屏自动暂停**——在每台显示器上，支持X11、wlroots合成器、COSMIC和KDE Plasma（通过其壁纸插件）；也可选择适用于最大化窗口，并支持电池供电时暂停。
@@ -112,13 +115,14 @@ Fresco 目前不在 AUR 或 Flathub 上——AUR 中名为 `fresco` 的包是一
 |---|---|---|
 | X11（GNOME、Cinnamon、XFCE 等） | ✅ | 内嵌渲染器。GNOME 仅在发行版仍提供 Xorg 会话时可用（见下方 GNOME 说明） |
 | Kali Linux（Xfce，X11） | ✅ | 在 Kali 默认的 Xfce-on-X11 会话上运行，与其他 X11 桌面使用同一内嵌渲染器 |
+| Xfce（X11） | ✅ | 桌面图标在壁纸之上保持可见，且可以点击、选中和拖动 |
 | MATE（X11） | ✅ | 桌面图标在壁纸之上保持可见、可点击 |
 | Deepin 25（DDE，X11） | ✅ | 自动 DDE 适配——社区已在 Deepin 25 Community build1 上验证 |
 | COSMIC（Wayland） | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 及以上（Wayland） | ✅ | Cinnamon 的合成器自 6.8 起支持 layer-shell。Cinnamon 6.6 及更早版本没有 layer-shell，在 Wayland 上保持静帧 |
-| KDE Plasma 6（X11 和 Wayland） | ✅ | 通过 plasmashell 自带的壁纸插件进行设置，因此桌面图标保持可见。视频播放需要 `qml6-module-qtmultimedia`。播放由 Qt 负责，而非 mpv：静音、无硬件解码调优、无裁剪或转场；播放列表仅播放其第一个文件，幻灯片仅显示其第一帧。 |
+| KDE Plasma 6（X11 和 Wayland） | ✅ | 通过 plasmashell 自带的壁纸插件进行设置，因此桌面图标保持可见。视频播放需要 `qml6-module-qtmultimedia`。播放由 Qt 负责，而非 mpv：静音、无硬件解码调优、无裁剪或转场；播放列表仅播放其第一个文件，幻灯片仅显示其第一帧。**填充方式**选项（填充、适应、拉伸）会生效。 |
 | GNOME on Wayland | ⚠️ | 仅静帧——Mutter 不提供动态壁纸绘制面，无视频、无挂件。动态视频需要一个 Fresco GNOME 扩展（规划中） |
 
 以上每个环境都在每次发布时于 CI 中无头运行验证。
@@ -215,15 +219,15 @@ X11 上完全支持，包括完整的动态壁纸——视频、挂件，一切�
 
 ### Fresco 支持 KDE Plasma、COSMIC、Hyprland 和 Sway 吗？
 
-支持，四者皆可。COSMIC、Hyprland 和 Sway 通过 layer-shell 播放动态视频。KDE Plasma 6（X11 和 Wayland）使用 Fresco 在 plasmashell 内的专用壁纸插件，桌面图标保持可见，但播放由 Qt 而非 mpv 负责：静音、无裁剪与转场，视频播放还需要 `qml6-module-qtmultimedia`。
+支持，四者皆可。COSMIC、Hyprland 和 Sway 通过 layer-shell 播放动态视频。KDE Plasma 6（X11 和 Wayland）使用 Fresco 在 plasmashell 内的专用壁纸插件，桌面图标保持可见，但播放由 Qt 而非 mpv 负责：静音、无裁剪与转场，视频播放还需要 `qml6-module-qtmultimedia`。**填充方式**选项（填充、适应或拉伸）在这里同样适用。
 
 ### Fresco 支持 Linux Mint、Xfce、Cinnamon 和 MATE 吗？
 
-支持。X11 下的 Cinnamon、Xfce 和 MATE 使用内嵌渲染器，在 Xfce 和 MATE 上桌面图标会保持显示在壁纸之上。Wayland 下的 Cinnamon 自 6.8 起支持，该版本加入了 layer-shell 支持。
+支持。X11 下的 Cinnamon、Xfce 和 MATE 使用内嵌渲染器，在 Xfce 和 MATE 上桌面图标会保持显示在壁纸之上；在 Xfce 上你还可以照常点击、选中和拖动它们。Wayland 下的 Cinnamon 自 6.8 起支持，该版本加入了 layer-shell 支持。
 
 ### 怎么用快捷键切换壁纸？
 
-在合成器或桌面环境的设置里，把 `fresco next`、`fresco prev` 或 `fresco random` 绑定到某个按键——它们无需打开应用即可切换壁纸（`random` 不会选中正在播放的那张）。它们按应用中显示的顺序在你的壁纸库中依次切换，或只在你当前打开的文件夹内切换，并在 Fresco 服务未运行时将其启动。应用内按 Ctrl+K 可打开命令面板。例如在 Sway 中：
+在合成器或桌面环境的设置里，把 `fresco next`、`fresco prev` 或 `fresco random` 绑定到某个按键——它们无需打开应用即可切换壁纸（`random` 不会选中正在播放的那张）。它们按应用中显示的顺序在你的壁纸库中依次切换，或只在你当前打开的文件夹内切换，并在 Fresco 服务未运行时将其启动。如果此时 Fresco 窗口是打开的，它会采用新壁纸，而不会把旧壁纸改回去。应用内按 Ctrl+K 可打开命令面板。例如在 Sway 中：
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -237,7 +241,15 @@ bindsym $mod+Return exec fresco random
 
 ### 支持 GIF 和图片幻灯片吗？
 
-支持——除视频文件外，还有动态 GIF、静态图片、带切换效果（虚化、淡入黑场再淡出、推进、缓慢平移缩放——Ken Burns）的图片幻灯片，以及多视频播放列表。
+支持——除视频文件外，还有动态 GIF、静态图片、带切换效果（淡入黑场再淡出、缓慢平移缩放（Ken Burns）、推近和虚化）的图片幻灯片，以及多视频播放列表。
+
+### Fresco 能直接使用我现有的壁纸文件夹而不用导入吗？
+
+能。在菜单中选择**链接文件夹…**（或先点**添加文件夹**，再选**链接此文件夹**），指向你平时存放壁纸的文件夹。其中的图片、GIF 和视频会留在原处，在你的壁纸库里以单独的分区显示，无需导入；你在该文件夹里增删文件，壁纸库会随之保持同步。**包含子文件夹**为可选项（最多向下四层），收藏与编辑会按文件分别记住。如果文件夹消失（比如拔掉了移动硬盘），它的分区会标上“（不可用）”并保留，待文件夹恢复后自动回来。**取消链接文件夹**（在分区菜单中）会移除该分区，但不会删除任何文件。**添加**仍然像以前一样导入单个文件。
+
+### Fresco 能应付数千张壁纸吗？
+
+能。壁纸库只为你滚动位置附近的壁纸构建卡片，而不是一次性构建全部，所以庞大的收藏不会拖垮应用。在一个 4,000 张壁纸（图片和视频各一半）的测试库上，壁纸库约 2 秒就出现，此前要 9 到 13 秒；内存占用约 325 MB，此前为 1.6 GB。这些数据来自一台机器上、负载较高时的开发版本，请当作参考，而不是承诺。
 
 ### 能把 YouTube 视频设为壁纸吗？
 
@@ -279,7 +291,7 @@ Fresco 可以在壁纸上绘制五种可选挂件，包括桌面歌词和桌面�
 | **音频可视化** | 五种样式——柱状、镜像、波形、圆点、环形——支持取色器、双色渐变或彩虹 |
 | **专辑封面** | 当前曲目封面在旋转的唱片上；播放暂停时停止旋转 |
 
-除世界时钟可选的**悬浮在窗口之上**模式外，挂件通过 mpv 的 OSD 层绘制在壁纸内，而不是画在独立窗口里，因此永远不会盖在你的窗口上方、永远不会拦截点击，且在 X11 与所有 layer-shell 合成器上表现一致。实测在音乐播放、歌词、时钟、可视化与专辑封面挂件全开时开销为**单核 CPU 的 0.8%**——几乎全部来自音频采集，因为内容不变就不重绘。
+除世界时钟可选的**悬浮在窗口之上**模式外，挂件通过 mpv 的 OSD 层绘制在壁纸内，而不是画在独立窗口里，因此永远不会盖在你的窗口上方、永远不会拦截点击，且在 X11 与所有 layer-shell 合成器上表现一致。实测在音乐播放、歌词、时钟、可视化与专辑封面挂件全开时开销为**单核 CPU 的 0.8%**——几乎全部来自音频采集，因为内容不变就不重绘。机器休眠并唤醒后，挂件也会自行恢复显示。
 
 挂件默认出现在**每一块屏幕**上。想只留在一块屏上，可在 `config.toml` 的 `[widgets]` 块中加 `monitor = "DP-1"`（暂无图形界面开关）。挂件**在 GNOME on Wayland 上不可用**——那里没有可供 Fresco 绘制的动态壁纸面，壁纸在那里退回静帧也是同一原因。
 
@@ -326,6 +338,8 @@ Spotify 的 Linux 原生客户端自 2018 年起就返回 `Position: 0` 且从�
 ## 故障排查
 
 请先运行 `fresco doctor`：它会报告你的会话类型、Fresco 选用了哪个渲染器及其来源，以及 GNOME 的 Xorg 变通办法是否适用。[docs/INSTALL.md](docs/INSTALL.md) 涵盖更多情况，包括 CPU 占用过高。提交 issue 时请附上 `fresco doctor` 的输出。
+
+仍未解决？[报告 Bug](https://github.com/DibbayajyotiRoy/Fresco/issues/new?template=bug_report.yml) 或[提出功能建议](https://github.com/DibbayajyotiRoy/Fresco/issues/new?template=feature_request.yml)。
 
 ### 安装后 Fresco 没有出现在 Deepin 启动器里——为什么？
 
@@ -401,7 +415,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 | **最新版本** | 1.1.50（2026-10-16）——最新版本见 [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **安装包** | `.deb`（amd64）、一行安装脚本、Deepin 应用商店；其他发行版从源码构建 |
 | **界面语言** | 英文，另有 12 种翻译：简体中文、俄语、西班牙语、法语、德语、巴西葡萄牙语、土耳其语、越南语、印尼语、印地语、孟加拉语和罗马尼亚语 |
-| **用户规模** | 来自 127 个国家/地区的 2,500+ 名用户 |
+| **用户规模** | 来自 128 个国家/地区的 3,000+ 名用户 |
 | **维护者** | Dibbayajyoti Roy |
 | **源代码** | <https://github.com/DibbayajyotiRoy/fresco> |
 | **官网** | <https://fresco.dibbayajyoti.com> |
@@ -416,4 +430,4 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ---
 
-<sub>Fresco 是一款免费开源的 Linux 动态壁纸与视频壁纸软件（支持 X11 与 Wayland），带有绘制进壁纸的歌词、时钟、音频可视化和专辑封面挂件。它是原生 Linux 平台上 Wallpaper Engine 的替代品，也可作为 Conky 之类工具在音乐与时间展示上的补充。已有 127 个国家/地区的 2,500+ 人在使用。最后更新：2026-10-16。</sub>
+<sub>Fresco 是一款免费开源的 Linux 动态壁纸与视频壁纸软件（支持 X11 与 Wayland），带有绘制进壁纸的歌词、时钟、音频可视化和专辑封面挂件。它是原生 Linux 平台上 Wallpaper Engine 的替代品，也可作为 Conky 之类工具在音乐与时间展示上的补充。已有 128 个国家/地区的 3,000+ 人在使用。最后更新：2026-10-16。</sub>

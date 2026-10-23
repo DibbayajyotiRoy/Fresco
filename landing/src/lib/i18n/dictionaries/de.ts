@@ -116,7 +116,7 @@ export const de: Dictionary = {
     platforms:
       "Jeder X11-Desktop (Ubuntu, Pop!_OS, Linux Mint, Debian, Kali Linux) sowie Wayland-Compositoren mit layer-shell: COSMIC, Hyprland, Sway, KDE Plasma 6. Unter GNOME mit Wayland gibt es nur ein Standbild, bis eine Fresco-Erweiterung für GNOME erscheint.",
     widgets:
-      "Vier Widgets, die in den Hintergrund selbst gezeichnet werden statt in ein Fenster: zeitsynchroner Songtext, eine Uhr mit sechs Designs, ein Audio-Visualizer und das Albumcover auf einer drehenden Schallplatte. Nichts schwebt über deinen Fenstern, nichts fängt einen Klick ab. Alle sind standardmäßig aus. Unter GNOME mit Wayland nicht verfügbar, da es dort keine Fläche für animierte Hintergründe gibt.",
+      "Fünf Widgets, die in den Hintergrund selbst gezeichnet werden statt in ein Fenster: zeitsynchroner Songtext, eine Uhr mit acht Designs, eine Weltuhr, ein Audio-Visualizer und das Albumcover auf einer drehenden Schallplatte. Nichts schwebt über deinen Fenstern, außer du schaltest den optionalen Modus der Weltuhr ein, in dem sie über den Fenstern schwebt, und nichts fängt einen Klick ab. Alle sind standardmäßig aus. Unter GNOME mit Wayland nicht verfügbar, da es dort keine Fläche für animierte Hintergründe gibt.",
     licenseLead: "GPL-3.0, für immer kostenlos.",
     licenseLink: "Quellcode auf GitHub",
     licenseTail: "Gebaut mit Rust, GTK4 und mpv.",
@@ -126,6 +126,14 @@ export const de: Dictionary = {
     kicker: "Funktionen",
     title: "Jedes Medium. Jeder Monitor. Kein CPU-Drama.",
     lead: "Fresco setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe unter X11 und Wayland, dekodiert auf der GPU, sodass ein bewegter Hintergrund etwa so viel kostet wie ein statischer.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Fünf Desktop-Widgets, in den Hintergrund gezeichnet.",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "Weltuhr",
+      body:
+        "Mehrere Städte auf einmal, als schlichter 12-Stunden-Text mit weichem Schatten und ohne Karte dahinter. Wähle beliebige Zeitzonen und beschrifte jede einzeln. Sie wird einmal pro Minute neu gezeichnet, und ein optionaler Modus lässt sie über deinen Fenstern schweben, Klicks gehen dabei hindurch.",
+    },
     manifest: (n: number) => `Manifest: ${n} Funktionen`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
@@ -158,6 +166,20 @@ export const de: Dictionary = {
           "Kuratierte, lizenzierte Hintergründe direkt in der App durchsuchen (Menü, dann Hintergründe durchsuchen) und mit zwei Klicks setzen. Ein direkter Link lässt sich ebenfalls einfügen.",
         status: "In der App",
       },
+      linkedFolders: {
+        tag: "Ordner",
+        title: "Ordner verknüpfen",
+        description:
+          "Nutze einen vorhandenen Hintergrundordner (Bilder, GIFs und Videos), ohne ihn zu importieren. Er bleibt synchron, wenn du Dateien hinzufügst oder entfernst, Unterordner sind optional, und deine Favoriten und Änderungen bleiben pro Datei erhalten.",
+        status: "Ohne Import",
+      },
+      bigLibrary: {
+        tag: "Bibliothek",
+        title: "Tausende Hintergründe",
+        description:
+          "Die Bibliothek zeichnet nur, was auf dem Bildschirm zu sehen ist. Eine Testbibliothek mit 4.000 Hintergründen öffnete sich in etwa 2 Sekunden und brauchte rund 325 MB, zuvor waren es 9 bis 13 Sekunden und 1,6 GB.",
+        status: "Bei Bedarf",
+      },
       video: {
         tag: "Video · GIF",
         title: "Video- und GIF-Hintergründe",
@@ -169,7 +191,7 @@ export const de: Dictionary = {
         tag: "Diashow",
         title: "Diashows mit Übergängen",
         description:
-          "Einen Bildordner mit Überblendung, Ausblenden oder Ken Burns durchwechseln.",
+          "Einen Bildordner mit Übergängen durchwechseln: über Schwarz überblenden, Ken Burns, Zoom oder Weichzeichnen.",
         status: "4 Übergänge",
       },
       playlist: {
@@ -183,7 +205,7 @@ export const de: Dictionary = {
         tag: "Songtext · Uhr",
         title: "Songtext- und Uhr-Widget",
         description:
-          "Zeitsynchroner Songtext zu allem, was über MPRIS läuft (zuerst lokale .lrc, dann LRCLIB), und eine Uhr in einem von sechs Designs. In den Hintergrund gezeichnet, also schwebt nichts über deinen Fenstern. Standardmäßig aus.",
+          "Zeitsynchroner Songtext zu allem, was über MPRIS läuft (zuerst lokale .lrc, dann LRCLIB), eine Uhr in einem von acht Designs und eine Weltuhr für mehrere Städte gleichzeitig. In den Hintergrund gezeichnet, also schwebt nichts über deinen Fenstern, außer du schaltest den optionalen Schwebemodus der Weltuhr ein. Standardmäßig aus.",
         status: "Standardmäßig aus",
       },
       visualiser: {
@@ -296,8 +318,8 @@ export const de: Dictionary = {
         body: "Die aktuelle Zeile, im Takt zu allem, was über MPRIS läuft. Zuerst lokale .lrc-Dateien, dann LRCLIB. Vier Voreinstellungen und ein Sync-Versatz.",
       },
       clock: {
-        title: "Uhr, sechs Designs",
-        body: "Digital, Minimal, Segment, Stacked, Wordy und Card, eine transluzente Fläche mit gezeichnetem Analogzifferblatt. 12 oder 24 Stunden, Datum optional.",
+        title: "Uhr, acht Designs",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS und ein Sperrbildschirm-Zifferblatt im Smartphone-Stil. 12 oder 24 Stunden, Datum optional.",
       },
       visualizer: {
         title: "Audio-Visualizer",
@@ -457,7 +479,15 @@ export const de: Dictionary = {
       },
       {
         q: "Welche Medienformate werden unterstützt?",
-        a: "Video in Schleife (mp4, webm, mkv, avi, mov), animierte GIFs, statische Bilder (jpg, png, webp), ein Bildordner als Diashow mit Überblendung, Ausblenden, Schieben oder Ken Burns, sowie Playlists mit mehreren Videos.",
+        a: "Video in Schleife (mp4, webm, mkv, avi, mov), animierte GIFs, statische Bilder (jpg, png, webp), ein Bildordner als Diashow mit Übergängen (über Schwarz überblenden, Ken Burns, Zoom oder Weichzeichnen), sowie Playlists mit mehreren Videos.",
+      },
+      {
+        q: "Kann Fresco meinen vorhandenen Hintergrundordner nutzen, ohne ihn zu importieren?",
+        a: "Ja. Wähle im Menü Ordner verknüpfen… (oder nach Ordner hinzufügen die Option Diesen Ordner verknüpfen), um Fresco auf einen Ordner zu richten, in dem du ohnehin Hintergründe aufbewahrst. Seine Bilder, GIFs und Videos erscheinen in einem eigenen Abschnitt deiner Bibliothek, dort, wo sie liegen, ohne importiert zu werden, und die Bibliothek bleibt synchron, wenn du in diesem Ordner Dateien hinzufügst oder entfernst. Unterordner einschließen ist optional (bis zu vier Ebenen tief), und deine Favoriten und Änderungen werden pro Datei gespeichert. Fehlt der Ordner, etwa weil ein Laufwerk abgezogen wurde, bleibt sein Abschnitt als „(nicht verfügbar)“ markiert und kehrt von selbst zurück. Verknüpfung aufheben im Menü des Abschnitts entfernt den Abschnitt, ohne Dateien zu löschen. Hinzufügen importiert einzelne Dateien weiterhin wie bisher.",
+      },
+      {
+        q: "Kommt Fresco mit Tausenden von Hintergründen klar?",
+        a: "Ja. Die Bibliothek baut nur die Karten der Hintergründe auf, die in der Nähe deiner Scrollposition liegen, statt alle auf einmal, deshalb bremst auch eine große Sammlung die App nicht aus. Mit einer Testbibliothek aus 4.000 Hintergründen (je zur Hälfte Bilder und Videos) erschien die Bibliothek nach etwa 2 Sekunden statt nach 9 bis 13, und die App brauchte rund 325 MB Arbeitsspeicher statt 1,6 GB. Diese Werte stammen von einem Entwicklungs-Build unter Last auf einem einzelnen Rechner, nimm sie also als Richtwert und nicht als Zusage.",
       },
       {
         q: "Werden mehrere Monitore unterstützt?",
@@ -489,11 +519,11 @@ export const de: Dictionary = {
       },
       {
         q: "Gibt es unter Linux Desktop-Widgets wie Conky?",
-        a: "Ja, und Fresco bringt vier davon mit, die weder Panel noch Erweiterung noch Unterstützung deines Desktops brauchen: synchroner Songtext, eine Uhr mit sechs Designs, ein Audio-Visualizer mit fünf Stilen und das Cover des laufenden Titels auf einer drehenden Schallplatte. Sie werden in den Hintergrund selbst gezeichnet statt in ein Fenster, liegen also nie über deinen Fenstern, fangen nie einen Klick ab und funktionieren auch auf Desktops ohne eigene Widget-Ebene, darunter COSMIC, Hyprland und Sway. Alle vier sind standardmäßig aus. Anders als bei Conky gibt es noch keine Systemmonitor-Widgets, also keine Anzeigen für CPU, RAM oder Netzwerk. GNOME unter Wayland ist der einzige Ort, an dem die Widgets nicht laufen können, weil dort keine Fläche für animierte Hintergründe zum Zeichnen existiert.",
+        a: "Ja, und Fresco bringt fünf davon mit, die weder Panel noch Erweiterung noch Unterstützung deines Desktops brauchen: synchroner Songtext, eine Uhr mit acht Designs, eine Weltuhr für mehrere Städte gleichzeitig, ein Audio-Visualizer mit fünf Stilen und das Cover des laufenden Titels auf einer drehenden Schallplatte. Sie werden in den Hintergrund selbst gezeichnet statt in ein Fenster, liegen also hinter deinen Fenstern, fangen nie einen Klick ab und funktionieren auch auf Desktops ohne eigene Widget-Ebene, darunter COSMIC, Hyprland und Sway. Die einzige Ausnahme ist der optionale Modus der Weltuhr, der sie über alle Apps hebt, wobei Klicks hindurchgehen. Alle fünf sind standardmäßig aus. Anders als bei Conky gibt es noch keine Systemmonitor-Widgets, also keine Anzeigen für CPU, RAM oder Netzwerk. GNOME unter Wayland ist der einzige Ort, an dem die Widgets nicht laufen können, weil dort keine Fläche für animierte Hintergründe zum Zeichnen existiert.",
       },
       {
         q: "Kann ich einen Musik-Visualizer auf dem Desktophintergrund bekommen?",
-        a: "Ja. Frescos Audio-Visualizer reagiert auf alles, was dein System abspielt, in einem von fünf Stilen (Bars, Mirror, Wave, Dots, Ring) mit Farbwähler, Zweifarbverlauf oder Regenbogen. Er ist standardmäßig aus und fragt beim ersten Aktivieren um Zustimmung, weil er deine Audioausgabe mithören muss. Mit laufender Musik und allen vier aktivierten Widgets lag der gemessene Aufwand bei 0,8 % eines CPU-Kerns, fast vollständig durch die Audioaufnahme, denn neu gezeichnet wird nur, was sich inhaltlich geändert hat.",
+        a: "Ja. Frescos Audio-Visualizer reagiert auf alles, was dein System abspielt, in einem von fünf Stilen (Bars, Mirror, Wave, Dots, Ring) mit Farbwähler, Zweifarbverlauf oder Regenbogen. Er ist standardmäßig aus und fragt beim ersten Aktivieren um Zustimmung, weil er deine Audioausgabe mithören muss. Mit laufender Musik und aktivierten Songtext-, Uhr-, Visualizer- und Albumcover-Widgets lag der gemessene Aufwand bei 0,8 % eines CPU-Kerns, fast vollständig durch die Audioaufnahme, denn neu gezeichnet wird nur, was sich inhaltlich geändert hat.",
       },
       {
         q: "Gibt es Fresco im deepin App Store?",
@@ -506,9 +536,19 @@ export const de: Dictionary = {
     ],
   },
 
+  report: {
+    title: "Ein Problem melden",
+    lead: "Fehler gefunden oder eine Idee? Sag es uns auf GitHub.",
+    tipBefore: "Nenne deinen Desktop, die Fresco-Version und die Ausgabe von ",
+    tipAfter: ".",
+    bug: "Fehler melden",
+    feature: "Funktion vorschlagen",
+  },
+
   footer: {
     github: "GitHub",
     license: "Lizenz",
+    reportIssue: "Problem melden",
     tagline: "Rust + GTK4 + mpv",
     sound: "Ton umschalten",
   },
@@ -516,7 +556,7 @@ export const de: Dictionary = {
   featureList: [
     "Eingebauter Katalog kuratierter, lizenzierter Hintergründe",
     "Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe",
-    "In den Hintergrund gezeichnete Widgets: synchroner Songtext, Uhr, Audio-Visualizer, Albumcover",
+    "In den Hintergrund gezeichnete Widgets: synchroner Songtext, Uhr, Weltuhr, Audio-Visualizer, Albumcover",
     "Hintergründe über eine direkte URL hinzufügen",
     "Tag- und Nachtzeitpläne (dazu Zeitfenster und Sonnenstand über die Konfiguration)",
     "Hintergrund pro Bildschirm über die Oberfläche",
@@ -526,8 +566,10 @@ export const de: Dictionary = {
     "Läuft unter X11 und auf Wayland-Compositoren mit layer-shell",
     "Editor zum Zuschneiden per Ziehen und 90-Grad-Drehen",
     "Ton und Lautstärke pro Hintergrund",
-    "Diashow-Übergänge (Überblendung, Ausblenden, Schieben, Ken Burns)",
+    "Diashow-Übergänge (über Schwarz überblenden, Ken Burns, Zoom, Weichzeichnen)",
     "Hintergrundbibliothek mit Suche",
+    "Ordner verknüpfen: vorhandenen Hintergrundordner ohne Import nutzen, bleibt bei Dateiänderungen synchron",
+    "Bibliothek bleibt auch mit Tausenden Hintergründen schnell",
     "Unterschiedlicher Hintergrund pro Monitor",
     "Pause im Akkubetrieb und automatische Pause bei Vollbild",
     "Stellt sich beim Anmelden automatisch wieder her",
@@ -535,5 +577,5 @@ export const de: Dictionary = {
   ],
 
   softwareDescription:
-    "Fresco ist eine kostenlose Open-Source-App für animierte Hintergründe unter Linux. Sie setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe als bewegten Desktophintergrund mit hardwarebeschleunigter Wiedergabe und kann vier Desktop-Widgets in den Hintergrund selbst zeichnen: zeitsynchronen Songtext, eine Uhr, einen Audio-Visualizer und das Albumcover auf einer drehenden Schallplatte. Eine kostenlose Wallpaper-Engine-Alternative für Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux und elementary OS, unter X11 und auf Wayland-Compositoren mit layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
+    "Fresco ist eine kostenlose Open-Source-App für animierte Hintergründe unter Linux. Sie setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe als bewegten Desktophintergrund mit hardwarebeschleunigter Wiedergabe und kann fünf Desktop-Widgets in den Hintergrund selbst zeichnen: zeitsynchronen Songtext, eine Uhr, eine Weltuhr, einen Audio-Visualizer und das Albumcover auf einer drehenden Schallplatte. Eine kostenlose Wallpaper-Engine-Alternative für Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux und elementary OS, unter X11 und auf Wayland-Compositoren mit layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
 };

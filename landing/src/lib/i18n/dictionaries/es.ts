@@ -116,7 +116,7 @@ export const es: Dictionary = {
     platforms:
       "Cualquier escritorio X11 (Ubuntu, Pop!_OS, Linux Mint, Debian, Kali Linux), además de los compositores Wayland con layer-shell: COSMIC, Hyprland, Sway y KDE Plasma 6. En GNOME con Wayland solo muestra un fotograma estático hasta que llegue una extensión de Fresco para GNOME.",
     widgets:
-      "Cuatro widgets dibujados en el propio fondo de pantalla, no en una ventana: letras de canciones sincronizadas, un reloj con seis temas, un visualizador de audio y la portada del álbum en un disco que gira. Nada flota sobre tus ventanas y nada intercepta un clic. Todos vienen desactivados. No están disponibles en GNOME con Wayland, que no tiene superficie de fondo animado.",
+      "Cinco widgets dibujados en el propio fondo de pantalla, no en una ventana: letras de canciones sincronizadas, un reloj con ocho temas, un reloj mundial, un visualizador de audio y la portada del álbum en un disco que gira. Nada flota sobre tus ventanas, salvo que actives el modo opcional del reloj mundial que lo hace flotar por encima, y nada intercepta un clic. Todos vienen desactivados. No están disponibles en GNOME con Wayland, que no tiene superficie de fondo animado.",
     licenseLead: "GPL-3.0, gratis para siempre.",
     licenseLink: "Código en GitHub",
     licenseTail: "Hecho con Rust, GTK4 y mpv.",
@@ -126,6 +126,14 @@ export const es: Dictionary = {
     kicker: "Funciones",
     title: "Cualquier medio. Cualquier monitor. Sin dramas de CPU.",
     lead: "Fresco pone fondos de pantalla en vídeo, GIF, imagen, presentación y lista de reproducción en X11 y Wayland, decodificados en la GPU, de modo que un fondo animado cuesta casi lo mismo que uno estático.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Cinco widgets, pintados en el fondo de pantalla.",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "Reloj mundial",
+      body:
+        "Varias ciudades a la vez, como texto sencillo de 12 horas con una sombra suave y sin tarjeta detrás. Elige las zonas horarias que quieras y ponle nombre a cada una. Se redibuja una vez por minuto, y un modo opcional lo hace flotar sobre tus ventanas dejando pasar los clics.",
+    },
     manifest: (n: number) => `Manifiesto: ${n} funciones`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",
@@ -158,6 +166,20 @@ export const es: Dictionary = {
           "Explora fondos seleccionados y con licencia dentro de la aplicación (menú y luego Explorar fondos) y pon uno en dos clics. También puedes pegar un enlace directo.",
         status: "En la app",
       },
+      linkedFolders: {
+        tag: "Carpetas",
+        title: "Vincular carpeta",
+        description:
+          "Usa una carpeta de fondos que ya tengas (imágenes, GIF y vídeos) sin importarla. Se mantiene sincronizada cuando añades o quitas archivos, las subcarpetas son opcionales y tus favoritos y ediciones se guardan por archivo.",
+        status: "Sin importar",
+      },
+      bigLibrary: {
+        tag: "Biblioteca",
+        title: "Miles de fondos",
+        description:
+          "La biblioteca solo dibuja lo que se ve en pantalla. Una biblioteca de prueba con 4000 fondos se abrió en unos 2 segundos y usó unos 325 MB, frente a los 9 a 13 segundos y 1,6 GB de antes.",
+        status: "Bajo demanda",
+      },
       video: {
         tag: "Vídeo · GIF",
         title: "Fondos en vídeo y GIF",
@@ -169,7 +191,7 @@ export const es: Dictionary = {
         tag: "Presentación",
         title: "Presentaciones con transiciones",
         description:
-          "Rota una carpeta de imágenes con fundido cruzado, fundido o Ken Burns.",
+          "Rota una carpeta de imágenes con desvanecer a negro, Ken Burns, acercamiento o desenfoque.",
         status: "4 transiciones",
       },
       playlist: {
@@ -183,7 +205,7 @@ export const es: Dictionary = {
         tag: "Letras · reloj",
         title: "Widgets de letra y reloj",
         description:
-          "Letras sincronizadas con lo que suene a través de MPRIS (primero el .lrc local, luego LRCLIB) y un reloj en uno de seis temas. Se dibujan en el fondo, así que nada flota sobre tus ventanas. Desactivados por defecto.",
+          "Letras sincronizadas con lo que suene a través de MPRIS (primero el .lrc local, luego LRCLIB), un reloj en uno de ocho temas y un reloj mundial para varias ciudades a la vez. Se dibujan en el fondo, así que nada flota sobre tus ventanas, salvo que actives el modo opcional del reloj mundial que lo hace flotar. Desactivados por defecto.",
         status: "Desactivado por defecto",
       },
       visualiser: {
@@ -296,8 +318,8 @@ export const es: Dictionary = {
         body: "La línea actual, al ritmo de lo que suene a través de MPRIS. Primero archivos .lrc locales, luego LRCLIB. Cuatro ajustes predefinidos y un desfase de sincronía.",
       },
       clock: {
-        title: "Reloj, seis temas",
-        body: "Digital, Minimal, Segment, Stacked, Wordy y Card, un panel translúcido con una esfera analógica dibujada. 12 o 24 horas, fecha opcional.",
+        title: "Reloj, ocho temas",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS y una esfera de pantalla de bloqueo al estilo de un teléfono. 12 o 24 horas, fecha opcional.",
       },
       visualizer: {
         title: "Visualizador de audio",
@@ -457,7 +479,15 @@ export const es: Dictionary = {
       },
       {
         q: "¿Qué formatos de medios son compatibles?",
-        a: "Vídeo en bucle (mp4, webm, mkv, avi, mov), GIF animados, imágenes estáticas (jpg, png, webp), una carpeta de imágenes como presentación con transiciones de fundido cruzado, fundido, deslizamiento o Ken Burns, y listas de reproducción con varios vídeos.",
+        a: "Vídeo en bucle (mp4, webm, mkv, avi, mov), GIF animados, imágenes estáticas (jpg, png, webp), una carpeta de imágenes como presentación con transiciones (desvanecer a negro, Ken Burns, acercamiento o desenfoque), y listas de reproducción con varios vídeos.",
+      },
+      {
+        q: "¿Puede Fresco usar mi carpeta de fondos existente sin importarla?",
+        a: "Sí. Elige Vincular carpeta… en el menú (o Vincular esta carpeta después de Agregar carpeta) para indicarle a Fresco una carpeta donde ya guardas fondos. Sus imágenes, GIF y vídeos aparecen en tu biblioteca, en una sección propia, donde están y sin importarse, y la biblioteca se mantiene sincronizada cuando añades o quitas archivos en esa carpeta. Incluir subcarpetas es opcional (hasta cuatro niveles de profundidad), y tus favoritos y ediciones se recuerdan por archivo. Si la carpeta deja de estar disponible, por ejemplo por desconectar una unidad, su sección sigue marcada como «(no disponible)» y vuelve sola. Desvincular carpeta, en el menú de la sección, quita la sección sin borrar ningún archivo. Agregar sigue importando archivos sueltos como siempre.",
+      },
+      {
+        q: "¿Puede Fresco manejar miles de fondos?",
+        a: "Sí. La biblioteca solo construye las tarjetas de los fondos cercanos a donde estás desplazándote, en lugar de todos a la vez, así que una colección grande no sobrecarga la aplicación. Con una biblioteca de prueba de 4000 fondos (mitad imágenes, mitad vídeos), la biblioteca apareció en unos 2 segundos en lugar de 9 a 13, y la aplicación usó unos 325 MB de memoria en lugar de 1,6 GB. Esas cifras proceden de una compilación de desarrollo con carga en una sola máquina, así que tómalas como orientación y no como una promesa.",
       },
       {
         q: "¿Admite varios monitores?",
@@ -489,11 +519,11 @@ export const es: Dictionary = {
       },
       {
         q: "¿Linux tiene widgets de escritorio como Conky?",
-        a: "Sí, y Fresco añade cuatro que no necesitan panel, ni extensión, ni soporte de tu escritorio: letras sincronizadas, un reloj con seis temas, un visualizador de audio con cinco estilos y la portada de la pista actual en un disco que gira. Se pintan en el propio fondo en vez de en una ventana, así que nunca quedan por encima de tus ventanas, nunca interceptan un clic y funcionan en escritorios que no tienen capa de widgets propia, incluidos COSMIC, Hyprland y Sway. Los cuatro vienen desactivados. A diferencia de Conky todavía no hay widgets de monitorización del sistema, así que no hay lecturas de CPU, RAM o red. GNOME con Wayland es el único sitio donde los widgets no pueden funcionar, porque no hay superficie de fondo animado sobre la que dibujar.",
+        a: "Sí, y Fresco añade cinco que no necesitan panel, ni extensión, ni soporte de tu escritorio: letras sincronizadas, un reloj con ocho temas, un reloj mundial para varias ciudades a la vez, un visualizador de audio con cinco estilos y la portada de la pista actual en un disco que gira. Se pintan en el propio fondo en vez de en una ventana, así que quedan detrás de tus ventanas, nunca interceptan un clic y funcionan en escritorios que no tienen capa de widgets propia, incluidos COSMIC, Hyprland y Sway. La única excepción es el modo opcional del reloj mundial, que lo sitúa por encima de todas las aplicaciones dejando pasar los clics. Los cinco vienen desactivados. A diferencia de Conky todavía no hay widgets de monitorización del sistema, así que no hay lecturas de CPU, RAM o red. GNOME con Wayland es el único sitio donde los widgets no pueden funcionar, porque no hay superficie de fondo animado sobre la que dibujar.",
       },
       {
         q: "¿Puedo tener un visualizador de música en el fondo de escritorio?",
-        a: "Sí. El visualizador de audio de Fresco reacciona a lo que esté reproduciendo tu sistema, en uno de cinco estilos (Bars, Mirror, Wave, Dots, Ring) con selector de color, mezcla de dos colores o arcoíris. Viene desactivado y pide consentimiento la primera vez que lo activas, porque tiene que escuchar tu salida de audio. Con música sonando y los cuatro widgets encendidos, el coste medido fue del 0,8% de un núcleo de CPU, casi todo por la captura de audio, porque nada se redibuja salvo que su contenido cambie.",
+        a: "Sí. El visualizador de audio de Fresco reacciona a lo que esté reproduciendo tu sistema, en uno de cinco estilos (Bars, Mirror, Wave, Dots, Ring) con selector de color, mezcla de dos colores o arcoíris. Viene desactivado y pide consentimiento la primera vez que lo activas, porque tiene que escuchar tu salida de audio. Con música sonando y los widgets de letras, reloj, visualizador y portada de álbum encendidos, el coste medido fue del 0,8% de un núcleo de CPU, casi todo por la captura de audio, porque nada se redibuja salvo que su contenido cambie.",
       },
       {
         q: "¿Está Fresco en la tienda de apps de deepin?",
@@ -506,9 +536,19 @@ export const es: Dictionary = {
     ],
   },
 
+  report: {
+    title: "Informar de un problema",
+    lead: "¿Encontraste un error o tienes una idea? Cuéntanoslo en GitHub.",
+    tipBefore: "Incluye tu escritorio, la versión de Fresco y la salida de ",
+    tipAfter: ".",
+    bug: "Informar de un error",
+    feature: "Sugerir una función",
+  },
+
   footer: {
     github: "GitHub",
     license: "Licencia",
+    reportIssue: "Informar de un problema",
     tagline: "Rust + GTK4 + mpv",
     sound: "Activar o silenciar el sonido",
   },
@@ -516,7 +556,7 @@ export const es: Dictionary = {
   featureList: [
     "Catálogo integrado de fondos seleccionados y con licencia",
     "Fondos en vídeo, GIF, imagen, presentación y lista de reproducción",
-    "Widgets dibujados en el fondo: letras sincronizadas, reloj, visualizador de audio, portada del álbum",
+    "Widgets dibujados en el fondo: letras sincronizadas, reloj, reloj mundial, visualizador de audio, portada del álbum",
     "Añadir fondos desde una URL directa",
     "Horarios de fondo de día y noche (más franjas horarias y modo solar desde la configuración)",
     "Fondo por pantalla desde la interfaz gráfica",
@@ -526,8 +566,10 @@ export const es: Dictionary = {
     "Funciona en X11 y en compositores Wayland con layer-shell",
     "Editor de recorte arrastrando y rotación de 90 grados",
     "Sonido y volumen por fondo de pantalla",
-    "Transiciones de presentación (fundido cruzado, fundido, deslizamiento, Ken Burns)",
+    "Transiciones de presentación (desvanecer a negro, Ken Burns, acercamiento, desenfoque)",
     "Biblioteca de fondos con búsqueda",
+    "Vincular carpeta: usar una carpeta de fondos existente sin importarla, sincronizada cuando cambian los archivos",
+    "Biblioteca ágil incluso con miles de fondos",
     "Un fondo distinto en cada monitor",
     "Pausa con batería y pausa automática a pantalla completa",
     "Se restaura automáticamente al iniciar sesión",
@@ -535,5 +577,5 @@ export const es: Dictionary = {
   ],
 
   softwareDescription:
-    "Fresco es una aplicación gratuita y de código abierto de fondos de pantalla animados para Linux. Pone fondos en vídeo, GIF, imagen, presentación y lista de reproducción como fondo de escritorio animado, con reproducción acelerada por hardware, y puede dibujar cuatro widgets en el propio fondo: letras sincronizadas, un reloj, un visualizador de audio y la portada del álbum en un disco que gira. Una alternativa gratuita a Wallpaper Engine para Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux y elementary OS, en X11 y en compositores Wayland con layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
+    "Fresco es una aplicación gratuita y de código abierto de fondos de pantalla animados para Linux. Pone fondos en vídeo, GIF, imagen, presentación y lista de reproducción como fondo de escritorio animado, con reproducción acelerada por hardware, y puede dibujar cinco widgets en el propio fondo: letras sincronizadas, un reloj, un reloj mundial, un visualizador de audio y la portada del álbum en un disco que gira. Una alternativa gratuita a Wallpaper Engine para Pop!_OS, Ubuntu, Linux Mint, Debian, Kali Linux y elementary OS, en X11 y en compositores Wayland con layer-shell (COSMIC, Hyprland, Sway, KDE Plasma 6).",
 };

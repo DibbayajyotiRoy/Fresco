@@ -352,6 +352,10 @@ impl LockRuntime {
         let now_locked = self.monitor.current().is_locked();
         if now_locked != self.locked {
             self.locked = now_locked;
+            // Desktop widgets are cleared on a lock and stay down until the
+            // unlock; with no line here a widget that "never came back" could
+            // not be told apart from one that was never told to.
+            log::info!("lock: session is now {:?}", self.monitor.current());
             return Some(now_locked);
         }
         None
@@ -3382,6 +3386,21 @@ fn run_wayland_layershell() -> Result<()> {
             if now.duration_since(last_fs_poll) >= FS_POLL {
                 last_fs_poll = now;
                 let now_hidden = w.fullscreen_connectors(config.pause_on_maximized);
+                if now_hidden != hidden {
+                    // The Wayland twin of the X11 loop's "detected"/"cleared"
+                    // lines: a covered output pauses and takes no widget
+                    // pushes, so a report of "widgets stopped" needs this.
+                    fn sorted(s: &HashSet<String>) -> Vec<&str> {
+                        let mut v: Vec<&str> = s.iter().map(String::as_str).collect();
+                        v.sort_unstable();
+                        v
+                    }
+                    log::info!(
+                        "covered outputs (fullscreen/maximized window): {:?} -> {:?}",
+                        sorted(&hidden),
+                        sorted(&now_hidden)
+                    );
+                }
                 if hidden.iter().any(|c| !now_hidden.contains(c)) {
                     widget_engine.invalidate(); // overlays skipped while covered
                 }
@@ -3407,6 +3426,10 @@ fn run_wayland_layershell() -> Result<()> {
         let generations: u64 = outputs.values().map(|o| o.generation).sum();
         if generations != last_generations {
             last_generations = generations;
+            log::info!(
+                "widgets: a renderer was (re)started; re-pushing overlays on {} output(s)",
+                outputs.len()
+            );
             widget_engine.invalidate();
             // A respawned mpvpaper has no overlays for the lock engine's
             // `Desktop` target either — same reasoning, same fix.

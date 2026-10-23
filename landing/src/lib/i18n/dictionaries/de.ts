@@ -126,6 +126,8 @@ export const de: Dictionary = {
     kicker: "Funktionen",
     title: "Jedes Medium. Jeder Monitor. Kein CPU-Drama.",
     lead: "Fresco setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe unter X11 und Wayland, dekodiert auf der GPU, sodass ein bewegter Hintergrund etwa so viel kostet wie ein statischer.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Fünf Desktop-Widgets, in den Hintergrund gezeichnet.",
     manifest: (n: number) => `Manifest: ${n} Funktionen`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

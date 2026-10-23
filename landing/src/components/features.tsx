@@ -122,7 +122,7 @@ export function Features({ dict }: { dict: Dictionary }) {
                 data-reveal="fade"
                 className="max-w-3xl font-display text-display-sm text-ink [overflow-wrap:anywhere]"
               >
-                {dict.whatsNew.title}
+                {dict.features.widgetsTitle}
               </h3>
               <a
                 href={`${GITHUB_URL}/blob/main/CHANGELOG.md`}

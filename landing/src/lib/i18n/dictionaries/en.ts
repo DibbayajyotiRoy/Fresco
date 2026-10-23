@@ -136,6 +136,8 @@ export const en = {
     kicker: "Features",
     title: "Any media. Any monitor. No CPU drama.",
     lead: "Fresco sets video, GIF, image, slideshow, and playlist wallpapers on X11 and Wayland, decoded on the GPU so a live wallpaper costs about as much as a static one.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Five desktop widgets, painted into the wallpaper.",
     manifest: (n: number) => `Manifest: ${n} capabilities`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

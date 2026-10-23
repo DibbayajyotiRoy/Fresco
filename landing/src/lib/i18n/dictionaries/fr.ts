@@ -126,6 +126,8 @@ export const fr: Dictionary = {
     kicker: "Fonctionnalités",
     title: "N'importe quel média. N'importe quel écran. Sans drame côté CPU.",
     lead: "Fresco met des fonds d'écran vidéo, GIF, image, diaporama et playlist sous X11 et Wayland, décodés sur le GPU, si bien qu'un fond animé coûte à peu près autant qu'un fond fixe.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Cinq widgets de bureau, peints dans le fond d'écran.",
     manifest: (n: number) => `Manifeste : ${n} fonctionnalités`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

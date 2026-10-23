@@ -126,6 +126,8 @@ export const ptBr: Dictionary = {
     kicker: "Recursos",
     title: "Qualquer mídia. Qualquer monitor. Sem drama de CPU.",
     lead: "O Fresco define papéis de parede em vídeo, GIF, imagem, apresentação de slides e playlist no X11 e no Wayland, decodificados na GPU, de modo que um papel de parede animado custa quase o mesmo que um estático.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Cinco widgets, pintados no papel de parede.",
     manifest: (n: number) => `Manifesto: ${n} recursos`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

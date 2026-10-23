@@ -123,6 +123,8 @@ export const ja: Dictionary = {
     kicker: "機能",
     title: "どんなメディアも。どのモニターでも。CPU は静かなまま。",
     lead: "Fresco は動画・GIF・画像・スライドショー・プレイリストを X11 と Wayland の壁紙に設定します。デコードは GPU が担当するため、ライブ壁紙のコストは静止画とほぼ同じです。",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "壁紙に描かれる、5 つのデスクトップ ウィジェット。",
     manifest: (n: number) => `マニフェスト: ${n} 機能`,
     /** Sentence-final mark after each row title. */
     titleSuffix: "。",

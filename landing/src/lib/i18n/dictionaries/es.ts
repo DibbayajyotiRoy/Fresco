@@ -126,6 +126,8 @@ export const es: Dictionary = {
     kicker: "Funciones",
     title: "Cualquier medio. Cualquier monitor. Sin dramas de CPU.",
     lead: "Fresco pone fondos de pantalla en vídeo, GIF, imagen, presentación y lista de reproducción en X11 y Wayland, decodificados en la GPU, de modo que un fondo animado cuesta casi lo mismo que uno estático.",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "Cinco widgets, pintados en el fondo de pantalla.",
     manifest: (n: number) => `Manifiesto: ${n} funciones`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

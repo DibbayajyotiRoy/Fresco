@@ -119,6 +119,8 @@ export const zhCn: Dictionary = {
     kicker: "功能",
     title: "任意媒体，任意显示器，CPU 毫无压力。",
     lead: "Fresco 可在 X11 与 Wayland 上设置视频、GIF、图片、幻灯片和播放列表壁纸，解码全部交给 GPU，因此动态壁纸的开销与静态壁纸相差无几。",
+    /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
+    widgetsTitle: "五个桌面组件，直接画进壁纸里。",
     manifest: (n: number) => `功能清单：${n} 项`,
     /** Sentence-final mark after each row title. */
     titleSuffix: "。",

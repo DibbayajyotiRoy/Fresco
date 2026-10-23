@@ -182,7 +182,7 @@ export const zhCn: Dictionary = {
       slideshow: {
         tag: "幻灯片",
         title: "带转场的幻灯片",
-        description: "用交叉淡化、淡入淡出或 Ken Burns 效果轮播一个图片文件夹。",
+        description: "用淡入黑场再淡出、Ken Burns、推近或虚化效果轮播一个图片文件夹。",
         status: "4 种转场",
       },
       playlist: {
@@ -307,8 +307,8 @@ export const zhCn: Dictionary = {
         body: "当前这一行，与 MPRIS 上正在播放的内容保持同步。优先读取本地 .lrc 文件，其次使用 LRCLIB。提供四种预设和同步偏移。",
       },
       clock: {
-        title: "时钟，六种主题",
-        body: "Digital、Minimal、Segment、Stacked、Wordy，以及带手绘指针表盘的半透明面板 Card。支持 12/24 小时制，日期可选。",
+        title: "时钟，八种主题",
+        body: "Digital、Minimal、Segment、Stacked、Wordy、Card、NOS，以及手机锁屏风格的 Lock screen 表盘。支持 12/24 小时制，日期可选。",
       },
       visualizer: {
         title: "音频可视化",
@@ -466,7 +466,7 @@ export const zhCn: Dictionary = {
       },
       {
         q: "支持哪些媒体格式？",
-        a: "循环播放的视频（mp4、webm、mkv、avi、mov）、动态 GIF、静态图片（jpg、png、webp）、把图片文件夹作为幻灯片播放（支持交叉淡化、淡入淡出、滑动和 Ken Burns 转场），以及多视频播放列表。",
+        a: "循环播放的视频（mp4、webm、mkv、avi、mov）、动态 GIF、静态图片（jpg、png、webp）、把图片文件夹作为幻灯片播放（支持淡入黑场再淡出、Ken Burns、推近和虚化转场），以及多视频播放列表。",
       },
       {
         q: "Fresco 能直接使用我现有的壁纸文件夹而不用导入吗？",
@@ -553,7 +553,7 @@ export const zhCn: Dictionary = {
     "支持 X11 与 Wayland layer-shell 合成器",
     "拖动裁剪与 90 度旋转编辑器",
     "逐张壁纸的声音与音量设置",
-    "幻灯片转场（交叉淡化、淡入淡出、滑动、Ken Burns）",
+    "幻灯片转场（淡入黑场再淡出、Ken Burns、推近、虚化）",
     "带搜索的壁纸库",
     "无需导入即可关联现有壁纸文件夹，文件变化时自动同步",
     "数千张壁纸也流畅的壁纸库",

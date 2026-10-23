@@ -191,7 +191,7 @@ export const fr: Dictionary = {
         tag: "Diaporama",
         title: "Diaporamas avec transitions",
         description:
-          "Fais défiler un dossier d'images en fondu enchaîné, fondu ou Ken Burns.",
+          "Fais défiler un dossier d'images avec un fondu au noir, Ken Burns, un zoom ou un flou.",
         status: "4 transitions",
       },
       playlist: {
@@ -318,8 +318,8 @@ export const fr: Dictionary = {
         body: "La ligne en cours, en rythme avec ce qui passe via MPRIS. D'abord les fichiers .lrc locaux, puis LRCLIB. Quatre préréglages et un décalage de synchronisation.",
       },
       clock: {
-        title: "Horloge, six thèmes",
-        body: "Digital, Minimal, Segment, Stacked, Wordy et Card, un panneau translucide avec un cadran analogique dessiné. 12 ou 24 heures, date facultative.",
+        title: "Horloge, huit thèmes",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS et un affichage d'écran de verrouillage façon téléphone. 12 ou 24 heures, date facultative.",
       },
       visualizer: {
         title: "Visualiseur audio",
@@ -479,7 +479,7 @@ export const fr: Dictionary = {
       },
       {
         q: "Quels formats de média sont pris en charge ?",
-        a: "Vidéo en boucle (mp4, webm, mkv, avi, mov), GIF animés, images fixes (jpg, png, webp), un dossier d'images en diaporama avec transitions fondu enchaîné, fondu, glissement ou Ken Burns, et des playlists de plusieurs vidéos.",
+        a: "Vidéo en boucle (mp4, webm, mkv, avi, mov), GIF animés, images fixes (jpg, png, webp), un dossier d'images en diaporama avec transitions (fondu au noir, Ken Burns, zoom ou flou), et des playlists de plusieurs vidéos.",
       },
       {
         q: "Fresco peut-il utiliser mon dossier de fonds d'écran existant sans l'importer ?",
@@ -566,7 +566,7 @@ export const fr: Dictionary = {
     "Fonctionne sous X11 et sur les compositeurs Wayland avec layer-shell",
     "Éditeur de recadrage par glisser et rotation de 90 degrés",
     "Son et volume par fond d'écran",
-    "Transitions de diaporama (fondu enchaîné, fondu, glissement, Ken Burns)",
+    "Transitions de diaporama (fondu au noir, Ken Burns, zoom, flou)",
     "Bibliothèque de fonds d'écran avec recherche",
     "Lier un dossier de fonds d'écran existant sans l'importer, synchronisé quand les fichiers changent",
     "Bibliothèque fluide même avec des milliers de fonds d'écran",

@@ -191,7 +191,7 @@ export const es: Dictionary = {
         tag: "Presentación",
         title: "Presentaciones con transiciones",
         description:
-          "Rota una carpeta de imágenes con fundido cruzado, fundido o Ken Burns.",
+          "Rota una carpeta de imágenes con desvanecer a negro, Ken Burns, acercamiento o desenfoque.",
         status: "4 transiciones",
       },
       playlist: {
@@ -318,8 +318,8 @@ export const es: Dictionary = {
         body: "La línea actual, al ritmo de lo que suene a través de MPRIS. Primero archivos .lrc locales, luego LRCLIB. Cuatro ajustes predefinidos y un desfase de sincronía.",
       },
       clock: {
-        title: "Reloj, seis temas",
-        body: "Digital, Minimal, Segment, Stacked, Wordy y Card, un panel translúcido con una esfera analógica dibujada. 12 o 24 horas, fecha opcional.",
+        title: "Reloj, ocho temas",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS y una esfera de pantalla de bloqueo al estilo de un teléfono. 12 o 24 horas, fecha opcional.",
       },
       visualizer: {
         title: "Visualizador de audio",
@@ -479,7 +479,7 @@ export const es: Dictionary = {
       },
       {
         q: "¿Qué formatos de medios son compatibles?",
-        a: "Vídeo en bucle (mp4, webm, mkv, avi, mov), GIF animados, imágenes estáticas (jpg, png, webp), una carpeta de imágenes como presentación con transiciones de fundido cruzado, fundido, deslizamiento o Ken Burns, y listas de reproducción con varios vídeos.",
+        a: "Vídeo en bucle (mp4, webm, mkv, avi, mov), GIF animados, imágenes estáticas (jpg, png, webp), una carpeta de imágenes como presentación con transiciones (desvanecer a negro, Ken Burns, acercamiento o desenfoque), y listas de reproducción con varios vídeos.",
       },
       {
         q: "¿Puede Fresco usar mi carpeta de fondos existente sin importarla?",
@@ -566,7 +566,7 @@ export const es: Dictionary = {
     "Funciona en X11 y en compositores Wayland con layer-shell",
     "Editor de recorte arrastrando y rotación de 90 grados",
     "Sonido y volumen por fondo de pantalla",
-    "Transiciones de presentación (fundido cruzado, fundido, deslizamiento, Ken Burns)",
+    "Transiciones de presentación (desvanecer a negro, Ken Burns, acercamiento, desenfoque)",
     "Biblioteca de fondos con búsqueda",
     "Vincular una carpeta de fondos existente sin importarla, sincronizada cuando cambian los archivos",
     "Biblioteca ágil incluso con miles de fondos",

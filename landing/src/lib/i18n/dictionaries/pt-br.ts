@@ -191,7 +191,7 @@ export const ptBr: Dictionary = {
         tag: "Slides",
         title: "Apresentações com transições",
         description:
-          "Alterne uma pasta de imagens com crossfade, fade ou Ken Burns.",
+          "Alterne uma pasta de imagens com esmaecer para preto, Ken Burns, zoom ou desfoque.",
         status: "4 transições",
       },
       playlist: {
@@ -318,8 +318,8 @@ export const ptBr: Dictionary = {
         body: "A linha atual, em sincronia com o que estiver tocando via MPRIS. Primeiro arquivos .lrc locais, depois o LRCLIB. Quatro predefinições e ajuste de sincronia.",
       },
       clock: {
-        title: "Relógio, seis temas",
-        body: "Digital, Minimal, Segment, Stacked, Wordy e Card, um painel translúcido com mostrador analógico desenhado. 12 ou 24 horas, data opcional.",
+        title: "Relógio, oito temas",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS e um visual de tela de bloqueio ao estilo de celular. 12 ou 24 horas, data opcional.",
       },
       visualizer: {
         title: "Visualizador de áudio",
@@ -479,7 +479,7 @@ export const ptBr: Dictionary = {
       },
       {
         q: "Quais formatos de mídia são suportados?",
-        a: "Vídeo em loop (mp4, webm, mkv, avi, mov), GIFs animados, imagens estáticas (jpg, png, webp), uma pasta de imagens como apresentação de slides com transições crossfade, fade, slide ou Ken Burns, e playlists com vários vídeos.",
+        a: "Vídeo em loop (mp4, webm, mkv, avi, mov), GIFs animados, imagens estáticas (jpg, png, webp), uma pasta de imagens como apresentação de slides com transições (esmaecer para preto, Ken Burns, zoom ou desfoque), e playlists com vários vídeos.",
       },
       {
         q: "O Fresco pode usar minha pasta de papéis de parede existente sem importar?",
@@ -566,7 +566,7 @@ export const ptBr: Dictionary = {
     "Funciona no X11 e em compositores Wayland com layer-shell",
     "Editor de recorte por arrasto e rotação de 90 graus",
     "Som e volume por papel de parede",
-    "Transições de apresentação (crossfade, fade, slide, Ken Burns)",
+    "Transições de apresentação (esmaecer para preto, Ken Burns, zoom, desfoque)",
     "Biblioteca de papéis de parede com busca",
     "Vincular uma pasta de papéis de parede existente sem importá-la, sincronizada quando os arquivos mudam",
     "Biblioteca ágil mesmo com milhares de papéis de parede",

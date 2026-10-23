@@ -200,7 +200,7 @@ export const en = {
         tag: "Slideshow",
         title: "Slideshows with transitions",
         description:
-          "Rotate a folder of images with crossfade, fade, or Ken Burns.",
+          "Rotate a folder of images with a fade through black, Ken Burns, zoom, or blur.",
         status: "4 transitions",
       },
       playlist: {
@@ -325,8 +325,8 @@ export const en = {
         body: "The current line, in time with whatever is playing over MPRIS. Local .lrc files first, then LRCLIB. Four presets and a sync offset.",
       },
       clock: {
-        title: "Clock, six themes",
-        body: "Digital, Minimal, Segment, Stacked, Wordy, and Card, a translucent panel with a drawn analog face. 12 or 24-hour, optional date.",
+        title: "Clock, eight themes",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS, and a phone-style Lock screen face. 12 or 24-hour, optional date.",
       },
       visualizer: {
         title: "Audio visualiser",
@@ -487,7 +487,7 @@ export const en = {
       },
       {
         q: "What media formats are supported?",
-        a: "Looping video (mp4, webm, mkv, avi, mov), animated GIFs, static images (jpg, png, webp), a folder of images as a slideshow with crossfade, fade, slide, or Ken Burns transitions, and multi-video playlists.",
+        a: "Looping video (mp4, webm, mkv, avi, mov), animated GIFs, static images (jpg, png, webp), a folder of images as a slideshow with fade through black, Ken Burns, zoom, or blur transitions, and multi-video playlists.",
       },
       {
         q: "Can Fresco use my existing wallpaper folder without importing?",
@@ -575,7 +575,7 @@ export const en = {
     "Works on X11 and Wayland layer-shell compositors",
     "Drag-to-crop and 90-degree rotate editor",
     "Per-wallpaper sound and volume",
-    "Slideshow transitions (crossfade, fade, slide, Ken Burns)",
+    "Slideshow transitions (fade through black, Ken Burns, zoom, blur)",
     "Wallpaper library with search",
     "Link an existing wallpaper folder without importing it, kept in sync as files change",
     "Library that stays quick with thousands of wallpapers",

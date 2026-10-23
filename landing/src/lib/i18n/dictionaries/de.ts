@@ -191,7 +191,7 @@ export const de: Dictionary = {
         tag: "Diashow",
         title: "Diashows mit Übergängen",
         description:
-          "Einen Bildordner mit Überblendung, Ausblenden oder Ken Burns durchwechseln.",
+          "Einen Bildordner mit Übergängen durchwechseln: über Schwarz überblenden, Ken Burns, Zoom oder Weichzeichnen.",
         status: "4 Übergänge",
       },
       playlist: {
@@ -318,8 +318,8 @@ export const de: Dictionary = {
         body: "Die aktuelle Zeile, im Takt zu allem, was über MPRIS läuft. Zuerst lokale .lrc-Dateien, dann LRCLIB. Vier Voreinstellungen und ein Sync-Versatz.",
       },
       clock: {
-        title: "Uhr, sechs Designs",
-        body: "Digital, Minimal, Segment, Stacked, Wordy und Card, eine transluzente Fläche mit gezeichnetem Analogzifferblatt. 12 oder 24 Stunden, Datum optional.",
+        title: "Uhr, acht Designs",
+        body: "Digital, Minimal, Segment, Stacked, Wordy, Card, NOS und ein Sperrbildschirm-Zifferblatt im Smartphone-Stil. 12 oder 24 Stunden, Datum optional.",
       },
       visualizer: {
         title: "Audio-Visualizer",
@@ -479,7 +479,7 @@ export const de: Dictionary = {
       },
       {
         q: "Welche Medienformate werden unterstützt?",
-        a: "Video in Schleife (mp4, webm, mkv, avi, mov), animierte GIFs, statische Bilder (jpg, png, webp), ein Bildordner als Diashow mit Überblendung, Ausblenden, Schieben oder Ken Burns, sowie Playlists mit mehreren Videos.",
+        a: "Video in Schleife (mp4, webm, mkv, avi, mov), animierte GIFs, statische Bilder (jpg, png, webp), ein Bildordner als Diashow mit Übergängen (über Schwarz überblenden, Ken Burns, Zoom oder Weichzeichnen), sowie Playlists mit mehreren Videos.",
       },
       {
         q: "Kann Fresco meinen vorhandenen Hintergrundordner nutzen, ohne ihn zu importieren?",
@@ -566,7 +566,7 @@ export const de: Dictionary = {
     "Läuft unter X11 und auf Wayland-Compositoren mit layer-shell",
     "Editor zum Zuschneiden per Ziehen und 90-Grad-Drehen",
     "Ton und Lautstärke pro Hintergrund",
-    "Diashow-Übergänge (Überblendung, Ausblenden, Schieben, Ken Burns)",
+    "Diashow-Übergänge (über Schwarz überblenden, Ken Burns, Zoom, Weichzeichnen)",
     "Hintergrundbibliothek mit Suche",
     "Vorhandenen Hintergrundordner ohne Import verknüpfen, bleibt bei Dateiänderungen synchron",
     "Bibliothek bleibt auch mit Tausenden Hintergründen schnell",

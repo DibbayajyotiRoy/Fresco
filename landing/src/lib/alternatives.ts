@@ -79,7 +79,7 @@ export const ALTERNATIVES: Alternative[] = [
     lead: "Hidamari is a friendly GTK app for video wallpapers on GNOME. Fresco covers the same ground and adds hardware-accelerated mpv playback, a crop and rotate editor, a searchable wallpaper library, playlists, slideshow transitions, and a Wayland layer-shell backend.",
     body: [
       "Hidamari is a solid, GNOME-focused choice for looping a video on your desktop. Where it stops is where Fresco keeps going: Fresco decodes through mpv with VA-API or NVDEC for genuinely low CPU, and it treats wallpapers as a managed library with thumbnails, a recently-used row, and search rather than a single current file.",
-      "Fresco also adds editing and variety. You can drag a crop frame, rotate a sideways clip 90 degrees, set per-wallpaper sound and volume, run a folder of images as a slideshow with crossfade or Ken Burns transitions, or queue several clips as a playlist. On multi-monitor setups you can give each display its own wallpaper.",
+      "Fresco also adds editing and variety. You can drag a crop frame, rotate a sideways clip 90 degrees, set per-wallpaper sound and volume, run a folder of images as a slideshow with fade-through-black, Ken Burns, zoom or blur transitions, or queue several clips as a playlist. On multi-monitor setups you can give each display its own wallpaper.",
       "Both are free and open source, so trying Fresco costs nothing. If Hidamari already does what you need on GNOME, keep it; if you want more control and lower CPU, Fresco is the step up.",
     ],
     reasons: [

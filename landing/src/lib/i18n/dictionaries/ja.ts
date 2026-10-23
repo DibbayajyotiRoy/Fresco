@@ -188,7 +188,7 @@ export const ja: Dictionary = {
         tag: "スライドショー",
         title: "トランジション付きスライドショー",
         description:
-          "フォルダー内の画像を、クロスフェード・フェード・Ken Burns で切り替え。",
+          "フォルダー内の画像を、黒を経由するフェード・Ken Burns・ズーム・ぼかしで切り替え。",
         status: "4 種のトランジション",
       },
       playlist: {
@@ -314,8 +314,8 @@ export const ja: Dictionary = {
         body: "MPRIS で再生中の曲に合わせて、いま歌われている行を表示。まずローカルの .lrc、次に LRCLIB。4 つのプリセットと同期オフセット付き。",
       },
       clock: {
-        title: "時計、6 テーマ",
-        body: "Digital、Minimal、Segment、Stacked、Wordy、そして描画されたアナログ文字盤を載せた半透明パネルの Card。12/24 時間表示、日付表示は任意。",
+        title: "時計、8 テーマ",
+        body: "Digital、Minimal、Segment、Stacked、Wordy、Card、NOS、そしてスマートフォンのロック画面風の Lock screen。12/24 時間表示、日付表示は任意。",
       },
       visualizer: {
         title: "オーディオ ビジュアライザー",
@@ -474,7 +474,7 @@ export const ja: Dictionary = {
       },
       {
         q: "対応しているメディア形式は？",
-        a: "ループ再生する動画（mp4、webm、mkv、avi、mov）、アニメーション GIF、静止画（jpg、png、webp）、画像フォルダーをクロスフェード・フェード・スライド・Ken Burns のトランジション付きスライドショーとして再生、そして複数動画のプレイリストです。",
+        a: "ループ再生する動画（mp4、webm、mkv、avi、mov）、アニメーション GIF、静止画（jpg、png、webp）、画像フォルダーを、黒を経由するフェード・Ken Burns・ズーム・ぼかしのトランジション付きスライドショーとして再生、そして複数動画のプレイリストです。",
       },
       {
         q: "既存の壁紙フォルダーを、インポートせずにそのまま使えますか？",
@@ -561,7 +561,7 @@ export const ja: Dictionary = {
     "X11 と Wayland layer-shell コンポジタで動作",
     "ドラッグ切り抜きと 90 度回転のエディター",
     "壁紙ごとの音声と音量",
-    "スライドショーのトランジション（クロスフェード、フェード、スライド、Ken Burns）",
+    "スライドショーのトランジション（黒を経由するフェード、Ken Burns、ズーム、ぼかし）",
     "検索付きの壁紙ライブラリ",
     "既存の壁紙フォルダーをインポートせずにリンク（ファイルの変更に同期）",
     "数千枚の壁紙でも軽快なライブラリ",

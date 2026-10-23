@@ -215,7 +215,11 @@ mod tests {
         let own = library::LibraryEntry::new_video(PathBuf::from("/own.mp4"));
         let mut entries = vec![own];
         linked::append_all(&mut entries, &[photos.clone(), gone.clone()]);
-        assert_eq!(entries.len(), 3, "two media files; the missing folder adds none");
+        assert_eq!(
+            entries.len(),
+            3,
+            "two media files; the missing folder adds none"
+        );
 
         let pool = window::display_order(
             &entries,

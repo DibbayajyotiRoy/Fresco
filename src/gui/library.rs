@@ -1812,7 +1812,13 @@ mod tests {
         let json = serde_json::to_string(&cs).unwrap();
         assert!(!json.contains("status") && !json.contains("Ready"));
         let back: Vec<Collection> = serde_json::from_str(&json).unwrap();
-        let link = back.iter().find(|c| c.id == id).unwrap().link.clone().unwrap();
+        let link = back
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap()
+            .link
+            .clone()
+            .unwrap();
         assert_eq!(link.path, PathBuf::from("/mnt/photos"));
         assert!(link.recursive);
         assert_eq!(link.status, LinkStatus::Scanning);

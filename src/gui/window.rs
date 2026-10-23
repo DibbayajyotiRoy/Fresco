@@ -2003,9 +2003,7 @@ fn plan_sections(
                 // A single scope IS a single group, so the arrows are honest
                 // here — but only while nothing is re-deriving the order, and
                 // a linked folder mirrors the disk instead of being arranged.
-                reorderable: view.sort.is_manual()
-                    && view.collection.is_some()
-                    && linked.is_none(),
+                reorderable: view.sort.is_manual() && view.collection.is_some() && linked.is_none(),
                 ids: sorted(all),
                 linked: linked.map(str::to_string),
             });
@@ -2597,7 +2595,12 @@ fn build_linked_note(
         ),
     };
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    section.append(&section_header(&title, first_section, state, Some(&folder.id)));
+    section.append(&section_header(
+        &title,
+        first_section,
+        state,
+        Some(&folder.id),
+    ));
     let note = gtk4::Label::new(Some(&text));
     note.add_css_class("dialog-sub");
     note.set_wrap(true);

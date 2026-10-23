@@ -26,9 +26,9 @@ use anyhow::{Context, Result};
 use gtk4::{gio, glib, prelude::*};
 use serde::{Deserialize, Serialize};
 
+use super::import_queue;
 use super::library::{self, Collection, LibraryEntry, Link, LinkStatus};
 use super::window::{show_toast, AppState};
-use super::import_queue;
 use crate::config::{PowerSaving, Transition};
 use crate::{media, tf};
 
@@ -211,7 +211,11 @@ pub fn append_all(entries: &mut Vec<LibraryEntry>, collections: &[Collection]) {
 /// while the scan ran is not undone), new files are added, vanished ones are
 /// dropped. A rename is a vanish plus an add. A file whose modification time
 /// moved also gets its thumbnail and size refreshed.
-pub fn sync_source(entries: &mut Vec<LibraryEntry>, source: &str, fresh: Vec<LibraryEntry>) -> bool {
+pub fn sync_source(
+    entries: &mut Vec<LibraryEntry>,
+    source: &str,
+    fresh: Vec<LibraryEntry>,
+) -> bool {
     let mine = |e: &LibraryEntry| e.collection.as_deref() == Some(source);
     {
         let have: HashMap<&str, &LibraryEntry> = entries
@@ -227,9 +231,8 @@ pub fn sync_source(entries: &mut Vec<LibraryEntry>, source: &str, fresh: Vec<Lib
             return false;
         }
     }
-    let (old, mut rest): (Vec<_>, Vec<_>) = std::mem::take(entries)
-        .into_iter()
-        .partition(|e| mine(e));
+    let (old, mut rest): (Vec<_>, Vec<_>) =
+        std::mem::take(entries).into_iter().partition(|e| mine(e));
     let mut old: HashMap<String, LibraryEntry> =
         old.into_iter().map(|e| (e.id.clone(), e)).collect();
     rest.extend(fresh.into_iter().map(|f| match old.remove(&f.id) {
@@ -605,7 +608,13 @@ fn is_content_event(event: gio::FileMonitorEvent) -> bool {
     use gio::FileMonitorEvent as E;
     matches!(
         event,
-        E::Created | E::Deleted | E::ChangesDoneHint | E::Renamed | E::MovedIn | E::MovedOut | E::Unmounted
+        E::Created
+            | E::Deleted
+            | E::ChangesDoneHint
+            | E::Renamed
+            | E::MovedIn
+            | E::MovedOut
+            | E::Unmounted
     )
 }
 
@@ -655,7 +664,13 @@ mod tests {
         let mut v: Vec<String> = scan
             .files
             .iter()
-            .map(|f| f.path.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .map(|f| {
+                f.path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         v.sort();
         v
@@ -666,25 +681,39 @@ mod tests {
         let dir = tree(
             "filter",
             &[
-                "a.jpg", "b.PNG", "c.webp", "d.gif", "e.mp4", "f.webm", "g.mkv", "h.mov",
-                "i.avi", "notes.txt", "noext", ".hidden.jpg", ".cache/x.png", "sub/s.jpg",
+                "a.jpg",
+                "b.PNG",
+                "c.webp",
+                "d.gif",
+                "e.mp4",
+                "f.webm",
+                "g.mkv",
+                "h.mov",
+                "i.avi",
+                "notes.txt",
+                "noext",
+                ".hidden.jpg",
+                ".cache/x.png",
+                "sub/s.jpg",
             ],
         );
         let flat = scan(&link(&dir, false)).unwrap();
         assert_eq!(
             names(&flat, &dir),
-            [
-                "a.jpg", "b.PNG", "c.webp", "d.gif", "e.mp4", "f.webm", "g.mkv", "h.mov",
-                "i.avi"
-            ]
+            ["a.jpg", "b.PNG", "c.webp", "d.gif", "e.mp4", "f.webm", "g.mkv", "h.mov", "i.avi"]
         );
-        assert_eq!(flat.dirs, [dir.clone()], "a flat scan reads only the root");
+        assert_eq!(
+            flat.dirs,
+            std::slice::from_ref(&dir),
+            "a flat scan reads only the root"
+        );
 
         let deep = scan(&link(&dir, true)).unwrap();
         let got = names(&deep, &dir);
         assert!(got.contains(&"sub/s.jpg".to_string()));
         assert!(
-            !got.iter().any(|n| n.contains(".cache") || n.contains("hidden")),
+            !got.iter()
+                .any(|n| n.contains(".cache") || n.contains("hidden")),
             "hidden files and folders stay out: {got:?}"
         );
         assert_eq!(deep.dirs.len(), 2, "root and sub");
@@ -697,7 +726,12 @@ mod tests {
     fn scan_depth_is_bounded_and_a_missing_root_is_none() {
         let dir = tree("depth", &["1/2/3/4/5/deep.jpg", "1/2/ok.jpg"]);
         let got = names(&scan(&link(&dir, true)).unwrap(), &dir);
-        assert_eq!(got, ["1/2/ok.jpg"], "{} levels at most", media::MAX_SCAN_DEPTH);
+        assert_eq!(
+            got,
+            ["1/2/ok.jpg"],
+            "{} levels at most",
+            media::MAX_SCAN_DEPTH
+        );
         assert!(scan(&link(&dir.join("missing"), true)).is_none());
         fs::remove_dir_all(&dir).ok();
     }
@@ -724,13 +758,20 @@ mod tests {
 
     #[test]
     fn built_entries_are_sorted_stable_and_probed() {
-        let files = vec![found("/p/b.mp4", 1), found("/p/A.png", 2), found("/p/c.gif", 3)];
+        let files = vec![
+            found("/p/b.mp4", 1),
+            found("/p/A.png", 2),
+            found("/p/c.gif", 3),
+        ];
         let built = build("src", files.clone(), &TweakMap::new());
         let names: Vec<&str> = built.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["A", "b", "c"]);
         assert_eq!(built.iter().map(|e| e.order).collect::<Vec<_>>(), [0, 1, 2]);
         assert!(built.iter().all(|e| e.collection.as_deref() == Some("src")));
-        assert!(built.iter().all(|e| !e.needs_probe()), "size is known from the scan");
+        assert!(
+            built.iter().all(|e| !e.needs_probe()),
+            "size is known from the scan"
+        );
         assert_eq!(built[0].added, 2);
         // Same files in another order give the same ids.
         let mut shuffled = files;
@@ -767,16 +808,26 @@ mod tests {
 
     #[test]
     fn only_changed_files_are_stored_and_reverting_forgets_them() {
-        let mut built = build("s", vec![found("/p/a.png", 1), found("/p/b.png", 1)], &TweakMap::new());
+        let mut built = build(
+            "s",
+            vec![found("/p/a.png", 1), found("/p/b.png", 1)],
+            &TweakMap::new(),
+        );
         let mut map = TweakMap::new();
-        assert!(!merge_tweaks(&mut map, &built), "untouched files store nothing");
+        assert!(
+            !merge_tweaks(&mut map, &built),
+            "untouched files store nothing"
+        );
         assert!(map.is_empty());
 
         built[1].favorite = true;
         built[1].name = "Beach".into();
         assert!(merge_tweaks(&mut map, &built));
         assert_eq!(map.len(), 1);
-        assert!(!merge_tweaks(&mut map, &built), "same state is not a change");
+        assert!(
+            !merge_tweaks(&mut map, &built),
+            "same state is not a change"
+        );
 
         // A regular entry is never stored here.
         let own = LibraryEntry::new_video(PathBuf::from("/own.mp4"));
@@ -809,7 +860,8 @@ mod tests {
         let back: TweakMap = serde_json::from_str(&json).unwrap();
         assert_eq!(back, map);
         // A future field or a hand-trimmed entry still loads.
-        let sparse: TweakMap = serde_json::from_str(r#"{"/x.png":{"favorite":true,"new":1}}"#).unwrap();
+        let sparse: TweakMap =
+            serde_json::from_str(r#"{"/x.png":{"favorite":true,"new":1}}"#).unwrap();
         assert!(sparse[Path::new("/x.png")].favorite);
     }
 
@@ -839,8 +891,15 @@ mod tests {
 
         // Unchanged scan: nothing to do, nothing moves.
         let before: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
-        assert!(!sync_source(&mut entries, "s", entries_of("s", &[("/p/a.png", 1), ("/p/b.png", 1)])));
-        assert_eq!(before, entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>());
+        assert!(!sync_source(
+            &mut entries,
+            "s",
+            entries_of("s", &[("/p/a.png", 1), ("/p/b.png", 1)])
+        ));
+        assert_eq!(
+            before,
+            entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>()
+        );
 
         // Added.
         assert!(sync_source(
@@ -851,11 +910,19 @@ mod tests {
         assert_eq!(ids_of(&entries, "s"), ["a", "b", "c"]);
 
         // Removed.
-        assert!(sync_source(&mut entries, "s", entries_of("s", &[("/p/a.png", 1), ("/p/c.png", 1)])));
+        assert!(sync_source(
+            &mut entries,
+            "s",
+            entries_of("s", &[("/p/a.png", 1), ("/p/c.png", 1)])
+        ));
         assert_eq!(ids_of(&entries, "s"), ["a", "c"]);
 
         // Renamed: the old name goes, the new one appears.
-        assert!(sync_source(&mut entries, "s", entries_of("s", &[("/p/a.png", 1), ("/p/z.png", 1)])));
+        assert!(sync_source(
+            &mut entries,
+            "s",
+            entries_of("s", &[("/p/a.png", 1), ("/p/z.png", 1)])
+        ));
         assert_eq!(ids_of(&entries, "s"), ["a", "z"]);
 
         // Other sections and imported entries are untouched.
@@ -882,7 +949,10 @@ mod tests {
 
         let a = entries.iter().find(|e| e.name == "a").unwrap();
         assert!(a.favorite, "the edit survives the rescan");
-        assert!(a.thumbnail.is_some(), "an unchanged file keeps its thumbnail");
+        assert!(
+            a.thumbnail.is_some(),
+            "an unchanged file keeps its thumbnail"
+        );
         let b = entries.iter().find(|e| e.name == "b").unwrap();
         assert!(b.thumbnail.is_none(), "a replaced file is re-thumbnailed");
         assert_eq!((b.added, b.size_bytes), (9, Some(99)));
@@ -913,7 +983,15 @@ mod tests {
     #[test]
     fn only_content_changes_trigger_a_rescan() {
         use gio::FileMonitorEvent as E;
-        for e in [E::Created, E::Deleted, E::ChangesDoneHint, E::Renamed, E::MovedIn, E::MovedOut, E::Unmounted] {
+        for e in [
+            E::Created,
+            E::Deleted,
+            E::ChangesDoneHint,
+            E::Renamed,
+            E::MovedIn,
+            E::MovedOut,
+            E::Unmounted,
+        ] {
             assert!(is_content_event(e), "{e:?}");
         }
         for e in [E::Changed, E::AttributeChanged, E::PreUnmount] {
@@ -926,9 +1004,15 @@ mod tests {
         let flat = link(Path::new("/pics"), false);
         let deep = link(Path::new("/pics"), true);
         assert!(overlaps(&flat, Path::new("/pics"), false));
-        assert!(!overlaps(&flat, Path::new("/pics/sub"), false), "flat link does not see sub");
+        assert!(
+            !overlaps(&flat, Path::new("/pics/sub"), false),
+            "flat link does not see sub"
+        );
         assert!(overlaps(&deep, Path::new("/pics/sub"), false));
-        assert!(overlaps(&flat, Path::new("/"), true), "a recursive parent takes it in");
+        assert!(
+            overlaps(&flat, Path::new("/"), true),
+            "a recursive parent takes it in"
+        );
         assert!(!overlaps(&flat, Path::new("/pics2"), true));
     }
 

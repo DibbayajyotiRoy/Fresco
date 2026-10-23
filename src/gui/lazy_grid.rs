@@ -87,7 +87,11 @@ pub fn plan_pass(
     let keep = visible_range(n, &y_of, item_h, top - 2.0 * view, bottom + 2.0 * view);
     Pass {
         build: want.filter(|i| !built.contains(i)).collect(),
-        drop: built.iter().copied().filter(|i| !keep.contains(i)).collect(),
+        drop: built
+            .iter()
+            .copied()
+            .filter(|i| !keep.contains(i))
+            .collect(),
     }
 }
 

@@ -2727,7 +2727,13 @@ fn build_library_card(
                 .borrow_mut()
                 .get_or_insert_with(|| {
                     let cluster = build_card_actions(
-                        &overlay, &state_a, &stack_a, &id, idx, favorite, reorderable,
+                        &overlay,
+                        &state_a,
+                        &stack_a,
+                        &id,
+                        idx,
+                        favorite,
+                        reorderable,
                     );
                     overlay.add_overlay(&cluster);
                     cluster

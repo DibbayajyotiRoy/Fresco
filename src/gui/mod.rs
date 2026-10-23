@@ -5,6 +5,7 @@ mod hover_preview;
 mod import_queue;
 mod lazy_grid;
 mod library;
+mod linked;
 mod lockscreen;
 mod preview;
 mod preview_proxy;

@@ -9,7 +9,7 @@ authors = ["Dibbayajyoti Roy"]
 
 [features]
 default = ["gui", "daemon"]
-gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel", "dep:semver", "dep:chrono-tz"]
+gui = ["dep:gtk4", "dep:libadwaita", "dep:ureq", "dep:async-channel", "dep:semver", "dep:chrono-tz", "dep:libloading"]
 daemon = [
     "dep:x11rb", "dep:libloading", "dep:nix", "dep:wayland-client",
     "dep:wayland-protocols-wlr", "dep:cosmic-protocols",

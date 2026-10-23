@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::linked;
 use crate::config::{Crop, Fit, Kind, PowerSaving, Slideshow, Transition, Wallpaper};
 use crate::media;
 use crate::{t, tf};
@@ -774,9 +775,20 @@ pub fn save_entries(entries: &[LibraryEntry]) -> Result<()> {
     fs::create_dir_all(&dir)?;
     let path = entries_path();
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_string_pretty(entries)?)?;
+    fs::write(&tmp, entries_json(entries)?)?;
     fs::rename(&tmp, &path)?;
-    Ok(())
+    // Linked files are not stored above; only what the user changed on them is.
+    linked::save_tweaks(entries)
+}
+
+/// The text of `entries.json`: every entry except the files of linked folders,
+/// which are rebuilt from disk on each launch (see [`linked`]).
+fn entries_json(entries: &[LibraryEntry]) -> Result<String> {
+    let own: Vec<&LibraryEntry> = entries
+        .iter()
+        .filter(|e| !linked::is_linked_id(&e.id))
+        .collect();
+    Ok(serde_json::to_string_pretty(&own)?)
 }
 
 /// Up to `limit` entries sorted by most recently used.
@@ -807,6 +819,11 @@ pub struct Collection {
     /// [`renumber_collections`].
     #[serde(default)]
     pub position: u32,
+    /// Set when this section is a folder on disk shown in place rather than a
+    /// group of imported entries (see [`linked`]). Absent from every
+    /// `collections.json` written before linked folders existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<Link>,
 }
 
 impl Collection {
@@ -815,8 +832,32 @@ impl Collection {
             id: make_id(),
             name: name.into(),
             position,
+            link: None,
         }
     }
+}
+
+/// The folder a linked section reads its wallpapers from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Link {
+    pub path: PathBuf,
+    /// Subfolders are part of the section too (bounded by [`media::MAX_SCAN_DEPTH`]).
+    #[serde(default)]
+    pub recursive: bool,
+    /// Whether the last scan could read the folder. Never stored: it is
+    /// re-learned on every launch.
+    #[serde(skip)]
+    pub status: LinkStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkStatus {
+    /// No scan has finished yet.
+    #[default]
+    Scanning,
+    Ready,
+    /// The folder could not be read: an unplugged drive, a deleted folder.
+    Missing,
 }
 
 fn collections_path() -> PathBuf {
@@ -869,6 +910,15 @@ pub fn create_collection(collections: &mut Vec<Collection>, name: &str) -> Strin
     id
 }
 
+/// Add a linked folder as a section at the end of the list; returns its id.
+pub fn create_linked(collections: &mut Vec<Collection>, name: &str, link: Link) -> String {
+    let id = create_collection(collections, name);
+    if let Some(c) = collections.iter_mut().find(|c| c.id == id) {
+        c.link = Some(link);
+    }
+    id
+}
+
 /// Rename a folder in place. Returns false when the id is unknown or the new
 /// name is blank — both are "nothing happened", not errors worth a dialog.
 pub fn rename_collection(collections: &mut [Collection], id: &str, name: &str) -> bool {
@@ -898,7 +948,8 @@ pub fn delete_collection(
     entries: &mut [LibraryEntry],
     id: &str,
 ) -> bool {
-    if !collections.iter().any(|c| c.id == id) {
+    // A linked section has no members to hand back; unlinking is `linked`'s job.
+    if !collections.iter().any(|c| c.id == id && c.link.is_none()) {
         return false;
     }
     let mut members: Vec<usize> = entries
@@ -934,7 +985,8 @@ pub fn assign(entries: &mut [LibraryEntry], entry_ids: &[String], collection_id:
         let Some(e) = entries.iter_mut().find(|e| &e.id == id) else {
             continue;
         };
-        if e.collection.as_deref() == collection_id {
+        // Files of a linked folder live where they are; they cannot be filed.
+        if e.collection.as_deref() == collection_id || linked::is_linked_id(&e.id) {
             continue;
         }
         let from = e.collection.clone();
@@ -1430,7 +1482,7 @@ impl FolderMedia {
     }
 }
 
-fn file_name_key(p: &Path) -> String {
+pub(super) fn file_name_key(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default()
@@ -1739,6 +1791,92 @@ mod tests {
         let cs: Vec<Collection> =
             serde_json::from_str(r#"[{"id":"c1","name":"Space"}]"#).expect("loads");
         assert_eq!(cs[0].position, 0);
+        assert_eq!(cs[0].link, None, "old collections are not linked folders");
+    }
+
+    /// A linked folder is stored as path + recursive flag on its collection;
+    /// the scan status is learned again on every launch, never stored.
+    #[test]
+    fn linked_collections_round_trip_without_runtime_state() {
+        let mut cs = Vec::new();
+        let plain = create_collection(&mut cs, "Space");
+        let id = create_linked(
+            &mut cs,
+            "Photos",
+            Link {
+                path: PathBuf::from("/mnt/photos"),
+                recursive: true,
+                status: LinkStatus::Ready,
+            },
+        );
+        let json = serde_json::to_string(&cs).unwrap();
+        assert!(!json.contains("status") && !json.contains("Ready"));
+        let back: Vec<Collection> = serde_json::from_str(&json).unwrap();
+        let link = back
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap()
+            .link
+            .clone()
+            .unwrap();
+        assert_eq!(link.path, PathBuf::from("/mnt/photos"));
+        assert!(link.recursive);
+        assert_eq!(link.status, LinkStatus::Scanning);
+        assert_eq!(back.iter().find(|c| c.id == plain).unwrap().link, None);
+        // A plain collection serializes exactly as it did before linking existed.
+        assert!(!serde_json::to_string(&back[0]).unwrap().contains("link"));
+        // Hand-written, with the flag left out.
+        let hand: Vec<Collection> =
+            serde_json::from_str(r#"[{"id":"x","name":"N","link":{"path":"/n"}}]"#).unwrap();
+        assert!(!hand[0].link.as_ref().unwrap().recursive);
+    }
+
+    /// Linked files are rebuilt from disk, so none of them may land in
+    /// `entries.json`; a library without any is written byte-for-byte as before.
+    #[test]
+    fn entries_json_leaves_linked_files_out() {
+        let own = vec![
+            LibraryEntry::new_video(PathBuf::from("/a.mp4")),
+            LibraryEntry::new_image(PathBuf::from("/b.png")),
+        ];
+        assert_eq!(
+            entries_json(&own).unwrap(),
+            serde_json::to_string_pretty(&own).unwrap()
+        );
+        let mut mixed = own.clone();
+        let mut l = LibraryEntry::new_image(PathBuf::from("/linked/c.png"));
+        l.id = linked::file_id(Path::new("/linked/c.png"));
+        mixed.push(l);
+        let back: Vec<LibraryEntry> = serde_json::from_str(&entries_json(&mixed).unwrap()).unwrap();
+        assert_eq!(back.len(), 2);
+        assert!(back.iter().all(|e| !linked::is_linked_id(&e.id)));
+    }
+
+    /// Unlinking is the only way out of a linked section, and files in one
+    /// cannot be filed elsewhere: both would otherwise turn linked entries
+    /// into orphans that vanish on the next launch.
+    #[test]
+    fn linked_sections_cannot_be_deleted_or_filed_into() {
+        let mut cs = Vec::new();
+        let id = create_linked(
+            &mut cs,
+            "Photos",
+            Link {
+                path: PathBuf::from("/p"),
+                recursive: false,
+                status: LinkStatus::Ready,
+            },
+        );
+        let mut e = LibraryEntry::new_image(PathBuf::from("/p/a.png"));
+        e.id = linked::file_id(Path::new("/p/a.png"));
+        e.collection = Some(id.clone());
+        let mut entries = vec![e];
+        assert!(!delete_collection(&mut cs, &mut entries, &id));
+        assert_eq!(cs.len(), 1);
+        assert_eq!(entries[0].collection.as_deref(), Some(id.as_str()));
+        let ids = vec![entries[0].id.clone()];
+        assign(&mut entries, &ids, None);
+        assert_eq!(entries[0].collection.as_deref(), Some(id.as_str()));
     }
 
     #[test]

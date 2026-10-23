@@ -168,7 +168,7 @@ export const ptBr: Dictionary = {
       },
       linkedFolders: {
         tag: "Pastas",
-        title: "Vincular uma pasta",
+        title: "Vincular pasta",
         description:
           "Use uma pasta de papéis de parede que você já tem (imagens, GIFs e vídeos) sem importá-la. Ela fica sincronizada quando você adiciona ou remove arquivos, as subpastas são opcionais e seus favoritos e edições são guardados por arquivo.",
         status: "Sem importar",
@@ -483,7 +483,7 @@ export const ptBr: Dictionary = {
       },
       {
         q: "O Fresco pode usar minha pasta de papéis de parede existente sem importar?",
-        a: "Pode. Com Vincular uma pasta, você aponta o Fresco para uma pasta onde já guarda papéis de parede. As imagens, GIFs e vídeos dela aparecem na sua biblioteca onde estão, sem serem importados, e a biblioteca fica sincronizada quando você adiciona ou remove arquivos nessa pasta. As subpastas são opcionais, e seus favoritos e edições são lembrados por arquivo. Adicionar continua importando arquivos individuais, como antes.",
+        a: "Pode. Escolha Vincular pasta… no menu (ou Vincular esta pasta depois de Adicionar pasta) para apontar o Fresco para uma pasta onde você já guarda papéis de parede. As imagens, GIFs e vídeos dela aparecem na sua biblioteca, numa seção própria, onde estão e sem serem importados, e a biblioteca fica sincronizada quando você adiciona ou remove arquivos nessa pasta. Incluir subpastas é opcional (até quatro níveis de profundidade), e seus favoritos e edições são lembrados por arquivo. Se a pasta sumir, por exemplo por causa de um disco desconectado, a seção dela continua marcada como “(indisponível)” e volta sozinha. Desvincular pasta, no menu da seção, remove a seção sem apagar nenhum arquivo. Adicionar continua importando arquivos individuais, como antes.",
       },
       {
         q: "O Fresco aguenta milhares de papéis de parede?",
@@ -568,7 +568,7 @@ export const ptBr: Dictionary = {
     "Som e volume por papel de parede",
     "Transições de apresentação (esmaecer para preto, Ken Burns, zoom, desfoque)",
     "Biblioteca de papéis de parede com busca",
-    "Vincular uma pasta de papéis de parede existente sem importá-la, sincronizada quando os arquivos mudam",
+    "Vincular pasta: usar uma pasta de papéis de parede existente sem importá-la, sincronizada quando os arquivos mudam",
     "Biblioteca ágil mesmo com milhares de papéis de parede",
     "Papel de parede diferente em cada monitor",
     "Pausa na bateria e pausa automática em tela cheia",

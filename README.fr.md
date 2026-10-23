@@ -246,7 +246,7 @@ Oui : GIF animés, images fixes, diaporamas d’images avec transitions (fondu 
 
 ### Fresco peut-il utiliser mon dossier de fonds d’écran existant sans l’importer ?
 
-Oui. Utilisez **Lier un dossier** pour indiquer à Fresco un dossier où vous gardez déjà vos fonds d’écran. Ses images, GIF et vidéos apparaissent dans votre bibliothèque là où ils se trouvent, sans être importés, et la bibliothèque reste synchronisée quand vous ajoutez et retirez des fichiers dans ce dossier. Les sous-dossiers sont facultatifs, et vos favoris et modifications sont mémorisés fichier par fichier. **Ajouter** importe toujours les fichiers individuels comme avant.
+Oui. Choisissez **Lier un dossier…** dans le menu (ou **Lier ce dossier** après **Ajouter un dossier**) pour indiquer à Fresco un dossier où vous gardez déjà vos fonds d’écran. Ses images, GIF et vidéos apparaissent dans votre bibliothèque, dans une section à part, là où ils se trouvent, sans être importés, et la bibliothèque reste synchronisée quand vous ajoutez et retirez des fichiers dans ce dossier. **Inclure les sous-dossiers** est facultatif (jusqu’à quatre niveaux de profondeur), et vos favoris et modifications sont mémorisés fichier par fichier. Si le dossier disparaît, par exemple parce qu’un disque est débranché, sa section reste marquée « (indisponible) » et revient d’elle-même. **Délier le dossier**, dans le menu de la section, retire la section sans supprimer aucun fichier. **Ajouter** importe toujours les fichiers individuels comme avant.
 
 ### Fresco peut-il gérer des milliers de fonds d’écran ?
 

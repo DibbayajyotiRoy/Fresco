@@ -94,7 +94,7 @@ The wallpaper keeps playing after the window closes.
 
 - **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image slideshow, multi-video playlist
 - **Add from a link** — paste a Pinterest pin or any direct video/image URL; Fresco downloads it and opens the crop editor
-- **Link a folder** — use a wallpaper folder you already have (images, GIFs and videos) without importing it; it stays in sync as you add and remove files, subfolders are optional, and your favourites and edits are kept per file
+- **Link folder** — use a wallpaper folder you already have (images, GIFs and videos) without importing it; it stays in sync as you add and remove files, subfolders are optional, and your favourites and edits are kept per file
 - **Big libraries** — the library only draws the wallpapers near your scroll position, so thousands of wallpapers open in about two seconds and use a few hundred megabytes (on a 4,000-wallpaper test library: about 2 s and 325 MB, down from 9 to 13 s and 1.6 GB)
 - **Hardware decode** — GPU video decoding (VA-API / NVDEC) keeps CPU usage near idle by moving the work to the video engine, where it is measurably cheaper (not free — see [Performance](#performance-and-battery-life))
 - **Power saving** — cheaper GPU scaling for laptops; measured to roughly halve GPU power (see [Performance](#performance-and-battery-life))
@@ -246,7 +246,7 @@ Yes — animated GIFs, static images, image slideshows with transitions (fade th
 
 ### Can Fresco use my existing wallpaper folder without importing?
 
-Yes. Use **Link a folder** to point Fresco at a folder you already keep wallpapers in. Its images, GIFs and videos show up in your library where they are, without being imported, and the library stays in sync as you add and remove files in that folder. Subfolders are optional, and your favourites and edits are remembered per file. **Add** still imports individual files as before.
+Yes. Choose **Link folder…** in the menu (or **Link this folder** after **Add folder**) to point Fresco at a folder you already keep wallpapers in. Its images, GIFs and videos show up in your library in a section of their own, where they are and without being imported, and the library stays in sync as you add and remove files in that folder. **Include subfolders** is optional and goes up to four levels deep, and your favourites and edits are remembered per file. If the folder goes missing, for example an unplugged drive, its section stays marked “(unavailable)” and comes back by itself. **Unlink folder**, in the section’s menu, removes the section without deleting any files. **Add** still imports individual files as before.
 
 ### Can Fresco handle thousands of wallpapers?
 

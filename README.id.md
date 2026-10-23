@@ -246,7 +246,7 @@ Ya — GIF animasi, gambar statis, slideshow gambar dengan transisi (memudar ke 
 
 ### Bisakah Fresco memakai folder wallpaper yang sudah ada tanpa mengimpor?
 
-Bisa. Gunakan **Tautkan folder** untuk mengarahkan Fresco ke folder tempat Anda sudah menyimpan wallpaper. Gambar, GIF, dan video di dalamnya muncul di pustaka Anda di tempatnya berada, tanpa diimpor, dan pustaka tetap sinkron saat Anda menambah dan menghapus berkas di folder itu. Subfolder bersifat opsional, dan favorit serta suntingan Anda diingat per berkas. **Tambah** tetap mengimpor berkas satuan seperti sebelumnya.
+Bisa. Pilih **Tautkan folder…** di menu (atau **Tautkan folder ini** setelah **Tambah folder**) untuk mengarahkan Fresco ke folder tempat Anda sudah menyimpan wallpaper. Gambar, GIF, dan video di dalamnya muncul di pustaka Anda dalam bagian tersendiri, di tempatnya berada, tanpa diimpor, dan pustaka tetap sinkron saat Anda menambah dan menghapus berkas di folder itu. **Sertakan subfolder** bersifat opsional (hingga empat tingkat ke dalam), dan favorit serta suntingan Anda diingat per berkas. Jika folder hilang, misalnya karena drive dicabut, bagiannya tetap ditandai “(tidak tersedia)” dan pulih sendiri. **Putuskan tautan folder**, di menu bagian itu, menghapus bagian tersebut tanpa menghapus berkas apa pun. **Tambah** tetap mengimpor berkas satuan seperti sebelumnya.
 
 ### Bisakah Fresco menangani ribuan wallpaper?
 

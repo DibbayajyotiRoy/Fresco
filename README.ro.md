@@ -246,7 +246,7 @@ Da — GIF-uri animate, imagini statice, succesiuni de imagini cu tranziții (fo
 
 ### Poate Fresco să folosească dosarul meu existent cu imagini de fundal fără import?
 
-Da. Folosiți **Asociere dosar** pentru a indica Fresco un dosar în care păstrați deja imagini de fundal. Imaginile, GIF-urile și videoclipurile din el apar în bibliotecă acolo unde se află, fără să fie importate, iar biblioteca rămâne sincronizată pe măsură ce adăugați și eliminați fișiere în acel dosar. Subdosarele sunt opționale, iar favoritele și modificările sunt reținute pentru fiecare fișier. **Adăugare** importă în continuare fișiere individuale, ca înainte.
+Da. Alegeți **Asociere dosar…** din meniu (sau **Asociază acest dosar** după **Adăugare dosar**) pentru a indica Fresco un dosar în care păstrați deja imagini de fundal. Imaginile, GIF-urile și videoclipurile din el apar în bibliotecă, într-o secțiune proprie, acolo unde se află, fără să fie importate, iar biblioteca rămâne sincronizată pe măsură ce adăugați și eliminați fișiere în acel dosar. **Include subdosarele** este opțional (până la patru niveluri de adâncime), iar favoritele și modificările sunt reținute pentru fiecare fișier. Dacă dosarul dispare, de exemplu pentru că unitatea a fost deconectată, secțiunea lui rămâne marcată „(indisponibil)” și revine singură. **Anulare asociere dosar**, din meniul secțiunii, elimină secțiunea fără să șteargă niciun fișier. **Adăugare** importă în continuare fișiere individuale, ca înainte.
 
 ### Poate Fresco să gestioneze mii de imagini de fundal?
 

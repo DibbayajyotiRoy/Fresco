@@ -483,7 +483,7 @@ export const fr: Dictionary = {
       },
       {
         q: "Fresco peut-il utiliser mon dossier de fonds d'écran existant sans l'importer ?",
-        a: "Oui. Avec Lier un dossier, tu indiques à Fresco un dossier où tu ranges déjà tes fonds d'écran. Ses images, GIF et vidéos apparaissent dans ta bibliothèque là où ils se trouvent, sans être importés, et la bibliothèque reste synchronisée quand tu ajoutes ou supprimes des fichiers dans ce dossier. Les sous-dossiers sont facultatifs, et tes favoris et modifications sont mémorisés fichier par fichier. Ajouter continue d'importer des fichiers individuels comme avant.",
+        a: "Oui. Choisis Lier un dossier… dans le menu (ou Lier ce dossier après Ajouter un dossier) pour indiquer à Fresco un dossier où tu ranges déjà tes fonds d'écran. Ses images, GIF et vidéos apparaissent dans ta bibliothèque, dans une section à part, là où ils se trouvent, sans être importés, et la bibliothèque reste synchronisée quand tu ajoutes ou supprimes des fichiers dans ce dossier. Inclure les sous-dossiers est facultatif (jusqu'à quatre niveaux de profondeur), et tes favoris et modifications sont mémorisés fichier par fichier. Si le dossier disparaît, par exemple parce qu'un disque est débranché, sa section reste marquée « (indisponible) » et revient d'elle-même. Délier le dossier, dans le menu de la section, retire la section sans supprimer aucun fichier. Ajouter continue d'importer des fichiers individuels comme avant.",
       },
       {
         q: "Fresco peut-il gérer des milliers de fonds d'écran ?",
@@ -568,7 +568,7 @@ export const fr: Dictionary = {
     "Son et volume par fond d'écran",
     "Transitions de diaporama (fondu au noir, Ken Burns, zoom, flou)",
     "Bibliothèque de fonds d'écran avec recherche",
-    "Lier un dossier de fonds d'écran existant sans l'importer, synchronisé quand les fichiers changent",
+    "Lier un dossier : utiliser un dossier de fonds d'écran existant sans l'importer, synchronisé quand les fichiers changent",
     "Bibliothèque fluide même avec des milliers de fonds d'écran",
     "Un fond d'écran différent par moniteur",
     "Pause sur batterie et pause automatique en plein écran",

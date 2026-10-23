@@ -178,7 +178,7 @@ export const en = {
       },
       linkedFolders: {
         tag: "Folders",
-        title: "Link a folder",
+        title: "Link folder",
         description:
           "Use a wallpaper folder you already have (images, GIFs and videos) without importing it. It stays in sync as you add and remove files, subfolders are optional, and your favourites and edits are kept per file.",
         status: "No import",
@@ -491,7 +491,7 @@ export const en = {
       },
       {
         q: "Can Fresco use my existing wallpaper folder without importing?",
-        a: "Yes. Use Link a folder to point Fresco at a folder you already keep wallpapers in. Its images, GIFs and videos show up in your library where they are, without being imported, and the library stays in sync as you add and remove files in that folder. Subfolders are optional, and your favourites and edits are remembered per file. Add still imports individual files as before.",
+        a: "Yes. Choose Link folder… in the menu (or Link this folder after Add folder) to point Fresco at a folder you already keep wallpapers in. Its images, GIFs and videos show up in your library in a section of their own, where they are and without being imported, and the library stays in sync as you add and remove files in that folder. Include subfolders is optional and goes up to four levels deep, and your favourites and edits are remembered per file. If the folder goes missing, for example an unplugged drive, its section stays marked “(unavailable)” and comes back by itself. Unlink folder, in the section’s menu, removes the section without deleting any files. Add still imports individual files as before.",
       },
       {
         q: "Can Fresco handle thousands of wallpapers?",
@@ -577,7 +577,7 @@ export const en = {
     "Per-wallpaper sound and volume",
     "Slideshow transitions (fade through black, Ken Burns, zoom, blur)",
     "Wallpaper library with search",
-    "Link an existing wallpaper folder without importing it, kept in sync as files change",
+    "Link folder: use an existing wallpaper folder without importing it, kept in sync as files change",
     "Library that stays quick with thousands of wallpapers",
     "Different wallpaper per monitor",
     "Pause on battery and auto-pause on fullscreen",

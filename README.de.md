@@ -246,7 +246,7 @@ Ja – animierte GIFs, Standbilder, Bild-Diashows mit Übergängen (über Schwar
 
 ### Kann Fresco meinen vorhandenen Hintergrundbild-Ordner nutzen, ohne ihn zu importieren?
 
-Ja. Mit **Ordner verknüpfen** weisen Sie Fresco auf einen Ordner, in dem Sie Ihre Hintergrundbilder ohnehin aufbewahren. Dessen Bilder, GIFs und Videos erscheinen dort, wo sie liegen, in Ihrer Bibliothek, ohne importiert zu werden, und die Bibliothek bleibt synchron, wenn Sie in diesem Ordner Dateien hinzufügen oder entfernen. Unterordner sind optional, und Ihre Favoriten und Bearbeitungen werden je Datei gemerkt. **Hinzufügen** importiert einzelne Dateien weiterhin wie bisher.
+Ja. Wählen Sie im Menü **Ordner verknüpfen…** (oder nach **Ordner hinzufügen** die Option **Diesen Ordner verknüpfen**), um Fresco auf einen Ordner zu richten, in dem Sie Ihre Hintergrundbilder ohnehin aufbewahren. Dessen Bilder, GIFs und Videos erscheinen in einem eigenen Abschnitt Ihrer Bibliothek, dort, wo sie liegen, ohne importiert zu werden, und die Bibliothek bleibt synchron, wenn Sie in diesem Ordner Dateien hinzufügen oder entfernen. **Unterordner einschließen** ist optional (bis zu vier Ebenen tief), und Ihre Favoriten und Bearbeitungen werden je Datei gemerkt. Fehlt der Ordner, etwa weil ein Laufwerk abgezogen wurde, bleibt sein Abschnitt als „(nicht verfügbar)“ markiert und kehrt von selbst zurück. **Verknüpfung aufheben** im Menü des Abschnitts entfernt den Abschnitt, ohne Dateien zu löschen. **Hinzufügen** importiert einzelne Dateien weiterhin wie bisher.
 
 ### Kommt Fresco mit Tausenden Hintergrundbildern zurecht?
 

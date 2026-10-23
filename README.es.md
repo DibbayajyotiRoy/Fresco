@@ -94,7 +94,7 @@ El fondo de pantalla sigue reproduciéndose después de cerrar la ventana.
 
 - **Cualquier medio**: video en bucle (mp4/webm/mkv), GIF animado, imagen fija, presentación de imágenes, lista de reproducción con varios videos
 - **Agregar desde un enlace**: pega un pin de Pinterest o cualquier URL directa de video o imagen; Fresco la descarga y abre el editor de recorte
-- **Vincular una carpeta**: usa una carpeta de fondos de pantalla que ya tengas (imágenes, GIF y videos) sin importarla; se mantiene sincronizada cuando agregas y quitas archivos, las subcarpetas son opcionales y tus favoritos y ediciones se conservan por archivo
+- **Vincular carpeta**: usa una carpeta de fondos de pantalla que ya tengas (imágenes, GIF y videos) sin importarla; se mantiene sincronizada cuando agregas y quitas archivos, las subcarpetas son opcionales y tus favoritos y ediciones se conservan por archivo
 - **Bibliotecas grandes**: la biblioteca solo dibuja los fondos de pantalla cercanos a tu posición de desplazamiento, así que miles de fondos de pantalla se abren en unos dos segundos y usan unos cientos de megabytes (en una biblioteca de prueba con 4000 fondos de pantalla: unos 2 s y 325 MB, frente a entre 9 y 13 s y 1.6 GB)
 - **Decodificación por hardware**: la decodificación de video en la GPU (VA-API / NVDEC) mantiene el uso de CPU casi en reposo al trasladar el trabajo al motor de video, donde es mensurablemente más barato (no es gratis; consulta [Rendimiento y duración de la batería](#rendimiento-y-duración-de-la-batería))
 - **Ahorro de energía**: escalado más económico en la GPU para portátiles; medido, reduce a aproximadamente la mitad la potencia de la GPU (consulta [Rendimiento y duración de la batería](#rendimiento-y-duración-de-la-batería))
@@ -246,7 +246,7 @@ Sí: GIF animados, imágenes estáticas, presentaciones de imágenes con transic
 
 ### ¿Puede Fresco usar mi carpeta de fondos de pantalla sin importarla?
 
-Sí. Usa **Vincular una carpeta** para indicarle a Fresco una carpeta donde ya guardas fondos de pantalla. Sus imágenes, GIF y videos aparecen en tu biblioteca donde están, sin importarse, y la biblioteca se mantiene sincronizada cuando agregas y quitas archivos en esa carpeta. Las subcarpetas son opcionales, y tus favoritos y ediciones se recuerdan por archivo. **Agregar** sigue importando archivos sueltos como antes.
+Sí. Elige **Vincular carpeta…** en el menú (o **Vincular esta carpeta** después de **Agregar carpeta**) para indicarle a Fresco una carpeta donde ya guardas fondos de pantalla. Sus imágenes, GIF y videos aparecen en tu biblioteca, en una sección propia, donde están y sin importarse, y la biblioteca se mantiene sincronizada cuando agregas y quitas archivos en esa carpeta. **Incluir subcarpetas** es opcional (hasta cuatro niveles de profundidad), y tus favoritos y ediciones se recuerdan por archivo. Si la carpeta deja de estar disponible, por ejemplo por desconectar una unidad, su sección sigue marcada como «(no disponible)» y vuelve sola. **Desvincular carpeta**, en el menú de la sección, quita la sección sin borrar ningún archivo. **Agregar** sigue importando archivos sueltos como antes.
 
 ### ¿Puede Fresco manejar miles de fondos de pantalla?
 

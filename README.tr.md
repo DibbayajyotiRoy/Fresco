@@ -246,7 +246,7 @@ Evet — video dosyalarına ek olarak animasyonlu GIF’ler, sabit görseller, g
 
 ### Fresco, içe aktarmadan mevcut duvar kağıdı klasörümü kullanabilir mi?
 
-Evet. Fresco’yu duvar kağıtlarınızı zaten sakladığınız bir klasöre yöneltmek için **Klasör bağla**’yı kullanın. Klasördeki görseller, GIF’ler ve videolar içe aktarılmadan, bulundukları yerde kitaplığınızda görünür; o klasöre dosya ekleyip kaldırdıkça kitaplık eşitlenmiş kalır. Alt klasörler isteğe bağlıdır, favorileriniz ve düzenlemeleriniz dosya başına hatırlanır. **Ekle** tek tek dosyaları eskisi gibi içe aktarmaya devam eder.
+Evet. Fresco’yu duvar kağıtlarınızı zaten sakladığınız bir klasöre yöneltmek için menüden **Klasör bağla…** seçeneğini (ya da **Klasör ekle**’den sonra **Bu klasörü bağla**’yı) kullanın. Klasördeki görseller, GIF’ler ve videolar içe aktarılmadan, bulundukları yerde kitaplığınızda ayrı bir bölümde görünür; o klasöre dosya ekleyip kaldırdıkça kitaplık eşitlenmiş kalır. **Alt klasörleri dahil et** isteğe bağlıdır (dört düzeye kadar iner), favorileriniz ve düzenlemeleriniz dosya başına hatırlanır. Klasör ortadan kalkarsa, örneğin sürücü çıkarılırsa, bölümü “(kullanılamıyor)” olarak işaretli kalır ve kendiliğinden geri gelir. **Klasör bağlantısını kaldır**, bölümün menüsünde, hiçbir dosyayı silmeden bölümü kaldırır. **Ekle** tek tek dosyaları eskisi gibi içe aktarmaya devam eder.
 
 ### Fresco binlerce duvar kağıdını kaldırabilir mi?
 

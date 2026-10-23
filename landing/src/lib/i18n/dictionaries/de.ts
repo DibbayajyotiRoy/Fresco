@@ -483,7 +483,7 @@ export const de: Dictionary = {
       },
       {
         q: "Kann Fresco meinen vorhandenen Hintergrundordner nutzen, ohne ihn zu importieren?",
-        a: "Ja. Mit Ordner verknüpfen zeigst du Fresco einen Ordner, in dem du ohnehin Hintergründe aufbewahrst. Seine Bilder, GIFs und Videos erscheinen in deiner Bibliothek dort, wo sie liegen, ohne importiert zu werden, und die Bibliothek bleibt synchron, wenn du in diesem Ordner Dateien hinzufügst oder entfernst. Unterordner sind optional, und deine Favoriten und Änderungen werden pro Datei gespeichert. Hinzufügen importiert einzelne Dateien weiterhin wie bisher.",
+        a: "Ja. Wähle im Menü Ordner verknüpfen… (oder nach Ordner hinzufügen die Option Diesen Ordner verknüpfen), um Fresco auf einen Ordner zu richten, in dem du ohnehin Hintergründe aufbewahrst. Seine Bilder, GIFs und Videos erscheinen in einem eigenen Abschnitt deiner Bibliothek, dort, wo sie liegen, ohne importiert zu werden, und die Bibliothek bleibt synchron, wenn du in diesem Ordner Dateien hinzufügst oder entfernst. Unterordner einschließen ist optional (bis zu vier Ebenen tief), und deine Favoriten und Änderungen werden pro Datei gespeichert. Fehlt der Ordner, etwa weil ein Laufwerk abgezogen wurde, bleibt sein Abschnitt als „(nicht verfügbar)“ markiert und kehrt von selbst zurück. Verknüpfung aufheben im Menü des Abschnitts entfernt den Abschnitt, ohne Dateien zu löschen. Hinzufügen importiert einzelne Dateien weiterhin wie bisher.",
       },
       {
         q: "Kommt Fresco mit Tausenden von Hintergründen klar?",
@@ -568,7 +568,7 @@ export const de: Dictionary = {
     "Ton und Lautstärke pro Hintergrund",
     "Diashow-Übergänge (über Schwarz überblenden, Ken Burns, Zoom, Weichzeichnen)",
     "Hintergrundbibliothek mit Suche",
-    "Vorhandenen Hintergrundordner ohne Import verknüpfen, bleibt bei Dateiänderungen synchron",
+    "Ordner verknüpfen: vorhandenen Hintergrundordner ohne Import nutzen, bleibt bei Dateiänderungen synchron",
     "Bibliothek bleibt auch mit Tausenden Hintergründen schnell",
     "Unterschiedlicher Hintergrund pro Monitor",
     "Pause im Akkubetrieb und automatische Pause bei Vollbild",

@@ -246,7 +246,7 @@ Có — GIF động, ảnh tĩnh, trình chiếu ảnh có hiệu ứng chuyển
 
 ### Fresco có dùng được thư mục hình nền sẵn có mà không cần nhập vào không?
 
-Có. Dùng **Liên kết thư mục** để chỉ cho Fresco một thư mục bạn vốn đã lưu hình nền. Ảnh, GIF và video trong đó hiện trong thư viện của bạn ngay tại chỗ, không cần nhập vào, và thư viện luôn đồng bộ khi bạn thêm và xóa tệp trong thư mục đó. Thư mục con là tùy chọn, còn mục yêu thích và các chỉnh sửa của bạn được ghi nhớ theo từng tệp. **Thêm** vẫn nhập từng tệp riêng lẻ như trước.
+Có. Chọn **Liên kết thư mục…** trong menu (hoặc **Liên kết thư mục này** sau khi chọn **Thêm thư mục**) để chỉ cho Fresco một thư mục bạn vốn đã lưu hình nền. Ảnh, GIF và video trong đó hiện trong thư viện của bạn ở một mục riêng, ngay tại chỗ, không cần nhập vào, và thư viện luôn đồng bộ khi bạn thêm và xóa tệp trong thư mục đó. **Bao gồm cả thư mục con** là tùy chọn (sâu tối đa bốn cấp), còn mục yêu thích và các chỉnh sửa của bạn được ghi nhớ theo từng tệp. Nếu thư mục biến mất, chẳng hạn khi ổ đĩa bị rút ra, mục của nó vẫn được đánh dấu “(không khả dụng)” và tự phục hồi. **Hủy liên kết thư mục**, trong menu của mục, gỡ mục đó mà không xóa tệp nào. **Thêm** vẫn nhập từng tệp riêng lẻ như trước.
 
 ### Fresco có xử lý được hàng nghìn hình nền không?
 

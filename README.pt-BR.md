@@ -94,7 +94,7 @@ O papel de parede continua tocando depois que a janela é fechada.
 
 - **Qualquer mídia** — vídeo em loop (mp4/webm/mkv), GIF animado, imagem estática, apresentação de slides de imagens, playlist com vários vídeos
 - **Adicionar por link** — cole um pin do Pinterest ou qualquer URL direta de vídeo/imagem; o Fresco baixa o arquivo e abre o editor de recorte
-- **Vincular uma pasta** — use uma pasta de papéis de parede que você já tem (imagens, GIFs e vídeos) sem importá-la; ela continua sincronizada quando você adiciona e remove arquivos, as subpastas são opcionais e seus favoritos e edições são mantidos por arquivo
+- **Vincular pasta** — use uma pasta de papéis de parede que você já tem (imagens, GIFs e vídeos) sem importá-la; ela continua sincronizada quando você adiciona e remove arquivos, as subpastas são opcionais e seus favoritos e edições são mantidos por arquivo
 - **Bibliotecas grandes** — a biblioteca só desenha os papéis de parede perto da sua posição de rolagem, então milhares deles abrem em cerca de dois segundos e usam algumas centenas de megabytes (numa biblioteca de teste com 4.000 papéis de parede: cerca de 2 s e 325 MB, contra 9 a 13 s e 1,6 GB)
 - **Decodificação por hardware** — a decodificação de vídeo na GPU (VA-API / NVDEC) mantém o uso de CPU perto de zero ao levar o trabalho para o mecanismo de vídeo, onde ele é mensuravelmente mais barato (mas não de graça — veja [Desempenho](#desempenho-e-duração-da-bateria))
 - **Economia de energia** — escalonamento de GPU mais leve para notebooks; medido em cerca de metade do consumo da GPU (veja [Desempenho](#desempenho-e-duração-da-bateria))
@@ -246,7 +246,7 @@ Sim — GIFs animados, imagens estáticas, apresentações de slides de imagens 
 
 ### O Fresco pode usar minha pasta de papéis de parede sem importar?
 
-Sim. Use **Vincular uma pasta** para apontar o Fresco para uma pasta onde você já guarda papéis de parede. As imagens, GIFs e vídeos dela aparecem na sua biblioteca onde estão, sem serem importados, e a biblioteca continua sincronizada conforme você adiciona e remove arquivos nessa pasta. As subpastas são opcionais, e seus favoritos e edições são lembrados por arquivo. **Adicionar** continua importando arquivos individuais como antes.
+Sim. Escolha **Vincular pasta…** no menu (ou **Vincular esta pasta** depois de **Adicionar pasta**) para apontar o Fresco para uma pasta onde você já guarda papéis de parede. As imagens, GIFs e vídeos dela aparecem na sua biblioteca, numa seção própria, onde estão e sem serem importados, e a biblioteca continua sincronizada conforme você adiciona e remove arquivos nessa pasta. **Incluir subpastas** é opcional (até quatro níveis de profundidade), e seus favoritos e edições são lembrados por arquivo. Se a pasta sumir, por exemplo por causa de um disco desconectado, a seção dela continua marcada como “(indisponível)” e volta sozinha. **Desvincular pasta**, no menu da seção, remove a seção sem apagar nenhum arquivo. **Adicionar** continua importando arquivos individuais como antes.
 
 ### O Fresco aguenta milhares de papéis de parede?
 

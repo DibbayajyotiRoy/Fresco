@@ -168,7 +168,7 @@ export const es: Dictionary = {
       },
       linkedFolders: {
         tag: "Carpetas",
-        title: "Vincular una carpeta",
+        title: "Vincular carpeta",
         description:
           "Usa una carpeta de fondos que ya tengas (imágenes, GIF y vídeos) sin importarla. Se mantiene sincronizada cuando añades o quitas archivos, las subcarpetas son opcionales y tus favoritos y ediciones se guardan por archivo.",
         status: "Sin importar",
@@ -483,7 +483,7 @@ export const es: Dictionary = {
       },
       {
         q: "¿Puede Fresco usar mi carpeta de fondos existente sin importarla?",
-        a: "Sí. Con Vincular una carpeta le indicas a Fresco una carpeta donde ya guardas fondos. Sus imágenes, GIF y vídeos aparecen en tu biblioteca donde están, sin importarse, y la biblioteca se mantiene sincronizada cuando añades o quitas archivos en esa carpeta. Las subcarpetas son opcionales y tus favoritos y ediciones se recuerdan por archivo. Añadir sigue importando archivos sueltos como siempre.",
+        a: "Sí. Elige Vincular carpeta… en el menú (o Vincular esta carpeta después de Agregar carpeta) para indicarle a Fresco una carpeta donde ya guardas fondos. Sus imágenes, GIF y vídeos aparecen en tu biblioteca, en una sección propia, donde están y sin importarse, y la biblioteca se mantiene sincronizada cuando añades o quitas archivos en esa carpeta. Incluir subcarpetas es opcional (hasta cuatro niveles de profundidad), y tus favoritos y ediciones se recuerdan por archivo. Si la carpeta deja de estar disponible, por ejemplo por desconectar una unidad, su sección sigue marcada como «(no disponible)» y vuelve sola. Desvincular carpeta, en el menú de la sección, quita la sección sin borrar ningún archivo. Agregar sigue importando archivos sueltos como siempre.",
       },
       {
         q: "¿Puede Fresco manejar miles de fondos?",
@@ -568,7 +568,7 @@ export const es: Dictionary = {
     "Sonido y volumen por fondo de pantalla",
     "Transiciones de presentación (desvanecer a negro, Ken Burns, acercamiento, desenfoque)",
     "Biblioteca de fondos con búsqueda",
-    "Vincular una carpeta de fondos existente sin importarla, sincronizada cuando cambian los archivos",
+    "Vincular carpeta: usar una carpeta de fondos existente sin importarla, sincronizada cuando cambian los archivos",
     "Biblioteca ágil incluso con miles de fondos",
     "Un fondo distinto en cada monitor",
     "Pausa con batería y pausa automática a pantalla completa",

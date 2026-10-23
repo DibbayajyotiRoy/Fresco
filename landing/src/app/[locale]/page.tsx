@@ -10,6 +10,7 @@ import { HowItWorks } from "@/components/how-it-works";
 import { VideoShowcase } from "@/components/video-showcase";
 import { Download } from "@/components/download";
 import { Faq } from "@/components/faq";
+import { ReportIssue } from "@/components/report-issue";
 import { SiteFooter } from "@/components/site-footer";
 import { JsonLd } from "@/components/json-ld";
 import { PageMotion } from "@/components/motion/page-motion";
@@ -55,6 +56,7 @@ export default async function Home({
         <Download dict={dict} />
         <AtAGlance dict={dict} version={stats.version} />
         <Faq dict={dict} />
+        <ReportIssue dict={dict} />
       </main>
       <SiteFooter dict={dict} />
       <PageMotion />

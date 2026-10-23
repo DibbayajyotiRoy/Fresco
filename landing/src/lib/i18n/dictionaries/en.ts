@@ -514,9 +514,19 @@ export const en = {
     ],
   },
 
+  report: {
+    title: "Report a problem",
+    lead: "Found a bug or have an idea? Tell us on GitHub.",
+    tipBefore: "Include your desktop, Fresco version and the output of ",
+    tipAfter: ".",
+    bug: "Report a bug",
+    feature: "Request a feature",
+  },
+
   footer: {
     github: "GitHub",
     license: "License",
+    reportIssue: "Report an issue",
     tagline: "Rust + GTK4 + mpv",
     sound: "Toggle sound",
   },

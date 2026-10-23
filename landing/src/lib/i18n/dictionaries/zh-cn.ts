@@ -493,9 +493,19 @@ export const zhCn: Dictionary = {
     ],
   },
 
+  report: {
+    title: "报告问题",
+    lead: "发现 bug 或有好点子？欢迎到 GitHub 告诉我们。",
+    tipBefore: "请附上你的桌面环境、Fresco 版本以及 ",
+    tipAfter: " 的输出。",
+    bug: "报告 Bug",
+    feature: "提出功能建议",
+  },
+
   footer: {
     github: "GitHub",
     license: "许可协议",
+    reportIssue: "报告问题",
     tagline: "Rust + GTK4 + mpv",
     sound: "开关音效",
   },

@@ -501,9 +501,19 @@ export const ja: Dictionary = {
     ],
   },
 
+  report: {
+    title: "問題を報告",
+    lead: "バグを見つけた、またはアイデアがありますか？ GitHub でお知らせください。",
+    tipBefore: "お使いのデスクトップ環境、Fresco のバージョン、",
+    tipAfter: " の出力を添えてください。",
+    bug: "バグを報告",
+    feature: "機能をリクエスト",
+  },
+
   footer: {
     github: "GitHub",
     license: "ライセンス",
+    reportIssue: "問題を報告",
     tagline: "Rust + GTK4 + mpv",
     sound: "サウンドを切り替え",
   },

@@ -30,7 +30,7 @@ Fresco turns a video, GIF, image, slideshow or playlist into the wallpaper behin
 - **Control:** the app, a Ctrl+K command palette, and `fresco next` / `fresco prev` / `fresco random` for keyboard shortcuts.
 - **Install:** a `.deb` for Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali and Deepin (one-line script, manual download or the Deepin App Store); build from source on Fedora, Arch and others — see [Installation](#installation).
 - **License:** free and open source under [GPL-3.0-or-later](LICENSE), with no ads and no account.
-- **Users:** 2,500+ people in 127 countries. Latest version: 1.1.50.
+- **Users:** 3,000+ people in 128 countries. Latest version: 1.1.50.
 
 ## Installation
 
@@ -348,6 +348,8 @@ sync offset slider in the lyrics settings for exactly that.
 
 Run `fresco doctor` first: it reports your session, which renderer Fresco picked and where it came from, and whether the GNOME Xorg workaround applies. [docs/INSTALL.md](docs/INSTALL.md) covers more cases, including high CPU use. Include the output of `fresco doctor` when you file an issue.
 
+Still stuck? [Report a bug](https://github.com/DibbayajyotiRoy/Fresco/issues/new?template=bug_report.yml) or [request a feature](https://github.com/DibbayajyotiRoy/Fresco/issues/new?template=feature_request.yml).
+
 ### Fresco doesn't show up in the Deepin launcher after installing — why?
 
 A known dde-launchpad issue: its post-install refresh doesn't pick Fresco up.
@@ -457,7 +459,7 @@ The thread is keyed by a random ticket generated separately from telemetry and s
 | **Latest version** | 1.1.50 (2026-10-16) — see [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) for the newest |
 | **Packages** | `.deb` (amd64), one-line install script, Deepin App Store; source build elsewhere |
 | **Interface languages** | English plus 12 translations: Simplified Chinese, Russian, Spanish, French, German, Portuguese (Brazil), Turkish, Vietnamese, Indonesian, Hindi, Bengali and Romanian |
-| **Users** | 2,500+ people in 127 countries |
+| **Users** | 3,000+ people in 128 countries |
 | **Maintainer** | Dibbayajyoti Roy |
 | **Source code** | <https://github.com/DibbayajyotiRoy/fresco> |
 | **Website** | <https://fresco.dibbayajyoti.com> |
@@ -472,4 +474,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco is a free, open-source live wallpaper and video wallpaper app for Linux (X11 and Wayland), with lyrics, clock, audio-visualiser and album-art widgets drawn into the wallpaper. It is a native Linux alternative to Wallpaper Engine and a music-and-clock companion to tools like Conky. Used by 2,500+ people in 127 countries. Last updated: 2026-10-16.</sub>
+<sub>Fresco is a free, open-source live wallpaper and video wallpaper app for Linux (X11 and Wayland), with lyrics, clock, audio-visualiser and album-art widgets drawn into the wallpaper. It is a native Linux alternative to Wallpaper Engine and a music-and-clock companion to tools like Conky. Used by 3,000+ people in 128 countries. Last updated: 2026-10-16.</sub>

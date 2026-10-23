@@ -29,7 +29,7 @@ Fresco 通过 GTK4 / libadwaita 图形界面，把视频、GIF、图片、幻灯
 - **操作方式：** 应用界面、Ctrl+K 命令面板，以及可绑定快捷键的 `fresco next` / `fresco prev` / `fresco random`。
 - **安装：** 面向 Ubuntu、Debian、Linux Mint、Pop!_OS、elementary OS、Kali 与 Deepin 的 `.deb` 包（一行脚本、手动下载或 Deepin 应用商店）；Fedora、Arch 等发行版从源码构建——见[安装](#安装)。
 - **许可证：** 免费开源，采用 [GPL-3.0-or-later](LICENSE)，无广告，无需注册账号。
-- **用户规模：** 来自 127 个国家/地区的 2,500+ 名用户。最新版本：1.1.50。
+- **用户规模：** 来自 128 个国家/地区的 3,000+ 名用户。最新版本：1.1.50。
 
 ## 安装
 
@@ -327,6 +327,8 @@ Spotify 的 Linux 原生客户端自 2018 年起就返回 `Position: 0` 且从�
 
 请先运行 `fresco doctor`：它会报告你的会话类型、Fresco 选用了哪个渲染器及其来源，以及 GNOME 的 Xorg 变通办法是否适用。[docs/INSTALL.md](docs/INSTALL.md) 涵盖更多情况，包括 CPU 占用过高。提交 issue 时请附上 `fresco doctor` 的输出。
 
+仍未解决？[报告 Bug](https://github.com/DibbayajyotiRoy/Fresco/issues/new?template=bug_report.yml) 或[提出功能建议](https://github.com/DibbayajyotiRoy/Fresco/issues/new?template=feature_request.yml)。
+
 ### 安装后 Fresco 没有出现在 Deepin 启动器里——为什么？
 
 这是 dde-launchpad 的已知问题：它安装后的刷新抓不到 Fresco。运行 `killall dde-shell`（它会自动重启），或注销再登录，条目就会永久出现。Fresco 本身安装无误——Deepin 自家的应用管理器能列出它，其图标在所有已装主题中都能解析。如果在一台装过 Fresco 的机器上每次重装都遇到，可运行 `sh scripts/dde-launcher-diag.sh`——它是只读的，会输出一份值得附到 issue 里的日志。
@@ -401,7 +403,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 | **最新版本** | 1.1.50（2026-10-16）——最新版本见 [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **安装包** | `.deb`（amd64）、一行安装脚本、Deepin 应用商店；其他发行版从源码构建 |
 | **界面语言** | 英文，另有 12 种翻译：简体中文、俄语、西班牙语、法语、德语、巴西葡萄牙语、土耳其语、越南语、印尼语、印地语、孟加拉语和罗马尼亚语 |
-| **用户规模** | 来自 127 个国家/地区的 2,500+ 名用户 |
+| **用户规模** | 来自 128 个国家/地区的 3,000+ 名用户 |
 | **维护者** | Dibbayajyoti Roy |
 | **源代码** | <https://github.com/DibbayajyotiRoy/fresco> |
 | **官网** | <https://fresco.dibbayajyoti.com> |
@@ -416,4 +418,4 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ---
 
-<sub>Fresco 是一款免费开源的 Linux 动态壁纸与视频壁纸软件（支持 X11 与 Wayland），带有绘制进壁纸的歌词、时钟、音频可视化和专辑封面挂件。它是原生 Linux 平台上 Wallpaper Engine 的替代品，也可作为 Conky 之类工具在音乐与时间展示上的补充。已有 127 个国家/地区的 2,500+ 人在使用。最后更新：2026-10-16。</sub>
+<sub>Fresco 是一款免费开源的 Linux 动态壁纸与视频壁纸软件（支持 X11 与 Wayland），带有绘制进壁纸的歌词、时钟、音频可视化和专辑封面挂件。它是原生 Linux 平台上 Wallpaper Engine 的替代品，也可作为 Conky 之类工具在音乐与时间展示上的补充。已有 128 个国家/地区的 3,000+ 人在使用。最后更新：2026-10-16。</sub>

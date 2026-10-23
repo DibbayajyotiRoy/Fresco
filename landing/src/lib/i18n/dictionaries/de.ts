@@ -506,9 +506,19 @@ export const de: Dictionary = {
     ],
   },
 
+  report: {
+    title: "Ein Problem melden",
+    lead: "Fehler gefunden oder eine Idee? Sag es uns auf GitHub.",
+    tipBefore: "Nenne deinen Desktop, die Fresco-Version und die Ausgabe von ",
+    tipAfter: ".",
+    bug: "Fehler melden",
+    feature: "Funktion vorschlagen",
+  },
+
   footer: {
     github: "GitHub",
     license: "Lizenz",
+    reportIssue: "Problem melden",
     tagline: "Rust + GTK4 + mpv",
     sound: "Ton umschalten",
   },

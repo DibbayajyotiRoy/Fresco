@@ -506,9 +506,19 @@ export const ptBr: Dictionary = {
     ],
   },
 
+  report: {
+    title: "Relatar um problema",
+    lead: "Encontrou um bug ou tem uma ideia? Conte para nós no GitHub.",
+    tipBefore: "Informe seu desktop, a versão do Fresco e a saída de ",
+    tipAfter: ".",
+    bug: "Relatar um bug",
+    feature: "Sugerir um recurso",
+  },
+
   footer: {
     github: "GitHub",
     license: "Licença",
+    reportIssue: "Relatar um problema",
     tagline: "Rust + GTK4 + mpv",
     sound: "Alternar som",
   },

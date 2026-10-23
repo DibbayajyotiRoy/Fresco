@@ -30,6 +30,10 @@ Item {
     // property from the outside once the Loader reports Ready.
     property url videoSource
 
+    // Set from main.qml (same Binding mechanism): Qt's fillMode enum value
+    // (0 Stretch, 1 PreserveAspectFit, 2 PreserveAspectCrop) from Fresco's fit.
+    property int fillMode: VideoOutput.PreserveAspectCrop
+
     // Set from main.qml (same Binding mechanism) while a fullscreen/maximized
     // window hides the wallpaper; frees the GPU on iGPUs.
     property bool paused: false
@@ -45,7 +49,7 @@ Item {
     VideoOutput {
         id: videoOutput
         anchors.fill: parent
-        fillMode: VideoOutput.PreserveAspectCrop
+        fillMode: videoLayer.fillMode
     }
 
     AudioOutput {

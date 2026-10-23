@@ -43,6 +43,12 @@
       <label>Desktop only: Fresco's own pause (Pause button, pause on battery), kept apart from the window auto-pause.</label>
       <default>false</default>
     </entry>
+    <entry name="FillMode" type="Int">
+      <label>How the video and still fill the screen, as Qt's fillMode enum: 0 stretch, 1 fit (letterbox), 2 fill (crop).</label>
+      <default>2</default>
+      <min>0</min>
+      <max>2</max>
+    </entry>
     <entry name="Dim" type="Double">
       <label>Opacity (0-0.8) of the black veil drawn over the media, for prompt legibility.</label>
       <default>0.2</default>

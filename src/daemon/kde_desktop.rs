@@ -17,8 +17,9 @@
 //!
 //! Trade-offs against the mpv backends, accepted for Plasma: QtMultimedia
 //! plays the video (muted, no hwdec tuning, crop/rotation/scaling or
-//! transitions), a playlist plays its first file, a slideshow shows its first
-//! frame, and one wallpaper is used for every screen.
+//! transitions; only the fit option applies, see [`fill_mode`]), a playlist
+//! plays its first file, a slideshow shows its first frame, and one wallpaper
+//! is used for every screen.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -31,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 use super::lock::hosts::kde::{self, PLUGIN_ID};
 use super::{dde, overview};
-use crate::config::{Config, Wallpaper};
+use crate::config::{Config, Fit, Wallpaper};
 
 const DEST: &str = "org.kde.plasmashell";
 const OBJECT: &str = "/PlasmaShell";
@@ -188,6 +189,7 @@ fn apply_now(wallpaper: &Wallpaper, pause_mode: i32, generation: u64) -> Result<
         &uri(&still),
         pause_mode,
         paused,
+        wallpaper.fit,
     ))?;
     log::info!(
         "KDE Plasma: applied via plasmashell wallpaper plugin ({})",
@@ -292,10 +294,28 @@ fn kde_pause_mode(config: &Config) -> i32 {
     i32::from(config.pause_on_maximized)
 }
 
+/// The plugin's `FillMode` (`contents/config/main.xml`) for a fit option, as
+/// Qt's `fillMode` enum: Cover is `PreserveAspectCrop` (2), Contain is
+/// `PreserveAspectFit` (1), Stretch is `Stretch` (0) — what mpv's `panscan` and
+/// `keepaspect` give on the other backends.
+fn fill_mode(fit: Fit) -> u8 {
+    match fit {
+        Fit::Stretch => 0,
+        Fit::Contain => 1,
+        Fit::Cover => 2,
+    }
+}
+
 /// The script `plasma-apply-wallpaperimage` sends, with our plugin and its
 /// config keys (`contents/config/main.xml`). No veil, no widget layer on the
 /// desktop.
-fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32, paused: bool) -> String {
+fn apply_script(
+    video_uri: &str,
+    still_uri: &str,
+    pause_mode: i32,
+    paused: bool,
+    fit: Fit,
+) -> String {
     let id = js_str(PLUGIN_ID);
     format!(
         "desktops().forEach(function(d){{\
@@ -306,11 +326,13 @@ fn apply_script(video_uri: &str, still_uri: &str, pause_mode: i32, paused: bool)
          d.writeConfig('StillPath',{still});\
          d.writeConfig('PlayVideo',{play});\
          d.writeConfig('PauseMode',{pause_mode});\
+         d.writeConfig('FillMode',{fill});\
          d.writeConfig('Dim',0);\
          }});",
         video = js_str(video_uri),
         still = js_str(still_uri),
         play = !video_uri.is_empty(),
+        fill = fill_mode(fit),
     )
 }
 
@@ -425,7 +447,7 @@ mod tests {
 
     #[test]
     fn hostile_paths_stay_inside_their_string_literal() {
-        let benign = apply_script("file:///a.mp4", "file:///a.png", 0, false);
+        let benign = apply_script("file:///a.mp4", "file:///a.png", 0, false, Fit::Cover);
         for evil in [
             "x');d.wallpaperPlugin=('evil",
             "x\");evil();(\"",
@@ -434,14 +456,14 @@ mod tests {
             "x\u{2028}evil();//",
             "x</script>",
         ] {
-            let s = apply_script(evil, evil, 0, false);
+            let s = apply_script(evil, evil, 0, false, Fit::Cover);
             assert_eq!(skeleton(&s), skeleton(&benign), "{evil:?}");
         }
     }
 
     #[test]
     fn apply_script_selects_our_plugin_and_writes_the_plugin_keys() {
-        let s = apply_script("file:///v.mp4", "file:///s.png", 1, true);
+        let s = apply_script("file:///v.mp4", "file:///s.png", 1, true, Fit::Contain);
         assert!(s.starts_with("desktops().forEach(function(d){d.wallpaperPlugin=\"io.github."));
         for key in [
             "VideoPath",
@@ -449,22 +471,38 @@ mod tests {
             "PlayVideo",
             "PauseMode",
             "Paused",
+            "FillMode",
             "Dim",
         ] {
             assert!(s.contains(&format!("writeConfig('{key}'")), "{key}");
         }
         // A new wallpaper keeps the user's pause (or lack of it).
         assert!(s.contains("writeConfig('Paused',true)"));
-        assert!(apply_script("", "", 0, false).contains("writeConfig('Paused',false)"));
+        assert!(apply_script("", "", 0, false, Fit::Cover).contains("writeConfig('Paused',false)"));
         assert!(s.contains("writeConfig('PlayVideo',true)"));
         assert!(s.contains("writeConfig('PauseMode',1)"));
+        assert!(s.contains("writeConfig('FillMode',1)"));
         assert!(
             s.contains("['Wallpaper',\"io.github.dibbayajyotiroy.fresco.lockscreen\",'General']")
         );
         // An image wallpaper has nothing to play.
-        assert!(
-            apply_script("", "file:///s.png", 0, false).contains("writeConfig('PlayVideo',false)")
-        );
+        assert!(apply_script("", "file:///s.png", 0, false, Fit::Cover)
+            .contains("writeConfig('PlayVideo',false)"));
+    }
+
+    #[test]
+    fn fit_maps_to_qt_fill_mode() {
+        // Qt's fillMode enum: Stretch, PreserveAspectFit, PreserveAspectCrop.
+        assert_eq!(fill_mode(Fit::Stretch), 0);
+        assert_eq!(fill_mode(Fit::Contain), 1);
+        assert_eq!(fill_mode(Fit::Cover), 2);
+        for (fit, want) in [(Fit::Stretch, 0), (Fit::Contain, 1), (Fit::Cover, 2)] {
+            let s = apply_script("file:///v.mp4", "", 0, false, fit);
+            assert!(
+                s.contains(&format!("writeConfig('FillMode',{want})")),
+                "{fit:?}"
+            );
+        }
     }
 
     #[test]
@@ -508,7 +546,7 @@ mod tests {
     fn script_survives_gdbus_argument_quoting() {
         // gdbus parses the argument as a GVariant string: quotes and
         // backslashes in the script must round-trip through the literal.
-        let script = apply_script("file:///it's.mp4", "", 0, false);
+        let script = apply_script("file:///it's.mp4", "", 0, false, Fit::Cover);
         let lit = overview::gvariant_string_literal(&script);
         let inner = &lit[1..lit.len() - 1];
         let mut un = String::new();

@@ -3,6 +3,7 @@ mod daemon_ctl;
 mod gallery;
 mod hover_preview;
 mod import_queue;
+mod lazy_grid;
 mod library;
 mod lockscreen;
 mod preview;

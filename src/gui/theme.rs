@@ -346,6 +346,8 @@ window.glass .background {{ background: transparent; }}
 /* Placeholder shown inside a card while (or if) no thumbnail exists. */
 .wp-placeholder {{ background-color: @thumb_mat; }}
 .wp-placeholder image {{ color: @dim_fg; }}
+/* A lazy_grid slot whose card is not built yet (it is outside the viewport). */
+.wp-slot {{ background-color: alpha(@thumb_mat, 0.14); border-radius: 12px; }}
 /* Card whose import work (thumbnail / metadata) is still outstanding: same
    size as a real card, glyph dimmed so it reads as loading, not empty. */
 .wp-card.wp-loading .wp-placeholder image {{ opacity: 0.45; }}

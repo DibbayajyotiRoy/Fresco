@@ -7,6 +7,7 @@ use gtk4::{gio, glib, prelude::*};
 use gtk4::{FileChooserAction, GestureClick, PolicyType, ResponseType};
 use libadwaita::{self as adw, prelude::*};
 
+use super::lazy_grid;
 use super::theme;
 use super::window_state;
 use super::{
@@ -2348,18 +2349,34 @@ fn build_section(
     flow.set_row_spacing(12);
     flow.set_column_spacing(12);
     flow.set_margin_bottom(6);
-    for (idx, entry) in matches {
-        let active = entry_is_active(entry, cfg);
-        let card = build_library_card(
-            entry,
-            *idx,
-            state.clone(),
-            stack.clone(),
-            active,
-            reorderable,
-        );
-        flow.append(&card);
-    }
+    // One empty slot per wallpaper; the card itself is built when its slot
+    // nears the viewport (see `lazy_grid`), so a 4,000-wallpaper library does
+    // not mean 100,000 widgets and 4,000 decoded thumbnails.
+    let items: Vec<(usize, String)> = matches.iter().map(|(i, e)| (*i, e.id.clone())).collect();
+    let (cfg, state, stack) = (cfg.clone(), state.clone(), stack.clone());
+    lazy_grid::fill(&flow, items.len(), move |k| {
+        let (idx, id) = &items[k];
+        // The live entry, not the one this section was planned from: an import
+        // may have given it a thumbnail since.
+        let entry = state
+            .borrow()
+            .entries
+            .get(*idx)
+            .filter(|e| e.id == *id)
+            .cloned();
+        match entry {
+            Some(e) => build_library_card(
+                &e,
+                *idx,
+                state.clone(),
+                stack.clone(),
+                entry_is_active(&e, &cfg),
+                reorderable,
+            )
+            .upcast(),
+            None => gtk4::Box::new(gtk4::Orientation::Vertical, 0).upcast(),
+        }
+    });
     section.append(&flow);
     section
 }
@@ -2450,8 +2467,9 @@ fn thumb_placeholder(kind: Kind) -> gtk4::Box {
     ph
 }
 
-/// Cinematic 16:9 library card: poster thumbnail, gradient title scrim, kind
-/// badge, active-wallpaper accent ring + pill, and a hover-revealed Edit button.
+/// Cinematic library card, placed in a 16:9 `lazy_grid` slot: poster thumbnail,
+/// gradient title scrim, kind badge, active-wallpaper accent ring + pill, and a
+/// hover-revealed Edit button.
 fn build_library_card(
     entry: &LibraryEntry,
     idx: usize,
@@ -2459,7 +2477,7 @@ fn build_library_card(
     stack: gtk4::Stack,
     active: bool,
     reorderable: bool,
-) -> gtk4::AspectFrame {
+) -> gtk4::Overlay {
     let overlay = gtk4::Overlay::new();
     overlay.add_css_class("wp-card");
     if active {
@@ -2614,109 +2632,45 @@ fn build_library_card(
             click.connect_released(move |_, _, _, _| toggle_selected(&state_c, &id));
         }
         overlay.add_controller(click);
-
-        let frame = gtk4::AspectFrame::new(0.5, 0.0, 16.0 / 9.0, false);
-        frame.set_size_request(260, 146);
-        frame.set_child(Some(&overlay));
-        return frame;
+        return overlay;
     }
 
-    // Hover-revealed action cluster (bottom-right): heart · edit · menu.
-    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    actions.add_css_class("wp-actions");
-    actions.set_halign(gtk4::Align::End);
-    actions.set_valign(gtk4::Align::End);
-    actions.set_visible(false);
-
-    // Manual-order arrows. Only where the section is one ordering group shown
-    // in manual order (see `SectionPlan::reorderable`) — anywhere else the move
-    // would be written to `order` and instantly overruled by the sort.
-    if reorderable {
-        for (icon, tip, delta) in [
-            ("go-previous-symbolic", t!("Move earlier"), -1i32),
-            ("go-next-symbolic", t!("Move later"), 1i32),
-        ] {
-            let b = gtk4::Button::from_icon_name(icon);
-            b.add_css_class("wp-edit");
-            b.add_css_class("circular");
-            b.set_tooltip_text(Some(tip));
-            let state_r = state.clone();
-            let id = entry.id.clone();
-            b.connect_clicked(move |_| move_entry(&state_r, &id, delta));
-            actions.append(&b);
-        }
-    }
-
-    let fav = gtk4::Button::from_icon_name("emblem-favorite-symbolic");
-    fav.add_css_class("wp-edit");
-    fav.add_css_class("circular");
-    if entry.favorite {
-        fav.add_css_class("fav-on");
-        fav.set_tooltip_text(Some(t!("Unfavorite")));
-    } else {
-        fav.set_tooltip_text(Some(t!("Favorite")));
-    }
-    {
-        let state_f = state.clone();
-        fav.connect_clicked(move |_| toggle_favorite(&state_f, idx));
-    }
-    actions.append(&fav);
-
-    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
-    edit.add_css_class("wp-edit");
-    edit.add_css_class("circular");
-    edit.set_tooltip_text(Some(t!("Edit & crop")));
-    {
-        let state_e = state.clone();
-        let stack_e = stack.clone();
-        edit.connect_clicked(move |_| {
-            open_editor(&state_e, &stack_e, idx);
-        });
-    }
-    actions.append(&edit);
-
-    let more = gtk4::Button::from_icon_name("view-more-symbolic");
-    more.add_css_class("wp-edit");
-    more.add_css_class("circular");
-    more.set_tooltip_text(Some(t!("More actions")));
-    {
-        let state_m = state.clone();
-        let stack_m = stack.clone();
-        let overlay_m = overlay.clone();
-        more.connect_clicked(move |btn| {
-            // Anchor the popover at the button (translate its origin into the
-            // overlay's coordinate space; fall back to the corner).
-            #[allow(deprecated)]
-            let (x, y) = btn
-                .translate_coordinates(&overlay_m, 0.0, 0.0)
-                .unwrap_or((0.0, 0.0));
-            show_card_menu(
-                &overlay_m,
-                state_m.clone(),
-                stack_m.clone(),
-                idx,
-                x,
-                y,
-                reorderable,
-            );
-        });
-    }
-    actions.append(&more);
-    overlay.add_overlay(&actions);
-
+    // Hover-revealed action cluster. Built on the first pointer-enter instead of
+    // with the card: it is about a dozen widgets per card that nobody sees until
+    // they hover, and a card is built every time it scrolls into view.
+    let actions: Rc<RefCell<Option<gtk4::Box>>> = Rc::new(RefCell::new(None));
     let motion = gtk4::EventControllerMotion::new();
     {
         let actions = actions.clone();
-        let id = entry.id.clone();
+        let overlay_w = overlay.downgrade();
+        let (state_a, stack_a) = (state.clone(), stack.clone());
+        let (id, favorite) = (entry.id.clone(), entry.favorite);
         motion.connect_enter(move |_, _, _| {
-            if !import_queue::is_pending(&id) {
-                actions.set_visible(true);
+            if import_queue::is_pending(&id) {
+                return;
             }
+            let Some(overlay) = overlay_w.upgrade() else {
+                return;
+            };
+            actions
+                .borrow_mut()
+                .get_or_insert_with(|| {
+                    let cluster = build_card_actions(
+                        &overlay, &state_a, &stack_a, &id, idx, favorite, reorderable,
+                    );
+                    overlay.add_overlay(&cluster);
+                    cluster
+                })
+                .set_visible(true);
         });
     }
     {
         let actions = actions.clone();
-        motion.connect_leave(move |_| actions.set_visible(false));
+        motion.connect_leave(move |_| {
+            if let Some(a) = actions.borrow().as_ref() {
+                a.set_visible(false);
+            }
+        });
     }
     overlay.add_controller(motion);
 
@@ -2725,12 +2679,15 @@ fn build_library_card(
     {
         let state_c = state.clone();
         let stack_c = stack.clone();
-        let overlay_c = overlay.clone();
+        let overlay_c = overlay.downgrade();
         let id = entry.id.clone();
         click.connect_released(move |_, n_press, _, _| {
             // Inline rename editor is up on this card (#21) — don't let the
             // click fall through to apply/open underneath it.
-            if overlay_c.has_css_class("renaming") {
+            if overlay_c
+                .upgrade()
+                .is_none_or(|o| o.has_css_class("renaming"))
+            {
                 return;
             }
             // Still importing: a half-built card must not act (it used to
@@ -2753,9 +2710,12 @@ fn build_library_card(
     {
         let state_c = state.clone();
         let stack_c = stack.clone();
-        let overlay_c = overlay.clone();
+        let overlay_c = overlay.downgrade();
         let id = entry.id.clone();
         rclick.connect_pressed(move |_, _, x, y| {
+            let Some(overlay_c) = overlay_c.upgrade() else {
+                return;
+            };
             if overlay_c.has_css_class("renaming") || import_queue::is_pending(&id) {
                 return;
             }
@@ -2790,15 +2750,110 @@ fn build_library_card(
         }
     }
 
-    // Minimum 16:9 poster footprint whose height derives from the FlowBox's
-    // allocated cell width, so cards grow with the window instead of being
-    // pinned to a fixed pixel size; homogeneous(true) on the FlowBox gives
-    // every cell in a row the same width, so they all resolve to the same
-    // aspect height too — never stretched or distorted.
-    let frame = gtk4::AspectFrame::new(0.5, 0.0, 16.0 / 9.0, false);
-    frame.set_size_request(260, 146);
-    frame.set_child(Some(&overlay));
-    frame
+    // The 16:9 poster footprint belongs to the slot this card is placed in
+    // (`lazy_grid::new_slot`): its height derives from the FlowBox's allocated
+    // cell width, so cards grow with the window rather than being pinned to a
+    // fixed pixel size, and homogeneous(true) keeps every cell in a row the
+    // same width, so none is stretched or distorted.
+    overlay
+}
+
+/// The hover-revealed buttons of a library card (bottom-right): manual-order
+/// arrows where they mean something, heart, edit, and the "more" menu.
+fn build_card_actions(
+    overlay: &gtk4::Overlay,
+    state: &Rc<RefCell<AppState>>,
+    stack: &gtk4::Stack,
+    id: &str,
+    idx: usize,
+    favorite: bool,
+    reorderable: bool,
+) -> gtk4::Box {
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    actions.add_css_class("wp-actions");
+    actions.set_halign(gtk4::Align::End);
+    actions.set_valign(gtk4::Align::End);
+
+    // Manual-order arrows. Only where the section is one ordering group shown
+    // in manual order (see `SectionPlan::reorderable`) — anywhere else the move
+    // would be written to `order` and instantly overruled by the sort.
+    if reorderable {
+        for (icon, tip, delta) in [
+            ("go-previous-symbolic", t!("Move earlier"), -1i32),
+            ("go-next-symbolic", t!("Move later"), 1i32),
+        ] {
+            let b = gtk4::Button::from_icon_name(icon);
+            b.add_css_class("wp-edit");
+            b.add_css_class("circular");
+            b.set_tooltip_text(Some(tip));
+            let state_r = state.clone();
+            let id = id.to_string();
+            b.connect_clicked(move |_| move_entry(&state_r, &id, delta));
+            actions.append(&b);
+        }
+    }
+
+    let fav = gtk4::Button::from_icon_name("emblem-favorite-symbolic");
+    fav.add_css_class("wp-edit");
+    fav.add_css_class("circular");
+    if favorite {
+        fav.add_css_class("fav-on");
+        fav.set_tooltip_text(Some(t!("Unfavorite")));
+    } else {
+        fav.set_tooltip_text(Some(t!("Favorite")));
+    }
+    {
+        let state_f = state.clone();
+        fav.connect_clicked(move |_| toggle_favorite(&state_f, idx));
+    }
+    actions.append(&fav);
+
+    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
+    edit.add_css_class("wp-edit");
+    edit.add_css_class("circular");
+    edit.set_tooltip_text(Some(t!("Edit & crop")));
+    {
+        let state_e = state.clone();
+        let stack_e = stack.clone();
+        edit.connect_clicked(move |_| {
+            open_editor(&state_e, &stack_e, idx);
+        });
+    }
+    actions.append(&edit);
+
+    let more = gtk4::Button::from_icon_name("view-more-symbolic");
+    more.add_css_class("wp-edit");
+    more.add_css_class("circular");
+    more.set_tooltip_text(Some(t!("More actions")));
+    {
+        let state_m = state.clone();
+        let stack_m = stack.clone();
+        // Weak: this closure lives inside the card, so a strong clone of the
+        // card here is a reference cycle and the card is never freed.
+        let overlay_m = overlay.downgrade();
+        more.connect_clicked(move |btn| {
+            let Some(overlay_m) = overlay_m.upgrade() else {
+                return;
+            };
+            // Anchor the popover at the button (translate its origin into the
+            // overlay's coordinate space; fall back to the corner).
+            #[allow(deprecated)]
+            let (x, y) = btn
+                .translate_coordinates(&overlay_m, 0.0, 0.0)
+                .unwrap_or((0.0, 0.0));
+            show_card_menu(
+                &overlay_m,
+                state_m.clone(),
+                stack_m.clone(),
+                idx,
+                x,
+                y,
+                reorderable,
+            );
+        });
+    }
+    actions.append(&more);
+    actions
 }
 
 /// Home sections, in display order.

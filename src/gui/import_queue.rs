@@ -34,6 +34,18 @@ use crate::{t, tf};
 /// loses at most a couple dozen thumbnails' bookkeeping (the PNGs stay on disk).
 const CHECKPOINT_EVERY: usize = 25;
 
+/// ...but a long run checkpoints at most this many times. Each checkpoint
+/// rewrites the whole of `entries.json` on the UI thread, so a fixed cadence made
+/// a 4,000-item import write the (growing) file 160 times.
+const MAX_CHECKPOINTS: usize = 40;
+
+/// Only the first this-many items of a run get an eager hover-preview proxy
+/// (see `preview_proxy::prefetch`). `prefetch` caps how many are *waiting*, but
+/// the worker drains that queue as fast as it fills, so without a cap on the
+/// run a 4,000-video import kept ffmpeg transcoding for hours. The rest are
+/// made on first hover instead.
+const PREFETCH_FIRST: usize = 24;
+
 // ─── Pure logic ──────────────────────────────────────────────────────────────
 
 /// In which order queued entries are worked on.
@@ -68,6 +80,18 @@ pub fn plan(items: &[(String, u64)], order: Order) -> Vec<String> {
 /// (more just thrash the disk and the little RAM a low-end box has).
 pub fn worker_count(parallelism: usize) -> usize {
     parallelism.saturating_sub(1).clamp(1, 4)
+}
+
+/// Whether the item that just finished (the `finished`-th of its run) should
+/// queue an eager hover-preview proxy.
+pub fn should_prefetch(finished: usize) -> bool {
+    finished <= PREFETCH_FIRST
+}
+
+/// Items between checkpoints for a run of `total`: [`CHECKPOINT_EVERY`], spread
+/// out for a run long enough to exceed [`MAX_CHECKPOINTS`].
+pub fn checkpoint_every(total: usize) -> usize {
+    (total / MAX_CHECKPOINTS).max(CHECKPOINT_EVERY)
 }
 
 /// Whether a run that has finished `finished` items should checkpoint now.
@@ -276,6 +300,24 @@ struct Done {
     ok: bool,
 }
 
+/// Run the calling thread, and every ffmpeg / ffprobe it spawns, at nice 10.
+///
+/// A big import keeps up to four workers decoding video (ffmpegthumbnailer
+/// threads one decoder per core), which on a low-core machine starves the UI and
+/// the rest of the desktop for the length of the run. Linux keeps the nice value
+/// per thread and children inherit it, so lowering it here covers the helpers
+/// without wrapping each command in `nice`.
+fn lower_priority() {
+    extern "C" {
+        fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+    }
+    // SAFETY: plain syscall wrapper, no pointers. PRIO_PROCESS (0) with id 0 is
+    // the calling thread on Linux; failure just leaves the priority unchanged.
+    unsafe {
+        setpriority(0, 0, 10);
+    }
+}
+
 /// Thumbnail + metadata for one entry. Still images are decoded once, in
 /// process, and yield their size for free; videos/GIFs keep ffmpegthumbnailer
 /// and ffprobe.
@@ -400,6 +442,7 @@ fn launch(state: &Rc<RefCell<AppState>>, queued: Queued) {
         let spawned = std::thread::Builder::new()
             .name(format!("fresco-import-{n}"))
             .spawn(move || {
+                lower_priority();
                 while !cancel.load(Ordering::Relaxed) {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(job) = jobs.get(i) else { break };
@@ -464,9 +507,9 @@ fn apply(state: &Rc<RefCell<AppState>>, done: Done, progress: &mut Progress) {
                 }
                 // A hover preview of a large video plays a small proxy clip;
                 // make it now, at low priority, so the first hover is already
-                // alive. Capped inside `prefetch`, so a big folder only gets
-                // the first few eagerly and the rest on first hover.
-                if previews_on {
+                // alive. Only for the first few items of a run (`PREFETCH_FIRST`),
+                // so a big folder gets the rest on first hover instead.
+                if previews_on && should_prefetch(progress.finished()) {
                     if let Some(request) = super::preview_proxy::request_for(e) {
                         super::preview_proxy::prefetch(request);
                     }
@@ -484,7 +527,7 @@ fn apply(state: &Rc<RefCell<AppState>>, done: Done, progress: &mut Progress) {
         }
     };
     update_card(&done.id, done.thumbnail.as_deref(), meta_line.as_deref());
-    if should_checkpoint(progress.finished(), CHECKPOINT_EVERY) {
+    if should_checkpoint(progress.finished(), checkpoint_every(progress.total)) {
         checkpoint(state);
     }
 }
@@ -555,6 +598,26 @@ mod tests {
         assert_eq!(worker_count(4), 3);
         assert_eq!(worker_count(5), 4);
         assert_eq!(worker_count(64), 4);
+    }
+
+    #[test]
+    fn only_the_first_items_of_a_run_prefetch_a_proxy() {
+        assert!(should_prefetch(1));
+        assert!(should_prefetch(PREFETCH_FIRST));
+        assert!(!should_prefetch(PREFETCH_FIRST + 1));
+        assert!(!should_prefetch(4000));
+    }
+
+    #[test]
+    fn long_runs_checkpoint_less_often() {
+        assert_eq!(checkpoint_every(0), CHECKPOINT_EVERY);
+        assert_eq!(checkpoint_every(200), CHECKPOINT_EVERY);
+        assert_eq!(checkpoint_every(1000), CHECKPOINT_EVERY);
+        assert_eq!(checkpoint_every(4000), 100);
+        // However long the run, no more than MAX_CHECKPOINTS writes.
+        for total in [1000, 4000, 25_000] {
+            assert!(total / checkpoint_every(total) <= MAX_CHECKPOINTS);
+        }
     }
 
     #[test]

@@ -26,11 +26,12 @@ Fresco mengubah video, GIF, gambar, slideshow, atau daftar putar menjadi wallpap
 - **Yang bisa diputar:** video (mp4, webm, mkv, avi, mov), GIF animasi, gambar, slideshow gambar, dan daftar putar video.
 - **Desktop:** sesi X11 (GNOME di Xorg, Cinnamon, Xfce, MATE, Deepin 25) dan Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). GNOME di Wayland hanya menampilkan satu bingkai diam — lihat [Lingkungan desktop yang didukung](#lingkungan-desktop-yang-didukung).
 - **Dekode hardware:** VA-API (Intel, AMD) dan NVDEC (NVIDIA), lewat mpv.
+- **Pustaka:** tautkan folder wallpaper yang sudah Anda punya alih-alih mengimpornya, dan jaga agar tetap sinkron saat berkas datang dan pergi. Pustaka hanya menggambar apa yang ada di layar, sehingga ribuan wallpaper tetap cepat dan ringan.
 - **Widget:** lirik yang sinkron dengan musik, jam (termasuk jam dunia), visualizer audio, dan sampul album, semuanya digambar langsung di wallpaper. Semuanya nonaktif secara bawaan.
 - **Kontrol:** aplikasinya sendiri, palet perintah Ctrl+K, serta `fresco next` / `fresco prev` / `fresco random` untuk pintasan keyboard.
 - **Instalasi:** paket `.deb` untuk Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali, dan Deepin (skrip satu baris, unduh manual, atau Toko Aplikasi Deepin); di Fedora, Arch, dan distro lain, bangun dari kode sumber — lihat [Instalasi](#instalasi).
 - **Lisensi:** gratis dan open source di bawah [GPL-3.0-or-later](LICENSE), tanpa iklan dan tanpa akun.
-- **Pengguna:** 3,000+ orang di 128 negara. Versi terbaru: 1.1.50.
+- **Pengguna:** 3.000+ orang di 128 negara. Versi terbaru: 1.1.50.
 
 ## Instalasi
 
@@ -93,13 +94,15 @@ Wallpaper tetap diputar setelah jendela aplikasi ditutup.
 
 - **Media apa pun** — video berulang (mp4/webm/mkv), GIF animasi, gambar statis, slideshow gambar, daftar putar beberapa video
 - **Tambah dari tautan** — tempel pin Pinterest atau URL video/gambar langsung; Fresco mengunduhnya lalu membuka editor pangkas
+- **Tautkan folder** — pakai folder wallpaper yang sudah Anda punya (gambar, GIF, dan video) tanpa mengimpornya; folder tetap sinkron saat Anda menambah dan menghapus berkas, subfolder bersifat opsional, dan favorit serta hasil suntingan Anda disimpan per berkas
+- **Pustaka besar** — pustaka hanya menggambar wallpaper di dekat posisi gulir Anda, sehingga ribuan wallpaper terbuka dalam sekitar dua detik dan memakai beberapa ratus megabita (pada pustaka uji berisi 4.000 wallpaper: sekitar 2 dtk dan 325 MB, turun dari 9 sampai 13 dtk dan 1,6 GB)
 - **Dekode hardware** — dekode video lewat GPU (VA-API / NVDEC) menjaga CPU tetap nyaris menganggur dengan memindahkan pekerjaan ke mesin video, tempat biayanya terukur lebih murah (bukan gratis — lihat [Performa](#performa-dan-daya-tahan-baterai))
 - **Hemat daya** — penskalaan GPU yang lebih murah untuk laptop; terukur memangkas daya GPU hingga sekitar setengahnya (lihat [Performa](#performa-dan-daya-tahan-baterai))
 - **Multi-monitor** — wallpaper berbeda untuk tiap layar, dengan pemutaran tersinkron untuk video yang sama di beberapa monitor
 - **Jadwal siang dan malam** — ganti wallpaper berdasarkan timer, slot waktu bebas, atau matahari terbit/terbenam
 - **Widget desktop** — lirik lagu yang sinkron, jam bertema, jam dunia, visualizer audio, dan cakram sampul album yang berputar, digambar langsung di wallpaper sehingga tidak ada yang menutupi jendela Anda (jam dunia punya mode opsional melayang di atas jendela); semuanya nonaktif secara bawaan (lihat [Widget desktop](#widget-desktop-lirik-jam-visualizer-dan-sampul-album))
 - **Layar kunci** — tampilkan wallpaper dan widget (jam, ucapan salam, lagu yang sedang diputar, baterai, dan lainnya) di layar kunci sungguhan, menggantikan layar kunci bawaan — video hidup dan widget di COSMIC 1.9+ dan KDE Plasma 6, wallpaper beserta widget lewat `fresco lock` di Sway/Hyprland/niri dan X11, satu bingkai diam di tempat lain. Nonaktif secara bawaan, dan Fresco tidak pernah melihat kata sandi Anda — lihat [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Kontrol keyboard** — `fresco next`, `fresco prev`, dan `fresco random` untuk pintasan compositor, serta palet perintah Ctrl+K di dalam aplikasi
+- **Kontrol keyboard** — `fresco next`, `fresco prev`, dan `fresco random` untuk pintasan compositor (jendela Fresco yang terbuka mengikuti perubahan itu alih-alih mengembalikannya), serta palet perintah Ctrl+K di dalam aplikasi
 - **Pengelolaan massal** — pilih beberapa wallpaper sekaligus dan hapus dalam satu langkah
 - **Katalog bawaan** — jelajahi wallpaper pilihan yang berlisensi resmi langsung di dalam aplikasi
 - **Jeda otomatis saat layar penuh** — per monitor, di X11, compositor wlroots, COSMIC, dan KDE Plasma (lewat plugin wallpapernya); opsional juga untuk jendela yang dimaksimalkan, ditambah jeda saat memakai baterai
@@ -113,13 +116,14 @@ Wallpaper tetap diputar setelah jendela aplikasi ditutup.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Renderer tertanam. GNOME hanya jika distro masih menyertakan sesi Xorg (lihat catatan GNOME di bawah) |
 | Kali Linux (Xfce, X11) | ✅ | Berjalan di sesi bawaan Kali, yaitu Xfce di X11, dengan renderer tertanam yang sama seperti desktop X11 lainnya |
+| Xfce (X11) | ✅ | Ikon desktop tetap terlihat di atas wallpaper, dan Anda bisa mengeklik, memilih, serta menyeretnya |
 | MATE (X11) | ✅ | Ikon desktop tetap terlihat dan bisa diklik di atas wallpaper |
 | Deepin 25 (DDE, X11) | ✅ | Adaptasi DDE otomatis — diverifikasi komunitas di Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 ke atas (Wayland) | ✅ | Compositor Cinnamon mendapat layer-shell di versi 6.8. Cinnamon 6.6 ke bawah tidak punya layer-shell dan hanya menampilkan satu bingkai diam di Wayland |
-| KDE Plasma 6 (X11 dan Wayland) | ✅ | Diatur lewat plugin wallpaper milik plasmashell sendiri, jadi ikon desktop tetap terlihat. Memerlukan `qml6-module-qtmultimedia` untuk video. Pemutaran memakai Qt, bukan mpv: tanpa suara, tanpa penyetelan hwdec, pangkas, atau transisi; daftar putar hanya memutar berkas pertamanya dan slideshow hanya menampilkan bingkai pertamanya |
+| KDE Plasma 6 (X11 dan Wayland) | ✅ | Diatur lewat plugin wallpaper milik plasmashell sendiri, jadi ikon desktop tetap terlihat. Memerlukan `qml6-module-qtmultimedia` untuk video. Pemutaran memakai Qt, bukan mpv: tanpa suara, tanpa penyetelan hwdec, pangkas, atau transisi; daftar putar hanya memutar berkas pertamanya dan slideshow hanya menampilkan bingkai pertamanya. Opsi Metode pengisian (Penuhi, Sesuaikan, Regangkan) tetap berlaku |
 | GNOME di Wayland | ⚠️ | Hanya satu bingkai diam — Mutter tidak menyediakan permukaan wallpaper hidup, jadi tidak ada video dan tidak ada widget. Video hidup memerlukan ekstensi GNOME untuk Fresco (direncanakan) |
 
 Setiap lingkungan di atas diuji secara headless di CI pada setiap rilis.
@@ -153,11 +157,11 @@ Fresco menyertakan `mpvpaper` sebagai renderer Wayland-nya, jadi Fresco dibangun
 
 | Video | Hemat daya | Daya GPU | Total daya paket |
 |---|---|---|---|
-| 1080p 60fps | Kualitas penuh | 1.37 W | 6.00 W |
-| 1080p 60fps | **Rendah** (bawaan) | **0.63 W** (−54%) | **4.03 W** (−33%) |
-| 4K 60fps | Kualitas penuh | 2.77 W | 7.94 W |
-| 4K 60fps | **Rendah** (bawaan) | **1.60 W** (−42%) | **5.95 W** (−25%) |
-| 4K 60fps | Minimum | 0.99 W (−65%) | 4.97 W (−37%) |
+| 1080p 60fps | Kualitas penuh | 1,37 W | 6,00 W |
+| 1080p 60fps | **Rendah** (bawaan) | **0,63 W** (−54%) | **4,03 W** (−33%) |
+| 4K 60fps | Kualitas penuh | 2,77 W | 7,94 W |
+| 4K 60fps | **Rendah** (bawaan) | **1,60 W** (−42%) | **5,95 W** (−25%) |
+| 4K 60fps | Minimum | 0,99 W (−65%) | 4,97 W (−37%) |
 
 Hemat daya mengurangi biaya penskalaan GPU per bingkai. Tidak ada bingkai yang dibuang dan dekode hardware tidak disentuh, sehingga pemutaran tetap mulus — yang dikorbankan adalah ketajaman gambar, bukan gerakan. Rendah adalah pengaturan bawaan; Minimum layak dipilih untuk sumber 4K.
 
@@ -204,7 +208,7 @@ Fresco menyediakan paket `.deb` untuk distro berbasis Debian dan Ubuntu: Ubuntu,
 
 CPU, tidak. Baterai, sedikit — wallpaper hidup tidak pernah gratis.
 
-Fresco mendekode video di GPU (VA-API / NVDEC), sehingga pemakaian CPU nyaris menganggur. Itu memindahkan biayanya ke mesin video, bukan menghilangkannya. Diukur pada Intel N150 dengan tingkat Hemat daya bawaan, wallpaper 1080p memakai daya GPU 0.63 W dengan total daya paket 4.03 W saat diputar (lihat [Performa](#performa-dan-daya-tahan-baterai) untuk cara membacanya, termasuk apa yang *tidak* dikatakannya). Jeda otomatis saat layar penuh dan Jeda saat baterai ada untuk menjaga biaya itu tidak menguras baterai pada saat yang paling penting.
+Fresco mendekode video di GPU (VA-API / NVDEC), sehingga pemakaian CPU nyaris menganggur. Itu memindahkan biayanya ke mesin video, bukan menghilangkannya. Diukur pada Intel N150 dengan tingkat Hemat daya bawaan, wallpaper 1080p memakai daya GPU 0,63 W dengan total daya paket 4,03 W saat diputar (lihat [Performa](#performa-dan-daya-tahan-baterai) untuk cara membacanya, termasuk apa yang *tidak* dikatakannya). Jeda otomatis saat layar penuh dan Jeda saat baterai ada untuk menjaga biaya itu tidak menguras baterai pada saat yang paling penting.
 
 ### Apakah Fresco berjalan di Wayland?
 
@@ -216,15 +220,15 @@ Ya di X11, dengan wallpaper hidup penuh — video, widget, semuanya. Di **GNOME 
 
 ### Apakah Fresco berjalan di KDE Plasma, COSMIC, Hyprland, atau Sway?
 
-Ya, di keempatnya. COSMIC, Hyprland, dan Sway memutar video hidup lewat layer-shell. KDE Plasma 6 (X11 dan Wayland) memakai plugin wallpaper milik Fresco sendiri di dalam plasmashell, yang menjaga ikon desktop tetap terlihat tetapi memutar lewat Qt, bukan mpv: tanpa suara, tanpa pangkas atau transisi, dan memerlukan `qml6-module-qtmultimedia` untuk video.
+Ya, di keempatnya. COSMIC, Hyprland, dan Sway memutar video hidup lewat layer-shell. KDE Plasma 6 (X11 dan Wayland) memakai plugin wallpaper milik Fresco sendiri di dalam plasmashell, yang menjaga ikon desktop tetap terlihat tetapi memutar lewat Qt, bukan mpv: tanpa suara, tanpa pangkas atau transisi, dan memerlukan `qml6-module-qtmultimedia` untuk video. Opsi Metode pengisian (Penuhi, Sesuaikan, atau Regangkan) juga berlaku di sana.
 
 ### Apakah Fresco berjalan di Linux Mint, Xfce, Cinnamon, atau MATE?
 
-Ya. Cinnamon, Xfce, dan MATE di X11 memakai renderer tertanam, dan ikon desktop tetap terlihat di atas wallpaper pada Xfce dan MATE. Cinnamon di Wayland berfungsi mulai Cinnamon 6.8, yang menambahkan layer-shell.
+Ya. Cinnamon, Xfce, dan MATE di X11 memakai renderer tertanam, dan ikon desktop tetap terlihat di atas wallpaper pada Xfce dan MATE; di Xfce Anda bisa mengeklik, memilih, dan menyeretnya seperti biasa. Cinnamon di Wayland berfungsi mulai Cinnamon 6.8, yang menambahkan layer-shell.
 
 ### Bagaimana cara berganti wallpaper dengan pintasan keyboard?
 
-Kaitkan `fresco next`, `fresco prev`, atau `fresco random` ke sebuah tombol di pengaturan compositor atau desktop Anda — perintah-perintah itu mengganti wallpaper tanpa membuka aplikasi (`random` tidak pernah memilih wallpaper yang sedang diputar). Perintah-perintah itu berpindah di pustaka Anda sesuai urutan yang ditampilkan aplikasi, atau hanya di folder yang sedang Anda buka di sana, dan menjalankan layanan Fresco jika belum berjalan. Di dalam aplikasi, Ctrl+K membuka palet perintah. Contohnya di Sway:
+Kaitkan `fresco next`, `fresco prev`, atau `fresco random` ke sebuah tombol di pengaturan compositor atau desktop Anda — perintah-perintah itu mengganti wallpaper tanpa membuka aplikasi (`random` tidak pernah memilih wallpaper yang sedang diputar). Perintah-perintah itu berpindah di pustaka Anda sesuai urutan yang ditampilkan aplikasi, atau hanya di folder yang sedang Anda buka di sana, dan menjalankan layanan Fresco jika belum berjalan. Jika jendela Fresco sedang terbuka saat itu, jendela tersebut mengikuti wallpaper baru alih-alih memasang kembali yang lama. Di dalam aplikasi, Ctrl+K membuka palet perintah. Contohnya di Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Bisa. Fresco mendukung wallpaper per layar, dan saat video yang sama dipakai di 
 
 ### Apakah mendukung GIF dan slideshow gambar?
 
-Ya — GIF animasi, gambar statis, slideshow gambar dengan transisi (crossfade, memudar, geser, Ken Burns), dan daftar putar beberapa video, selain berkas video.
+Ya — GIF animasi, gambar statis, slideshow gambar dengan transisi (memudar ke hitam, Ken Burns, perbesar, dan buram), dan daftar putar beberapa video, selain berkas video.
+
+### Bisakah Fresco memakai folder wallpaper yang sudah ada tanpa mengimpor?
+
+Bisa. Gunakan **Tautkan folder** untuk mengarahkan Fresco ke folder tempat Anda sudah menyimpan wallpaper. Gambar, GIF, dan video di dalamnya muncul di pustaka Anda di tempatnya berada, tanpa diimpor, dan pustaka tetap sinkron saat Anda menambah dan menghapus berkas di folder itu. Subfolder bersifat opsional, dan favorit serta suntingan Anda diingat per berkas. **Tambah** tetap mengimpor berkas satuan seperti sebelumnya.
+
+### Bisakah Fresco menangani ribuan wallpaper?
+
+Bisa. Pustaka hanya membuat kartu untuk wallpaper di dekat posisi gulir Anda, bukan semuanya sekaligus, sehingga koleksi besar tidak membebani aplikasi. Pada pustaka uji berisi 4.000 wallpaper (setengah gambar, setengah video), pustaka muncul dalam sekitar 2 detik, bukan 9 sampai 13 detik, dan aplikasi memakai sekitar 325 MB memori, bukan 1,6 GB. Angka-angka itu berasal dari build pengembangan yang berjalan di bawah beban pada satu mesin, jadi anggaplah sebagai gambaran, bukan janji.
 
 ### Bisakah memakai video YouTube sebagai wallpaper?
 
@@ -280,7 +292,7 @@ Fresco menggambar lima widget opsional di wallpaper Anda. Semuanya **nonaktif se
 | **Visualizer audio** | Lima gaya — Batang, Cerminkan, Gelombang, Titik, Cincin — dengan pemilih warna, paduan dua warna, atau pelangi |
 | **Sampul album** | Sampul lagu yang sedang diputar pada piringan hitam yang berputar; berhenti berputar saat pemutaran dijeda |
 
-Kecuali mode opsional **Melayang di atas jendela** pada jam dunia, widget digambar ke wallpaper lewat lapisan OSD mpv dan bukan ke jendelanya sendiri, sehingga tidak pernah berada di atas jendela Anda, tidak pernah menangkap klik, dan berperilaku sama persis di X11 dan di setiap compositor layer-shell. Dengan musik diputar dan widget lirik, jam, visualizer, dan sampul album aktif, biaya yang terukur adalah **0.8% dari satu inti CPU** — hampir seluruhnya dari penangkapan audio, karena tidak ada yang digambar ulang kecuali isinya berubah.
+Kecuali mode opsional **Melayang di atas jendela** pada jam dunia, widget digambar ke wallpaper lewat lapisan OSD mpv dan bukan ke jendelanya sendiri, sehingga tidak pernah berada di atas jendela Anda, tidak pernah menangkap klik, dan berperilaku sama persis di X11 dan di setiap compositor layer-shell. Dengan musik diputar dan widget lirik, jam, visualizer, dan sampul album aktif, biaya yang terukur adalah **0,8% dari satu inti CPU** — hampir seluruhnya dari penangkapan audio, karena tidak ada yang digambar ulang kecuali isinya berubah. Widget juga kembali dengan sendirinya setelah komputer ditangguhkan lalu dilanjutkan.
 
 Widget muncul di **setiap layar** secara bawaan. Untuk membatasinya di satu layar, tambahkan `monitor = "DP-1"` ke blok `[widgets]` di `config.toml` (belum ada kontrol GUI untuk ini). Widget **tidak tersedia di GNOME pada Wayland**, yang tidak punya permukaan wallpaper hidup untuk digambari Fresco — alasan yang sama dengan wallpaper yang kembali ke bingkai statis di sana.
 
@@ -465,7 +477,7 @@ Utas itu dikunci dengan tiket acak yang dibuat terpisah dari telemetri dan disim
 | **Versi terbaru** | 1.1.50 (2026-10-16) — lihat [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) untuk yang terbaru |
 | **Paket** | `.deb` (amd64), skrip instalasi satu baris, Toko Aplikasi Deepin; bangun dari kode sumber di tempat lain |
 | **Bahasa antarmuka** | Inggris ditambah 12 terjemahan: Tionghoa Sederhana, Rusia, Spanyol, Prancis, Jerman, Portugis (Brasil), Turki, Vietnam, Indonesia, Hindi, Bengali, dan Rumania |
-| **Pengguna** | 3,000+ orang di 128 negara |
+| **Pengguna** | 3.000+ orang di 128 negara |
 | **Pengelola** | Dibbayajyoti Roy |
 | **Kode sumber** | <https://github.com/DibbayajyotiRoy/fresco> |
 | **Situs web** | <https://fresco.dibbayajyoti.com> |
@@ -480,4 +492,4 @@ Laporan bug, permintaan fitur, dan PR sangat diterima — buka [issue](https://g
 
 ---
 
-<sub>Fresco adalah aplikasi wallpaper hidup dan wallpaper video yang gratis dan open source untuk Linux (X11 dan Wayland), dengan widget lirik, jam, visualizer audio, dan sampul album yang digambar langsung di wallpaper. Fresco adalah alternatif native Wallpaper Engine untuk Linux sekaligus pendamping musik dan jam bagi alat seperti Conky. Dipakai oleh 3,000+ orang di 128 negara. Terakhir diperbarui: 2026-10-16.</sub>
+<sub>Fresco adalah aplikasi wallpaper hidup dan wallpaper video yang gratis dan open source untuk Linux (X11 dan Wayland), dengan widget lirik, jam, visualizer audio, dan sampul album yang digambar langsung di wallpaper. Fresco adalah alternatif native Wallpaper Engine untuk Linux sekaligus pendamping musik dan jam bagi alat seperti Conky. Dipakai oleh 3.000+ orang di 128 negara. Terakhir diperbarui: 2026-10-16.</sub>

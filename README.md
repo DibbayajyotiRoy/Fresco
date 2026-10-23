@@ -242,7 +242,7 @@ Yes. Fresco supports per-display wallpapers, and when the same video is used acr
 
 ### Does it support GIFs and image slideshows?
 
-Yes — animated GIFs, static images, image slideshows with transitions (crossfade, fade, slide, Ken Burns), and multi-video playlists, in addition to video files.
+Yes — animated GIFs, static images, image slideshows with transitions (fade through black, Ken Burns, zoom and blur), and multi-video playlists, in addition to video files.
 
 ### Can Fresco use my existing wallpaper folder without importing?
 

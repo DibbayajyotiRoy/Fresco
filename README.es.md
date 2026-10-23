@@ -26,6 +26,7 @@ Fresco convierte un video, GIF, imagen, presentación de imágenes o lista de re
 - **Reproduce:** videos (mp4, webm, mkv, avi, mov), GIF animados, imágenes, presentaciones de imágenes y listas de reproducción de videos.
 - **Escritorios:** sesiones X11 (GNOME en Xorg, Cinnamon, Xfce, MATE, Deepin 25) y Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). GNOME en Wayland solo muestra una imagen fija; consulta [Entornos compatibles](#entornos-compatibles).
 - **Decodificación por hardware:** VA-API (Intel, AMD) y NVDEC (NVIDIA), a través de mpv.
+- **Biblioteca:** vincula una carpeta de fondos de pantalla que ya tengas en lugar de importarla, y mantenla sincronizada a medida que los archivos entran y salen. La biblioteca solo dibuja lo que está en pantalla, así que miles de fondos de pantalla siguen siendo ágiles y ligeros.
 - **Widgets:** letras sincronizadas con la música, relojes (incluido un reloj mundial), un visualizador de audio y la portada del álbum, dibujados directamente en el fondo de pantalla. Todos desactivados por defecto.
 - **Control:** la aplicación, una paleta de comandos con Ctrl+K y `fresco next` / `fresco prev` / `fresco random` para atajos de teclado.
 - **Instalación:** un `.deb` para Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali y Deepin (script de una línea, descarga manual o la tienda de aplicaciones de Deepin); compilación desde el código fuente en Fedora, Arch y otras; consulta [Instalación](#instalación).
@@ -93,13 +94,15 @@ El fondo de pantalla sigue reproduciéndose después de cerrar la ventana.
 
 - **Cualquier medio**: video en bucle (mp4/webm/mkv), GIF animado, imagen fija, presentación de imágenes, lista de reproducción con varios videos
 - **Agregar desde un enlace**: pega un pin de Pinterest o cualquier URL directa de video o imagen; Fresco la descarga y abre el editor de recorte
+- **Vincular una carpeta**: usa una carpeta de fondos de pantalla que ya tengas (imágenes, GIF y videos) sin importarla; se mantiene sincronizada cuando agregas y quitas archivos, las subcarpetas son opcionales y tus favoritos y ediciones se conservan por archivo
+- **Bibliotecas grandes**: la biblioteca solo dibuja los fondos de pantalla cercanos a tu posición de desplazamiento, así que miles de fondos de pantalla se abren en unos dos segundos y usan unos cientos de megabytes (en una biblioteca de prueba con 4000 fondos de pantalla: unos 2 s y 325 MB, frente a entre 9 y 13 s y 1.6 GB)
 - **Decodificación por hardware**: la decodificación de video en la GPU (VA-API / NVDEC) mantiene el uso de CPU casi en reposo al trasladar el trabajo al motor de video, donde es mensurablemente más barato (no es gratis; consulta [Rendimiento y duración de la batería](#rendimiento-y-duración-de-la-batería))
 - **Ahorro de energía**: escalado más económico en la GPU para portátiles; medido, reduce a aproximadamente la mitad la potencia de la GPU (consulta [Rendimiento y duración de la batería](#rendimiento-y-duración-de-la-batería))
 - **Varios monitores**: un fondo de pantalla distinto en cada pantalla, con reproducción sincronizada cuando se usa el mismo video en varios monitores
 - **Horarios de día y noche**: cambia de fondo de pantalla con un temporizador, en franjas horarias a tu medida o según el amanecer y el atardecer
 - **Widgets de escritorio**: letras sincronizadas, relojes con distintos temas, un reloj mundial, un visualizador de audio y un disco de portada de álbum que gira, dibujados en el propio fondo de pantalla para que nada tape tus ventanas (el reloj mundial tiene un modo opcional para flotar sobre las ventanas); todos desactivados por defecto (consulta [Widgets de escritorio](#widgets-de-escritorio-letras-relojes-visualizador-y-portada-del-álbum))
 - **Pantalla de bloqueo**: muestra tu fondo de pantalla y tus widgets (reloj, saludo, lo que suena, batería y más) en tu pantalla de bloqueo real en lugar de la predeterminada: video en vivo y widgets en COSMIC 1.9+ y KDE Plasma 6, fondo de pantalla y widgets con `fresco lock` en Sway/Hyprland/niri y X11, y una imagen fija en el resto. Desactivada por defecto, y Fresco nunca ve tu contraseña; consulta [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Control con el teclado**: `fresco next`, `fresco prev` y `fresco random` para los atajos del compositor, y una paleta de comandos con Ctrl+K dentro de la aplicación
+- **Control con el teclado**: `fresco next`, `fresco prev` y `fresco random` para los atajos del compositor (una ventana de Fresco abierta recoge el cambio en lugar de revertirlo), y una paleta de comandos con Ctrl+K dentro de la aplicación
 - **Gestión por lotes**: selecciona varios fondos de pantalla a la vez y quítalos en un solo paso
 - **Catálogo integrado**: explora dentro de la aplicación fondos de pantalla seleccionados y con licencia en regla
 - **Pausa automática a pantalla completa**: por monitor, en X11, compositores wlroots, COSMIC y KDE Plasma (mediante su complemento de fondo de pantalla); opcionalmente también con ventanas maximizadas, además de pausa con batería
@@ -113,13 +116,14 @@ El fondo de pantalla sigue reproduciéndose después de cerrar la ventana.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Renderizador integrado. GNOME solo donde la distribución aún incluye una sesión Xorg (consulta la nota sobre GNOME más abajo) |
 | Kali Linux (Xfce, X11) | ✅ | Funciona en la sesión predeterminada de Kali, Xfce sobre X11, con el mismo renderizador integrado que los demás escritorios X11 |
+| Xfce (X11) | ✅ | Los iconos del escritorio siguen visibles sobre el fondo de pantalla, y puedes pulsarlos, seleccionarlos y arrastrarlos |
 | MATE (X11) | ✅ | Los iconos del escritorio siguen visibles y se pueden pulsar sobre el fondo de pantalla |
 | Deepin 25 (DDE, X11) | ✅ | Adaptación automática a DDE; verificada por la comunidad en Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 y posteriores (Wayland) | ✅ | El compositor de Cinnamon incorporó layer-shell en la 6.8. Cinnamon 6.6 y anteriores no tienen layer-shell y muestran una imagen fija en Wayland |
-| KDE Plasma 6 (X11 y Wayland) | ✅ | Se establece mediante el propio complemento de fondo de pantalla de plasmashell, por lo que los iconos del escritorio siguen visibles. Necesita `qml6-module-qtmultimedia` para video. La reproducción es de Qt, no de mpv: sin sonido, sin ajuste de hwdec, recorte ni transiciones; una lista de reproducción reproduce su primer archivo y una presentación muestra su primer fotograma |
+| KDE Plasma 6 (X11 y Wayland) | ✅ | Se establece mediante el propio complemento de fondo de pantalla de plasmashell, por lo que los iconos del escritorio siguen visibles. Necesita `qml6-module-qtmultimedia` para video. La reproducción es de Qt, no de mpv: sin sonido, sin ajuste de hwdec, recorte ni transiciones; una lista de reproducción reproduce su primer archivo y una presentación muestra su primer fotograma. Se respeta la opción Ajuste (Rellenar, Ajustar, Estirar) |
 | GNOME en Wayland | ⚠️ | Solo imagen fija: Mutter no ofrece ninguna superficie para fondos de pantalla en vivo, así que no hay video ni widgets. El video en vivo requiere una extensión de GNOME para Fresco (planificada) |
 
 Todos los entornos anteriores se prueban en modo headless en la CI en cada versión.
@@ -216,15 +220,15 @@ Sí en X11, con el fondo de pantalla en vivo completo: video, widgets, todo. En 
 
 ### ¿Funciona Fresco en KDE Plasma, COSMIC, Hyprland o Sway?
 
-Sí, en los cuatro. COSMIC, Hyprland y Sway reproducen video en vivo mediante layer-shell. KDE Plasma 6 (X11 y Wayland) usa el propio complemento de fondo de pantalla de Fresco dentro de plasmashell, que mantiene visibles los iconos del escritorio pero reproduce con Qt en lugar de mpv: sin sonido, sin recorte ni transiciones, y necesita `qml6-module-qtmultimedia` para video.
+Sí, en los cuatro. COSMIC, Hyprland y Sway reproducen video en vivo mediante layer-shell. KDE Plasma 6 (X11 y Wayland) usa el propio complemento de fondo de pantalla de Fresco dentro de plasmashell, que mantiene visibles los iconos del escritorio pero reproduce con Qt en lugar de mpv: sin sonido, sin recorte ni transiciones, y necesita `qml6-module-qtmultimedia` para video. La opción Ajuste (Rellenar, Ajustar o Estirar) también se aplica ahí.
 
 ### ¿Funciona Fresco en Linux Mint, Xfce, Cinnamon o MATE?
 
-Sí. Cinnamon, Xfce y MATE en X11 usan el renderizador integrado, y en Xfce y MATE los iconos del escritorio siguen visibles sobre el fondo de pantalla. Cinnamon en Wayland funciona desde Cinnamon 6.8, que incorporó layer-shell.
+Sí. Cinnamon, Xfce y MATE en X11 usan el renderizador integrado, y en Xfce y MATE los iconos del escritorio siguen visibles sobre el fondo de pantalla; en Xfce puedes pulsarlos, seleccionarlos y arrastrarlos como siempre. Cinnamon en Wayland funciona desde Cinnamon 6.8, que incorporó layer-shell.
 
 ### ¿Cómo cambio de fondo de pantalla con un atajo de teclado?
 
-Asigna `fresco next`, `fresco prev` o `fresco random` a una tecla en tu compositor o en los ajustes del escritorio: cambian el fondo de pantalla sin abrir la aplicación (`random` nunca elige el que ya se está reproduciendo). Recorren tu biblioteca en el orden en que la muestra la aplicación, o solo la carpeta que tengas abierta allí, e inician el servicio de Fresco si no está en ejecución. Dentro de la aplicación, Ctrl+K abre una paleta de comandos. Por ejemplo, en Sway:
+Asigna `fresco next`, `fresco prev` o `fresco random` a una tecla en tu compositor o en los ajustes del escritorio: cambian el fondo de pantalla sin abrir la aplicación (`random` nunca elige el que ya se está reproduciendo). Recorren tu biblioteca en el orden en que la muestra la aplicación, o solo la carpeta que tengas abierta allí, e inician el servicio de Fresco si no está en ejecución. Si la ventana de Fresco está abierta en ese momento, recoge el fondo de pantalla nuevo en lugar de volver a poner el anterior. Dentro de la aplicación, Ctrl+K abre una paleta de comandos. Por ejemplo, en Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Sí. Fresco admite un fondo de pantalla por pantalla, y cuando se usa el mismo v
 
 ### ¿Admite GIF y presentaciones de imágenes?
 
-Sí: GIF animados, imágenes estáticas, presentaciones de imágenes con transiciones (fundido cruzado, fundido, deslizamiento, Ken Burns) y listas de reproducción con varios videos, además de archivos de video.
+Sí: GIF animados, imágenes estáticas, presentaciones de imágenes con transiciones (desvanecer a negro, Ken Burns, acercamiento y desenfoque) y listas de reproducción con varios videos, además de archivos de video.
+
+### ¿Puede Fresco usar mi carpeta de fondos de pantalla sin importarla?
+
+Sí. Usa **Vincular una carpeta** para indicarle a Fresco una carpeta donde ya guardas fondos de pantalla. Sus imágenes, GIF y videos aparecen en tu biblioteca donde están, sin importarse, y la biblioteca se mantiene sincronizada cuando agregas y quitas archivos en esa carpeta. Las subcarpetas son opcionales, y tus favoritos y ediciones se recuerdan por archivo. **Agregar** sigue importando archivos sueltos como antes.
+
+### ¿Puede Fresco manejar miles de fondos de pantalla?
+
+Sí. La biblioteca solo construye las tarjetas de los fondos de pantalla cercanos a donde estás desplazándote, en lugar de todos a la vez, así que una colección grande no sobrecarga la aplicación. En una biblioteca de prueba con 4000 fondos de pantalla (mitad imágenes, mitad videos), la biblioteca apareció en unos 2 segundos en lugar de entre 9 y 13, y la aplicación usó unos 325 MB de memoria en lugar de 1.6 GB. Esas cifras provienen de una compilación de desarrollo bajo carga en una sola máquina, así que tómalas como una guía, no como una promesa.
 
 ### ¿Puedo usar un video de YouTube como fondo de pantalla?
 
@@ -280,7 +292,7 @@ Fresco dibuja cinco widgets opcionales sobre tu fondo de pantalla. Todos están 
 | **Visualizador de audio** | Cinco estilos (Barras, Reflejar, Onda, Puntos, Anillo) con selector de color, degradado entre dos colores o arcoíris |
 | **Portada del álbum** | La portada de la pista actual sobre un disco que gira; deja de girar cuando se pausa la reproducción |
 
-Salvo el modo opcional **Flotar sobre las ventanas** del reloj mundial, los widgets se pintan en el fondo de pantalla mediante la capa OSD de mpv en lugar de en una ventana propia, así que nunca quedan por encima de tus ventanas, nunca interceptan un clic y se comportan igual en X11 y en todos los compositores con layer-shell. Con música sonando y los widgets de letras, reloj, visualizador y portada del álbum activados, el costo medido fue del **0.8 % de un núcleo de CPU**, casi todo por la captura de audio, ya que nada se repinta a menos que cambie su contenido.
+Salvo el modo opcional **Flotar sobre las ventanas** del reloj mundial, los widgets se pintan en el fondo de pantalla mediante la capa OSD de mpv en lugar de en una ventana propia, así que nunca quedan por encima de tus ventanas, nunca interceptan un clic y se comportan igual en X11 y en todos los compositores con layer-shell. Con música sonando y los widgets de letras, reloj, visualizador y portada del álbum activados, el costo medido fue del **0.8 % de un núcleo de CPU**, casi todo por la captura de audio, ya que nada se repinta a menos que cambie su contenido. Los widgets también vuelven por sí solos cuando el equipo se suspende y se reanuda.
 
 Los widgets aparecen por defecto en **todas las pantallas**. Para dejarlos en una sola, añade `monitor = "DP-1"` al bloque `[widgets]` de `config.toml` (todavía no hay un control en la interfaz gráfica para esto). **No están disponibles en GNOME con Wayland**, que no tiene ninguna superficie de fondo de pantalla en vivo en la que Fresco pueda dibujar; es la misma razón por la que allí los fondos de pantalla vuelven a una imagen fija.
 

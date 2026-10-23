@@ -26,11 +26,12 @@ Fresco biến video, GIF, ảnh, trình chiếu hoặc danh sách phát thành h
 - **Phát được:** video (mp4, webm, mkv, avi, mov), GIF động, ảnh, trình chiếu ảnh và danh sách phát video.
 - **Desktop:** phiên X11 (GNOME trên Xorg, Cinnamon, Xfce, MATE, Deepin 25) và Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). GNOME trên Wayland chỉ hiện được một khung hình tĩnh — xem [Môi trường được hỗ trợ](#môi-trường-được-hỗ-trợ).
 - **Giải mã phần cứng:** VA-API (Intel, AMD) và NVDEC (NVIDIA), thông qua mpv.
+- **Thư viện:** liên kết một thư mục hình nền bạn đã có thay vì nhập vào, và giữ đồng bộ khi tệp được thêm vào hay bị xóa đi. Thư viện chỉ vẽ những gì đang hiện trên màn hình, nên hàng nghìn hình nền vẫn nhanh và nhẹ.
 - **Widget:** lời bài hát đồng bộ theo nhạc, đồng hồ (kể cả đồng hồ thế giới), hiệu ứng hình ảnh âm thanh và ảnh bìa album, được vẽ thẳng lên hình nền. Tất cả đều tắt theo mặc định.
 - **Điều khiển:** ứng dụng, bảng lệnh Ctrl+K, cùng `fresco next` / `fresco prev` / `fresco random` để gán phím tắt.
 - **Cài đặt:** gói `.deb` cho Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali và Deepin (một dòng lệnh, tải thủ công hoặc qua Cửa hàng ứng dụng Deepin); trên Fedora, Arch và các bản phân phối khác thì biên dịch từ mã nguồn — xem [Cài đặt](#cài-đặt).
 - **Giấy phép:** miễn phí và mã nguồn mở theo [GPL-3.0-or-later](LICENSE), không quảng cáo, không cần tài khoản.
-- **Người dùng:** 3,000+ người ở 128 quốc gia. Phiên bản mới nhất: 1.1.50.
+- **Người dùng:** 3.000+ người ở 128 quốc gia. Phiên bản mới nhất: 1.1.50.
 
 ## Cài đặt
 
@@ -93,13 +94,15 @@ Hình nền vẫn tiếp tục phát sau khi cửa sổ ứng dụng đã đóng
 
 - **Mọi loại media** — video lặp (mp4/webm/mkv), GIF động, ảnh tĩnh, trình chiếu ảnh, danh sách phát nhiều video
 - **Thêm từ liên kết** — dán một pin Pinterest hoặc URL video/ảnh trực tiếp; Fresco tải về rồi mở trình chỉnh sửa cắt
+- **Liên kết thư mục** — dùng một thư mục hình nền bạn đã có (ảnh, GIF và video) mà không cần nhập vào; thư mục luôn đồng bộ khi bạn thêm và xóa tệp, thư mục con là tùy chọn, còn mục yêu thích và các chỉnh sửa của bạn được giữ theo từng tệp
+- **Thư viện lớn** — thư viện chỉ vẽ những hình nền gần vị trí cuộn của bạn, nên hàng nghìn hình nền mở trong khoảng hai giây và dùng vài trăm megabyte (trên thư viện thử nghiệm 4.000 hình nền: khoảng 2 giây và 325 MB, so với 9 đến 13 giây và 1,6 GB)
 - **Giải mã phần cứng** — giải mã video bằng GPU (VA-API / NVDEC) giữ CPU gần như rảnh bằng cách chuyển công việc sang bộ xử lý video, nơi chi phí rẻ hơn rõ rệt (không phải miễn phí — xem [Hiệu năng](#hiệu-năng-và-thời-lượng-pin))
 - **Tiết kiệm điện** — co giãn ảnh trên GPU nhẹ hơn cho laptop; đo được là giảm khoảng một nửa điện năng GPU (xem [Hiệu năng](#hiệu-năng-và-thời-lượng-pin))
 - **Nhiều màn hình** — mỗi màn hình một hình nền riêng, và phát đồng bộ khi cùng một video chạy trên nhiều màn hình
 - **Lịch ngày và đêm** — đổi hình nền theo bộ hẹn giờ, khung giờ tùy ý hoặc theo bình minh/hoàng hôn
 - **Widget trên màn hình nền** — lời bài hát đồng bộ, đồng hồ theo giao diện, đồng hồ thế giới, hiệu ứng hình ảnh âm thanh và đĩa ảnh bìa album xoay tròn, được vẽ thẳng vào hình nền nên không che cửa sổ nào của bạn (đồng hồ thế giới có thêm chế độ tùy chọn nổi trên cửa sổ); tất cả đều tắt theo mặc định (xem [Widget trên màn hình nền](#widget-trên-màn-hình-nền-lời-bài-hát-đồng-hồ-hiệu-ứng-hình-ảnh-âm-thanh-và-ảnh-bìa-album))
 - **Màn hình khóa** — hiển thị hình nền và widget (đồng hồ, lời chào, bài đang phát, pin và hơn thế nữa) trên màn hình khóa thật thay cho màn hình khóa mặc định — video động và widget trên COSMIC 1.9+ và KDE Plasma 6, hình nền kèm widget qua `fresco lock` trên Sway/Hyprland/niri và X11, còn lại là một khung hình tĩnh. Tắt theo mặc định, và Fresco không bao giờ nhìn thấy mật khẩu của bạn — xem [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Điều khiển bằng bàn phím** — `fresco next`, `fresco prev` và `fresco random` để gán phím tắt cho compositor, cùng bảng lệnh Ctrl+K ngay trong ứng dụng
+- **Điều khiển bằng bàn phím** — `fresco next`, `fresco prev` và `fresco random` để gán phím tắt cho compositor (cửa sổ Fresco đang mở sẽ nhận thay đổi thay vì hoàn nguyên nó), cùng bảng lệnh Ctrl+K ngay trong ứng dụng
 - **Quản lý hàng loạt** — chọn nhiều hình nền cùng lúc và xóa chỉ trong một bước
 - **Danh mục tích hợp** — duyệt ngay trong ứng dụng các hình nền tuyển chọn, có bản quyền hợp lệ
 - **Tự động tạm dừng khi toàn màn hình** — theo từng màn hình, trên X11, các compositor wlroots, COSMIC và KDE Plasma (qua plugin hình nền của nó); tùy chọn áp dụng cả cho cửa sổ phóng to tối đa, cộng thêm tạm dừng khi dùng pin
@@ -113,13 +116,14 @@ Hình nền vẫn tiếp tục phát sau khi cửa sổ ứng dụng đã đóng
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Trình kết xuất nhúng. GNOME chỉ dùng được khi bản phân phối còn cung cấp phiên Xorg (xem ghi chú GNOME bên dưới) |
 | Kali Linux (Xfce, X11) | ✅ | Chạy trên phiên mặc định của Kali là Xfce trên X11, với cùng trình kết xuất nhúng như các desktop X11 khác |
+| Xfce (X11) | ✅ | Biểu tượng màn hình nền vẫn hiển thị phía trên hình nền, và bạn có thể nhấp, chọn và kéo chúng |
 | MATE (X11) | ✅ | Biểu tượng màn hình nền vẫn hiển thị và nhấp được phía trên hình nền |
 | Deepin 25 (DDE, X11) | ✅ | Tự động thích ứng với DDE — đã được cộng đồng kiểm chứng trên Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 trở lên (Wayland) | ✅ | Compositor của Cinnamon có layer-shell từ bản 6.8. Cinnamon 6.6 trở xuống không có layer-shell và chỉ giữ một khung hình tĩnh trên Wayland |
-| KDE Plasma 6 (X11 và Wayland) | ✅ | Được đặt thông qua plugin hình nền của chính plasmashell, nên biểu tượng màn hình nền vẫn hiển thị. Cần `qml6-module-qtmultimedia` để phát video. Việc phát do Qt đảm nhận chứ không phải mpv: tắt tiếng, không tinh chỉnh hwdec, không cắt hay hiệu ứng chuyển; danh sách phát chỉ phát tệp đầu tiên và trình chiếu chỉ hiện khung hình đầu tiên |
+| KDE Plasma 6 (X11 và Wayland) | ✅ | Được đặt thông qua plugin hình nền của chính plasmashell, nên biểu tượng màn hình nền vẫn hiển thị. Cần `qml6-module-qtmultimedia` để phát video. Việc phát do Qt đảm nhận chứ không phải mpv: tắt tiếng, không tinh chỉnh hwdec, không cắt hay hiệu ứng chuyển; danh sách phát chỉ phát tệp đầu tiên và trình chiếu chỉ hiện khung hình đầu tiên. Tùy chọn Cách hiển thị (Lấp đầy, Vừa khung, Kéo giãn) vẫn được áp dụng |
 | GNOME trên Wayland | ⚠️ | Chỉ một khung hình tĩnh — Mutter không cung cấp bề mặt cho hình nền động, nên không có video và không có widget. Muốn có video động cần một tiện ích mở rộng GNOME của Fresco (đang được lên kế hoạch) |
 
 Mỗi môi trường ở trên đều được chạy kiểm thử headless trong CI ở mỗi bản phát hành.
@@ -153,11 +157,11 @@ Fresco đóng kèm `mpvpaper` làm trình kết xuất cho Wayland, nên nó xâ
 
 | Video | Tiết kiệm điện | Công suất GPU | Tổng công suất package |
 |---|---|---|---|
-| 1080p 60fps | Chất lượng đầy đủ | 1.37 W | 6.00 W |
-| 1080p 60fps | **Thấp** (mặc định) | **0.63 W** (−54%) | **4.03 W** (−33%) |
-| 4K 60fps | Chất lượng đầy đủ | 2.77 W | 7.94 W |
-| 4K 60fps | **Thấp** (mặc định) | **1.60 W** (−42%) | **5.95 W** (−25%) |
-| 4K 60fps | Chất lượng thấp nhất | 0.99 W (−65%) | 4.97 W (−37%) |
+| 1080p 60fps | Chất lượng đầy đủ | 1,37 W | 6,00 W |
+| 1080p 60fps | **Thấp** (mặc định) | **0,63 W** (−54%) | **4,03 W** (−33%) |
+| 4K 60fps | Chất lượng đầy đủ | 2,77 W | 7,94 W |
+| 4K 60fps | **Thấp** (mặc định) | **1,60 W** (−42%) | **5,95 W** (−25%) |
+| 4K 60fps | Chất lượng thấp nhất | 0,99 W (−65%) | 4,97 W (−37%) |
 
 Tiết kiệm điện làm giảm chi phí co giãn ảnh trên GPU cho từng khung hình. Không có khung hình nào bị bỏ và giải mã phần cứng không bị đụng đến, nên việc phát vẫn mượt — cái phải đánh đổi là độ sắc nét của ảnh, không phải chuyển động. Thấp là mặc định; với nguồn 4K, nên cân nhắc chọn chất lượng thấp nhất.
 
@@ -204,7 +208,7 @@ Fresco cung cấp gói `.deb` cho các bản phân phối dựa trên Debian và
 
 CPU thì không. Pin thì có một chút — hình nền động không bao giờ miễn phí.
 
-Fresco giải mã video trên GPU (VA-API / NVDEC), nên mức dùng CPU gần như rảnh. Điều đó chuyển chi phí sang bộ xử lý video chứ không xóa bỏ nó. Đo trên Intel N150 ở mức Tiết kiệm điện mặc định, hình nền 1080p tiêu thụ 0.63 W công suất GPU với tổng công suất package là 4.03 W khi đang phát (xem [Hiệu năng](#hiệu-năng-và-thời-lượng-pin) để biết cách đọc, kể cả những gì nó *không* nói lên). Tự động tạm dừng khi toàn màn hình và Tạm dừng khi dùng pin giúp chi phí đó không ngốn pin vào lúc quan trọng nhất.
+Fresco giải mã video trên GPU (VA-API / NVDEC), nên mức dùng CPU gần như rảnh. Điều đó chuyển chi phí sang bộ xử lý video chứ không xóa bỏ nó. Đo trên Intel N150 ở mức Tiết kiệm điện mặc định, hình nền 1080p tiêu thụ 0,63 W công suất GPU với tổng công suất package là 4,03 W khi đang phát (xem [Hiệu năng](#hiệu-năng-và-thời-lượng-pin) để biết cách đọc, kể cả những gì nó *không* nói lên). Tự động tạm dừng khi toàn màn hình và Tạm dừng khi dùng pin giúp chi phí đó không ngốn pin vào lúc quan trọng nhất.
 
 ### Fresco có chạy trên Wayland không?
 
@@ -216,15 +220,15 @@ Có trên X11, với đầy đủ hình nền động — video, widget, mọi t
 
 ### Fresco có chạy trên KDE Plasma, COSMIC, Hyprland hoặc Sway không?
 
-Có, trên cả bốn. COSMIC, Hyprland và Sway phát video động qua layer-shell. KDE Plasma 6 (X11 và Wayland) dùng plugin hình nền riêng của Fresco bên trong plasmashell, giúp biểu tượng màn hình nền vẫn hiển thị nhưng phát qua Qt thay vì mpv: tắt tiếng, không cắt hay hiệu ứng chuyển, và cần `qml6-module-qtmultimedia` để phát video.
+Có, trên cả bốn. COSMIC, Hyprland và Sway phát video động qua layer-shell. KDE Plasma 6 (X11 và Wayland) dùng plugin hình nền riêng của Fresco bên trong plasmashell, giúp biểu tượng màn hình nền vẫn hiển thị nhưng phát qua Qt thay vì mpv: tắt tiếng, không cắt hay hiệu ứng chuyển, và cần `qml6-module-qtmultimedia` để phát video. Tùy chọn Cách hiển thị (Lấp đầy, Vừa khung hoặc Kéo giãn) cũng áp dụng ở đó.
 
 ### Fresco có chạy trên Linux Mint, Xfce, Cinnamon hoặc MATE không?
 
-Có. Cinnamon, Xfce và MATE trên X11 dùng trình kết xuất nhúng, và biểu tượng màn hình nền vẫn hiển thị phía trên hình nền trên Xfce và MATE. Cinnamon trên Wayland chạy được từ Cinnamon 6.8, bản đã thêm layer-shell.
+Có. Cinnamon, Xfce và MATE trên X11 dùng trình kết xuất nhúng, và biểu tượng màn hình nền vẫn hiển thị phía trên hình nền trên Xfce và MATE; trên Xfce, bạn có thể nhấp, chọn và kéo chúng như thường. Cinnamon trên Wayland chạy được từ Cinnamon 6.8, bản đã thêm layer-shell.
 
 ### Làm sao đổi hình nền bằng phím tắt?
 
-Gán `fresco next`, `fresco prev` hoặc `fresco random` cho một phím trong cài đặt compositor hoặc desktop của bạn — chúng đổi hình nền mà không cần mở ứng dụng (`random` không bao giờ chọn hình nền đang phát). Chúng lần lượt đi qua thư viện của bạn theo đúng thứ tự ứng dụng hiển thị, hoặc chỉ trong thư mục bạn đang mở ở đó, và sẽ khởi động dịch vụ Fresco nếu nó chưa chạy. Trong ứng dụng, Ctrl+K mở bảng lệnh. Ví dụ trên Sway:
+Gán `fresco next`, `fresco prev` hoặc `fresco random` cho một phím trong cài đặt compositor hoặc desktop của bạn — chúng đổi hình nền mà không cần mở ứng dụng (`random` không bao giờ chọn hình nền đang phát). Chúng lần lượt đi qua thư viện của bạn theo đúng thứ tự ứng dụng hiển thị, hoặc chỉ trong thư mục bạn đang mở ở đó, và sẽ khởi động dịch vụ Fresco nếu nó chưa chạy. Nếu cửa sổ Fresco đang mở vào lúc đó, nó sẽ nhận hình nền mới thay vì đặt lại hình nền cũ. Trong ứng dụng, Ctrl+K mở bảng lệnh. Ví dụ trên Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Có. Fresco hỗ trợ hình nền riêng cho từng màn hình, và khi cùng m
 
 ### Fresco có hỗ trợ GIF và trình chiếu ảnh không?
 
-Có — GIF động, ảnh tĩnh, trình chiếu ảnh có hiệu ứng chuyển (crossfade, mờ dần, trượt, Ken Burns) và danh sách phát nhiều video, bên cạnh các tệp video.
+Có — GIF động, ảnh tĩnh, trình chiếu ảnh có hiệu ứng chuyển (mờ dần qua màn hình đen, Ken Burns, phóng to và làm mờ) và danh sách phát nhiều video, bên cạnh các tệp video.
+
+### Fresco có dùng được thư mục hình nền sẵn có mà không cần nhập vào không?
+
+Có. Dùng **Liên kết thư mục** để chỉ cho Fresco một thư mục bạn vốn đã lưu hình nền. Ảnh, GIF và video trong đó hiện trong thư viện của bạn ngay tại chỗ, không cần nhập vào, và thư viện luôn đồng bộ khi bạn thêm và xóa tệp trong thư mục đó. Thư mục con là tùy chọn, còn mục yêu thích và các chỉnh sửa của bạn được ghi nhớ theo từng tệp. **Thêm** vẫn nhập từng tệp riêng lẻ như trước.
+
+### Fresco có xử lý được hàng nghìn hình nền không?
+
+Có. Thư viện chỉ dựng thẻ cho những hình nền gần chỗ bạn đang cuộn, thay vì dựng tất cả cùng lúc, nên một bộ sưu tập lớn không làm ứng dụng nặng nề. Trên một thư viện thử nghiệm 4.000 hình nền (một nửa là ảnh, một nửa là video), thư viện xuất hiện sau khoảng 2 giây thay vì 9 đến 13 giây, và ứng dụng dùng khoảng 325 MB bộ nhớ thay vì 1,6 GB. Các con số này đến từ một bản dựng phát triển chạy dưới tải trên một máy, nên hãy xem chúng là mốc tham khảo chứ không phải lời hứa.
 
 ### Có thể dùng video YouTube làm hình nền không?
 
@@ -280,7 +292,7 @@ Fresco vẽ năm widget tùy chọn lên hình nền của bạn. Tất cả đ�
 | **Hiệu ứng hình ảnh âm thanh** | Năm kiểu — Cột, Lật gương, Dạng sóng, Chấm, Vòng tròn — với bộ chọn màu, pha hai màu hoặc cầu vồng |
 | **Ảnh bìa album** | Ảnh bìa của bài đang phát trên một chiếc đĩa than xoay; đĩa ngừng xoay khi tạm dừng phát |
 
-Ngoại trừ chế độ tùy chọn **Nổi trên cửa sổ** của đồng hồ thế giới, các widget được vẽ vào hình nền thông qua lớp OSD của mpv chứ không vào một cửa sổ riêng, nên chúng không bao giờ nằm trên cửa sổ của bạn, không bao giờ chặn cú nhấp chuột và hoạt động giống hệt nhau trên X11 và mọi compositor layer-shell. Khi đang phát nhạc và bật các widget lời bài hát, đồng hồ, hiệu ứng hình ảnh âm thanh và ảnh bìa album, chi phí đo được là **0.8% của một nhân CPU** — hầu hết là do thu âm thanh, vì không có gì được vẽ lại trừ khi nội dung của nó thay đổi.
+Ngoại trừ chế độ tùy chọn **Nổi trên cửa sổ** của đồng hồ thế giới, các widget được vẽ vào hình nền thông qua lớp OSD của mpv chứ không vào một cửa sổ riêng, nên chúng không bao giờ nằm trên cửa sổ của bạn, không bao giờ chặn cú nhấp chuột và hoạt động giống hệt nhau trên X11 và mọi compositor layer-shell. Khi đang phát nhạc và bật các widget lời bài hát, đồng hồ, hiệu ứng hình ảnh âm thanh và ảnh bìa album, chi phí đo được là **0,8% của một nhân CPU** — hầu hết là do thu âm thanh, vì không có gì được vẽ lại trừ khi nội dung của nó thay đổi. Các widget cũng tự trở lại sau khi máy tạm ngưng rồi hoạt động trở lại.
 
 Theo mặc định, widget xuất hiện trên **mọi màn hình**. Để giữ chúng chỉ ở một màn hình, hãy thêm `monitor = "DP-1"` vào khối `[widgets]` của `config.toml` (hiện chưa có điều khiển GUI cho việc này). Widget **không dùng được trên GNOME dưới Wayland**, nơi không có bề mặt hình nền động để Fresco vẽ vào — cùng lý do khiến hình nền ở đó chuyển sang khung hình tĩnh.
 
@@ -464,7 +476,7 @@ Cuộc trò chuyện được gắn với một phiếu ngẫu nhiên tạo riê
 | **Phiên bản mới nhất** | 1.1.50 (2026-10-16) — xem [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) để biết bản mới nhất |
 | **Gói** | `.deb` (amd64), tập lệnh cài đặt một dòng, Cửa hàng ứng dụng Deepin; biên dịch từ mã nguồn ở nơi khác |
 | **Ngôn ngữ giao diện** | Tiếng Anh cùng 12 bản dịch: Trung giản thể, Nga, Tây Ban Nha, Pháp, Đức, Bồ Đào Nha (Brazil), Thổ Nhĩ Kỳ, Việt, Indonesia, Hindi, Bengal và Romania |
-| **Người dùng** | 3,000+ người ở 128 quốc gia |
+| **Người dùng** | 3.000+ người ở 128 quốc gia |
 | **Người phát triển** | Dibbayajyoti Roy |
 | **Mã nguồn** | <https://github.com/DibbayajyotiRoy/fresco> |
 | **Trang web** | <https://fresco.dibbayajyoti.com> |
@@ -479,4 +491,4 @@ Rất hoan nghênh báo cáo lỗi, đề xuất tính năng và PR — hãy m�
 
 ---
 
-<sub>Fresco là ứng dụng hình nền động và hình nền video miễn phí, mã nguồn mở cho Linux (X11 và Wayland), với các widget lời bài hát, đồng hồ, hiệu ứng hình ảnh âm thanh và ảnh bìa album được vẽ thẳng lên hình nền. Đây là lựa chọn thay thế Wallpaper Engine chạy native trên Linux, đồng thời là người bạn đồng hành về nhạc và thời gian cho các công cụ như Conky. Được 3,000+ người ở 128 quốc gia sử dụng. Cập nhật lần cuối: 2026-10-16.</sub>
+<sub>Fresco là ứng dụng hình nền động và hình nền video miễn phí, mã nguồn mở cho Linux (X11 và Wayland), với các widget lời bài hát, đồng hồ, hiệu ứng hình ảnh âm thanh và ảnh bìa album được vẽ thẳng lên hình nền. Đây là lựa chọn thay thế Wallpaper Engine chạy native trên Linux, đồng thời là người bạn đồng hành về nhạc và thời gian cho các công cụ như Conky. Được 3.000+ người ở 128 quốc gia sử dụng. Cập nhật lần cuối: 2026-10-16.</sub>

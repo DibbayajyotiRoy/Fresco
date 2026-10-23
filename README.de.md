@@ -26,6 +26,7 @@ Fresco macht aus einem Video, GIF, Bild, einer Diashow oder einer Wiedergabelist
 - **Wiedergabe:** Videos (mp4, webm, mkv, avi, mov), animierte GIFs, Bilder, Bild-Diashows und Video-Wiedergabelisten.
 - **Desktops:** X11-Sitzungen (GNOME unter Xorg, Cinnamon, Xfce, MATE, Deepin 25) und Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). GNOME unter Wayland zeigt nur ein Standbild – siehe [Unterstützte Umgebungen](#unterstützte-umgebungen).
 - **Hardware-Dekodierung:** VA-API (Intel, AMD) und NVDEC (NVIDIA), über mpv.
+- **Bibliothek:** Verknüpfen Sie einen Hintergrundbild-Ordner, den Sie schon haben, statt ihn zu importieren, und halten Sie ihn synchron, wenn Dateien hinzukommen oder wegfallen. Die Bibliothek zeichnet nur, was auf dem Bildschirm zu sehen ist, sodass auch Tausende Hintergrundbilder schnell und schlank bleiben.
 - **Widgets:** zeitlich synchronisierte Songtexte, Uhren (auch eine Weltzeituhr), eine Audiovisualisierung und Album-Cover, direkt ins Hintergrundbild gezeichnet. Alle standardmäßig aus.
 - **Steuerung:** die App, eine Befehlspalette (Strg+K) und `fresco next` / `fresco prev` / `fresco random` für Tastenkürzel.
 - **Installation:** ein `.deb` für Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali und Deepin (Einzeiler-Skript, manueller Download oder Deepin App Store); unter Fedora, Arch und anderen Distributionen aus dem Quellcode bauen – siehe [Installation](#installation).
@@ -93,13 +94,15 @@ Das Hintergrundbild läuft auch nach dem Schließen des Fensters weiter.
 
 - **Beliebige Medien** – Video in Endlosschleife (mp4/webm/mkv), animiertes GIF, Standbild, Bild-Diashow, Wiedergabeliste aus mehreren Videos
 - **Von Link hinzufügen** – fügen Sie einen Pinterest-Pin oder eine beliebige direkte Video- oder Bild-URL ein; Fresco lädt die Datei herunter und öffnet den Zuschnitt-Editor
+- **Ordner verknüpfen** – nutzen Sie einen Hintergrundbild-Ordner, den Sie schon haben (Bilder, GIFs und Videos), ohne ihn zu importieren; er bleibt synchron, wenn Sie Dateien hinzufügen und entfernen, Unterordner sind optional, und Ihre Favoriten und Bearbeitungen bleiben je Datei erhalten
+- **Große Bibliotheken** – die Bibliothek zeichnet nur die Hintergrundbilder in der Nähe Ihrer Scrollposition, sodass Tausende Hintergrundbilder in etwa zwei Sekunden öffnen und einige Hundert Megabyte belegen (bei einer Testbibliothek mit 4.000 Hintergrundbildern: etwa 2 s und 325 MB, zuvor 9 bis 13 s und 1,6 GB)
 - **Hardware-Dekodierung** – die GPU-Videodekodierung (VA-API / NVDEC) hält die CPU-Auslastung nahe am Leerlauf, indem sie die Arbeit auf die Video-Engine verlagert, wo sie messbar günstiger ist (nicht kostenlos – siehe [Leistung und Akkulaufzeit](#leistung-und-akkulaufzeit))
 - **Energiesparen** – günstigere GPU-Skalierung für Laptops; gemessen etwa die Hälfte der GPU-Leistung (siehe [Leistung und Akkulaufzeit](#leistung-und-akkulaufzeit))
 - **Mehrere Bildschirme** – ein eigenes Hintergrundbild pro Bildschirm, mit synchroner Wiedergabe, wenn dasselbe Video auf mehreren Monitoren läuft
 - **Tag-Nacht-Zeitpläne** – Hintergrundbilder per Timer, in frei wählbaren Zeitfenstern oder nach Sonnenauf- und -untergang wechseln
 - **Desktop-Widgets** – synchronisierte Songtexte, Uhren in mehreren Designs, eine Weltzeituhr, eine Audiovisualisierung und ein rotierendes Album-Cover, direkt ins Hintergrundbild gezeichnet, sodass nichts Ihre Fenster verdeckt (die Weltzeituhr hat einen optionalen Modus, in dem sie über den Fenstern schwebt); alle standardmäßig aus (siehe [Desktop-Widgets](#desktop-widgets-songtexte-uhren-audiovisualisierung-und-album-cover))
 - **Sperrbildschirm** – zeigen Sie Ihr Hintergrundbild und Ihre Widgets (Uhr, Begrüßung, aktuelle Wiedergabe, Akku und mehr) auf Ihrem echten Sperrbildschirm statt auf dem Standard-Sperrbildschirm: Live-Video und Widgets unter COSMIC 1.9+ und KDE Plasma 6, Hintergrundbild samt Widgets über `fresco lock` unter Sway/Hyprland/niri und X11, anderswo ein Standbild. Standardmäßig aus, und Fresco bekommt Ihr Passwort nie zu sehen – siehe [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Tastatursteuerung** – `fresco next`, `fresco prev` und `fresco random` für Compositor-Tastenkürzel sowie eine Befehlspalette (Strg+K) in der App
+- **Tastatursteuerung** – `fresco next`, `fresco prev` und `fresco random` für Compositor-Tastenkürzel (ein geöffnetes Fresco-Fenster übernimmt den Wechsel, statt ihn rückgängig zu machen) sowie eine Befehlspalette (Strg+K) in der App
 - **Stapelverwaltung** – mehrere Hintergrundbilder auf einmal auswählen und in einem Schritt entfernen
 - **Integrierter Katalog** – stöbern Sie in der App durch kuratierte, ordnungsgemäß lizenzierte Hintergrundbilder
 - **Automatische Pause im Vollbild** – pro Monitor, unter X11, wlroots-Compositoren, COSMIC und KDE Plasma (über dessen Hintergrundbild-Plugin); optional auch bei maximierten Fenstern, dazu Pause bei Akkubetrieb
@@ -113,13 +116,14 @@ Das Hintergrundbild läuft auch nach dem Schließen des Fensters weiter.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Eingebetteter Renderer. GNOME nur dort, wo die Distribution noch eine Xorg-Sitzung mitliefert (siehe den GNOME-Hinweis unten) |
 | Kali Linux (Xfce, X11) | ✅ | Läuft auf Kalis Standardsitzung Xfce unter X11, mit demselben eingebetteten Renderer wie andere X11-Desktops |
+| Xfce (X11) | ✅ | Desktop-Symbole bleiben über dem Hintergrundbild sichtbar, und Sie können sie anklicken, auswählen und ziehen |
 | MATE (X11) | ✅ | Desktop-Symbole bleiben über dem Hintergrundbild sichtbar und anklickbar |
 | Deepin 25 (DDE, X11) | ✅ | Automatische DDE-Anpassung – von der Community unter Deepin 25 Community build1 bestätigt |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 und neuer (Wayland) | ✅ | Der Compositor von Cinnamon unterstützt seit 6.8 layer-shell. Cinnamon 6.6 und älter haben kein layer-shell und zeigen unter Wayland ein Standbild |
-| KDE Plasma 6 (X11 und Wayland) | ✅ | Wird über das eigene Hintergrundbild-Plugin von plasmashell gesetzt, daher bleiben Desktop-Symbole sichtbar. Für Video ist `qml6-module-qtmultimedia` nötig. Die Wiedergabe läuft über Qt, nicht über mpv: stumm, ohne Hardware-Dekodierung-Tuning, Zuschnitt oder Übergänge; eine Wiedergabeliste spielt ihre erste Datei, eine Diashow zeigt ihr erstes Bild |
+| KDE Plasma 6 (X11 und Wayland) | ✅ | Wird über das eigene Hintergrundbild-Plugin von plasmashell gesetzt, daher bleiben Desktop-Symbole sichtbar. Für Video ist `qml6-module-qtmultimedia` nötig. Die Wiedergabe läuft über Qt, nicht über mpv: stumm, ohne Hardware-Dekodierung-Tuning, Zuschnitt oder Übergänge; eine Wiedergabeliste spielt ihre erste Datei, eine Diashow zeigt ihr erstes Bild. Die Option Anpassung (Ausfüllen, Einpassen, Strecken) wird berücksichtigt |
 | GNOME unter Wayland | ⚠️ | Nur Standbild – Mutter bietet keine Oberfläche für Live-Hintergrundbilder, also weder Video noch Widgets. Live-Video braucht eine Fresco-GNOME-Erweiterung (geplant) |
 
 Jede der oben genannten Umgebungen wird bei jedem Release in der CI headless getestet.
@@ -216,15 +220,15 @@ Ja, unter X11, mit dem vollen Live-Hintergrundbild – Video, Widgets, alles. Un
 
 ### Funktioniert Fresco unter KDE Plasma, COSMIC, Hyprland oder Sway?
 
-Ja, auf allen vieren. COSMIC, Hyprland und Sway spielen Live-Video über layer-shell ab. KDE Plasma 6 (X11 und Wayland) nutzt Frescos eigenes Hintergrundbild-Plugin in plasmashell, das Desktop-Symbole sichtbar lässt, aber über Qt statt über mpv abspielt: stumm, ohne Zuschnitt oder Übergänge, und für Video wird `qml6-module-qtmultimedia` benötigt.
+Ja, auf allen vieren. COSMIC, Hyprland und Sway spielen Live-Video über layer-shell ab. KDE Plasma 6 (X11 und Wayland) nutzt Frescos eigenes Hintergrundbild-Plugin in plasmashell, das Desktop-Symbole sichtbar lässt, aber über Qt statt über mpv abspielt: stumm, ohne Zuschnitt oder Übergänge, und für Video wird `qml6-module-qtmultimedia` benötigt. Die Option Anpassung (Ausfüllen, Einpassen oder Strecken) gilt dort ebenfalls.
 
 ### Funktioniert Fresco unter Linux Mint, Xfce, Cinnamon oder MATE?
 
-Ja. Cinnamon, Xfce und MATE unter X11 nutzen den eingebetteten Renderer, und unter Xfce und MATE bleiben Desktop-Symbole über dem Hintergrundbild sichtbar. Cinnamon unter Wayland funktioniert ab Cinnamon 6.8, das layer-shell eingeführt hat.
+Ja. Cinnamon, Xfce und MATE unter X11 nutzen den eingebetteten Renderer, und unter Xfce und MATE bleiben Desktop-Symbole über dem Hintergrundbild sichtbar; unter Xfce können Sie sie wie gewohnt anklicken, auswählen und ziehen. Cinnamon unter Wayland funktioniert ab Cinnamon 6.8, das layer-shell eingeführt hat.
 
 ### Wie wechsle ich das Hintergrundbild per Tastenkürzel?
 
-Binden Sie `fresco next`, `fresco prev` oder `fresco random` in Ihrem Compositor oder in den Desktop-Einstellungen an eine Taste – sie wechseln das Hintergrundbild, ohne die App zu öffnen (`random` wählt nie das gerade laufende). Sie gehen Ihre Bibliothek in der Reihenfolge durch, in der die App sie zeigt, oder nur den dort geöffneten Ordner, und starten den Fresco-Dienst, falls er nicht läuft. In der App öffnet Strg+K eine Befehlspalette. Zum Beispiel in Sway:
+Binden Sie `fresco next`, `fresco prev` oder `fresco random` in Ihrem Compositor oder in den Desktop-Einstellungen an eine Taste – sie wechseln das Hintergrundbild, ohne die App zu öffnen (`random` wählt nie das gerade laufende). Sie gehen Ihre Bibliothek in der Reihenfolge durch, in der die App sie zeigt, oder nur den dort geöffneten Ordner, und starten den Fresco-Dienst, falls er nicht läuft. Ist das Fresco-Fenster gerade geöffnet, übernimmt es das neue Hintergrundbild, statt das alte wieder einzusetzen. In der App öffnet Strg+K eine Befehlspalette. Zum Beispiel in Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Ja. Fresco unterstützt Hintergrundbilder je Bildschirm, und wenn dasselbe Video
 
 ### Werden GIFs und Bild-Diashows unterstützt?
 
-Ja – animierte GIFs, Standbilder, Bild-Diashows mit Übergängen (Überblendung, Ausblenden, Schieben, Ken Burns) und Wiedergabelisten aus mehreren Videos, zusätzlich zu Videodateien.
+Ja – animierte GIFs, Standbilder, Bild-Diashows mit Übergängen (über Schwarz überblenden, Ken Burns, Zoom und Weichzeichnen) und Wiedergabelisten aus mehreren Videos, zusätzlich zu Videodateien.
+
+### Kann Fresco meinen vorhandenen Hintergrundbild-Ordner nutzen, ohne ihn zu importieren?
+
+Ja. Mit **Ordner verknüpfen** weisen Sie Fresco auf einen Ordner, in dem Sie Ihre Hintergrundbilder ohnehin aufbewahren. Dessen Bilder, GIFs und Videos erscheinen dort, wo sie liegen, in Ihrer Bibliothek, ohne importiert zu werden, und die Bibliothek bleibt synchron, wenn Sie in diesem Ordner Dateien hinzufügen oder entfernen. Unterordner sind optional, und Ihre Favoriten und Bearbeitungen werden je Datei gemerkt. **Hinzufügen** importiert einzelne Dateien weiterhin wie bisher.
+
+### Kommt Fresco mit Tausenden Hintergrundbildern zurecht?
+
+Ja. Die Bibliothek baut nur die Karten der Hintergrundbilder auf, in deren Nähe Sie gerade scrollen, statt aller auf einmal, sodass eine große Sammlung die App nicht belastet. Bei einer Testbibliothek mit 4.000 Hintergrundbildern (je zur Hälfte Bilder und Videos) erschien die Bibliothek nach etwa 2 Sekunden statt nach 9 bis 13, und die App belegte etwa 325 MB Arbeitsspeicher statt 1,6 GB. Diese Werte stammen von einem Entwicklungs-Build unter Last auf einem einzigen Rechner – verstehen Sie sie als Richtwert, nicht als Zusage.
 
 ### Kann ich ein YouTube-Video als Video-Hintergrund verwenden?
 
@@ -280,7 +292,7 @@ Fresco zeichnet fünf optionale Widgets auf Ihr Hintergrundbild. Alle sind **sta
 | **Audiovisualisierung** | Fünf Stile – Balken, Spiegeln, Welle, Punkte, Ring – mit Farbwähler, Farbübergang aus zwei Farben oder Regenbogen |
 | **Album-Cover** | Das Cover des aktuellen Titels auf einer rotierenden Schallplatte; sie bleibt stehen, wenn die Wiedergabe pausiert |
 
-Mit Ausnahme des optionalen Modus **Über Fenstern schweben** der Weltzeituhr werden Widgets über die OSD-Ebene von mpv ins Hintergrundbild gemalt statt in ein eigenes Fenster, sodass sie nie über Ihren Fenstern liegen, nie einen Klick abfangen und unter X11 und auf jedem layer-shell-Compositor identisch funktionieren. Bei laufender Musik und eingeschalteten Widgets für Songtext, Uhr, Audiovisualisierung und Album-Cover lag der gemessene Aufwand bei **0,8 % eines CPU-Kerns** – fast alles davon entfällt auf die Audioaufnahme, denn nichts wird neu gezeichnet, solange sich sein Inhalt nicht geändert hat.
+Mit Ausnahme des optionalen Modus **Über Fenstern schweben** der Weltzeituhr werden Widgets über die OSD-Ebene von mpv ins Hintergrundbild gemalt statt in ein eigenes Fenster, sodass sie nie über Ihren Fenstern liegen, nie einen Klick abfangen und unter X11 und auf jedem layer-shell-Compositor identisch funktionieren. Bei laufender Musik und eingeschalteten Widgets für Songtext, Uhr, Audiovisualisierung und Album-Cover lag der gemessene Aufwand bei **0,8 % eines CPU-Kerns** – fast alles davon entfällt auf die Audioaufnahme, denn nichts wird neu gezeichnet, solange sich sein Inhalt nicht geändert hat. Widgets kommen außerdem von selbst zurück, nachdem der Rechner in den Ruhezustand gegangen und wieder aufgewacht ist.
 
 Widgets erscheinen standardmäßig auf **jedem Bildschirm**. Um sie auf einem einzigen zu behalten, fügen Sie im Block `[widgets]` der `config.toml` `monitor = "DP-1"` hinzu (dafür gibt es noch keine GUI-Einstellung). Sie sind unter **GNOME mit Wayland nicht verfügbar**, weil es dort keine Live-Hintergrund-Oberfläche gibt, in die Fresco zeichnen könnte – aus demselben Grund fallen Hintergrundbilder dort auf ein Standbild zurück.
 

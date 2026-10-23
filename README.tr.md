@@ -26,6 +26,7 @@ Fresco; bir videoyu, GIF’i, görseli, slayt gösterisini veya çalma listesini
 - **Desteklenen medya:** videolar (mp4, webm, mkv, avi, mov), animasyonlu GIF’ler, görseller, görsel slayt gösterileri ve video çalma listeleri.
 - **Masaüstleri:** X11 oturumları (Xorg üzerinde GNOME, Cinnamon, Xfce, MATE, Deepin 25) ve Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). Wayland üzerindeki GNOME yalnızca durağan bir kare gösterir — bkz. [Desteklenen ortamlar](#desteklenen-ortamlar).
 - **Donanım çözme:** mpv üzerinden VA-API (Intel, AMD) ve NVDEC (NVIDIA).
+- **Kitaplık:** zaten sahip olduğunuz bir duvar kağıdı klasörünü içe aktarmak yerine bağlayın ve dosyalar gelip gittikçe eşitlenmiş tutun. Kitaplık yalnızca ekranda görünenleri çizer, bu yüzden binlerce duvar kağıdı hızlı ve hafif kalır.
 - **Widget’lar:** müzikle eşzamanlı şarkı sözleri, saatler (bir dünya saati dahil), bir ses görselleştirici ve albüm kapağı; duvar kağıdının içine çizilir. Hepsi varsayılan olarak kapalıdır.
 - **Kontrol:** uygulamanın kendisi, Ctrl+K komut paleti ve klavye kısayolları için `fresco next` / `fresco prev` / `fresco random`.
 - **Kurulum:** Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali ve Deepin için bir `.deb` paketi (tek satırlık betik, elle indirme veya Deepin Uygulama Mağazası); Fedora, Arch ve diğerlerinde kaynaktan derleme — bkz. [Kurulum](#kurulum).
@@ -93,13 +94,15 @@ Pencere kapandıktan sonra da duvar kağıdı oynamaya devam eder.
 
 - **Her tür medya** — döngüde video (mp4/webm/mkv), animasyonlu GIF, sabit görsel, görsel slayt gösterisi, çok videolu çalma listesi
 - **Bağlantıdan ekleme** — bir Pinterest pini veya doğrudan bir video/görsel URL’si yapıştırın; Fresco indirir ve kırpma düzenleyicisini açar
+- **Klasör bağla** — zaten sahip olduğunuz bir duvar kağıdı klasörünü (görseller, GIF’ler ve videolar) içe aktarmadan kullanın; dosya ekleyip kaldırdıkça eşitlenmiş kalır, alt klasörler isteğe bağlıdır, favorileriniz ve düzenlemeleriniz dosya başına korunur
+- **Büyük kitaplıklar** — kitaplık yalnızca kaydırma konumunuza yakın duvar kağıtlarını çizer; böylece binlerce duvar kağıdı yaklaşık iki saniyede açılır ve birkaç yüz megabayt kullanır (4.000 duvar kağıtlı bir test kitaplığında: yaklaşık 2 sn ve 325 MB; önceden 9 ila 13 sn ve 1,6 GB)
 - **Donanım çözme** — GPU ile video çözme (VA-API / NVDEC), işi ölçülebilir biçimde daha ucuz olduğu video motoruna kaydırarak işlemci kullanımını boşta durumuna yakın tutar (bedava değil — bkz. [Performans](#performans-ve-pil-ömrü))
 - **Güç tasarrufu** — dizüstü bilgisayarlar için daha ucuz GPU ölçekleme; GPU gücünü kabaca yarıya indirdiği ölçüldü (bkz. [Performans](#performans-ve-pil-ömrü))
 - **Çoklu monitör** — her ekranda farklı bir duvar kağıdı, aynı video birden fazla monitörde kullanıldığında eşzamanlı oynatma
 - **Gündüz ve gece zamanlamaları** — duvar kağıtlarını bir zamanlayıcıya, rastgele saat aralıklarına veya gün doğumu/batımına göre değiştirin
 - **Masaüstü widget’ları** — eşzamanlı şarkı sözleri, temalı saatler, bir dünya saati, bir ses görselleştirici ve dönen bir albüm kapağı diski; doğrudan duvar kağıdının içine çizilir, böylece hiçbir şey pencerelerinizi örtmez (dünya saatinin pencerelerin üzerinde yüzen isteğe bağlı bir kipi vardır); hepsi varsayılan olarak kapalıdır (bkz. [Masaüstü widget’ları](#masaüstü-widgetları-şarkı-sözleri-saatler-görselleştirici-ve-albüm-kapağı))
 - **Kilit ekranı** — duvar kağıdınızı ve widget’ları (saat, karşılama, çalan parça, pil ve daha fazlası) varsayılan kilit ekranı yerine gerçek kilit ekranınızda gösterin — COSMIC 1.9+ ve KDE Plasma 6’da canlı video ve widget’lar, Sway/Hyprland/niri ve X11’de `fresco lock` ile duvar kağıdı ve widget’lar, diğer yerlerde durağan bir kare. Varsayılan olarak kapalıdır ve Fresco parolanızı asla görmez — bkz. [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Klavye kontrolü** — kompozitör tuş atamaları için `fresco next`, `fresco prev` ve `fresco random`, uygulamanın içinde ise Ctrl+K komut paleti
+- **Klavye kontrolü** — kompozitör tuş atamaları için `fresco next`, `fresco prev` ve `fresco random` (açık bir Fresco penceresi değişikliği geri almak yerine üstlenir), uygulamanın içinde ise Ctrl+K komut paleti
 - **Toplu yönetim** — birkaç duvar kağıdını aynı anda seçin ve tek adımda kaldırın
 - **Yerleşik katalog** — lisansı düzgün, özenle seçilmiş duvar kağıtlarına uygulamanın içinden göz atın
 - **Tam ekranda otomatik duraklatma** — monitör başına; X11’de, wlroots kompozitörlerinde, COSMIC’te ve KDE Plasma’da (kendi duvar kağıdı eklentisi üzerinden); isteğe bağlı olarak ekranı kaplayan pencereler için de, ayrıca pilde duraklatma
@@ -113,13 +116,14 @@ Pencere kapandıktan sonra da duvar kağıdı oynamaya devam eder.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Yerleşik oluşturucu. GNOME yalnızca dağıtımın hâlâ bir Xorg oturumu sunduğu yerlerde (aşağıdaki GNOME notuna bakın) |
 | Kali Linux (Xfce, X11) | ✅ | Kali’nin varsayılan X11 üzerinde Xfce oturumunda, diğer X11 masaüstleriyle aynı yerleşik oluşturucu ile çalışır |
+| Xfce (X11) | ✅ | Masaüstü simgeleri duvar kağıdının üzerinde görünür kalır; üzerlerine tıklayabilir, onları seçebilir ve sürükleyebilirsiniz |
 | MATE (X11) | ✅ | Masaüstü simgeleri duvar kağıdının üzerinde görünür ve tıklanabilir kalır |
 | Deepin 25 (DDE, X11) | ✅ | Otomatik DDE uyarlaması — Deepin 25 Community build1’de topluluk tarafından doğrulandı |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 ve üstü (Wayland) | ✅ | Cinnamon’ın kompozitörü layer-shell desteğini 6.8’de kazandı. Cinnamon 6.6 ve öncesinde layer-shell yoktur ve Wayland’de durağan bir kare kalır |
-| KDE Plasma 6 (X11 ve Wayland) | ✅ | plasmashell’in kendi duvar kağıdı eklentisiyle ayarlanır, bu yüzden masaüstü simgeleri görünür kalır. Video için `qml6-module-qtmultimedia` gerekir. Oynatmayı mpv değil Qt yapar: sessiz, hwdec ayarı, kırpma veya geçiş yok; çalma listesi ilk dosyayı oynatır, slayt gösterisi ilk kareyi gösterir |
+| KDE Plasma 6 (X11 ve Wayland) | ✅ | plasmashell’in kendi duvar kağıdı eklentisiyle ayarlanır, bu yüzden masaüstü simgeleri görünür kalır. Video için `qml6-module-qtmultimedia` gerekir. Oynatmayı mpv değil Qt yapar: sessiz, hwdec ayarı, kırpma veya geçiş yok; çalma listesi ilk dosyayı oynatır, slayt gösterisi ilk kareyi gösterir. Sığdırma seçeneği (Kapla, Sığdır, Uzat) dikkate alınır |
 | Wayland üzerinde GNOME | ⚠️ | Yalnızca durağan kare — Mutter canlı duvar kağıdı yüzeyi sunmaz, dolayısıyla video da widget da yoktur. Canlı video için bir Fresco GNOME uzantısı gerekir (planlandı) |
 
 Yukarıdaki her ortam, her sürümde CI’da arayüzsüz (headless) olarak denenir.
@@ -216,15 +220,15 @@ X11’de evet; tam canlı duvar kağıdıyla — video, widget’lar, her şey. 
 
 ### Fresco KDE Plasma, COSMIC, Hyprland veya Sway’de çalışır mı?
 
-Evet, dördünde de. COSMIC, Hyprland ve Sway canlı videoyu layer-shell üzerinden oynatır. KDE Plasma 6 (X11 ve Wayland), plasmashell içinde Fresco’nun kendi duvar kağıdı eklentisini kullanır; bu, masaüstü simgelerini görünür tutar ama oynatmayı mpv yerine Qt ile yapar: sessiz, kırpma veya geçiş olmadan ve video için `qml6-module-qtmultimedia` gerekir.
+Evet, dördünde de. COSMIC, Hyprland ve Sway canlı videoyu layer-shell üzerinden oynatır. KDE Plasma 6 (X11 ve Wayland), plasmashell içinde Fresco’nun kendi duvar kağıdı eklentisini kullanır; bu, masaüstü simgelerini görünür tutar ama oynatmayı mpv yerine Qt ile yapar: sessiz, kırpma veya geçiş olmadan ve video için `qml6-module-qtmultimedia` gerekir. Sığdırma seçeneği (Kapla, Sığdır veya Uzat) orada da geçerlidir.
 
 ### Fresco, Linux Mint, Xfce, Cinnamon ve MATE masaüstlerinde çalışır mı?
 
-Evet. X11 üzerindeki Cinnamon, Xfce ve MATE yerleşik oluşturucuyu kullanır; Xfce ve MATE’te masaüstü simgeleri duvar kağıdının üzerinde görünür kalır. Wayland üzerindeki Cinnamon, layer-shell ekleyen Cinnamon 6.8’den itibaren çalışır.
+Evet. X11 üzerindeki Cinnamon, Xfce ve MATE yerleşik oluşturucuyu kullanır; Xfce ve MATE’te masaüstü simgeleri duvar kağıdının üzerinde görünür kalır; Xfce’te bunlara her zamanki gibi tıklayabilir, onları seçebilir ve sürükleyebilirsiniz. Wayland üzerindeki Cinnamon, layer-shell ekleyen Cinnamon 6.8’den itibaren çalışır.
 
 ### Klavye kısayoluyla duvar kağıdını nasıl değiştiririm?
 
-`fresco next`, `fresco prev` veya `fresco random` komutunu kompozitörünüzün ya da masaüstünüzün ayarlarında bir tuşa atayın — uygulamayı açmadan duvar kağıdını değiştirirler (`random` hiçbir zaman zaten oynatılanı seçmez). Kitaplığınızda uygulamanın gösterdiği sırayla ya da yalnızca orada açık olan klasörde ilerlerler ve çalışmıyorsa Fresco servisini başlatırlar. Uygulamanın içinde Ctrl+K bir komut paleti açar. Örneğin Sway’de:
+`fresco next`, `fresco prev` veya `fresco random` komutunu kompozitörünüzün ya da masaüstünüzün ayarlarında bir tuşa atayın — uygulamayı açmadan duvar kağıdını değiştirirler (`random` hiçbir zaman zaten oynatılanı seçmez). Kitaplığınızda uygulamanın gösterdiği sırayla ya da yalnızca orada açık olan klasörde ilerlerler ve çalışmıyorsa Fresco servisini başlatırlar. Fresco penceresi o sırada açıksa, eski duvar kağıdını geri koymak yerine yeni duvar kağıdını yakalar. Uygulamanın içinde Ctrl+K bir komut paleti açar. Örneğin Sway’de:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Evet. Fresco ekran başına duvar kağıdını destekler ve aynı video birkaç 
 
 ### GIF ve görsel slayt gösterilerini destekliyor mu?
 
-Evet — video dosyalarına ek olarak animasyonlu GIF’ler, sabit görseller, geçişli (crossfade, fade, slide, Ken Burns) görsel slayt gösterileri ve çok videolu çalma listeleri.
+Evet — video dosyalarına ek olarak animasyonlu GIF’ler, sabit görseller, geçişli (siyaha solarak geçiş, Ken Burns, yakınlaştırma ve bulanıklık) görsel slayt gösterileri ve çok videolu çalma listeleri.
+
+### Fresco, içe aktarmadan mevcut duvar kağıdı klasörümü kullanabilir mi?
+
+Evet. Fresco’yu duvar kağıtlarınızı zaten sakladığınız bir klasöre yöneltmek için **Klasör bağla**’yı kullanın. Klasördeki görseller, GIF’ler ve videolar içe aktarılmadan, bulundukları yerde kitaplığınızda görünür; o klasöre dosya ekleyip kaldırdıkça kitaplık eşitlenmiş kalır. Alt klasörler isteğe bağlıdır, favorileriniz ve düzenlemeleriniz dosya başına hatırlanır. **Ekle** tek tek dosyaları eskisi gibi içe aktarmaya devam eder.
+
+### Fresco binlerce duvar kağıdını kaldırabilir mi?
+
+Evet. Kitaplık, tüm duvar kağıtlarının kartlarını bir anda oluşturmak yerine yalnızca kaydırdığınız yerin yakınındakilerin kartlarını oluşturur; bu yüzden büyük bir koleksiyon uygulamayı ağırlaştırmaz. 4.000 duvar kağıtlı (yarısı görsel, yarısı video) bir test kitaplığında kitaplık 9 ila 13 saniye yerine yaklaşık 2 saniyede göründü ve uygulama 1,6 GB yerine yaklaşık 325 MB bellek kullandı. Bu rakamlar tek bir makinede, yük altındaki bir geliştirme sürümünden geliyor; söz olarak değil, yol gösterici olarak okuyun.
 
 ### YouTube videosunu duvar kağıdı olarak kullanabilir miyim?
 
@@ -280,7 +292,7 @@ Fresco, duvar kağıdınızın üzerine beş isteğe bağlı widget çizer. Heps
 | **Ses görselleştirici** | Beş stil — Çubuklar, Ayna, Dalga, Noktalar, Halka — renk seçici, iki renkli geçiş veya gökkuşağı ile |
 | **Albüm kapağı** | Geçerli parçanın kapağı dönen bir plak üzerinde; oynatma duraklatıldığında dönmeyi bırakır |
 
-Dünya saatinin isteğe bağlı **Pencerelerin üzerinde dursun** kipi dışında, widget’lar kendi pencereleri yerine mpv’nin OSD katmanı üzerinden duvar kağıdına boyanır; bu yüzden pencerelerinizin üzerinde durmaz, tıklamayı hiç yakalamaz ve X11’de ile her layer-shell kompozitöründe aynı davranır. Müzik çalarken ve şarkı sözleri, saat, görselleştirici ve albüm kapağı widget’ları açıkken ölçülen maliyet **bir işlemci çekirdeğinin %0,8’i** oldu — neredeyse tamamı ses yakalamadan, çünkü içeriği değişmedikçe hiçbir şey yeniden çizilmez.
+Dünya saatinin isteğe bağlı **Pencerelerin üzerinde dursun** kipi dışında, widget’lar kendi pencereleri yerine mpv’nin OSD katmanı üzerinden duvar kağıdına boyanır; bu yüzden pencerelerinizin üzerinde durmaz, tıklamayı hiç yakalamaz ve X11’de ile her layer-shell kompozitöründe aynı davranır. Müzik çalarken ve şarkı sözleri, saat, görselleştirici ve albüm kapağı widget’ları açıkken ölçülen maliyet **bir işlemci çekirdeğinin %0,8’i** oldu — neredeyse tamamı ses yakalamadan, çünkü içeriği değişmedikçe hiçbir şey yeniden çizilmez. Widget’lar ayrıca makine askıya alınıp devam ettirildikten sonra kendiliğinden geri gelir.
 
 Widget’lar varsayılan olarak **her ekranda** görünür. Birinde tutmak için `config.toml` içindeki `[widgets]` bloğuna `monitor = "DP-1"` ekleyin (bunun için henüz GUI denetimi yok). **Wayland altındaki GNOME’da kullanılamazlar**; orada Fresco’nun çizim yapabileceği bir canlı duvar kağıdı yüzeyi yoktur — duvar kağıtlarının orada durağan kareye dönmesinin de nedeni aynıdır.
 

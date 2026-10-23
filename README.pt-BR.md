@@ -26,6 +26,7 @@ O Fresco transforma um vídeo, GIF, imagem, apresentação de slides ou playlist
 - **Reproduz:** vídeos (mp4, webm, mkv, avi, mov), GIFs animados, imagens, apresentações de slides de imagens e playlists de vídeo.
 - **Desktops:** sessões X11 (GNOME no Xorg, Cinnamon, Xfce, MATE, Deepin 25) e Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). O GNOME no Wayland mostra apenas um quadro estático — veja [Ambientes compatíveis](#ambientes-compatíveis).
 - **Decodificação por hardware:** VA-API (Intel, AMD) e NVDEC (NVIDIA), via mpv.
+- **Biblioteca:** vincule uma pasta de papéis de parede que você já tem em vez de importá-la e mantenha-a sincronizada conforme os arquivos entram e saem. A biblioteca desenha só o que está na tela, então milhares de papéis de parede continuam rápidos e leves.
 - **Widgets:** letras sincronizadas com a música, relógios (incluindo um relógio mundial), um visualizador de áudio e capa do álbum, desenhados dentro do papel de parede. Todos desativados por padrão.
 - **Controle:** o app, uma paleta de comandos com Ctrl+K e `fresco next` / `fresco prev` / `fresco random` para atalhos de teclado.
 - **Instalação:** um `.deb` para Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali e Deepin (script de uma linha, download manual ou a loja de aplicativos do Deepin); compilação a partir do código-fonte no Fedora, Arch e outras — veja [Instalação](#instalação).
@@ -93,13 +94,15 @@ O papel de parede continua tocando depois que a janela é fechada.
 
 - **Qualquer mídia** — vídeo em loop (mp4/webm/mkv), GIF animado, imagem estática, apresentação de slides de imagens, playlist com vários vídeos
 - **Adicionar por link** — cole um pin do Pinterest ou qualquer URL direta de vídeo/imagem; o Fresco baixa o arquivo e abre o editor de recorte
+- **Vincular uma pasta** — use uma pasta de papéis de parede que você já tem (imagens, GIFs e vídeos) sem importá-la; ela continua sincronizada quando você adiciona e remove arquivos, as subpastas são opcionais e seus favoritos e edições são mantidos por arquivo
+- **Bibliotecas grandes** — a biblioteca só desenha os papéis de parede perto da sua posição de rolagem, então milhares deles abrem em cerca de dois segundos e usam algumas centenas de megabytes (numa biblioteca de teste com 4.000 papéis de parede: cerca de 2 s e 325 MB, contra 9 a 13 s e 1,6 GB)
 - **Decodificação por hardware** — a decodificação de vídeo na GPU (VA-API / NVDEC) mantém o uso de CPU perto de zero ao levar o trabalho para o mecanismo de vídeo, onde ele é mensuravelmente mais barato (mas não de graça — veja [Desempenho](#desempenho-e-duração-da-bateria))
 - **Economia de energia** — escalonamento de GPU mais leve para notebooks; medido em cerca de metade do consumo da GPU (veja [Desempenho](#desempenho-e-duração-da-bateria))
 - **Vários monitores** — um papel de parede diferente em cada tela, com reprodução sincronizada quando o mesmo vídeo é usado em vários monitores
 - **Agendamentos de dia e noite** — troque de papel de parede por temporizador, por faixas de horário livres ou pelo nascer e pôr do sol
 - **Widgets de desktop** — letras de músicas sincronizadas, relógios com temas, um relógio mundial, um visualizador de áudio e um disco de capa do álbum girando, desenhados no próprio papel de parede para que nada cubra as suas janelas (o relógio mundial tem um modo opcional que flutua sobre as janelas); todos desativados por padrão (veja [Widgets de desktop](#widgets-de-desktop-letras-relógios-visualizador-e-capa-do-álbum))
 - **Tela de bloqueio** — mostre o seu papel de parede e os widgets (relógio, saudação, música tocando, bateria e mais) na sua tela de bloqueio real, no lugar da padrão — vídeo ao vivo e widgets no COSMIC 1.9+ e no KDE Plasma 6, papel de parede e widgets via `fresco lock` no Sway/Hyprland/niri e no X11, e um quadro estático nos demais. Desativada por padrão, e o Fresco nunca vê a sua senha — veja [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Controle pelo teclado** — `fresco next`, `fresco prev` e `fresco random` para atalhos do compositor, e uma paleta de comandos com Ctrl+K dentro do app
+- **Controle pelo teclado** — `fresco next`, `fresco prev` e `fresco random` para atalhos do compositor (uma janela aberta do Fresco acompanha a troca em vez de desfazê-la), e uma paleta de comandos com Ctrl+K dentro do app
 - **Gerenciamento em lote** — selecione vários papéis de parede de uma vez e remova-os em uma só etapa
 - **Catálogo integrado** — navegue pelo app por papéis de parede selecionados e com licenças adequadas
 - **Pausa automática em tela cheia** — por monitor, no X11, em compositores wlroots, no COSMIC e no KDE Plasma (por meio do plugin de papel de parede dele); opcionalmente também para janelas maximizadas, além de pausar na bateria
@@ -113,13 +116,14 @@ O papel de parede continua tocando depois que a janela é fechada.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Renderizador embutido. No GNOME, apenas onde a distribuição ainda oferece uma sessão Xorg (veja a nota sobre o GNOME abaixo) |
 | Kali Linux (Xfce, X11) | ✅ | Funciona na sessão padrão do Kali, Xfce sobre X11, com o mesmo renderizador embutido dos outros desktops X11 |
+| Xfce (X11) | ✅ | Os ícones da área de trabalho continuam visíveis sobre o papel de parede, e você pode clicar, selecionar e arrastá-los |
 | MATE (X11) | ✅ | Os ícones da área de trabalho continuam visíveis e clicáveis sobre o papel de parede |
 | Deepin 25 (DDE, X11) | ✅ | Adaptação automática ao DDE — verificado pela comunidade no Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 e mais recentes (Wayland) | ✅ | O compositor do Cinnamon ganhou layer-shell na 6.8. O Cinnamon 6.6 e anteriores não têm layer-shell e ficam com um quadro estático no Wayland |
-| KDE Plasma 6 (X11 e Wayland) | ✅ | Definido pelo plugin de papel de parede do próprio plasmashell, então os ícones da área de trabalho continuam visíveis. Para vídeo, precisa do `qml6-module-qtmultimedia`. A reprodução é a do Qt, não a do mpv: sem som, sem ajuste de hwdec, recorte ou transições; uma playlist toca só o primeiro arquivo e uma apresentação de slides mostra só o primeiro quadro |
+| KDE Plasma 6 (X11 e Wayland) | ✅ | Definido pelo plugin de papel de parede do próprio plasmashell, então os ícones da área de trabalho continuam visíveis. Para vídeo, precisa do `qml6-module-qtmultimedia`. A reprodução é a do Qt, não a do mpv: sem som, sem ajuste de hwdec, recorte ou transições; uma playlist toca só o primeiro arquivo e uma apresentação de slides mostra só o primeiro quadro. A opção Ajuste (Cobrir, Ajustar, Esticar) é respeitada |
 | GNOME no Wayland | ⚠️ | Apenas quadro estático — o Mutter não expõe nenhuma superfície de papel de parede animado, então não há vídeo nem widgets. Vídeo ao vivo depende de uma extensão do Fresco para o GNOME (planejada) |
 
 Todos os ambientes acima são exercitados em modo headless na CI a cada versão.
@@ -216,15 +220,15 @@ Sim no X11, com o papel de parede animado completo — vídeo, widgets, tudo. No
 
 ### O Fresco funciona no KDE Plasma, COSMIC, Hyprland ou Sway?
 
-Sim, nos quatro. COSMIC, Hyprland e Sway reproduzem vídeo ao vivo por layer-shell. O KDE Plasma 6 (X11 e Wayland) usa o plugin de papel de parede do próprio Fresco dentro do plasmashell, que mantém os ícones da área de trabalho visíveis, mas reproduz pelo Qt em vez do mpv: sem som, sem recorte nem transições, e precisa do `qml6-module-qtmultimedia` para vídeo.
+Sim, nos quatro. COSMIC, Hyprland e Sway reproduzem vídeo ao vivo por layer-shell. O KDE Plasma 6 (X11 e Wayland) usa o plugin de papel de parede do próprio Fresco dentro do plasmashell, que mantém os ícones da área de trabalho visíveis, mas reproduz pelo Qt em vez do mpv: sem som, sem recorte nem transições, e precisa do `qml6-module-qtmultimedia` para vídeo. A opção Ajuste (Cobrir, Ajustar ou Esticar) também vale ali.
 
 ### O Fresco funciona no Linux Mint, Xfce, Cinnamon ou MATE?
 
-Sim. Cinnamon, Xfce e MATE no X11 usam o renderizador embutido, e os ícones da área de trabalho continuam visíveis sobre o papel de parede no Xfce e no MATE. O Cinnamon no Wayland funciona a partir do Cinnamon 6.8, que adicionou layer-shell.
+Sim. Cinnamon, Xfce e MATE no X11 usam o renderizador embutido, e os ícones da área de trabalho continuam visíveis sobre o papel de parede no Xfce e no MATE; no Xfce, você pode clicar, selecionar e arrastá-los normalmente. O Cinnamon no Wayland funciona a partir do Cinnamon 6.8, que adicionou layer-shell.
 
 ### Como trocar de papel de parede com um atalho de teclado?
 
-Associe `fresco next`, `fresco prev` ou `fresco random` a uma tecla nas configurações do seu compositor ou desktop — eles trocam o papel de parede sem abrir o app (o `random` nunca escolhe o que já está tocando). Eles percorrem a sua biblioteca na ordem em que o app a mostra, ou apenas a pasta que você tem aberta ali, e iniciam o serviço do Fresco se ele não estiver em execução. Dentro do app, Ctrl+K abre uma paleta de comandos. Por exemplo, no Sway:
+Associe `fresco next`, `fresco prev` ou `fresco random` a uma tecla nas configurações do seu compositor ou desktop — eles trocam o papel de parede sem abrir o app (o `random` nunca escolhe o que já está tocando). Eles percorrem a sua biblioteca na ordem em que o app a mostra, ou apenas a pasta que você tem aberta ali, e iniciam o serviço do Fresco se ele não estiver em execução. Se a janela do Fresco estiver aberta nessa hora, ela acompanha o novo papel de parede em vez de recolocar o antigo. Dentro do app, Ctrl+K abre uma paleta de comandos. Por exemplo, no Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Sim. O Fresco aceita papéis de parede por tela e, quando o mesmo vídeo é usad
 
 ### Ele aceita GIFs e apresentações de slides de imagens?
 
-Sim — GIFs animados, imagens estáticas, apresentações de slides de imagens com transições (crossfade, fade, slide, Ken Burns) e playlists com vários vídeos, além dos arquivos de vídeo.
+Sim — GIFs animados, imagens estáticas, apresentações de slides de imagens com transições (esmaecer para preto, Ken Burns, zoom e desfoque) e playlists com vários vídeos, além dos arquivos de vídeo.
+
+### O Fresco pode usar minha pasta de papéis de parede sem importar?
+
+Sim. Use **Vincular uma pasta** para apontar o Fresco para uma pasta onde você já guarda papéis de parede. As imagens, GIFs e vídeos dela aparecem na sua biblioteca onde estão, sem serem importados, e a biblioteca continua sincronizada conforme você adiciona e remove arquivos nessa pasta. As subpastas são opcionais, e seus favoritos e edições são lembrados por arquivo. **Adicionar** continua importando arquivos individuais como antes.
+
+### O Fresco aguenta milhares de papéis de parede?
+
+Sim. A biblioteca só monta os cartões dos papéis de parede perto de onde você está rolando, em vez de todos de uma vez, então uma coleção grande não pesa no app. Numa biblioteca de teste com 4.000 papéis de parede (metade imagens, metade vídeos), a biblioteca apareceu em cerca de 2 segundos em vez de 9 a 13, e o app usou aproximadamente 325 MB de memória em vez de 1,6 GB. Esses números vêm de uma versão de desenvolvimento sob carga em uma única máquina, então encare-os como uma referência, não como uma promessa.
 
 ### Posso usar um vídeo do YouTube como papel de parede?
 
@@ -280,7 +292,7 @@ O Fresco desenha cinco widgets opcionais sobre o seu papel de parede. Todos vêm
 | **Visualizador de áudio** | Cinco estilos — Barras, Espelhar, Onda, Pontos, Anel — com seletor de cor, mesclagem de duas cores ou arco-íris |
 | **Capa do álbum** | A capa da faixa atual em um disco girando; ele para de girar quando a reprodução é pausada |
 
-Exceto pelo modo opcional **Flutuar sobre as janelas** do relógio mundial, os widgets são pintados no papel de parede pela camada de OSD do mpv, e não em uma janela própria, então nunca ficam acima das suas janelas, nunca interceptam um clique e se comportam de forma idêntica no X11 e em todo compositor layer-shell. Com música tocando e os widgets de letra, relógio, visualizador e capa do álbum ativados, o custo medido foi de **0,8% de um núcleo de CPU** — quase tudo da captura de áudio, já que nada é redesenhado se o conteúdo não mudou.
+Exceto pelo modo opcional **Flutuar sobre as janelas** do relógio mundial, os widgets são pintados no papel de parede pela camada de OSD do mpv, e não em uma janela própria, então nunca ficam acima das suas janelas, nunca interceptam um clique e se comportam de forma idêntica no X11 e em todo compositor layer-shell. Com música tocando e os widgets de letra, relógio, visualizador e capa do álbum ativados, o custo medido foi de **0,8% de um núcleo de CPU** — quase tudo da captura de áudio, já que nada é redesenhado se o conteúdo não mudou. Os widgets também voltam por conta própria depois que a máquina é suspensa e retomada.
 
 Os widgets aparecem em **todas as telas** por padrão. Para mantê-los em uma só, adicione `monitor = "DP-1"` ao bloco `[widgets]` do `config.toml` (ainda não há controle na interface gráfica para isso). Eles **não estão disponíveis no GNOME sob Wayland**, que não tem superfície de papel de parede animado para o Fresco desenhar — o mesmo motivo pelo qual os papéis de parede voltam a um quadro estático ali.
 

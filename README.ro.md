@@ -26,6 +26,7 @@ Fresco transformă un videoclip, un GIF, o imagine, o succesiune de imagini sau 
 - **Redă:** videoclipuri (mp4, webm, mkv, avi, mov), GIF-uri animate, imagini, succesiuni de imagini și liste de redare video.
 - **Desktopuri:** sesiuni X11 (GNOME pe Xorg, Cinnamon, Xfce, MATE, Deepin 25) și Wayland (COSMIC, Hyprland, Sway, KDE Plasma 6, Cinnamon 6.8+). GNOME pe Wayland afișează doar un cadru fix — vedeți [Medii compatibile](#medii-compatibile).
 - **Decodare hardware:** VA-API (Intel, AMD) și NVDEC (NVIDIA), prin mpv.
+- **Bibliotecă:** asociați un dosar cu imagini de fundal pe care le aveți deja, în loc să îl importați, și păstrați-l sincronizat pe măsură ce fișierele apar și dispar. Biblioteca desenează doar ce este pe ecran, așa că mii de imagini de fundal rămân rapide și ușoare.
 - **Widgeturi:** versuri sincronizate cu muzica, ceasuri (inclusiv un ceas mondial), un vizualizator audio și coperta albumului, desenate în imaginea de fundal. Toate sunt dezactivate implicit.
 - **Control:** aplicația, o paletă de comenzi cu Ctrl+K și `fresco next` / `fresco prev` / `fresco random` pentru scurtături de tastatură.
 - **Instalare:** un pachet `.deb` pentru Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali și Deepin (script dintr-o linie, descărcare manuală sau magazinul de aplicații Deepin); compilare din sursă pe Fedora, Arch și altele — vedeți [Instalare](#instalare).
@@ -93,13 +94,15 @@ Imaginea de fundal continuă să ruleze și după ce fereastra se închide.
 
 - **Orice tip de conținut** — videoclip în buclă (mp4/webm/mkv), GIF animat, imagine statică, succesiune de imagini, listă de redare cu mai multe videoclipuri
 - **Adăugare din link** — lipiți un pin Pinterest sau orice URL direct de videoclip/imagine; Fresco îl descarcă și deschide editorul de decupare
+- **Asociere dosar** — folosiți un dosar cu imagini de fundal pe care îl aveți deja (imagini, GIF-uri și videoclipuri) fără să îl importați; rămâne sincronizat pe măsură ce adăugați și eliminați fișiere, subdosarele sunt opționale, iar favoritele și modificările se păstrează pentru fiecare fișier
+- **Biblioteci mari** — biblioteca desenează doar imaginile de fundal din apropierea poziției de derulare, așa că mii de imagini de fundal se deschid în aproximativ două secunde și ocupă câteva sute de megaocteți (pe o bibliotecă de test cu 4.000 de imagini de fundal: aproximativ 2 s și 325 MB, față de 9 până la 13 s și 1,6 GB)
 - **Decodare hardware** — decodarea video pe GPU (VA-API / NVDEC) menține utilizarea procesorului aproape de zero, mutând munca pe motorul video, unde este măsurabil mai ieftină (nu gratuită — vedeți [Performanță](#performanță-și-autonomie))
 - **Economisire energie** — scalare GPU mai ieftină pentru laptopuri; măsurată la aproximativ jumătate din consumul GPU (vedeți [Performanță](#performanță-și-autonomie))
 - **Mai multe monitoare** — o imagine de fundal diferită pe fiecare ecran, cu redare sincronizată când același videoclip rulează pe mai multe monitoare
 - **Programe zi și noapte** — schimbați imaginile de fundal după un cronometru, după intervale orare arbitrare sau după răsărit și apus
 - **Widgeturi pentru desktop** — versuri sincronizate ale melodiilor, ceasuri tematice, un ceas mondial, un vizualizator audio și un disc rotativ cu coperta albumului, desenate chiar în imaginea de fundal, astfel încât nimic nu acoperă ferestrele (ceasul mondial are un mod opțional care plutește deasupra ferestrelor); toate sunt dezactivate implicit (vedeți [Widgeturi pentru desktop](#widgeturi-pentru-desktop-versuri-ceasuri-vizualizator-și-copertă-de-album))
 - **Ecran de blocare** — afișați imaginea de fundal și widgeturile (ceas, salut, melodia curentă, baterie și altele) pe ecranul de blocare real, în locul celui implicit — video live și widgeturi pe COSMIC 1.9+ și KDE Plasma 6, imagine de fundal și widgeturi prin `fresco lock` pe Sway/Hyprland/niri și X11, un cadru fix în rest. Dezactivat implicit, iar Fresco nu vă vede niciodată parola — vedeți [docs/LOCKSCREEN.md](docs/LOCKSCREEN.md)
-- **Control de la tastatură** — `fresco next`, `fresco prev` și `fresco random` pentru scurtăturile compozitorului și o paletă de comenzi cu Ctrl+K în aplicație
+- **Control de la tastatură** — `fresco next`, `fresco prev` și `fresco random` pentru scurtăturile compozitorului (o fereastră Fresco deschisă preia schimbarea în loc să o anuleze) și o paletă de comenzi cu Ctrl+K în aplicație
 - **Gestionare în lot** — selectați mai multe imagini de fundal deodată și eliminați-le dintr-un singur pas
 - **Catalog integrat** — răsfoiți în aplicație imagini de fundal alese, cu licențe în regulă
 - **Pauză automată la ecran complet** — pe fiecare monitor, pe X11, pe compozitoarele wlroots, pe COSMIC și pe KDE Plasma (prin pluginul său de imagine de fundal); opțional și pentru ferestrele maximizate, plus pauză când e pe baterie
@@ -113,13 +116,14 @@ Imaginea de fundal continuă să ruleze și după ce fereastra se închide.
 |---|---|---|
 | X11 (GNOME, Cinnamon, XFCE, …) | ✅ | Randare integrată. GNOME doar acolo unde distribuția mai livrează o sesiune Xorg (vedeți nota despre GNOME de mai jos) |
 | Kali Linux (Xfce, X11) | ✅ | Rulează în sesiunea implicită Kali, Xfce pe X11, prin aceeași randare integrată ca pe celelalte desktopuri X11 |
+| Xfce (X11) | ✅ | Pictogramele de pe desktop rămân vizibile peste imaginea de fundal și le puteți apăsa, selecta și trage |
 | MATE (X11) | ✅ | Pictogramele de pe desktop rămân vizibile și pot fi apăsate peste imaginea de fundal |
 | Deepin 25 (DDE, X11) | ✅ | Adaptare automată la DDE — verificat de comunitate pe Deepin 25 Community build1 |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |
 | Cinnamon 6.8 și mai nou (Wayland) | ✅ | Compozitorul Cinnamon a primit layer-shell în 6.8. Cinnamon 6.6 și mai vechi nu au layer-shell și rămân cu un cadru fix pe Wayland |
-| KDE Plasma 6 (X11 și Wayland) | ✅ | Setat prin pluginul de imagine de fundal al plasmashell, deci pictogramele de pe desktop rămân vizibile. Pentru video are nevoie de `qml6-module-qtmultimedia`. Redarea este cea a Qt, nu a mpv: fără sunet, fără reglaje hwdec, decupare sau tranziții; o listă de redare rulează primul fișier, iar o succesiune de imagini afișează primul cadru |
+| KDE Plasma 6 (X11 și Wayland) | ✅ | Setat prin pluginul de imagine de fundal al plasmashell, deci pictogramele de pe desktop rămân vizibile. Pentru video are nevoie de `qml6-module-qtmultimedia`. Redarea este cea a Qt, nu a mpv: fără sunet, fără reglaje hwdec, decupare sau tranziții; o listă de redare rulează primul fișier, iar o succesiune de imagini afișează primul cadru. Opțiunea Umplere (Acoperire, Încadrare, Întindere) este respectată |
 | GNOME pe Wayland | ⚠️ | Doar cadru fix — Mutter nu expune nicio suprafață pentru fundal animat, deci nu există video și nici widgeturi. Videoul live are nevoie de o extensie Fresco pentru GNOME (planificată) |
 
 Fiecare mediu de mai sus este testat fără interfață grafică (headless) în CI la fiecare versiune.
@@ -216,15 +220,15 @@ Da, pe X11, cu fundalul animat complet — video, widgeturi, totul. Pe **GNOME s
 
 ### Funcționează Fresco pe KDE Plasma, COSMIC, Hyprland sau Sway?
 
-Da, pe toate patru. COSMIC, Hyprland și Sway redau video live prin layer-shell. KDE Plasma 6 (X11 și Wayland) folosește propriul plugin de imagine de fundal al Fresco în plasmashell, care păstrează pictogramele de pe desktop vizibile, dar redă prin Qt în loc de mpv: fără sunet, fără decupare sau tranziții, și are nevoie de `qml6-module-qtmultimedia` pentru video.
+Da, pe toate patru. COSMIC, Hyprland și Sway redau video live prin layer-shell. KDE Plasma 6 (X11 și Wayland) folosește propriul plugin de imagine de fundal al Fresco în plasmashell, care păstrează pictogramele de pe desktop vizibile, dar redă prin Qt în loc de mpv: fără sunet, fără decupare sau tranziții, și are nevoie de `qml6-module-qtmultimedia` pentru video. Opțiunea Umplere (Acoperire, Încadrare sau Întindere) se aplică și acolo.
 
 ### Funcționează Fresco pe Linux Mint, Xfce, Cinnamon sau MATE?
 
-Da. Cinnamon, Xfce și MATE pe X11 folosesc randarea integrată, iar pictogramele de pe desktop rămân vizibile peste imaginea de fundal pe Xfce și MATE. Cinnamon pe Wayland funcționează începând cu Cinnamon 6.8, care a adăugat layer-shell.
+Da. Cinnamon, Xfce și MATE pe X11 folosesc randarea integrată, iar pictogramele de pe desktop rămân vizibile peste imaginea de fundal pe Xfce și MATE; pe Xfce le puteți apăsa, selecta și trage ca de obicei. Cinnamon pe Wayland funcționează începând cu Cinnamon 6.8, care a adăugat layer-shell.
 
 ### Cum schimb imaginea de fundal cu o scurtătură de tastatură?
 
-Asociați `fresco next`, `fresco prev` sau `fresco random` unei taste în setările compozitorului sau ale desktopului — ele schimbă imaginea de fundal fără să deschidă aplicația (`random` nu o alege niciodată pe cea care rulează deja). Parcurg biblioteca în ordinea în care o arată aplicația, sau doar dosarul pe care îl aveți deschis acolo, și pornesc serviciul Fresco dacă nu rulează. În aplicație, Ctrl+K deschide o paletă de comenzi. De exemplu, în Sway:
+Asociați `fresco next`, `fresco prev` sau `fresco random` unei taste în setările compozitorului sau ale desktopului — ele schimbă imaginea de fundal fără să deschidă aplicația (`random` nu o alege niciodată pe cea care rulează deja). Parcurg biblioteca în ordinea în care o arată aplicația, sau doar dosarul pe care îl aveți deschis acolo, și pornesc serviciul Fresco dacă nu rulează. Dacă fereastra Fresco este deschisă în acel moment, ea preia noua imagine de fundal în loc să o repună pe cea veche. În aplicație, Ctrl+K deschide o paletă de comenzi. De exemplu, în Sway:
 
 ```
 bindsym $mod+Right  exec fresco next
@@ -238,7 +242,15 @@ Da. Fresco acceptă imagini de fundal separate pentru fiecare ecran, iar când a
 
 ### Acceptă GIF-uri și succesiuni de imagini?
 
-Da — GIF-uri animate, imagini statice, succesiuni de imagini cu tranziții (crossfade, fade, slide, Ken Burns) și liste de redare cu mai multe videoclipuri, pe lângă fișierele video.
+Da — GIF-uri animate, imagini statice, succesiuni de imagini cu tranziții (fondare prin negru, Ken Burns, apropiere și neclaritate) și liste de redare cu mai multe videoclipuri, pe lângă fișierele video.
+
+### Poate Fresco să folosească dosarul meu existent cu imagini de fundal fără import?
+
+Da. Folosiți **Asociere dosar** pentru a indica Fresco un dosar în care păstrați deja imagini de fundal. Imaginile, GIF-urile și videoclipurile din el apar în bibliotecă acolo unde se află, fără să fie importate, iar biblioteca rămâne sincronizată pe măsură ce adăugați și eliminați fișiere în acel dosar. Subdosarele sunt opționale, iar favoritele și modificările sunt reținute pentru fiecare fișier. **Adăugare** importă în continuare fișiere individuale, ca înainte.
+
+### Poate Fresco să gestioneze mii de imagini de fundal?
+
+Da. Biblioteca construiește doar cardurile imaginilor de fundal din apropierea locului în care derulați, nu pe toate deodată, așa că o colecție mare nu îngreunează aplicația. Pe o bibliotecă de test cu 4.000 de imagini de fundal (jumătate imagini, jumătate videoclipuri), biblioteca a apărut în aproximativ 2 secunde în loc de 9 până la 13, iar aplicația a folosit aproximativ 325 MB de memorie în loc de 1,6 GB. Aceste cifre provin dintr-o versiune de dezvoltare, sub sarcină, pe o singură mașină, așa că tratați-le ca pe o orientare, nu ca pe o promisiune.
 
 ### Pot folosi un videoclip YouTube ca imagine de fundal?
 
@@ -280,7 +292,7 @@ Fresco desenează cinci widgeturi opționale peste imaginea de fundal. Toate sun
 | **Vizualizator audio** | Cinci stiluri — Bare, Oglindire, Undă, Puncte, Inel — cu selector de culoare, degrade din două culori sau curcubeu |
 | **Copertă album** | Coperta melodiei curente pe un disc rotativ; se oprește din rotit când redarea este în pauză |
 
-Cu excepția modului opțional **Plutește deasupra ferestrelor** al ceasului mondial, widgeturile sunt pictate în imaginea de fundal prin stratul OSD al mpv, nu într-o fereastră proprie, deci nu stau niciodată deasupra ferestrelor, nu interceptează niciodată un clic și se comportă identic pe X11 și pe orice compozitor layer-shell. Cu muzica pornită și cu widgeturile de versuri, ceas, vizualizator și copertă de album active, costul măsurat a fost de **0,8% dintr-un nucleu de procesor** — aproape în întregime din captura audio, deoarece nimic nu se redesenează dacă conținutul nu s-a schimbat.
+Cu excepția modului opțional **Plutește deasupra ferestrelor** al ceasului mondial, widgeturile sunt pictate în imaginea de fundal prin stratul OSD al mpv, nu într-o fereastră proprie, deci nu stau niciodată deasupra ferestrelor, nu interceptează niciodată un clic și se comportă identic pe X11 și pe orice compozitor layer-shell. Cu muzica pornită și cu widgeturile de versuri, ceas, vizualizator și copertă de album active, costul măsurat a fost de **0,8% dintr-un nucleu de procesor** — aproape în întregime din captura audio, deoarece nimic nu se redesenează dacă conținutul nu s-a schimbat. Widgeturile revin și singure după ce calculatorul trece în repaus și își reia activitatea.
 
 Widgeturile apar implicit pe **toate ecranele**. Ca să le păstrați pe unul singur, adăugați `monitor = "DP-1"` în blocul `[widgets]` din `config.toml` (încă nu există un control grafic pentru asta). Ele **nu sunt disponibile pe GNOME sub Wayland**, care nu are o suprafață de fundal animat în care Fresco să deseneze — același motiv pentru care imaginile de fundal revin acolo la un cadru fix.
 

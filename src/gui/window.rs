@@ -134,7 +134,7 @@ fn discard_draft(state: &Rc<RefCell<AppState>>) {
 pub(crate) struct AppState {
     pub(crate) config: Config,
     pub(crate) entries: Vec<LibraryEntry>,
-    editing_idx: Option<usize>,
+    pub(super) editing_idx: Option<usize>,
     /// A freshly built entry that hasn't been committed to the library yet —
     /// kept out of `entries` (and off disk) until "Set as wallpaper" is
     /// clicked, so a file just picked, dropped, or downloaded from a link

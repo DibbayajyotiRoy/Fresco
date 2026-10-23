@@ -27,7 +27,6 @@ use anyhow::{Context, Result};
 use gtk4::{gio, glib, prelude::*};
 use serde::{Deserialize, Serialize};
 
-use super::import_queue;
 use super::library::{self, Collection, LibraryEntry, Link, LinkStatus};
 use super::window::{show_toast, AppState};
 use crate::config::{PowerSaving, Transition};
@@ -562,7 +561,7 @@ fn apply(
         LinkStatus::Missing
     };
     let (fresh, dirs) = loaded.unwrap_or_default();
-    let (link, name, redraw, new_ids) = {
+    let (link, name, redraw) = {
         let mut s = state.borrow_mut();
         let Some(c) = s.collections.iter_mut().find(|c| c.id == id) else {
             return; // unlinked while the scan ran
@@ -593,19 +592,10 @@ fn apply(
             }
             super::preview_proxy::remove_for(&gone_id);
         }
-        // Cards for new files start as placeholders; thumbnails fill in as the
-        // import queue gets to them. Files already queued are left alone.
-        let new_ids: Vec<String> = if changed {
-            s.entries
-                .iter()
-                .filter(|e| e.collection.as_deref() == Some(id) && e.thumbnail.is_none())
-                .filter(|e| !import_queue::is_pending(&e.id))
-                .map(|e| e.id.clone())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        (link, name, changed || status_moved, new_ids)
+        // Cards for new files start as placeholders and ask for their own
+        // thumbnail when the grid builds them (`import_queue::request_thumbnail`):
+        // a 4,000-file folder is not thumbnailed up front.
+        (link, name, changed || status_moved)
     };
     watch(state, id, &link, &dirs);
     if redraw {
@@ -613,9 +603,6 @@ fn apply(
         if let Some(r) = refresh {
             r();
         }
-    }
-    if !new_ids.is_empty() {
-        import_queue::start(state, new_ids, |_| {});
     }
     if announce {
         let msg = match status {

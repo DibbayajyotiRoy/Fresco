@@ -99,6 +99,34 @@ pub fn scan(link: &Link) -> Option<Scan> {
     Some(out)
 }
 
+/// The "N wallpapers" count in the link dialog, scanned off the UI thread.
+/// Lives as long as the dialog (one folder), so the cache is keyed by
+/// `recursive` alone.
+#[derive(Default)]
+pub struct CountState {
+    /// Bumped by every request; a result for an older one is stale.
+    generation: u32,
+    cache: HashMap<bool, usize>,
+}
+
+impl CountState {
+    /// The user wants the count for `recursive`. `Ok(n)` when it is already
+    /// known, else `Err(generation)` to scan under and hand back to [`finish`].
+    /// Bumps the generation either way, so a scan still running for the other
+    /// choice does not overwrite this one.
+    pub fn request(&mut self, recursive: bool) -> Result<usize, u32> {
+        self.generation = self.generation.wrapping_add(1);
+        self.cache.get(&recursive).copied().ok_or(self.generation)
+    }
+
+    /// A scan finished. Always cached (it is right for its `recursive`);
+    /// `true` when it is still the count on screen.
+    pub fn finish(&mut self, generation: u32, recursive: bool, n: usize) -> bool {
+        self.cache.insert(recursive, n);
+        generation == self.generation
+    }
+}
+
 fn walk(
     dir: &Path,
     depth: usize,
@@ -692,6 +720,31 @@ mod tests {
             recursive,
             status: LinkStatus::Ready,
         }
+    }
+
+    #[test]
+    fn count_state_drops_stale_results_but_caches_them() {
+        let mut c = CountState::default();
+        let flat = c.request(false).unwrap_err();
+        let deep = c.request(true).unwrap_err(); // toggled before the first landed
+        assert!(!c.finish(flat, false, 3), "superseded: not shown");
+        assert!(c.finish(deep, true, 9), "latest: shown");
+        assert_eq!(c.request(false), Ok(3), "the stale result was cached");
+        assert_eq!(c.request(true), Ok(9));
+    }
+
+    #[test]
+    fn count_state_cache_hit_supersedes_inflight_scan() {
+        let mut c = CountState::default();
+        let first = c.request(false).unwrap_err();
+        assert!(c.finish(first, false, 3));
+        let slow = c.request(true).unwrap_err(); // deep scan starts
+        assert_eq!(c.request(false), Ok(3)); // back to flat before it lands
+        assert!(
+            !c.finish(slow, true, 40),
+            "deep result must not overwrite flat label"
+        );
+        assert_eq!(c.request(true), Ok(40), "but it is cached for next time");
     }
 
     fn names(scan: &Scan, root: &Path) -> Vec<String> {

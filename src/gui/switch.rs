@@ -10,7 +10,7 @@ use std::hash::BuildHasher;
 
 use anyhow::{bail, Result};
 
-use super::{daemon_ctl, library, window};
+use super::{daemon_ctl, library, linked, window};
 use crate::config::Config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,12 +88,20 @@ fn switch(step: Step) -> Result<Option<String>> {
     for e in &mut entries {
         e.check_health();
     }
+    // Linked folders are scanned here, as the window would; one that is
+    // unplugged contributes nothing.
+    linked::append_all(&mut entries, &collections);
 
     // The library as the gallery lists it, minus entries whose file is gone.
+    let index: std::collections::HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.id.as_str(), i))
+        .collect();
     let pool: Vec<usize> =
         window::display_order(&entries, &collections, cycle_view(library::load_view()))
             .iter()
-            .filter_map(|id| entries.iter().position(|e| &e.id == id))
+            .filter_map(|id| index.get(id.as_str()).copied())
             .filter(|&i| !entries[i].broken)
             .collect();
     let current = pool
@@ -181,6 +189,50 @@ mod tests {
         // The raw view would have flipped it, which is the bug.
         let raw = window::display_order(&[a.clone(), b.clone()], &[], view.clone());
         assert_eq!(raw, vec![b.id, a.id]);
+    }
+
+    /// `fresco next` cycles the library as shown, linked folders included: the
+    /// files of a linked folder are scanned in, listed in their section's
+    /// order, and an unplugged folder adds nothing.
+    #[test]
+    fn the_switch_pool_includes_linked_folders() {
+        use std::path::PathBuf;
+        let dir = std::env::temp_dir().join(format!("fresco-switch-linked-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["b.png", "a.mp4", "notes.txt"] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        let link = |path: PathBuf| library::Link {
+            path,
+            recursive: false,
+            status: library::LinkStatus::default(),
+        };
+        let mut photos = library::Collection::new("Photos", 0);
+        photos.link = Some(link(dir.clone()));
+        let mut gone = library::Collection::new("Gone", 1);
+        gone.link = Some(link(dir.join("missing")));
+        let own = library::LibraryEntry::new_video(PathBuf::from("/own.mp4"));
+        let mut entries = vec![own];
+        linked::append_all(&mut entries, &[photos.clone(), gone.clone()]);
+        assert_eq!(entries.len(), 3, "two media files; the missing folder adds none");
+
+        let pool = window::display_order(
+            &entries,
+            &[photos, gone],
+            cycle_view(library::LibraryView::default()),
+        );
+        let names: Vec<&str> = pool
+            .iter()
+            .map(|id| entries.iter().find(|e| &e.id == id).unwrap().name.as_str())
+            .collect();
+        // The linked folder's section first, in file-name order; the imported
+        // entry after it.
+        assert_eq!(names, ["a", "b", "own"]);
+        // And next/prev wrap through it.
+        assert_eq!(pick(pool.len(), Some(2), Step::Next, 0), Some(0));
+        assert_eq!(pick(pool.len(), Some(0), Step::Prev, 0), Some(2));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

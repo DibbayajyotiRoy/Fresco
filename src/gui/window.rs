@@ -13,7 +13,7 @@ use super::window_state;
 use super::{
     daemon_ctl, import_queue,
     library::{self, load_entries, save_entries, LibraryEntry},
-    status,
+    linked, status,
 };
 use crate::{
     autostart,
@@ -177,6 +177,24 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
+    /// Change `entries` while keeping the editor on the entry it has open.
+    /// Linked folders add and remove entries behind the window's back, which
+    /// shifts the indices the editor holds.
+    pub(crate) fn edit_entries<R>(
+        &mut self,
+        change: impl FnOnce(&mut Vec<LibraryEntry>) -> R,
+    ) -> R {
+        let open = self
+            .editing_idx
+            .and_then(|i| self.entries.get(i))
+            .map(|e| e.id.clone());
+        let result = change(&mut self.entries);
+        if let Some(id) = open {
+            self.editing_idx = self.entries.iter().position(|e| e.id == id);
+        }
+        result
+    }
+
     /// The entry currently shown in the editor: the draft, if one is being
     /// created, else `entries[editing_idx]`. `None` covers both "the editor
     /// isn't open" and "editing_idx points nowhere" (shouldn't happen, but a
@@ -411,6 +429,9 @@ fn build_ui(app: &adw::Application) {
     stack.set_transition_duration(220);
 
     let library_view = build_library_view(&window, state.clone(), &stack);
+    // Linked folders are scanned off the UI thread, now that the grid exists
+    // for the results to land in.
+    linked::start(&state);
     let editor_view = build_editor_view(state.clone(), &stack);
 
     stack.add_named(&library_view, Some("library"));
@@ -1492,6 +1513,16 @@ fn build_menu_root(
     )));
     popover_box.append(&url_btn);
 
+    let link_btn = menu_item_opening_window(t!("Link folder…"), popover, {
+        let state_l = state.clone();
+        let win_l = window.clone();
+        move || open_link_folder_picker(&win_l, state_l.clone())
+    });
+    link_btn.set_tooltip_text(Some(t!(
+        "Show a folder of wallpapers where it is, without importing it"
+    )));
+    popover_box.append(&link_btn);
+
     let folders_btn = menu_item_opening_window(t!("Manage folders…"), popover, {
         let state_f = state.clone();
         let win_f = window.clone();
@@ -1903,6 +1934,14 @@ struct SectionPlan {
     /// group by kind (the Images/Videos/GIFs layout) — would move the card
     /// past a neighbour that is not on screen and look like a no-op.
     reorderable: bool,
+    /// The id of the linked folder this section is, if it is one: its heading
+    /// gets Rescan / Unlink, and it is shown even while empty or unreachable.
+    linked: Option<String>,
+}
+
+/// Whether `id` names a linked-folder section.
+fn is_linked_section(collections: &[library::Collection], id: &str) -> bool {
+    collections.iter().any(|c| c.id == id && c.link.is_some())
 }
 
 /// Decide how the grid is laid out: which sections exist, in what order, and
@@ -1946,18 +1985,29 @@ fn plan_sections(
             title: t!("Favorites").to_string(),
             ids: sorted(favs),
             reorderable: false,
+            linked: None,
         });
     }
 
     if view.collection.is_some() || !view.sort.is_manual() {
         let all: Vec<&LibraryEntry> = entries.iter().filter(|e| keep(e)).collect();
-        if !all.is_empty() {
+        let linked = view
+            .collection
+            .as_deref()
+            .filter(|id| is_linked_section(collections, id));
+        // An opened linked folder is shown even while empty, so its note and
+        // its Rescan / Unlink stay reachable.
+        if !all.is_empty() || (linked.is_some() && q.is_empty()) {
             out.push(SectionPlan {
                 title: scope_label(view, collections),
                 // A single scope IS a single group, so the arrows are honest
-                // here — but only while nothing is re-deriving the order.
-                reorderable: view.sort.is_manual() && view.collection.is_some(),
+                // here — but only while nothing is re-deriving the order, and
+                // a linked folder mirrors the disk instead of being arranged.
+                reorderable: view.sort.is_manual()
+                    && view.collection.is_some()
+                    && linked.is_none(),
                 ids: sorted(all),
+                linked: linked.map(str::to_string),
             });
         }
         return out;
@@ -1976,6 +2026,7 @@ fn plan_sections(
                 title: category_label(cat).to_string(),
                 ids: sorted(v),
                 reorderable: false,
+                linked: None,
             });
         }
         return out;
@@ -1988,13 +2039,15 @@ fn plan_sections(
             .into_iter()
             .filter(|e| keep(e))
             .collect();
-        if v.is_empty() {
+        let is_link = c.link.is_some();
+        if v.is_empty() && !(is_link && q.is_empty()) {
             continue;
         }
         out.push(SectionPlan {
             title: c.name.clone(),
             ids: sorted(v),
-            reorderable: true,
+            reorderable: !is_link,
+            linked: is_link.then(|| c.id.clone()),
         });
     }
     let loose: Vec<&LibraryEntry> = library::uncategorized(entries)
@@ -2006,6 +2059,7 @@ fn plan_sections(
             title: t!("Uncategorized").to_string(),
             ids: sorted(loose),
             reorderable: true,
+            linked: None,
         });
     }
     out
@@ -2296,7 +2350,10 @@ fn populate_library(
     // wallpapers behind config.toml's back, not by the stale saved default.
     let cfg = config_for_active_cards(&cfg, &entries, status::cached_playing_path().as_deref());
 
-    if entries.is_empty() {
+    // A library holding only linked folders is not empty, even before their
+    // first scan lands (or while one is unplugged): their headings must show.
+    let has_links = state.borrow().collections.iter().any(|c| c.link.is_some());
+    if entries.is_empty() && !has_links {
         welcome.set_visible(true);
         recent_label.set_visible(false);
         recent_box.set_visible(false);
@@ -2356,6 +2413,15 @@ fn populate_library(
             .map(|i| (i, &entries[i]))
             .collect();
         if matches.is_empty() {
+            // Only a linked folder keeps its place while it has no cards.
+            let folder = plan
+                .linked
+                .as_deref()
+                .and_then(|id| collections.iter().find(|c| c.id == id));
+            if let Some(note) = folder.and_then(|c| build_linked_note(c, first_section, state)) {
+                sections_box.append(&note);
+                first_section = false;
+            }
             continue;
         }
         sections_box.append(&build_section(
@@ -2367,6 +2433,7 @@ fn populate_library(
             stack,
             bucket,
             plan.reorderable,
+            plan.linked.as_deref(),
         ));
         first_section = false;
     }
@@ -2402,13 +2469,10 @@ fn build_section(
     stack: &gtk4::Stack,
     bucket: LayoutBucket,
     reorderable: bool,
+    linked: Option<&str>,
 ) -> gtk4::Box {
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let header = overline(label);
-    // More air above a section than below its header (overline rhythm).
-    header.set_margin_top(if first_section { 8 } else { 14 });
-    header.set_margin_bottom(6);
-    section.append(&header);
+    section.append(&section_header(label, first_section, state, linked));
 
     let (min_children, max_children) = bucket.flow_caps();
     let flow = gtk4::FlowBox::new();
@@ -2450,6 +2514,97 @@ fn build_section(
     });
     section.append(&flow);
     section
+}
+
+/// A section's heading. A linked folder's also carries its Rescan / Unlink menu.
+fn section_header(
+    label: &str,
+    first_section: bool,
+    state: &Rc<RefCell<AppState>>,
+    linked: Option<&str>,
+) -> gtk4::Widget {
+    let header = overline(label);
+    // More air above a section than below its header (overline rhythm).
+    header.set_margin_top(if first_section { 8 } else { 14 });
+    header.set_margin_bottom(6);
+    let Some(id) = linked else {
+        return header.upcast();
+    };
+    header.set_hexpand(true);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    row.append(&header);
+    row.append(&linked_menu(state, id));
+    row.upcast()
+}
+
+/// Rescan / Unlink for a linked folder's heading.
+fn linked_menu(state: &Rc<RefCell<AppState>>, id: &str) -> gtk4::MenuButton {
+    let btn = gtk4::MenuButton::new();
+    btn.set_icon_name("view-more-symbolic");
+    btn.add_css_class("flat");
+    btn.set_valign(gtk4::Align::End);
+    btn.set_tooltip_text(Some(t!("Linked folder options")));
+    btn.update_property(&[gtk4::accessible::Property::Label(t!(
+        "Linked folder options"
+    ))]);
+    let pop = gtk4::Popover::new();
+    pop.add_css_class("fresco-menu");
+    let col = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    col.set_margin_top(6);
+    col.set_margin_bottom(6);
+    col.set_margin_start(6);
+    col.set_margin_end(6);
+    let rescan = menu_item_opening_window(t!("Rescan"), &pop, {
+        let (state, id) = (state.clone(), id.to_string());
+        move || linked::rescan(&state, &id, true)
+    });
+    col.append(&rescan);
+    let unlink = menu_item_opening_window(t!("Unlink folder"), &pop, {
+        let (state, id) = (state.clone(), id.to_string());
+        // Rebuilds the grid this menu lives in: let the click finish first.
+        move || {
+            let (state, id) = (state.clone(), id.clone());
+            glib::idle_add_local_once(move || unlink_folder(&state, &id));
+        }
+    });
+    col.append(&unlink);
+    pop.set_child(Some(&col));
+    btn.set_popover(Some(&pop));
+    btn
+}
+
+/// What a linked folder shows instead of cards: nothing while its first scan
+/// runs, a note when it cannot be read or holds no wallpaper yet.
+fn build_linked_note(
+    folder: &library::Collection,
+    first_section: bool,
+    state: &Rc<RefCell<AppState>>,
+) -> Option<gtk4::Box> {
+    let link = folder.link.as_ref()?;
+    let (title, text) = match link.status {
+        library::LinkStatus::Scanning => return None,
+        library::LinkStatus::Missing => (
+            tf!("{name} (unavailable)", "name" => folder.name.as_str()),
+            tf!(
+                "{path} can’t be read right now. It comes back by itself once the drive is plugged in or the folder returns.",
+                "path" => link.path.display().to_string()
+            ),
+        ),
+        library::LinkStatus::Ready => (
+            folder.name.clone(),
+            t!("No supported wallpapers in this folder yet. New files appear on their own.")
+                .to_string(),
+        ),
+    };
+    let section = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    section.append(&section_header(&title, first_section, state, Some(&folder.id)));
+    let note = gtk4::Label::new(Some(&text));
+    note.add_css_class("dialog-sub");
+    note.set_wrap(true);
+    note.set_xalign(0.0);
+    note.set_margin_bottom(12);
+    section.append(&note);
+    Some(section)
 }
 
 /// Compact recent-row card: thumbnail + title scrim, click to apply.
@@ -3004,6 +3159,13 @@ fn show_card_menu(
         b
     };
 
+    // Files of a linked folder stay where they are: no filing, no removing.
+    let from_linked_folder = state
+        .borrow()
+        .entries
+        .get(idx)
+        .is_some_and(|e| linked::is_linked_id(&e.id));
+
     let set = item(t!("Set as wallpaper"));
     {
         let s = state.clone();
@@ -3170,7 +3332,9 @@ fn show_card_menu(
             }
         });
     }
-    menu.append(&move_to);
+    if !from_linked_folder {
+        menu.append(&move_to);
+    }
 
     // Multi-file entries own a list the user could not edit until now: adding
     // to, removing from or reordering a playlist meant rebuilding it by hand.
@@ -3265,7 +3429,9 @@ fn show_card_menu(
             p.popdown();
         });
     }
-    menu.append(&remove);
+    if !from_linked_folder {
+        menu.append(&remove);
+    }
 
     pop.set_child(Some(&menu));
     pop.connect_closed(|p| p.unparent());
@@ -3483,7 +3649,7 @@ fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     let was_active;
     {
         let mut s = state.borrow_mut();
-        if idx >= s.entries.len() {
+        if idx >= s.entries.len() || linked::is_linked_id(&s.entries[idx].id) {
             return;
         }
         let entry = s.entries.remove(idx);
@@ -3638,6 +3804,27 @@ fn remove_entries_by_ids(state: Rc<RefCell<AppState>>, ids: &std::collections::H
     refresh_selection(&state);
 }
 
+/// `ids` minus the files of linked folders, which can be neither moved nor
+/// removed: the user is told, instead of the selection quietly shrinking.
+fn without_linked(
+    state: &Rc<RefCell<AppState>>,
+    ids: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let all: Vec<String> = ids.into_iter().collect();
+    let kept: Vec<String> = all
+        .iter()
+        .filter(|id| !linked::is_linked_id(id))
+        .cloned()
+        .collect();
+    if kept.len() < all.len() {
+        show_toast(
+            state,
+            t!("Files from a linked folder can’t be moved or removed. Unlink the folder instead."),
+        );
+    }
+    kept
+}
+
 /// Confirm before a bulk delete. Removing many wallpapers at once can't be
 /// undone, and the single-card path is already one click behind a menu, so the
 /// batch path gets an explicit count to check against.
@@ -3646,6 +3833,10 @@ fn confirm_remove_selected(
     state: Rc<RefCell<AppState>>,
     ids: std::collections::HashSet<String>,
 ) {
+    let ids: std::collections::HashSet<String> = without_linked(&state, ids).into_iter().collect();
+    if ids.is_empty() {
+        return;
+    }
     let n = ids.len();
     let active_hit = {
         let s = state.borrow();
@@ -4014,12 +4205,22 @@ fn show_collections_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<Ap
                 let del = gtk4::Button::from_icon_name("user-trash-symbolic");
                 del.add_css_class("flat");
                 del.set_valign(gtk4::Align::Center);
-                del.set_tooltip_text(Some(t!("Delete folder (wallpapers are kept)")));
+                let is_link = c.link.is_some();
+                del.set_tooltip_text(Some(if is_link {
+                    t!("Unlink folder (files are kept)")
+                } else {
+                    t!("Delete folder (wallpapers are kept)")
+                }));
                 {
                     let state2 = state.clone();
                     let id = c.id.clone();
                     let again = again.clone();
                     del.connect_clicked(move |_| {
+                        if is_link {
+                            unlink_folder(&state2, &id);
+                            again();
+                            return;
+                        }
                         {
                             let mut s = state2.borrow_mut();
                             // Mutates BOTH vectors — the members are handed
@@ -4179,6 +4380,7 @@ fn show_move_to_collection_dialog(
     state: Rc<RefCell<AppState>>,
     ids: Vec<String>,
 ) {
+    let ids = without_linked(&state, ids);
     if ids.is_empty() {
         return;
     }
@@ -4210,7 +4412,8 @@ fn show_move_to_collection_dialog(
         s.collections.clone()
     };
     let ids = Rc::new(ids);
-    for c in &collections {
+    // A linked folder mirrors the disk: nothing can be filed into it.
+    for c in collections.iter().filter(|c| c.link.is_none()) {
         let btn = menu_item(&c.name);
         let state2 = state.clone();
         let ids = ids.clone();
@@ -4990,6 +5193,213 @@ fn add_folder_options(
         });
     }
     options.append(&individual);
+
+    let link = gtk4::Button::new();
+    link.set_child(Some(&two_line_choice(
+        t!("Link this folder"),
+        t!("Shows it where it is, without importing. New files appear on their own."),
+    )));
+    {
+        let state = state.clone();
+        let folder = folder.to_path_buf();
+        let d = dialog.clone();
+        link.connect_clicked(move |_| {
+            link_folder(&state, folder.clone(), deep);
+            d.close();
+        });
+    }
+    options.append(&link);
+}
+
+// ─── Linked folders ──────────────────────────────────────────────────────────
+
+/// Folder picker → [`show_link_folder_dialog`].
+fn open_link_folder_picker(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    let chooser = gtk4::FileChooserNative::new(
+        Some(t!("Choose a folder to link")),
+        Some(window),
+        FileChooserAction::SelectFolder,
+        Some(t!("Select")),
+        Some(t!("Cancel")),
+    );
+    let state_cb = state.clone();
+    let win_cb = window.clone();
+    chooser.connect_response(move |ch, resp| {
+        state_cb.borrow_mut().current_picker = None;
+        if resp != ResponseType::Accept {
+            return;
+        }
+        if let Some(folder) = ch.file().and_then(|f| f.path()) {
+            show_link_folder_dialog(&win_cb, state_cb.clone(), folder);
+        }
+    });
+    state.borrow_mut().current_picker = Some(chooser.clone());
+    chooser.show();
+}
+
+/// Confirm linking `folder`, with the "Include subfolders" choice.
+fn show_link_folder_dialog(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    folder: PathBuf,
+) {
+    let (dialog, content) = glass_dialog(window, t!("Link folder"), 460, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+    body.set_margin_bottom(18);
+
+    let heading = gtk4::Label::new(Some(
+        &folder
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| folder.to_string_lossy().into_owned()),
+    ));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    body.append(&heading);
+
+    let sub = gtk4::Label::new(Some(t!(
+        "Fresco shows what is in this folder where it is. Nothing is copied or imported: new files appear on their own, and files you delete or move away disappear. Unlinking never deletes anything."
+    )));
+    sub.add_css_class("dialog-sub");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    body.append(&sub);
+
+    let recursive = gtk4::CheckButton::with_label(t!("Include subfolders"));
+    body.append(&recursive);
+
+    let count = gtk4::Label::new(None);
+    count.add_css_class("dialog-sub");
+    count.set_xalign(0.0);
+    body.append(&count);
+    let show_count = {
+        let (count, folder) = (count.clone(), folder.clone());
+        move |deep: bool| {
+            let link = library::Link {
+                path: folder.clone(),
+                recursive: deep,
+                status: library::LinkStatus::default(),
+            };
+            let n = linked::scan(&link).map_or(0, |s| s.files.len());
+            count.set_text(&match n {
+                0 => t!("No supported media in that folder").to_string(),
+                1 => t!("1 wallpaper").to_string(),
+                n => tf!("{count} wallpapers", "count" => n.to_string()),
+            });
+        }
+    };
+    show_count(false);
+    recursive.connect_toggled(move |cb| show_count(cb.is_active()));
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    actions.set_margin_top(8);
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    actions.append(&cancel);
+    let link = gtk4::Button::with_label(t!("Link folder"));
+    link.add_css_class("suggested-action");
+    {
+        let d = dialog.clone();
+        link.connect_clicked(move |_| {
+            link_folder(&state, folder.clone(), recursive.is_active());
+            d.close();
+        });
+    }
+    actions.append(&link);
+    body.append(&actions);
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// Link `folder` as a section of the library. The scan runs in the background;
+/// the section fills in when it lands.
+fn link_folder(state: &Rc<RefCell<AppState>>, folder: PathBuf, recursive: bool) {
+    let folder = std::fs::canonicalize(&folder).unwrap_or(folder);
+    let taken = state
+        .borrow()
+        .collections
+        .iter()
+        .filter_map(|c| c.link.as_ref())
+        .any(|l| linked::overlaps(l, &folder, recursive));
+    if taken {
+        show_toast(
+            state,
+            t!("That folder is already linked, or overlaps one that is."),
+        );
+        return;
+    }
+    let name = folder.file_name().map_or_else(
+        || folder.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let id = {
+        let mut s = state.borrow_mut();
+        let link = library::Link {
+            path: folder,
+            recursive,
+            status: library::LinkStatus::Scanning,
+        };
+        let id = library::create_linked(&mut s.collections, &name, link);
+        sort_collections_in_place(&mut s.collections);
+        library::save_collections(&s.collections).ok();
+        id
+    };
+    show_toast(state, &tf!("Linked “{name}”", "name" => name));
+    redraw_library(state);
+    linked::rescan(state, &id, false);
+}
+
+/// Remove a linked folder from the library. Only Fresco's record of it goes:
+/// the folder and every file in it are left alone.
+fn unlink_folder(state: &Rc<RefCell<AppState>>, id: &str) {
+    let name = {
+        let mut s = state.borrow_mut();
+        let Some(pos) = s
+            .collections
+            .iter()
+            .position(|c| c.id == id && c.link.is_some())
+        else {
+            return;
+        };
+        let folder = s.collections.remove(pos);
+        library::renumber_collections(&mut s.collections);
+        let gone = s.edit_entries(|entries| {
+            let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(entries)
+                .into_iter()
+                .partition(|e| e.collection.as_deref() == Some(id));
+            *entries = kept;
+            gone
+        });
+        // Thumbnails and preview clips are Fresco's own cache of those files.
+        for e in &gone {
+            if let Some(thumb) = &e.thumbnail {
+                std::fs::remove_file(thumb).ok();
+            }
+            super::preview_proxy::remove_for(&e.id);
+        }
+        library::save_collections(&s.collections).ok();
+        if let Some(link) = &folder.link {
+            linked::forget_tweaks(&link.path);
+        }
+        s.view = normalize_view(s.view.clone(), &s.collections);
+        library::save_view(&s.view).ok();
+        s.selection = None;
+        folder.name
+    };
+    linked::stop(id);
+    show_toast(
+        state,
+        &tf!("Unlinked “{name}”. Your files were not touched.", "name" => name),
+    );
+    refresh_selection(state);
 }
 
 /// The pre-1.2 "Add folder" outcome: one folder-backed slideshow, then the
@@ -12030,6 +12440,109 @@ mod tests {
             plans.iter().all(|p| p.reorderable),
             "each of these sections is exactly one ordering group"
         );
+    }
+
+    /// A linked folder: its collection (with a link) and its files, as a scan
+    /// would have built them.
+    fn linked_folder(name: &str, files: &[&str]) -> (library::Collection, Vec<LibraryEntry>) {
+        let mut col = library::Collection::new(name, 0);
+        col.link = Some(library::Link {
+            path: PathBuf::from("/linked"),
+            recursive: false,
+            status: library::LinkStatus::Ready,
+        });
+        let found = files
+            .iter()
+            .map(|f| linked::Found {
+                path: PathBuf::from(format!("/linked/{f}")),
+                size: 1,
+                mtime: 1,
+            })
+            .collect();
+        let entries = linked::build(&col.id, found, &linked::TweakMap::new());
+        (col, entries)
+    }
+
+    /// A linked folder is one more section, in folder order, that mirrors the
+    /// disk: no arrows, and it keeps its place while it has nothing to show.
+    #[test]
+    fn a_linked_folder_is_its_own_section_that_cannot_be_reordered() {
+        let (mut photos, files) = linked_folder("Photos", &["b.jpg", "a.jpg"]);
+        photos.position = 1;
+        let mut mine = library::Collection::new("Mine", 0);
+        mine.position = 0;
+        let mut entries = files.clone();
+        entries.push(filed("x", Some(&mine.id), 0));
+        entries.push(filed("loose", None, 0));
+        let cols = [photos.clone(), mine];
+        let view = library::LibraryView::default();
+
+        let plans = plan_sections(&entries, &cols, &view, "");
+        let titles: Vec<&str> = plans.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, vec!["Mine", "Photos", t!("Uncategorized")]);
+        let linked_plan = &plans[1];
+        assert_eq!(linked_plan.linked.as_deref(), Some(photos.id.as_str()));
+        assert!(!linked_plan.reorderable, "a linked folder mirrors the disk");
+        let names: Vec<&str> = linked_plan
+            .ids
+            .iter()
+            .map(|id| entries.iter().find(|e| &e.id == id).unwrap().name.as_str())
+            .collect();
+        assert_eq!(names, ["a", "b"], "file-name order");
+        assert!(plans[0].reorderable && plans[2].reorderable);
+        assert_eq!(plans.iter().filter(|p| p.linked.is_some()).count(), 1);
+
+        // Opened on its own: flat, still not reorderable.
+        let open = library::LibraryView {
+            collection: Some(photos.id.clone()),
+            ..view.clone()
+        };
+        let plans = plan_sections(&entries, &cols, &open, "");
+        assert_eq!(plans.len(), 1);
+        assert!(!plans[0].reorderable && plans[0].linked.is_some());
+    }
+
+    /// An unplugged drive or an empty folder is a section with a note, not a
+    /// section that quietly disappears; a search that matches nothing in it
+    /// hides it like any other.
+    #[test]
+    fn an_empty_or_unreachable_linked_folder_keeps_its_section() {
+        let (mut photos, _) = linked_folder("Photos", &[]);
+        photos.link.as_mut().unwrap().status = library::LinkStatus::Missing;
+        let loose = filed("loose", None, 0);
+        let view = library::LibraryView::default();
+
+        let plans = plan_sections(
+            std::slice::from_ref(&loose),
+            std::slice::from_ref(&photos),
+            &view,
+            "",
+        );
+        assert_eq!(plans[0].title, "Photos");
+        assert!(plans[0].ids.is_empty() && plans[0].linked.is_some());
+        let plans = plan_sections(
+            std::slice::from_ref(&loose),
+            std::slice::from_ref(&photos),
+            &view,
+            "zzz",
+        );
+        assert!(plans.is_empty(), "nothing in it matches the search");
+
+        let open = library::LibraryView {
+            collection: Some(photos.id.clone()),
+            ..view
+        };
+        let plans = plan_sections(&[loose], &[photos], &open, "");
+        assert_eq!(plans.len(), 1, "opened, it still says what is wrong");
+    }
+
+    /// Linked sections add no behaviour to the plain layout.
+    #[test]
+    fn plain_sections_are_never_marked_linked() {
+        let nature = library::Collection::new("Nature", 0);
+        let entries = vec![filed("a", Some(&nature.id), 0), filed("b", None, 0)];
+        let plans = plan_sections(&entries, &[nature], &library::LibraryView::default(), "");
+        assert!(plans.iter().all(|p| p.linked.is_none()));
     }
 
     /// Nobody who never makes a folder may notice this feature exists.

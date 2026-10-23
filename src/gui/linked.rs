@@ -14,18 +14,23 @@
 //! An entry's id is a hash of its path, so thumbnails, hover previews and
 //! tweaks find their file again after a restart.
 
-use std::collections::{BTreeMap, HashMap};
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::rc::Rc;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use gtk4::{gio, glib, prelude::*};
 use serde::{Deserialize, Serialize};
 
-use super::library::{self, Collection, Link, LinkStatus, LibraryEntry};
+use super::library::{self, Collection, LibraryEntry, Link, LinkStatus};
+use super::window::{show_toast, AppState};
+use super::import_queue;
 use crate::config::{PowerSaving, Transition};
-use crate::media;
+use crate::{media, tf};
 
 const ID_PREFIX: &str = "l-";
 
@@ -399,6 +404,229 @@ pub fn forget_tweaks(root: &Path) {
     }
 }
 
+// ─── Runtime ─────────────────────────────────────────────────────────────────
+
+/// Quiet time after the last change event before rescanning, so copying a
+/// hundred files in is one rescan, not a hundred.
+const SETTLE: Duration = Duration::from_millis(400);
+
+/// How often folders that came or went are noticed. A drive being plugged in
+/// or pulled out says nothing a directory monitor can hear.
+const RECHECK_SECS: u32 = 10;
+
+thread_local! {
+    static MONITORS: RefCell<HashMap<String, Vec<gio::FileMonitor>>> = RefCell::new(HashMap::new());
+    static SETTLING: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    /// The newest scan started per linked folder; an older one that finishes
+    /// late must not overwrite it. Removed on unlink, which drops scans in flight.
+    static SCANS: RefCell<HashMap<String, u32>> = RefCell::new(HashMap::new());
+    static CHECKING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Scan every linked folder and keep them in sync from here on. Call once the
+/// library view exists, so the results have a grid to land in.
+pub fn start(state: &Rc<RefCell<AppState>>) {
+    let ids: Vec<String> = state
+        .borrow()
+        .collections
+        .iter()
+        .filter(|c| c.link.is_some())
+        .map(|c| c.id.clone())
+        .collect();
+    for id in ids {
+        rescan(state, &id, false);
+    }
+    let state = state.clone();
+    glib::timeout_add_seconds_local(RECHECK_SECS, move || {
+        recheck(&state);
+        glib::ControlFlow::Continue
+    });
+}
+
+/// Rescan folders that became reachable or unreachable. The stat runs on a
+/// thread: on a dead network mount it blocks, and the window must not.
+fn recheck(state: &Rc<RefCell<AppState>>) {
+    let links: Vec<(String, Link)> = state
+        .borrow()
+        .collections
+        .iter()
+        .filter_map(|c| Some((c.id.clone(), c.link.clone()?)))
+        .collect();
+    if links.is_empty() || CHECKING.replace(true) {
+        return;
+    }
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let flipped: Vec<String> = links
+            .into_iter()
+            .filter(|(_, l)| reachability_changed(l, l.path.is_dir()))
+            .map(|(id, _)| id)
+            .collect();
+        let _ = tx.send_blocking(flipped);
+    });
+    let state = state.clone();
+    glib::spawn_future_local(async move {
+        if let Ok(ids) = rx.recv().await {
+            for id in ids {
+                rescan(&state, &id, false);
+            }
+        }
+        CHECKING.set(false);
+    });
+}
+
+/// Scan one linked folder off the UI thread and fold the result into the
+/// library. `announce` toasts the outcome (the Rescan button).
+pub fn rescan(state: &Rc<RefCell<AppState>>, id: &str, announce: bool) {
+    let Some(link) = state
+        .borrow()
+        .collections
+        .iter()
+        .find(|c| c.id == id)
+        .and_then(|c| c.link.clone())
+    else {
+        return;
+    };
+    let generation = SCANS.with(|s| {
+        let mut s = s.borrow_mut();
+        let next = s.get(id).map_or(0, |g| g.wrapping_add(1));
+        s.insert(id.to_string(), next);
+        next
+    });
+    let (tx, rx) = async_channel::bounded(1);
+    let source = id.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(load_source(&source, &link));
+    });
+    let (state, id) = (state.clone(), id.to_string());
+    glib::spawn_future_local(async move {
+        let Ok(loaded) = rx.recv().await else { return };
+        if SCANS.with(|s| s.borrow().get(&id) == Some(&generation)) {
+            apply(&state, &id, loaded, announce);
+        }
+    });
+}
+
+fn apply(
+    state: &Rc<RefCell<AppState>>,
+    id: &str,
+    loaded: Option<(Vec<LibraryEntry>, Vec<PathBuf>)>,
+    announce: bool,
+) {
+    let status = if loaded.is_some() {
+        LinkStatus::Ready
+    } else {
+        LinkStatus::Missing
+    };
+    let (fresh, dirs) = loaded.unwrap_or_default();
+    let (link, name, redraw, new_ids) = {
+        let mut s = state.borrow_mut();
+        let Some(c) = s.collections.iter_mut().find(|c| c.id == id) else {
+            return; // unlinked while the scan ran
+        };
+        let Some(link) = c.link.as_mut() else { return };
+        let status_moved = std::mem::replace(&mut link.status, status) != status;
+        let (link, name) = (link.clone(), c.name.clone());
+        let changed = s.edit_entries(|entries| sync_source(entries, id, fresh));
+        // Cards for new files start as placeholders; thumbnails fill in as the
+        // import queue gets to them. Files already queued are left alone.
+        let new_ids: Vec<String> = if changed {
+            s.entries
+                .iter()
+                .filter(|e| e.collection.as_deref() == Some(id) && e.thumbnail.is_none())
+                .filter(|e| !import_queue::is_pending(&e.id))
+                .map(|e| e.id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (link, name, changed || status_moved, new_ids)
+    };
+    watch(state, id, &link, &dirs);
+    if redraw {
+        let refresh = state.borrow().refresh.clone();
+        if let Some(r) = refresh {
+            r();
+        }
+    }
+    if !new_ids.is_empty() {
+        import_queue::start(state, new_ids, |_| {});
+    }
+    if announce {
+        let msg = match status {
+            LinkStatus::Missing => tf!("“{name}” isn’t available right now", "name" => name),
+            _ => tf!("Rescanned “{name}”", "name" => name),
+        };
+        show_toast(state, &msg);
+    }
+}
+
+/// Monitor the scanned directories (at most [`MAX_WATCHED_DIRS`]), replacing
+/// whatever was watched before.
+fn watch(state: &Rc<RefCell<AppState>>, id: &str, link: &Link, dirs: &[PathBuf]) {
+    if dirs.len() > MAX_WATCHED_DIRS {
+        log::warn!(
+            "linked folder {}: watching {MAX_WATCHED_DIRS} of {} directories, \
+             Rescan picks up changes in the rest",
+            link.path.display(),
+            dirs.len()
+        );
+    }
+    let flags = gio::FileMonitorFlags::WATCH_MOVES | gio::FileMonitorFlags::WATCH_MOUNTS;
+    let monitors: Vec<gio::FileMonitor> = dirs
+        .iter()
+        .take(MAX_WATCHED_DIRS)
+        .filter_map(|dir| {
+            let monitor = gio::File::for_path(dir)
+                .monitor_directory(flags, None::<&gio::Cancellable>)
+                .map_err(|e| log::warn!("not watching {}: {e}", dir.display()))
+                .ok()?;
+            let (state, link, id) = (state.clone(), link.clone(), id.to_string());
+            monitor.connect_changed(move |_, file, other, event| {
+                // A rename reports the old name as `file` and the new as `other`.
+                let matters = is_content_event(event)
+                    && std::iter::once(file)
+                        .chain(other)
+                        .filter_map(|f| f.path())
+                        .any(|p| event_matters(&link, &p));
+                if matters {
+                    settle(&state, &id);
+                }
+            });
+            Some(monitor)
+        })
+        .collect();
+    MONITORS.with(|m| m.borrow_mut().insert(id.to_string(), monitors));
+}
+
+/// Events that can add, remove or replace a file. Plain `Changed` fires over
+/// and over while a file is being written; its `ChangesDoneHint` follows.
+fn is_content_event(event: gio::FileMonitorEvent) -> bool {
+    use gio::FileMonitorEvent as E;
+    matches!(
+        event,
+        E::Created | E::Deleted | E::ChangesDoneHint | E::Renamed | E::MovedIn | E::MovedOut | E::Unmounted
+    )
+}
+
+/// Rescan once events have stopped arriving for [`SETTLE`].
+fn settle(state: &Rc<RefCell<AppState>>, id: &str) {
+    if !SETTLING.with(|s| s.borrow_mut().insert(id.to_string())) {
+        return;
+    }
+    let (state, id) = (state.clone(), id.to_string());
+    glib::timeout_add_local_once(SETTLE, move || {
+        SETTLING.with(|s| s.borrow_mut().remove(&id));
+        rescan(&state, &id, false);
+    });
+}
+
+/// Stop watching `id` and drop any scan still in flight for it.
+pub fn stop(id: &str) {
+    MONITORS.with(|m| m.borrow_mut().remove(id));
+    SCANS.with(|s| s.borrow_mut().remove(id));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -680,6 +908,17 @@ mod tests {
         assert!(event_matters(&deep, Path::new("/pics/sub/deep.jpg")));
         assert!(!event_matters(&deep, Path::new("/pics/.Trash/x.jpg")));
         assert!(!event_matters(&deep, Path::new("/pics/a/b/c/d/e/f.jpg")));
+    }
+
+    #[test]
+    fn only_content_changes_trigger_a_rescan() {
+        use gio::FileMonitorEvent as E;
+        for e in [E::Created, E::Deleted, E::ChangesDoneHint, E::Renamed, E::MovedIn, E::MovedOut, E::Unmounted] {
+            assert!(is_content_event(e), "{e:?}");
+        }
+        for e in [E::Changed, E::AttributeChanged, E::PreUnmount] {
+            assert!(!is_content_event(e), "{e:?}");
+        }
     }
 
     #[test]

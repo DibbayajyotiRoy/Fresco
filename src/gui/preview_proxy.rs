@@ -241,10 +241,11 @@ fn part_file(dir: &Path, id: &str) -> PathBuf {
 
 /// Whether a file in the previews directory belongs to no known entry. The
 /// entry id is everything before the first dot (`<id>.mp4`, `<id>.stamp`,
-/// `<id>.part.mp4`).
+/// `<id>.part.mp4`). Files of linked folders are never orphans here: the
+/// library is pruned before their folders have been scanned.
 fn is_orphan(file_name: &str, known: &BTreeSet<String>) -> bool {
     let stem = file_name.split('.').next().unwrap_or(file_name);
-    !known.contains(stem)
+    !known.contains(stem) && !super::linked::is_linked_id(stem)
 }
 
 // ---------------------------------------------------------------------------

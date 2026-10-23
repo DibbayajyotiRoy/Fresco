@@ -2728,7 +2728,11 @@ fn build_library_card(
     let pic = gtk4::Picture::new();
     pic.set_can_shrink(true);
     pic.set_keep_aspect_ratio(true);
-    if let Some(thumb) = entry.thumbnail.as_deref().filter(|p| p.exists()) {
+    let thumb = entry.thumbnail.as_deref().filter(|p| p.exists());
+    // A linked folder's file has no thumbnail until its card is built: it asks
+    // for its own below, and the placeholder stays until it arrives.
+    let lazy = import_queue::wants_lazy_thumbnail(&entry.id, thumb.is_some(), pending);
+    if let Some(thumb) = thumb {
         pic.add_css_class("wp-thumb");
         // Fade the thumbnail in on first map: start invisible, drop the class
         // on idle so the .wp-thumb opacity transition plays (no transform/blur
@@ -2779,9 +2783,9 @@ fn build_library_card(
             meta_row.append(&heart);
         }
         let line = entry.meta_line();
-        // A pending card gets its (possibly empty, hidden) meta label up front
-        // so the import queue can fill it in place when the probe lands.
-        let meta_label = (line.is_some() || pending).then(|| {
+        // A card awaiting its thumbnail gets its (possibly empty, hidden) meta
+        // label up front so it can be filled in place when the work lands.
+        let meta_label = (line.is_some() || pending || lazy).then(|| {
             let meta = gtk4::Label::new(line.as_deref());
             meta.add_css_class("wp-meta");
             meta.set_xalign(0.0);
@@ -2790,8 +2794,11 @@ fn build_library_card(
             meta_row.append(&meta);
             meta
         });
-        if let (true, Some(ph), Some(meta)) = (pending, &placeholder, &meta_label) {
+        if let (true, Some(ph), Some(meta)) = (pending || lazy, &placeholder, &meta_label) {
             import_queue::register_card(&entry.id, &overlay, &pic, ph, meta);
+            if lazy {
+                import_queue::request_thumbnail(&state, &entry.id);
+            }
         }
         if meta_row.first_child().is_some() {
             scrim.append(&meta_row);

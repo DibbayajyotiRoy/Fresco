@@ -4,6 +4,117 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.51] — 2026-10-23
+
+### Added
+<!-- TODO linked folders -->
+- **Link a folder to use the wallpapers already in it, without importing
+  them.** Point Fresco at an existing folder of images, GIFs and videos and
+  they show up in the library where they are; nothing is copied. The library
+  stays in sync with the folder, subfolders are optional, and favourites and
+  edits are kept per file.
+
+### Fixed
+- **A very large library no longer hangs the window or eats gigabytes of
+  memory.** A user who imported a folder of about 4,000 wallpapers found
+  the whole PC hanging. The library built a full card for every wallpaper up
+  front, and every card it had ever built stayed in memory for good. Cards are
+  now built only when they are on or near the screen, and the leak is gone. On
+  a 4,000-item test library (a development build with software rendering, so
+  read the absolute times loosely), the time from start to the first drawn
+  window fell from 9–13 s to about 2 s, and memory after startup from 1.65 GB
+  to about 325 MB; scrolling the whole library used to push it to 2.4 GB and
+  now stays near 390 MB. Importing a 4,000-file folder no longer freezes the
+  window for long stretches (the longest freeze fell from 19 s to about 1 s,
+  and the import itself from 189 s to about 113 s): only the first 24 videos
+  get a hover preview made up front (the rest are made the first time you
+  hover them), the import's helper programs run at lower priority, and
+  progress is saved less often. The trade-off is that scrolling now builds
+  cards as they appear; on a fast scroll that costs a few tens of milliseconds
+  more per step in a development build, and a release build should be cheaper.
+- **On KDE Plasma, the wallpaper's Fit option now works** (issue #71). Since
+  1.1.49 Plasma's desktop is drawn by Fresco's own Plasma wallpaper plugin,
+  which always filled the screen and cropped, so the Fit option in Edit/Crop
+  did nothing: Cover, Contain and Stretch all looked like Cover, and a 4:3
+  video on a 16:9 screen was always zoomed and cut off. The plugin now
+  follows the setting: Contain shows the whole picture with bars at the sides,
+  Cover fills the screen and crops, and Stretch fills the screen and distorts
+  the picture. After updating, restart plasmashell or log out and back in
+  once, because a running plasmashell keeps the old plugin loaded. The Plasma
+  lock screen still always uses Cover, and crop, rotation and scaling quality
+  still don't apply on Plasma.
+- **On Xfce, the desktop icons can be clicked again while a wallpaper
+  plays** (issue #74). The icons were visible over the video, but clicks never
+  reached them, so selecting, double-clicking, dragging and right-clicking
+  did nothing until you pressed Stop. xfwm4 wraps the wallpaper window in a
+  frame of its own and kept that frame accepting the clicks. Fresco now tells
+  xfwm4, once the window is up, that the frame must let clicks through. If
+  xfwm4 is restarted while Fresco runs, clicks stop passing through until the
+  wallpaper is restarted.
+- **`fresco next`, `fresco prev` and `fresco random` are no longer undone by
+  the open app** (issue #45). The window read its settings once at startup,
+  so after a keybinding changed the wallpaper, the next setting you changed in
+  the open window (a clock option, say) saved the old copy and brought the
+  previous wallpaper back. The window now notices when `config.toml` changes,
+  whether from the command line or by hand, moves the highlight in the library
+  to the new wallpaper and keeps it.
+- **On COSMIC, the widgets on the wallpaper no longer vanish after the
+  computer sleeps.** The clock, world clock, lyrics and album art disappeared
+  after the first suspend and did not come back until Fresco restarted.
+  Fresco believed the screen was still locked after waking: a daemon started
+  at login by systemd has no login-session id, so on COSMIC it never saw the
+  lock screen's unlock signal. Waking now returns to the state the session had
+  before it slept, after a short grace so that a lock raised on wake is seen
+  first. A real lock stays locked until it is unlocked, and COSMIC's lock is
+  now found without needing the session id. The same missing id made Fresco
+  look up its login session on every pass of its loop, about 70 short-lived
+  `gdbus` processes in six seconds; the lookup now also tries the user's
+  display session and retries every 30 seconds. Lock changes, covered-output
+  changes and renderer restarts are now logged in `frescod.log`.
+- **Fresco no longer retries the notice server every few seconds after it
+  answers "Too Many Requests".** The background connection that delivers
+  update prompts and notices was retried on the ordinary 5 seconds to 5 minutes
+  schedule after every drop, which produced a burst of rejected requests after
+  each start across thousands of installs. A "Too Many Requests" answer now
+  backs off from 60 seconds up to 30 minutes and honours the server's
+  `Retry-After`, and every wait gets a little random extra time so installs
+  that dropped together don't return together. The schedule starts over only
+  after a connection has stayed up for 5 minutes, and the daemon waits 15 to
+  22 seconds after starting before its first connection, so a second copy or a
+  start that exits straight away never reaches the server.
+
+### Docs and website
+<!-- TODO docs -->
+- **The README is now available in 13 languages.**
+- **The website has a "Report a problem" section.**
+- **The website now describes all five widgets and the eight clock themes.**
+
+### Notes for testers
+Not yet confirmed on real hardware, and the most useful things to check:
+- **Plasma Fit (#71).** After restarting plasmashell, set the Fit option in
+  Edit/Crop to Contain, Cover and Stretch in turn and press Apply, with a 4:3
+  video on a 16:9 screen.
+- **Xfce clicks (#74).** With a wallpaper running, click and Ctrl-click
+  icons, double-click one to open it, rubber-band select on empty desktop,
+  drag an icon, and right-click both the desktop and an icon.
+- **Widgets after suspend on COSMIC.** Suspend and resume with the widgets on;
+  they should still be there. If they vanish, the `lock: session is now ...`
+  and `covered outputs ...` lines in `frescod.log` show which condition was
+  holding them back. The report that turning on "Float above windows" brought
+  them back is not explained by this fix.
+- **Large libraries.** Import and scroll a folder of thousands of wallpapers
+  and tell us if the window ever stalls. The numbers above come from a
+  development build; a release build with the GPU renderer has not been
+  measured.
+- **Linked folders.** <!-- TODO linked folders --> Link a folder of mixed
+  images, GIFs and videos, with and without subfolders, and check that
+  changes in the folder show up in the library.
+
+### Packaging
+- **The deepin App Store listing targets deepin V23 and V25 only.** deepin
+  V20 doesn't ship GTK4 or libadwaita, which Fresco needs, so the package
+  can't run there. No package change in this release.
+
 ## [1.1.50] — 2026-10-16
 
 ### Added

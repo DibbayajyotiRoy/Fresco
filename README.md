@@ -4,7 +4,7 @@
 
 # Fresco — Free Live and Video Wallpaper App for Linux
 
-English | [简体中文](README.zh-CN.md)
+**English** | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco is a free, open-source live wallpaper app for Linux that sets any video, GIF or image as an animated desktop wallpaper on X11 and Wayland.** It is a native Linux alternative to Wallpaper Engine, with a graphical app, GPU-accelerated playback and desktop widgets.
 

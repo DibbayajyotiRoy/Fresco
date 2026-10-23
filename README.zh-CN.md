@@ -3,7 +3,7 @@
 
 # Fresco — 免费开源的 Linux 动态壁纸与视频壁纸软件
 
-[English](README.md) | 简体中文
+[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | **简体中文**
 
 **Fresco 是一款免费、开源的 Linux 动态壁纸应用，可将任意视频、GIF 或图片设为动态桌面壁纸，同时支持 X11 与 Wayland。** 它是原生 Linux 平台上 Wallpaper Engine 的替代品，提供图形界面、GPU 硬件加速播放和桌面挂件，适合用来做 Linux 桌面美化。
 

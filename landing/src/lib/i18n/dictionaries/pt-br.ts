@@ -158,6 +158,20 @@ export const ptBr: Dictionary = {
           "Navegue por papéis de parede selecionados e licenciados dentro do app (menu, depois Procurar papéis de parede) e defina um em dois cliques. Você também pode colar um link direto.",
         status: "No app",
       },
+      linkedFolders: {
+        tag: "Pastas",
+        title: "Vincular uma pasta",
+        description:
+          "Use uma pasta de papéis de parede que você já tem (imagens, GIFs e vídeos) sem importá-la. Ela fica sincronizada quando você adiciona ou remove arquivos, as subpastas são opcionais e seus favoritos e edições são guardados por arquivo.",
+        status: "Sem importar",
+      },
+      bigLibrary: {
+        tag: "Biblioteca",
+        title: "Milhares de papéis de parede",
+        description:
+          "A biblioteca só desenha o que está na tela. Uma biblioteca de teste com 4.000 papéis de parede abriu em cerca de 2 segundos e usou cerca de 325 MB, contra 9 a 13 segundos e 1,6 GB antes.",
+        status: "Sob demanda",
+      },
       video: {
         tag: "Vídeo · GIF",
         title: "Papéis de parede em vídeo e GIF",
@@ -538,6 +552,8 @@ export const ptBr: Dictionary = {
     "Som e volume por papel de parede",
     "Transições de apresentação (crossfade, fade, slide, Ken Burns)",
     "Biblioteca de papéis de parede com busca",
+    "Vincular uma pasta de papéis de parede existente sem importá-la, sincronizada quando os arquivos mudam",
+    "Biblioteca ágil mesmo com milhares de papéis de parede",
     "Papel de parede diferente em cada monitor",
     "Pausa na bateria e pausa automática em tela cheia",
     "Restaura automaticamente no login",

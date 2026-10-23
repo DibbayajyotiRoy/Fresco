@@ -158,6 +158,20 @@ export const fr: Dictionary = {
           "Parcours des fonds d'écran sélectionnés et sous licence directement dans l'application (menu, puis Parcourir les fonds d'écran) et applique-en un en deux clics. Tu peux aussi coller un lien direct.",
         status: "Dans l'app",
       },
+      linkedFolders: {
+        tag: "Dossiers",
+        title: "Lier un dossier",
+        description:
+          "Utilise un dossier de fonds d'écran que tu as déjà (images, GIF et vidéos) sans l'importer. Il reste synchronisé quand tu ajoutes ou supprimes des fichiers, les sous-dossiers sont facultatifs, et tes favoris et modifications sont conservés fichier par fichier.",
+        status: "Sans import",
+      },
+      bigLibrary: {
+        tag: "Bibliothèque",
+        title: "Des milliers de fonds d'écran",
+        description:
+          "La bibliothèque ne dessine que ce qui est à l'écran. Une bibliothèque de test de 4 000 fonds d'écran s'est ouverte en environ 2 secondes avec environ 325 Mo de mémoire, contre 9 à 13 secondes et 1,6 Go auparavant.",
+        status: "À la demande",
+      },
       video: {
         tag: "Vidéo · GIF",
         title: "Fonds d'écran vidéo et GIF",
@@ -538,6 +552,8 @@ export const fr: Dictionary = {
     "Son et volume par fond d'écran",
     "Transitions de diaporama (fondu enchaîné, fondu, glissement, Ken Burns)",
     "Bibliothèque de fonds d'écran avec recherche",
+    "Lier un dossier de fonds d'écran existant sans l'importer, synchronisé quand les fichiers changent",
+    "Bibliothèque fluide même avec des milliers de fonds d'écran",
     "Un fond d'écran différent par moniteur",
     "Pause sur batterie et pause automatique en plein écran",
     "Restauration automatique à la connexion",

@@ -37,6 +37,8 @@ const FEATURES = [
   { title: "Video & GIF wallpapers" },
   { title: "Image slideshows with transitions" },
   { title: "Video playlists" },
+  { title: "Link an existing wallpaper folder without importing it" },
+  { title: "Library that stays quick with thousands of wallpapers" },
   { title: "Drag-to-crop and 90-degree rotate" },
   { title: "Per-wallpaper sound and volume" },
   { title: "Works on X11 and Wayland (layer-shell)" },

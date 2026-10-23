@@ -168,6 +168,20 @@ export const en = {
           "Browse curated, licensed wallpapers in-app (menu, then Browse wallpapers) and set one in two clicks. You can also paste a direct link.",
         status: "In-app",
       },
+      linkedFolders: {
+        tag: "Folders",
+        title: "Link a folder",
+        description:
+          "Use a wallpaper folder you already have (images, GIFs and videos) without importing it. It stays in sync as you add and remove files, subfolders are optional, and your favourites and edits are kept per file.",
+        status: "No import",
+      },
+      bigLibrary: {
+        tag: "Library",
+        title: "Thousands of wallpapers",
+        description:
+          "The library only draws what is on screen. A 4,000-wallpaper test library opened in about 2 seconds and used about 325 MB, down from 9 to 13 seconds and 1.6 GB.",
+        status: "On demand",
+      },
       video: {
         tag: "Video · GIF",
         title: "Video & GIF wallpapers",
@@ -547,6 +561,8 @@ export const en = {
     "Per-wallpaper sound and volume",
     "Slideshow transitions (crossfade, fade, slide, Ken Burns)",
     "Wallpaper library with search",
+    "Link an existing wallpaper folder without importing it, kept in sync as files change",
+    "Library that stays quick with thousands of wallpapers",
     "Different wallpaper per monitor",
     "Pause on battery and auto-pause on fullscreen",
     "Restores automatically on login",

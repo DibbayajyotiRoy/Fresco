@@ -158,6 +158,20 @@ export const de: Dictionary = {
           "Kuratierte, lizenzierte Hintergründe direkt in der App durchsuchen (Menü, dann Hintergründe durchsuchen) und mit zwei Klicks setzen. Ein direkter Link lässt sich ebenfalls einfügen.",
         status: "In der App",
       },
+      linkedFolders: {
+        tag: "Ordner",
+        title: "Ordner verknüpfen",
+        description:
+          "Nutze einen vorhandenen Hintergrundordner (Bilder, GIFs und Videos), ohne ihn zu importieren. Er bleibt synchron, wenn du Dateien hinzufügst oder entfernst, Unterordner sind optional, und deine Favoriten und Änderungen bleiben pro Datei erhalten.",
+        status: "Ohne Import",
+      },
+      bigLibrary: {
+        tag: "Bibliothek",
+        title: "Tausende Hintergründe",
+        description:
+          "Die Bibliothek zeichnet nur, was auf dem Bildschirm zu sehen ist. Eine Testbibliothek mit 4.000 Hintergründen öffnete sich in etwa 2 Sekunden und brauchte rund 325 MB, zuvor waren es 9 bis 13 Sekunden und 1,6 GB.",
+        status: "Bei Bedarf",
+      },
       video: {
         tag: "Video · GIF",
         title: "Video- und GIF-Hintergründe",
@@ -538,6 +552,8 @@ export const de: Dictionary = {
     "Ton und Lautstärke pro Hintergrund",
     "Diashow-Übergänge (Überblendung, Ausblenden, Schieben, Ken Burns)",
     "Hintergrundbibliothek mit Suche",
+    "Vorhandenen Hintergrundordner ohne Import verknüpfen, bleibt bei Dateiänderungen synchron",
+    "Bibliothek bleibt auch mit Tausenden Hintergründen schnell",
     "Unterschiedlicher Hintergrund pro Monitor",
     "Pause im Akkubetrieb und automatische Pause bei Vollbild",
     "Stellt sich beim Anmelden automatisch wieder her",

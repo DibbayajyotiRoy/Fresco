@@ -158,6 +158,20 @@ export const es: Dictionary = {
           "Explora fondos seleccionados y con licencia dentro de la aplicación (menú y luego Explorar fondos) y pon uno en dos clics. También puedes pegar un enlace directo.",
         status: "En la app",
       },
+      linkedFolders: {
+        tag: "Carpetas",
+        title: "Vincular una carpeta",
+        description:
+          "Usa una carpeta de fondos que ya tengas (imágenes, GIF y vídeos) sin importarla. Se mantiene sincronizada cuando añades o quitas archivos, las subcarpetas son opcionales y tus favoritos y ediciones se guardan por archivo.",
+        status: "Sin importar",
+      },
+      bigLibrary: {
+        tag: "Biblioteca",
+        title: "Miles de fondos",
+        description:
+          "La biblioteca solo dibuja lo que se ve en pantalla. Una biblioteca de prueba con 4000 fondos se abrió en unos 2 segundos y usó unos 325 MB, frente a los 9 a 13 segundos y 1,6 GB de antes.",
+        status: "Bajo demanda",
+      },
       video: {
         tag: "Vídeo · GIF",
         title: "Fondos en vídeo y GIF",
@@ -538,6 +552,8 @@ export const es: Dictionary = {
     "Sonido y volumen por fondo de pantalla",
     "Transiciones de presentación (fundido cruzado, fundido, deslizamiento, Ken Burns)",
     "Biblioteca de fondos con búsqueda",
+    "Vincular una carpeta de fondos existente sin importarla, sincronizada cuando cambian los archivos",
+    "Biblioteca ágil incluso con miles de fondos",
     "Un fondo distinto en cada monitor",
     "Pausa con batería y pausa automática a pantalla completa",
     "Se restaura automáticamente al iniciar sesión",

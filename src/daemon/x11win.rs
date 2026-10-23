@@ -188,16 +188,7 @@ impl WallpaperWindow {
             &motif,
         )?;
 
-        // Empty input shape → clicks pass through to the real desktop.
-        conn.shape_rectangles(
-            x11rb::protocol::shape::SO::SET,
-            x11rb::protocol::shape::SK::INPUT,
-            ClipOrdering::UNSORTED,
-            window,
-            0,
-            0,
-            &[],
-        )?;
+        pass_clicks_through(conn, window)?;
 
         conn.map_window(window)?;
         restack(conn, atoms, screen.root, window, kind)?;
@@ -212,6 +203,21 @@ impl WallpaperWindow {
         // once mapped (the warm / reselect case) and never blocks startup for long.
         wait_until_viewable(conn, window);
 
+        // Issue #74: say it again now that the window manager has framed the
+        // window. xfwm4 reparents every client, desktop windows included, into
+        // a frame of its own, and the frame only learns the client's input
+        // shape from a ShapeNotify (`handleShape` -> `frameSetShapeInput`) --
+        // one it never got for the shape set above, which predates its
+        // `XShapeSelectInput`. Without it the frame, which fills the monitor,
+        // takes every click and xfdesktop below never sees one. The shape is
+        // unchanged, so this does nothing to a window manager that has
+        // already picked it up.
+        // ponytail: once, not on a timer; an xfwm4 restart (re-framing) or a
+        // window manager slower than the 3 s above needs a re-send on
+        // ReparentNotify, which the daemon's event loop does not watch.
+        pass_clicks_through(conn, window)?;
+        conn.flush()?;
+
         Ok(WallpaperWindow {
             window,
             connector: monitor.connector.clone(),
@@ -222,6 +228,21 @@ impl WallpaperWindow {
         let _ = conn.destroy_window(self.window);
         let _ = conn.flush();
     }
+}
+
+/// Give `window` an empty input shape, so every click falls through it to the
+/// window below.
+fn pass_clicks_through<C: Connection>(conn: &C, window: Window) -> Result<()> {
+    conn.shape_rectangles(
+        x11rb::protocol::shape::SO::SET,
+        x11rb::protocol::shape::SK::INPUT,
+        ClipOrdering::UNSORTED,
+        window,
+        0,
+        0,
+        &[],
+    )?;
+    Ok(())
 }
 
 /// Poll until `window` is viewable, up to ~3s. Best-effort: any error or a
@@ -585,5 +606,198 @@ pub(super) mod tests {
         });
         assert!(seen_dock, "helper never appeared as a DOCK window");
         assert_eq!(children(&conn), before, "helper window leaked");
+    }
+
+    /// A window manager that frames its clients the way xfwm4 does (issue
+    /// #74): every managed window is reparented into a frame of its own, and
+    /// the frame gets the client's INPUT shape only from a later ShapeNotify of
+    /// that kind (xfwm4's `handleShape` -> `frameSetShapeInput`), never when it
+    /// first takes the window over.
+    struct FramingWm {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl FramingWm {
+        fn start() -> FramingWm {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            use std::sync::{mpsc, Arc};
+            use x11rb::protocol::{shape, Event};
+
+            let stop = Arc::new(AtomicBool::new(false));
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let thread = {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let (conn, num) = x11rb::connect(None).unwrap();
+                    let root = conn.setup().roots[num].root;
+                    conn.change_window_attributes(
+                        root,
+                        &ChangeWindowAttributesAux::new().event_mask(
+                            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                        ),
+                    )
+                    .unwrap()
+                    .check()
+                    .expect("no other window manager is running");
+                    ready_tx.send(()).unwrap();
+                    let mut frames = std::collections::HashMap::new();
+                    while !stop.load(Ordering::SeqCst) {
+                        match conn.poll_for_event().unwrap() {
+                            Some(Event::MapRequest(e)) => {
+                                let g = conn.get_geometry(e.window).unwrap().reply().unwrap();
+                                let frame = conn.generate_id().unwrap();
+                                conn.create_window(
+                                    COPY_DEPTH_FROM_PARENT,
+                                    frame,
+                                    root,
+                                    g.x,
+                                    g.y,
+                                    g.width,
+                                    g.height,
+                                    0,
+                                    WindowClass::INPUT_OUTPUT,
+                                    0,
+                                    &CreateWindowAux::new(),
+                                )
+                                .unwrap();
+                                conn.reparent_window(e.window, frame, 0, 0).unwrap();
+                                conn.shape_select_input(e.window, true).unwrap();
+                                conn.map_window(e.window).unwrap();
+                                conn.map_window(frame).unwrap();
+                                conn.flush().unwrap();
+                                frames.insert(e.window, frame);
+                            }
+                            Some(Event::ShapeNotify(e))
+                                if e.shape_kind == shape::SK::INPUT
+                                    && frames.contains_key(&e.affected_window) =>
+                            {
+                                // `frameSetShapeInput`: the frame accepts input
+                                // where the client's frame decoration is, plus
+                                // wherever the client itself does. This frame
+                                // has no decoration, so that is the client's
+                                // own input shape.
+                                let (client, frame) =
+                                    (e.affected_window, frames[&e.affected_window]);
+                                let g = conn.get_geometry(frame).unwrap().reply().unwrap();
+                                let tmp = conn.generate_id().unwrap();
+                                conn.create_window(
+                                    COPY_DEPTH_FROM_PARENT,
+                                    tmp,
+                                    root,
+                                    0,
+                                    0,
+                                    g.width,
+                                    g.height,
+                                    0,
+                                    WindowClass::INPUT_OUTPUT,
+                                    0,
+                                    &CreateWindowAux::new(),
+                                )
+                                .unwrap();
+                                let (bounding, input) = (shape::SK::BOUNDING, shape::SK::INPUT);
+                                for (op, from, src) in [
+                                    (shape::SO::SET, bounding, frame),
+                                    (shape::SO::SUBTRACT, bounding, client),
+                                    (shape::SO::UNION, input, client),
+                                ] {
+                                    conn.shape_combine(op, input, from, tmp, 0, 0, src).unwrap();
+                                }
+                                conn.shape_combine(shape::SO::SET, input, input, frame, 0, 0, tmp)
+                                    .unwrap();
+                                conn.destroy_window(tmp).unwrap();
+                                conn.flush().unwrap();
+                            }
+                            Some(_) => {}
+                            None => std::thread::sleep(std::time::Duration::from_millis(2)),
+                        }
+                    }
+                })
+            };
+            ready_rx.recv().unwrap();
+            FramingWm {
+                stop,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for FramingWm {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    /// Issue #74: with the wallpaper window up and the pointer over it, the
+    /// window under the pointer must be the desktop window below -- on a bare X
+    /// server, and under a window manager that frames its clients like xfwm4.
+    /// Needs an X server, so it is `#[ignore]`d:
+    /// `xvfb-run -a cargo test --lib x11win -- --ignored --test-threads=1`.
+    #[test]
+    #[ignore]
+    fn wallpaper_window_lets_clicks_through_to_the_desktop_below() {
+        use x11rb::rust_connection::RustConnection;
+        let (conn, num) = RustConnection::connect(None).unwrap();
+        let screen = conn.setup().roots[num].clone();
+        let root = screen.root;
+        let atoms = Atoms::new(&conn).unwrap().reply().unwrap();
+
+        // xfdesktop, as far as the pointer is concerned: a mapped window under
+        // where the wallpaper goes.
+        let desktop = conn.generate_id().unwrap();
+        conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            desktop,
+            root,
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new(),
+        )
+        .unwrap();
+        conn.map_window(desktop).unwrap();
+        conn.flush().unwrap();
+
+        let monitor = Monitor {
+            connector: "TEST-1".into(),
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 400,
+            scale_milli: 1000,
+        };
+        let under_pointer = || {
+            conn.warp_pointer(x11rb::NONE, root, 0, 0, 0, 0, 320, 200)
+                .unwrap();
+            conn.query_pointer(root).unwrap().reply().unwrap().child
+        };
+        let check = |wm: &str| {
+            let w = WallpaperWindow::create(&conn, &screen, &atoms, &monitor, WindowKind::Desktop)
+                .unwrap();
+            // The window manager hears of the shape asynchronously.
+            let t0 = std::time::Instant::now();
+            let mut got = under_pointer();
+            while got != desktop && t0.elapsed() < std::time::Duration::from_secs(2) {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                got = under_pointer();
+            }
+            w.destroy(&conn);
+            conn.flush().unwrap();
+            assert_eq!(
+                got, desktop,
+                "{wm}: the pointer is over {got:#x}, not the desktop window {desktop:#x}"
+            );
+        };
+
+        check("no window manager");
+        let _wm = FramingWm::start();
+        check("a window manager that frames its clients");
     }
 }

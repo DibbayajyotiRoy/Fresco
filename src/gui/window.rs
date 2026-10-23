@@ -5278,19 +5278,33 @@ fn show_link_folder_dialog(
     count.add_css_class("dialog-sub");
     count.set_xalign(0.0);
     body.append(&count);
+    // The scan walks the tree (stat per file): off the UI thread, with a
+    // placeholder until it lands. Link stays usable meanwhile.
+    let counts = Rc::new(RefCell::new(linked::CountState::default()));
     let show_count = {
         let (count, folder) = (count.clone(), folder.clone());
         move |deep: bool| {
+            let generation = match counts.borrow_mut().request(deep) {
+                Ok(n) => return count.set_text(&wallpaper_count_text(n)),
+                Err(g) => g,
+            };
+            count.set_text(t!("Loading…"));
             let link = library::Link {
                 path: folder.clone(),
                 recursive: deep,
                 status: library::LinkStatus::default(),
             };
-            let n = linked::scan(&link).map_or(0, |s| s.files.len());
-            count.set_text(&match n {
-                0 => t!("No supported media in that folder").to_string(),
-                1 => t!("1 wallpaper").to_string(),
-                n => tf!("{count} wallpapers", "count" => n.to_string()),
+            let (tx, rx) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send_blocking(linked::scan(&link).map_or(0, |s| s.files.len()));
+            });
+            let (counts, count) = (counts.clone(), count.clone());
+            glib::spawn_future_local(async move {
+                if let Ok(n) = rx.recv().await {
+                    if counts.borrow_mut().finish(generation, deep, n) {
+                        count.set_text(&wallpaper_count_text(n));
+                    }
+                }
             });
         }
     };
@@ -5320,6 +5334,14 @@ fn show_link_folder_dialog(
 
     content.append(&body);
     dialog.present();
+}
+
+fn wallpaper_count_text(n: usize) -> String {
+    match n {
+        0 => t!("No supported media in that folder").to_string(),
+        1 => t!("1 wallpaper").to_string(),
+        n => tf!("{count} wallpapers", "count" => n.to_string()),
+    }
 }
 
 /// Link `folder` as a section of the library. The scan runs in the background;

@@ -121,6 +121,12 @@ export const zhCn: Dictionary = {
     lead: "Fresco 可在 X11 与 Wayland 上设置视频、GIF、图片、幻灯片和播放列表壁纸，解码全部交给 GPU，因此动态壁纸的开销与静态壁纸相差无几。",
     /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
     widgetsTitle: "五个桌面组件，直接画进壁纸里。",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "世界时钟",
+      body:
+        "同时显示多个城市的时间，以纯文字 12 小时制呈现，带柔和阴影，背后没有卡片。可任选时区并为每个城市加标签。每分钟重绘一次，可选的悬浮模式会让它浮在窗口之上，点击可以穿透。",
+    },
     manifest: (n: number) => `功能清单：${n} 项`,
     /** Sentence-final mark after each row title. */
     titleSuffix: "。",

@@ -138,6 +138,12 @@ export const en = {
     lead: "Fresco sets video, GIF, image, slideshow, and playlist wallpapers on X11 and Wayland, decoded on the GPU so a live wallpaper costs about as much as a static one.",
     /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
     widgetsTitle: "Five desktop widgets, painted into the wallpaper.",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "World clock",
+      body:
+        "Several cities at once, as plain 12-hour text with a soft shadow and no card behind it. Pick any time zones and label each one. It repaints once a minute, and an optional mode floats it above your windows, with clicks passing through.",
+    },
     manifest: (n: number) => `Manifest: ${n} capabilities`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

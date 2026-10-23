@@ -15,7 +15,7 @@ export type ShowcaseStep = {
 
 /**
  * "Painted into the wallpaper": a widget screen on the left, a compact ARIA
- * tablist of the four release notes on the right. Selecting a step (click,
+ * tablist of the five widget notes on the right. Selecting a step (click,
  * arrow keys, or auto-advance) crossfades the matching widget into the
  * screen. Auto-advance runs every `AUTO_MS` only while the section is on
  * screen, the tab is visible, motion is allowed, and the visitor has not

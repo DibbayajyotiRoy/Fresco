@@ -128,6 +128,12 @@ export const de: Dictionary = {
     lead: "Fresco setzt Video-, GIF-, Bild-, Diashow- und Playlist-Hintergründe unter X11 und Wayland, dekodiert auf der GPU, sodass ein bewegter Hintergrund etwa so viel kostet wie ein statischer.",
     /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
     widgetsTitle: "Fünf Desktop-Widgets, in den Hintergrund gezeichnet.",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "Weltuhr",
+      body:
+        "Mehrere Städte auf einmal, als schlichter 12-Stunden-Text mit weichem Schatten und ohne Karte dahinter. Wähle beliebige Zeitzonen und beschrifte jede einzeln. Sie wird einmal pro Minute neu gezeichnet, und ein optionaler Modus lässt sie über deinen Fenstern schweben, Klicks gehen dabei hindurch.",
+    },
     manifest: (n: number) => `Manifest: ${n} Funktionen`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

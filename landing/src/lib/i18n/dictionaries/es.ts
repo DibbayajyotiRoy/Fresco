@@ -128,6 +128,12 @@ export const es: Dictionary = {
     lead: "Fresco pone fondos de pantalla en vídeo, GIF, imagen, presentación y lista de reproducción en X11 y Wayland, decodificados en la GPU, de modo que un fondo animado cuesta casi lo mismo que uno estático.",
     /** Heading of the widgets block; independent of the pinned `whatsNew` copy. */
     widgetsTitle: "Cinco widgets, pintados en el fondo de pantalla.",
+    /** The fifth card of the widget showcase; the pinned `whatsNew` copy has four. */
+    worldClock: {
+      title: "Reloj mundial",
+      body:
+        "Varias ciudades a la vez, como texto sencillo de 12 horas con una sombra suave y sin tarjeta detrás. Elige las zonas horarias que quieras y ponle nombre a cada una. Se redibuja una vez por minuto, y un modo opcional lo hace flotar sobre tus ventanas dejando pasar los clics.",
+    },
     manifest: (n: number) => `Manifiesto: ${n} funciones`,
     /** Sentence-final mark after each row title. */
     titleSuffix: ".",

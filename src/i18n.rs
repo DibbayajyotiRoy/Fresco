@@ -84,6 +84,10 @@ pub enum Language {
     /// Bengali (বাংলা).
     #[serde(rename = "bn")]
     Bengali,
+    /// Arabic (العربية) — Modern Standard Arabic; every `ar_*` locale
+    /// (`ar_SA`, `ar_EG`, `ar_AE`, …) resolves here.
+    #[serde(rename = "ar")]
+    Arabic,
 }
 
 /// One row of [`REGISTRY`]: everything about a language that is not the
@@ -110,7 +114,7 @@ struct LangInfo {
 
 /// Every language offered in Settings, in menu order: System, English, then
 /// the rest in the order they were added.
-const REGISTRY: [LangInfo; 14] = [
+const REGISTRY: [LangInfo; 15] = [
     LangInfo {
         lang: Language::System,
         code: "system",
@@ -194,6 +198,12 @@ const REGISTRY: [LangInfo; 14] = [
         code: "bn",
         endonym: "বাংলা",
         source: Some(include_str!("../i18n/bn.json")),
+    },
+    LangInfo {
+        lang: Language::Arabic,
+        code: "ar",
+        endonym: "العربية",
+        source: Some(include_str!("../i18n/ar.json")),
     },
 ];
 
@@ -309,6 +319,7 @@ fn language_for_subtag(lang: &str) -> Option<Language> {
         "tr" => Some(Language::Turkish),
         "ro" => Some(Language::Romanian),
         "bn" => Some(Language::Bengali),
+        "ar" => Some(Language::Arabic),
         // Ukrainian is not Russian: deliberately not mapped to `ru`.
         _ => None,
     }
@@ -753,6 +764,9 @@ mod tests {
             ("ro_RO", Some(Language::Romanian)),
             ("bn_BD", Some(Language::Bengali)),
             ("bn_IN", Some(Language::Bengali)),
+            ("ar_SA.UTF-8", Some(Language::Arabic)),
+            ("ar_EG", Some(Language::Arabic)),
+            ("ar", Some(Language::Arabic)),
             ("uk_UA", None),
             ("ur_PK", None),
             ("fil_PH", None),

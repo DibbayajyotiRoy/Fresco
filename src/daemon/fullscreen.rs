@@ -178,6 +178,13 @@ impl FullscreenWatch {
         }
         self.state.fullscreen_connectors(maximized)
     }
+
+    /// Whether any toplevel is fullscreen, as of the last
+    /// [`FullscreenWatch::fullscreen_connectors`] roundtrip — tells that
+    /// call's result apart as "fullscreen" vs "only maximized".
+    pub fn any_fullscreen(&self) -> bool {
+        self.state.toplevels.values().any(|t| t.fullscreen)
+    }
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {

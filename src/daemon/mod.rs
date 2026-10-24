@@ -41,7 +41,9 @@ use x11rb::rust_connection::RustConnection;
 use crate::cli::which;
 use crate::config::{Config, Kind, PowerSaving, Scaling, Transition, Wallpaper};
 use crate::hwdecode::{self, install_hint, HwDecode, Pm};
-use crate::ipc::{LockReply, LockSocket, LockStatus, MonitorInfo, Request, Response, StatusReply};
+use crate::ipc::{
+    LockReply, LockSocket, LockStatus, MonitorInfo, PauseSources, Request, Response, StatusReply,
+};
 
 use lock::engine::LockEngine;
 use lock::hosts::{HostCtx, HostKind, LockHost, LockTargets, RunningHost};
@@ -308,6 +310,15 @@ impl LockRuntime {
     fn resolved(config: &Config) -> Option<crate::lockscreen::ResolvedLock> {
         let cfg = config.lockscreen.as_ref()?;
         cfg.enabled.then(|| crate::lockscreen::resolve(cfg))
+    }
+
+    /// Whether the lock screen's live-video policy holds the desktop
+    /// wallpaper paused right now (COSMIC's desktop target only).
+    fn forces_pause(&self, config: &Config) -> bool {
+        self.locked
+            && self.desktop_target
+            && Self::resolved(config)
+                .is_some_and(|r| !r.live_video.plays(crate::battery::on_battery()))
     }
 
     /// Where the lock engine should draw right now: a daemon-spawned host's
@@ -1635,9 +1646,24 @@ impl Daemon {
         let video = self.renderers.first().and_then(|r| r.player.video_status());
         let geoms = self.output_geoms_all();
         let ctx = self.lock.ctx(&self.config, &geoms);
+        // `fullscreen_covered` values start with `cover_kind`'s label
+        // ("fullscreen window (..)" / "maximized window (..)").
+        let covered_by = |kind: &str| {
+            self.fullscreen_covered
+                .values()
+                .any(|w| w.starts_with(kind))
+        };
         StatusReply {
             running: true,
             paused: self.user_paused || self.battery_paused,
+            paused_reason: PauseSources {
+                user: self.user_paused,
+                battery: self.battery_paused,
+                locked: self.lock_paused.is_some(),
+                fullscreen: covered_by("fullscreen"),
+                maximized: covered_by("maximized"),
+            }
+            .reason(),
             hwdec,
             wallpaper: self.describe_wallpaper(),
             cpu_percent: cpu,
@@ -2660,6 +2686,7 @@ fn static_status(config: &Config, lockscreen: &LockStatus) -> StatusReply {
     StatusReply {
         running: true,
         paused: false,
+        paused_reason: None,
         hwdec: None,
         wallpaper,
         cpu_percent: cpu,
@@ -2792,6 +2819,9 @@ fn run_wayland_layershell() -> Result<()> {
         }
     );
     let mut hidden: HashSet<String> = HashSet::new();
+    // Whether a *fullscreen* (rather than merely maximized) window is among
+    // what `hidden` reflects; only the pause reason reads it.
+    let mut hidden_fullscreen = false;
     let mut last_fs_poll = Instant::now() - FS_POLL;
     // Sum of every output's respawn counter. A fresh mpv has no overlays, so a
     // change here means the widget engine must re-push. Summing (rather than
@@ -3008,11 +3038,18 @@ fn run_wayland_layershell() -> Result<()> {
                     Request::Status => {
                         let geoms = wayland_all_output_geoms(&monitors);
                         let ctx = lock_rt.ctx(&config, &geoms);
+                        let covered = !hidden.is_empty();
                         Response::Status(wayland_status(
                             &monitors,
                             &outputs,
                             &config.wallpaper,
-                            user_paused || battery_paused,
+                            PauseSources {
+                                user: user_paused,
+                                battery: battery_paused,
+                                locked: lock_rt.forces_pause(&config),
+                                fullscreen: covered && hidden_fullscreen,
+                                maximized: covered && !hidden_fullscreen,
+                            },
                             lock_rt.status(&ctx, &config),
                         ))
                     }
@@ -3405,12 +3442,10 @@ fn run_wayland_layershell() -> Result<()> {
                     widget_engine.invalidate(); // overlays skipped while covered
                 }
                 hidden = now_hidden;
+                hidden_fullscreen = w.any_fullscreen();
             }
         }
-        let lock_forces_pause = lock_rt.locked
-            && lock_rt.desktop_target
-            && LockRuntime::resolved(&config)
-                .is_some_and(|r| !r.live_video.plays(crate::battery::on_battery()));
+        let lock_forces_pause = lock_rt.forces_pause(&config);
         let base_paused = user_paused || battery_paused || lock_forces_pause;
         // Plasma has no outputs: the plugin handles fullscreen itself, so only
         // the user and battery sources go to it.
@@ -4449,7 +4484,7 @@ fn wayland_status(
     monitors: &[Monitor],
     outputs: &std::collections::BTreeMap<String, WlOutput>,
     default_wallpaper: &Wallpaper,
-    paused: bool,
+    pause: PauseSources,
     lockscreen: LockStatus,
 ) -> StatusReply {
     let child_pids: Vec<u32> = outputs
@@ -4483,7 +4518,8 @@ fn wayland_status(
         .collect();
     StatusReply {
         running: true,
-        paused,
+        paused: pause.user || pause.battery,
+        paused_reason: pause.reason(),
         hwdec,
         wallpaper,
         cpu_percent: cpu,

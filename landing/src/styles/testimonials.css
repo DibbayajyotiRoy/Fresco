@@ -134,6 +134,17 @@
     display: flex;
     width: max-content;
   }
+  /* The drift is a physical translateX, and a wider-than-viewport track
+     overflows toward the end side: in RTL that is the wrong way. The row
+     stays LTR (cards restore the page direction, quotes pick their own). */
+  html[dir="rtl"].js-motion .tm-row,
+  html[dir="rtl"] .tm-row[data-tm-live] {
+    direction: ltr;
+  }
+  html[dir="rtl"].js-motion .tm-card,
+  html[dir="rtl"] .tm-row[data-tm-live] .tm-card {
+    direction: rtl;
+  }
   /* Each group carries its trailing gap, so the track is exactly
      (1 + copies) equal periods and --tm-shift loops it seamlessly. */
   html.js-motion .tm-group,

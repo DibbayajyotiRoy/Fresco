@@ -1,7 +1,7 @@
 /**
  * Locale registry. One entry per shipped language.
  *
- * `code` doubles as the URL segment (`/ja`, `/pt-br`). The default locale is
+ * `code` doubles as the URL segment (`/ja`, `/pt-br`, `/ar`). The default locale is
  * served WITHOUT a prefix so the established English URLs (`/`, indexed and
  * linked) never move; middleware rewrites those onto the `en` segment
  * internally. Everything else lives under its own prefix.
@@ -18,6 +18,8 @@ export const LOCALES = [
   "de",
   "fr",
   "zh-cn",
+  "ar",
+  "tr",
 ] as const;
 
 export type Locale = (typeof LOCALES)[number];
@@ -29,6 +31,8 @@ export type LocaleMeta = {
   hreflang: string;
   /** Value for <html lang>. */
   htmlLang: string;
+  /** Value for <html dir>. */
+  dir: "ltr" | "rtl";
   /** Facebook-style locale for og:locale. */
   ogLocale: string;
   /** Endonym, shown in the language switcher. Never translated. */
@@ -43,6 +47,7 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   en: {
     hreflang: "en",
     htmlLang: "en",
+    dir: "ltr",
     ogLocale: "en_US",
     nativeName: "English",
     short: "EN",
@@ -51,6 +56,7 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   ja: {
     hreflang: "ja",
     htmlLang: "ja",
+    dir: "ltr",
     ogLocale: "ja_JP",
     nativeName: "日本語",
     short: "日本語",
@@ -59,6 +65,7 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   "pt-br": {
     hreflang: "pt-BR",
     htmlLang: "pt-BR",
+    dir: "ltr",
     ogLocale: "pt_BR",
     nativeName: "Português (Brasil)",
     short: "PT",
@@ -67,6 +74,7 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   es: {
     hreflang: "es",
     htmlLang: "es",
+    dir: "ltr",
     ogLocale: "es_ES",
     nativeName: "Español",
     short: "ES",
@@ -75,6 +83,7 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   de: {
     hreflang: "de",
     htmlLang: "de",
+    dir: "ltr",
     ogLocale: "de_DE",
     nativeName: "Deutsch",
     short: "DE",
@@ -83,6 +92,7 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   fr: {
     hreflang: "fr",
     htmlLang: "fr",
+    dir: "ltr",
     ogLocale: "fr_FR",
     nativeName: "Français",
     short: "FR",
@@ -91,10 +101,31 @@ export const LOCALE_META: Record<Locale, LocaleMeta> = {
   "zh-cn": {
     hreflang: "zh-Hans",
     htmlLang: "zh-Hans",
+    dir: "ltr",
     ogLocale: "zh_CN",
     nativeName: "简体中文",
     short: "中文",
     numberLocale: "zh-CN",
+  },
+  ar: {
+    hreflang: "ar",
+    htmlLang: "ar",
+    dir: "rtl",
+    ogLocale: "ar_AR",
+    nativeName: "العربية",
+    short: "عربي",
+    // Latin digits: the version, GPL-3.0 and the star count on the page are
+    // Latin too, and mixed numeral systems in one row read as a bug.
+    numberLocale: "ar-u-nu-latn",
+  },
+  tr: {
+    hreflang: "tr",
+    htmlLang: "tr",
+    dir: "ltr",
+    ogLocale: "tr_TR",
+    nativeName: "Türkçe",
+    short: "TR",
+    numberLocale: "tr-TR",
   },
 };
 
@@ -158,6 +189,10 @@ export function matchLocale(acceptLanguage: string | null): Locale | null {
         // Traditional-script regions fall through to the next preference.
         if (region === "tw" || region === "hk" || region === "mo") break;
         return "zh-cn";
+      case "ar":
+        return "ar";
+      case "tr":
+        return "tr";
     }
   }
 

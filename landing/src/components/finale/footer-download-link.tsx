@@ -24,7 +24,7 @@ export function FooterDownloadLink({ label }: { label: string }) {
       {label}
       <ArrowRight
         aria-hidden
-        className="size-4 transition-transform duration-150 ease-out group-hover/dl:translate-x-0.5 motion-reduce:transition-none"
+        className="size-4 transition-transform duration-150 ease-out group-hover/dl:translate-x-0.5 rtl:-scale-x-100 rtl:group-hover/dl:-translate-x-0.5 motion-reduce:transition-none"
       />
     </a>
   );

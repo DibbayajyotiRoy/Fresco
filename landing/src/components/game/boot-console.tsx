@@ -84,7 +84,7 @@ export function BootConsole({
           target="_blank"
           rel="noopener noreferrer"
           style={order(0)}
-          className="hero-in group inline-flex h-8 items-center gap-2 rounded-full border border-hairline bg-surface pl-3.5 pr-3 text-[13px] font-medium text-ink-muted transition-colors duration-150 hover:border-hairline-strong hover:text-ink"
+          className="hero-in group inline-flex h-8 items-center gap-2 rounded-full border border-hairline bg-surface ps-3.5 pe-3 text-[13px] font-medium text-ink-muted transition-colors duration-150 hover:border-hairline-strong hover:text-ink"
         >
           <span className="tabular-nums text-ink">v{stats.version}</span>
           <span aria-hidden className="text-ink-faint">
@@ -94,7 +94,7 @@ export function BootConsole({
             {dict.stats.version}
           </span>
           <ArrowUpRight
-            className="size-3.5 text-ink-faint transition-transform duration-150 group-hover:-translate-y-px group-hover:translate-x-px"
+            className="size-3.5 text-ink-faint transition-transform duration-150 group-hover:-translate-y-px group-hover:translate-x-px rtl:-scale-x-100 rtl:group-hover:-translate-x-px"
             aria-hidden
           />
         </a>
@@ -161,7 +161,7 @@ export function BootConsole({
         {showPill ? (
           <p
             style={order(4)}
-            className="hero-in mt-5 inline-flex items-center gap-2 rounded-2xl border border-hairline bg-surface py-1 pl-2.5 pr-3 text-left text-[12px] text-ink-muted sm:mt-6 sm:gap-2.5 sm:rounded-full sm:py-1.5 sm:pl-3 sm:pr-3.5 sm:text-[13px]"
+            className="hero-in mt-5 inline-flex items-center gap-2 rounded-2xl border border-hairline bg-surface py-1 ps-2.5 pe-3 text-start text-[12px] text-ink-muted sm:mt-6 sm:gap-2.5 sm:rounded-full sm:py-1.5 sm:ps-3 sm:pe-3.5 sm:text-[13px]"
           >
             <span aria-hidden className="hero-live-dot shrink-0" />
             {activeToday ? (
@@ -235,7 +235,7 @@ export function BootConsole({
             >
               {AUTHOR_NAME}
               <ArrowUpRight
-                className="size-3.5 text-ink-faint transition-transform duration-150 group-hover:-translate-y-px group-hover:translate-x-px"
+                className="size-3.5 text-ink-faint transition-transform duration-150 group-hover:-translate-y-px group-hover:translate-x-px rtl:-scale-x-100 rtl:group-hover:-translate-x-px"
                 aria-hidden
               />
             </a>

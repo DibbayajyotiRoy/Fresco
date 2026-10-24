@@ -184,15 +184,20 @@
   --radius-xl: 12px;
   --radius-2xl: 12px;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Per-glyph fallback: Inter for Latin, then its latin-ext face (Turkish),
+     then Noto Sans Arabic (/ar), then the CJK system faces. */
+  --font-sans: var(--font-inter), var(--font-inter-ext), var(--font-arabic),
+    ui-sans-serif, system-ui, sans-serif;
   /* One family. Display = Inter semibold with slight negative tracking. */
-  --font-display: var(--font-inter), ui-sans-serif, system-ui,
-    "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
+  --font-display: var(--font-inter), var(--font-inter-ext), var(--font-arabic),
+    ui-sans-serif, system-ui, "Noto Sans CJK SC", "Noto Sans CJK JP",
+    sans-serif;
   /* Legacy lane name: existing `font-serif` usages resolve to the display face. */
-  --font-serif: var(--font-inter), ui-sans-serif, system-ui,
-    "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, "JetBrains Mono",
-    monospace;
+  --font-serif: var(--font-inter), var(--font-inter-ext), var(--font-arabic),
+    ui-sans-serif, system-ui, "Noto Sans CJK SC", "Noto Sans CJK JP",
+    sans-serif;
+  --font-mono: var(--font-jetbrains-mono), var(--font-jetbrains-mono-ext),
+    var(--font-arabic), ui-monospace, "JetBrains Mono", monospace;
 
   --ease-house: cubic-bezier(0.16, 1, 0.3, 1);
   --animate-fade-in: fade-in 120ms ease-out both;
@@ -316,6 +321,24 @@
       transition-duration: 0.01ms !important;
     }
   }
+}
+
+/* ---- Arabic (RTL) ------------------------------------------------------ */
+/* Arabic letters join, so any tracking (the display face, labels and
+   utilities all set it) pulls the joins apart. Marks above and below the
+   line need leading the Latin display sizes do not give them. !important
+   beats the utility classes without touching them. */
+html:lang(ar) *,
+html:lang(ar) *::before,
+html:lang(ar) *::after {
+  letter-spacing: 0 !important;
+}
+html:lang(ar) :is(h1, h2, h3, h4) {
+  line-height: 1.3 !important;
+}
+html:lang(ar) .sw {
+  padding-block: 0.25em;
+  margin-block: -0.25em;
 }
 
 /* Instrument label: 11px mono uppercase, the terminal texture. */

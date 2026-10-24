@@ -44,7 +44,7 @@ export function SiteFooter({ dict }: { dict: Dictionary }) {
                       className="inline-flex items-center gap-1 text-base text-ink-subtle transition-colors duration-150 hover:text-ink"
                     >
                       {link.label}
-                      <ArrowUpRight className="size-3.5" aria-hidden />
+                      <ArrowUpRight className="size-3.5 rtl:-scale-x-100" aria-hidden />
                     </a>
                   </li>
                 ))}

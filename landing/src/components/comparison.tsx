@@ -107,7 +107,7 @@ export function Comparison({ dict }: { dict: Dictionary }) {
             // without it they escape the clip and widen the document.
             className="relative isolate mt-8 min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-[16px] border border-hairline bg-surface"
           >
-            <table className="w-full min-w-[44rem] table-fixed border-separate border-spacing-0 text-left">
+            <table className="w-full min-w-[44rem] table-fixed border-separate border-spacing-0 text-start">
               <caption className="sr-only">{dict.compare.title}</caption>
               <colgroup>
                 <col className="w-[9.5rem] sm:w-[15rem] lg:w-[18rem]" />
@@ -160,7 +160,7 @@ export function Comparison({ dict }: { dict: Dictionary }) {
             {/* The competitor deep-dives are English-only, so they always
                 link to the unprefixed URL rather than into the locale. */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-sm font-medium text-ink-muted">
+              <span className="me-1 text-sm font-medium text-ink-muted">
                 {dict.compare.detailLabel}
               </span>
               {ALTERNATIVES.map((alt) => (
@@ -171,7 +171,7 @@ export function Comparison({ dict }: { dict: Dictionary }) {
                   className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 text-sm font-medium text-ink-muted transition-colors duration-150 hover:border-hairline-strong hover:text-ink"
                 >
                   {dict.compare.vs(alt.tool)}
-                  <ArrowUpRight aria-hidden className="size-3.5 text-accent" />
+                  <ArrowUpRight aria-hidden className="size-3.5 text-accent rtl:-scale-x-100" />
                 </Link>
               ))}
             </div>
@@ -180,7 +180,7 @@ export function Comparison({ dict }: { dict: Dictionary }) {
               className="inline-flex h-11 shrink-0 items-center justify-center gap-2 self-start rounded-[10px] bg-primary px-5 text-base font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.98] lg:self-auto"
             >
               {dict.nav.cta}
-              <ArrowRight aria-hidden className="size-4" />
+              <ArrowRight aria-hidden className="size-4 rtl:-scale-x-100" />
             </a>
           </div>
         </div>

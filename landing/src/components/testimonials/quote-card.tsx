@@ -45,7 +45,7 @@ export function QuoteItem({
 }) {
   return (
     <figure className="tm-card">
-      <blockquote lang={quote.lang} className="tm-card-body">
+      <blockquote lang={quote.lang} dir="auto" className="tm-card-body">
         <p className={cn("tm-q tm-item-q", sizeFor(quote.quote))}>{quote.quote}</p>
       </blockquote>
       <Caption quote={quote} attribution={attribution} />
@@ -66,7 +66,7 @@ export function TipCard({
 }) {
   return (
     <figure className="tm-card tm-card--tip">
-      <blockquote lang={quote.lang} className="tm-card-body flex items-center">
+      <blockquote lang={quote.lang} dir="auto" className="tm-card-body flex items-center">
         <p data-reveal="words" className="tm-q tm-tip-q">
           <SplitWords text={quote.quote} />
         </p>

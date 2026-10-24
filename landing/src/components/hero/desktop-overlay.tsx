@@ -10,10 +10,11 @@ import type { Dictionary } from "@/lib/i18n";
  *
  * aria-hidden: none of this is interactive or informative; screen readers
  * already get the real description from DemoVideo's aria-label.
+ * A mock LTR desktop: `dir="ltr"` keeps it unmirrored on RTL pages.
  */
 export function DesktopOverlay({ dict }: { dict: Dictionary["hero"] }) {
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 select-none">
+    <div aria-hidden dir="ltr" className="pointer-events-none absolute inset-0 select-none">
       {/* Vignette: the source clip is mostly pale, so the icon labels and
           panel text need a darker patch behind them to stay legible. */}
       <div

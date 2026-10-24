@@ -81,7 +81,7 @@ export function AtAGlance({
                 {/* `$` and the command share a top inset sized so a one-line
                     command centres on the 40px copy button, and a wrapped one
                     keeps the prompt on its first line. */}
-                <div className="flex items-start gap-3 rounded-[10px] border border-white/10 bg-terminal py-2 pr-2 pl-4">
+                <div dir="ltr" className="flex items-start gap-3 rounded-[10px] border border-white/10 bg-terminal py-2 pr-2 pl-4">
                   <span
                     aria-hidden
                     className="select-none py-2 font-mono text-sm leading-relaxed text-slate-400"

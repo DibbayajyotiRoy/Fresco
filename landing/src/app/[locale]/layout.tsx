@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Noto_Sans_Arabic } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { MotionProvider } from "@/components/motion/motion-provider";
 import { SoundProvider } from "@/components/sound-provider";
@@ -16,16 +16,36 @@ import {
 } from "@/lib/i18n/config";
 import "../globals.css";
 
-/* Three families, three lanes — self-hosted via next/font (no <link>). */
+/* Self-hosted via next/font (no <link>). The Latin lanes preload; the
+   extension faces below are `preload: false` and sit behind unicode-range, so
+   a page only downloads one when it actually draws a glyph from it:
+   latin-ext for Turkish (İ ğ Ğ ş Ş), Noto Sans Arabic for /ar. */
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
 });
 
-
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
+});
+
+const interExt = Inter({
+  variable: "--font-inter-ext",
+  subsets: ["latin-ext"],
+  preload: false,
+});
+
+const jetbrainsMonoExt = JetBrains_Mono({
+  variable: "--font-jetbrains-mono-ext",
+  subsets: ["latin-ext"],
+  preload: false,
+});
+
+const notoArabic = Noto_Sans_Arabic({
+  variable: "--font-arabic",
+  subsets: ["arabic"],
+  preload: false,
 });
 
 /* Applied before CSS paints, no flash:
@@ -60,7 +80,7 @@ const SHARED_KEYWORDS = [
   "mpv",
 ];
 
-/** Only the seven shipped locales are routable; anything else 404s. */
+/** Only the shipped locales are routable; anything else 404s. */
 export const dynamicParams = false;
 
 export function generateStaticParams() {
@@ -173,12 +193,16 @@ export default async function RootLayout({
   const dict = await getDictionary(typed);
 
   return (
-    <html lang={LOCALE_META[typed].htmlLang} suppressHydrationWarning>
+    <html
+      lang={LOCALE_META[typed].htmlLang}
+      dir={LOCALE_META[typed].dir}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${inter.variable} ${jetbrainsMono.variable} ${interExt.variable} ${jetbrainsMonoExt.variable} ${notoArabic.variable} font-sans antialiased`}
       >
         <SoundProvider>
           <SiteNav locale={typed} dict={dict} />

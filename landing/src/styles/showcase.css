@@ -201,6 +201,10 @@
   animation-play-state: var(--sc-progress-state, running);
 }
 
+html[dir="rtl"] .sc-progress {
+  transform-origin: right;
+}
+
 @keyframes sc-progress-fill {
   from {
     transform: scaleX(0);

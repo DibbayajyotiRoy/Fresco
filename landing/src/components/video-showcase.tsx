@@ -52,7 +52,7 @@ export function VideoShowcase({ dict }: { dict: Dictionary }) {
               className="inline-flex h-10 shrink-0 items-center gap-1.5 self-start rounded-[10px] border border-hairline-strong bg-surface px-4 text-base font-medium text-ink transition-colors duration-150 hover:bg-raised md:self-auto"
             >
               {v.more}
-              <ArrowUpRight className="size-4 text-ink-faint" aria-hidden />
+              <ArrowUpRight className="size-4 text-ink-faint rtl:-scale-x-100" aria-hidden />
             </a>
           </header>
 
@@ -77,7 +77,7 @@ export function VideoShowcase({ dict }: { dict: Dictionary }) {
                             {v.inDevelopment}
                           </span>
                         ) : null}
-                        <span className="ml-auto text-sm tabular-nums text-ink-faint">
+                        <span className="ms-auto text-sm tabular-nums text-ink-faint">
                           {video.runtime}
                         </span>
                       </div>
@@ -88,6 +88,7 @@ export function VideoShowcase({ dict }: { dict: Dictionary }) {
                           target="_blank"
                           rel="noopener noreferrer"
                           hrefLang="en"
+                          dir="auto"
                           className="transition-colors duration-150 hover:text-accent"
                         >
                           {video.title}

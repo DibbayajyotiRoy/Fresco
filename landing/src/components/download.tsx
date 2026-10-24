@@ -46,7 +46,7 @@ function Command({
   copiedLabel: string;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg bg-terminal p-3.5 ring-1 ring-inset ring-white/10">
+    <div dir="ltr" className="flex items-start gap-3 rounded-lg bg-terminal p-3.5 ring-1 ring-inset ring-white/10">
       <code className="min-w-0 flex-1 font-mono text-sm leading-relaxed text-slate-100 [overflow-wrap:anywhere]">
         <span aria-hidden className="select-none text-slate-400">
           ${" "}
@@ -176,7 +176,7 @@ function WorksOn({ dict }: { dict: Dictionary }) {
       </div>
 
       <p className="mt-4 text-center text-sm text-ink-faint">
-        <span className="mr-3 inline-block font-medium text-ink-subtle first-letter:uppercase">
+        <span className="me-3 inline-block font-medium text-ink-subtle first-letter:uppercase">
           {s.distrosTitle(DISTROS.length)}
         </span>
         {DISTROS.map((name, i) => (
@@ -312,7 +312,7 @@ export function Download({ dict }: { dict: Dictionary }) {
           <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-ink-subtle">
             <Cpu
               aria-hidden
-              className="mr-1.5 inline-block size-4 -translate-y-px align-middle text-ink-faint"
+              className="me-1.5 inline-block size-4 -translate-y-px align-middle text-ink-faint"
             />
             {d.gpuNote}
           </p>

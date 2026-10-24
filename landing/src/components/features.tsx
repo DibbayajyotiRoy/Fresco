@@ -136,7 +136,7 @@ export function Features({ dict }: { dict: Dictionary }) {
                 {dict.whatsNew.changelog}
                 <ArrowUpRight
                   aria-hidden
-                  className="size-4 transition-transform duration-200 ease-out group-hover/cl:-translate-y-0.5 group-hover/cl:translate-x-0.5"
+                  className="size-4 transition-transform duration-200 ease-out rtl:-scale-x-100 group-hover/cl:-translate-y-0.5 group-hover/cl:translate-x-0.5 rtl:group-hover/cl:-translate-x-0.5"
                 />
               </a>
             </div>

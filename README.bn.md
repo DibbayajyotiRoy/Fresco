@@ -4,7 +4,7 @@
 
 # Fresco — Linux-এর জন্য ফ্রি লাইভ ওয়ালপেপার ও ভিডিও ওয়ালপেপার অ্যাপ
 
-[English](README.md) | **বাংলা** | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | **বাংলা** | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco হলো Linux-এর জন্য একটি ফ্রি ও ওপেন-সোর্স লাইভ ওয়ালপেপার অ্যাপ, যা যেকোনো ভিডিও, GIF বা ছবিকে X11 ও Wayland-এ অ্যানিমেটেড ডেস্কটপ ওয়ালপেপার হিসেবে সেট করে।** Linux-এ এটি Wallpaper Engine-এর একটি নেটিভ বিকল্প — আছে গ্রাফিক্যাল অ্যাপ, GPU-অ্যাক্সিলারেটেড প্লেব্যাক এবং ডেস্কটপ উইজেট।
 
@@ -415,7 +415,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 | **প্রথম রিলিজ** | v0.0.1, জুন 2026 |
 | **সর্বশেষ সংস্করণ** | 1.1.51 (2026-10-23) — নতুনটির জন্য [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) দেখুন |
 | **প্যাকেজ** | `.deb` (amd64), এক লাইনের ইনস্টল স্ক্রিপ্ট, Deepin App Store; অন্যত্র সোর্স থেকে বিল্ড |
-| **ইন্টারফেসের ভাষা** | ইংরেজি এবং 12টি অনুবাদ: সরলীকৃত চীনা, রুশ, স্প্যানিশ, ফরাসি, জার্মান, পর্তুগিজ (ব্রাজিল), তুর্কি, ভিয়েতনামি, ইন্দোনেশীয়, হিন্দি, বাংলা ও রোমানীয় |
+| **ইন্টারফেসের ভাষা** | ইংরেজি এবং 13টি অনুবাদ: সরলীকৃত চীনা, রুশ, স্প্যানিশ, ফরাসি, জার্মান, পর্তুগিজ (ব্রাজিল), তুর্কি, ভিয়েতনামি, ইন্দোনেশীয়, হিন্দি, বাংলা, রোমানীয় ও আরবি |
 | **ব্যবহারকারী** | 128টি দেশে 3,000+ মানুষ |
 | **রক্ষণাবেক্ষণকারী** | Dibbayajyoti Roy |
 | **সোর্স কোড** | <https://github.com/DibbayajyotiRoy/fresco> |

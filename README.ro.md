@@ -4,7 +4,7 @@
 
 # Fresco — aplicație gratuită de fundal animat și imagine de fundal video pentru Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | **Română** | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | **Română** | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco este o aplicație gratuită și open source de fundal animat (imagine de fundal live) pentru Linux, care setează orice videoclip, GIF sau imagine ca imagine de fundal animată pe desktop, pe X11 și pe Wayland.** Este o alternativă nativă la Wallpaper Engine pentru Linux, cu aplicație grafică, redare accelerată de GPU și widgeturi pentru desktop.
 
@@ -479,7 +479,7 @@ Conversația este identificată printr-un tichet aleatoriu generat separat de te
 | **Prima versiune** | v0.0.1, iunie 2026 |
 | **Ultima versiune** | 1.1.51 (2026-10-23) — vedeți [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) pentru cea mai nouă |
 | **Pachete** | `.deb` (amd64), script de instalare dintr-o linie, magazinul de aplicații Deepin; compilare din sursă în rest |
-| **Limbile interfeței** | Engleză plus 12 traduceri: chineză simplificată, rusă, spaniolă, franceză, germană, portugheză (Brazilia), turcă, vietnameză, indoneziană, hindi, bengaleză și română |
+| **Limbile interfeței** | Engleză plus 13 traduceri: chineză simplificată, rusă, spaniolă, franceză, germană, portugheză (Brazilia), turcă, vietnameză, indoneziană, hindi, bengaleză, română și arabă |
 | **Utilizatori** | Peste 3.000 de persoane din 128 de țări |
 | **Întreținător** | Dibbayajyoti Roy |
 | **Cod sursă** | <https://github.com/DibbayajyotiRoy/fresco> |

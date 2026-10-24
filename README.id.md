@@ -4,7 +4,7 @@
 
 # Fresco — Aplikasi Wallpaper Bergerak dan Wallpaper Video Gratis untuk Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | **Bahasa Indonesia** | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | **Bahasa Indonesia** | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco adalah aplikasi wallpaper hidup (live wallpaper) untuk Linux yang gratis dan open source. Dengan Fresco, video, GIF, atau gambar apa pun bisa menjadi wallpaper bergerak di desktop, baik di X11 maupun Wayland.** Fresco adalah alternatif Wallpaper Engine yang native untuk Linux, lengkap dengan aplikasi grafis, pemutaran berakselerasi GPU, dan widget desktop.
 
@@ -476,7 +476,7 @@ Utas itu dikunci dengan tiket acak yang dibuat terpisah dari telemetri dan disim
 | **Rilis pertama** | v0.0.1, Juni 2026 |
 | **Versi terbaru** | 1.1.51 (2026-10-23) — lihat [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) untuk yang terbaru |
 | **Paket** | `.deb` (amd64), skrip instalasi satu baris, Toko Aplikasi Deepin; bangun dari kode sumber di tempat lain |
-| **Bahasa antarmuka** | Inggris ditambah 12 terjemahan: Tionghoa Sederhana, Rusia, Spanyol, Prancis, Jerman, Portugis (Brasil), Turki, Vietnam, Indonesia, Hindi, Bengali, dan Rumania |
+| **Bahasa antarmuka** | Inggris ditambah 13 terjemahan: Tionghoa Sederhana, Rusia, Spanyol, Prancis, Jerman, Portugis (Brasil), Turki, Vietnam, Indonesia, Hindi, Bengali, Rumania, dan Arab |
 | **Pengguna** | 3.000+ orang di 128 negara |
 | **Pengelola** | Dibbayajyoti Roy |
 | **Kode sumber** | <https://github.com/DibbayajyotiRoy/fresco> |

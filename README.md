@@ -4,7 +4,7 @@
 
 # Fresco — Free Live and Video Wallpaper App for Linux
 
-**English** | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+**English** | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco is a free, open-source live wallpaper app for Linux that sets any video, GIF or image as an animated desktop wallpaper on X11 and Wayland.** It is a native Linux alternative to Wallpaper Engine, with a graphical app, GPU-accelerated playback and desktop widgets.
 
@@ -470,7 +470,7 @@ The thread is keyed by a random ticket generated separately from telemetry and s
 | **First release** | v0.0.1, June 2026 |
 | **Latest version** | 1.1.51 (2026-10-23) — see [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) for the newest |
 | **Packages** | `.deb` (amd64), one-line install script, Deepin App Store; source build elsewhere |
-| **Interface languages** | English plus 12 translations: Simplified Chinese, Russian, Spanish, French, German, Portuguese (Brazil), Turkish, Vietnamese, Indonesian, Hindi, Bengali and Romanian |
+| **Interface languages** | English plus 13 translations: Simplified Chinese, Russian, Spanish, French, German, Portuguese (Brazil), Turkish, Vietnamese, Indonesian, Hindi, Bengali, Romanian and Arabic |
 | **Users** | 3,000+ people in 128 countries |
 | **Maintainer** | Dibbayajyoti Roy |
 | **Source code** | <https://github.com/DibbayajyotiRoy/fresco> |

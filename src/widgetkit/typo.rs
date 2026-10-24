@@ -375,10 +375,19 @@ pub fn styled(
         // the slow path and this run is entirely Han.
         Script::Cjk => fonts.cjk_family().or_else(|| fonts.latin_family()),
     };
+    // Letter-spacing opens a gap in every join of a cursive script, so Arabic
+    // is set solid at any size: the shaper joins the letters, tracking must not
+    // pull them apart again. (Hebrew does not join, but gains nothing from
+    // tracking either, and one rule for right-to-left text is simpler.)
+    let tracking = if text.chars().any(super::text::is_rtl_letter) {
+        0.0
+    } else {
+        tracking_em(size, micro_label, script)
+    };
     TextRun::new(text, size)
         .family(family)
         .weight(weight_for_script(weight, script))
-        .letter_spacing(tracking_em(size, micro_label, script) * size)
+        .letter_spacing(tracking * size)
         .line_height(line_height_ratio(size, script) * size)
 }
 
@@ -651,6 +660,19 @@ mod tests {
         let c = step_run("春风十里", Step::Title, &mut fonts);
         assert_eq!(c.weight, 700);
         assert!(c.line_height / c.size >= 1.20);
+
+        // Arabic is set solid: tracking would unjoin its letters. Its digits
+        // join nothing, so a run of those keeps its tracking.
+        let a = step_run("الاثنين", Step::Micro, &mut fonts);
+        assert_eq!(a.letter_spacing, 0.0);
+        assert_eq!(
+            styled("٩:٤١ ص", 11.0, 500, false, &mut fonts).letter_spacing,
+            0.0
+        );
+        assert_ne!(
+            styled("٩:٤١", 11.0, 500, false, &mut fonts).letter_spacing,
+            0.0
+        );
 
         // Degenerate sizes produce a drawable run rather than a poisoned one.
         for bad in [0.0, -5.0, f32::NAN] {

@@ -394,10 +394,12 @@ button.suggested-action:hover {{ background-color: alpha(@accent_bg_color, 0.85)
 .update-progress {{ min-height: 8px; }}
 .update-progress trough {{ min-height: 8px; border-radius: 999px; background-color: alpha(@window_fg_color, 0.08); }}
 .update-progress progress {{ min-height: 8px; border-radius: 999px; background-image: linear-gradient(to right, @accent_bg_color, shade(@accent_bg_color, 1.25)); }}
+.update-progress progress:dir(rtl) {{ background-image: linear-gradient(to left, @accent_bg_color, shade(@accent_bg_color, 1.25)); }}
 
 /* ===== Search ===== */
 entry.wp-search {{ min-height: 36px; border-radius: 10px; background-color: @card_bg_color; border: 1px solid @card_border; box-shadow: none; padding-left: 8px; padding-right: 8px; transition: border-color 130ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 130ms cubic-bezier(0.4, 0, 0.2, 1); }}
 entry.wp-search image {{ color: @dim_fg; margin-right: 4px; }}
+entry.wp-search image:dir(rtl) {{ margin-right: 0; margin-left: 4px; }}
 entry.wp-search:focus-within {{ border-color: @accent_bg_color; box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.22); }}
 
 /* ===== Header menu popover ===== compact grouped menu, GTK-menu-like rows.

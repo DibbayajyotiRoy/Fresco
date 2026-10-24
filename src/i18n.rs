@@ -337,6 +337,27 @@ fn detect_locale_language() -> Option<Language> {
 /// The active catalog, or `None` for English. Written once by [`init`].
 static CATALOG: OnceLock<Option<&'static HashMap<&'static str, &'static str>>> = OnceLock::new();
 
+/// Whether the language [`init`] settled on is written right-to-left. Written
+/// once by [`init`].
+static RTL: OnceLock<bool> = OnceLock::new();
+
+/// True for a language tag (`ar`, `ar-EG`, `fa_IR.UTF-8`) of a right-to-left
+/// language. Matches on the language subtag alone, and lists the other
+/// Arabic-script and Hebrew languages as well as `ar` so a catalog for one of
+/// them needs no change here.
+pub fn is_rtl(lang: &str) -> bool {
+    matches!(locale_subtag(lang).as_str(), "ar" | "fa" | "he" | "ur")
+}
+
+/// True when the active UI language is right-to-left, so the GUI should mirror.
+///
+/// Keyed off the catalog that actually loaded, not the setting: a malformed
+/// catalog falls back to English text, and English under a mirrored layout is
+/// worse than either alone.
+pub fn ui_is_rtl() -> bool {
+    RTL.get().copied().unwrap_or(false)
+}
+
 /// Compiled-in catalog sources. Adding a language means adding a `Language`
 /// variant and one [`REGISTRY`] row.
 fn catalog_source(lang: Language) -> Option<&'static str> {
@@ -390,7 +411,10 @@ pub fn init(setting: Language) {
         .filter(|v| !v.is_empty())
         .and_then(|v| Language::from_code(&v))
         .unwrap_or(setting);
-    let _ = CATALOG.set(chosen.resolve().and_then(load));
+    let resolved = chosen.resolve();
+    let catalog = resolved.and_then(load);
+    let _ = RTL.set(catalog.is_some() && resolved.is_some_and(|l| is_rtl(l.code())));
+    let _ = CATALOG.set(catalog);
 }
 
 /// True when a non-English catalog is active. Used to decide whether it is
@@ -780,6 +804,16 @@ mod tests {
                 want,
                 "locale {raw:?}"
             );
+        }
+    }
+
+    #[test]
+    fn rtl_is_decided_by_the_language_subtag() {
+        for rtl in ["ar", "ar-EG", "ar_SA.UTF-8", "AR", "fa", "he_IL", "ur-PK"] {
+            assert!(is_rtl(rtl), "{rtl} is right-to-left");
+        }
+        for ltr in ["en", "zh-CN", "pt-BR", "hi", "tr", "system", ""] {
+            assert!(!is_rtl(ltr), "{ltr} is left-to-right");
         }
     }
 

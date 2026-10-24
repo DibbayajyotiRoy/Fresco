@@ -321,6 +321,16 @@ fn build_ui(app: &adw::Application) {
         return;
     }
 
+    // Mirror the whole UI for a right-to-left language, and un-mirror it for
+    // any other: GTK seeds this from the process locale, which need not match
+    // the language picked in Settings. Before any widget exists, and fixed for
+    // the process like the catalog it follows (a language change restarts).
+    gtk4::Widget::set_default_direction(if crate::i18n::ui_is_rtl() {
+        gtk4::TextDirection::Rtl
+    } else {
+        gtk4::TextDirection::Ltr
+    });
+
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some("Fresco"));
     // Reopen at the size the user left it. Size and maximized only: GTK4 has
@@ -1403,16 +1413,21 @@ fn build_menu_popover(
         });
     }
     // Escape / Alt+Left step back out of a sub-page instead of closing the
-    // whole menu. Capture phase, so it runs before the popover's own Escape.
+    // whole menu (Alt+Right when mirrored: "back" points where text starts).
+    // Capture phase, so it runs before the popover's own Escape.
     {
         let keys = gtk4::EventControllerKey::new();
         keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let stack = stack.clone();
         keys.connect_key_pressed(move |_, key, _, mods| {
             let on_subpage = stack.visible_child_name().as_deref() != Some(MENU_ROOT);
+            let back_key = if stack.direction() == gtk4::TextDirection::Rtl {
+                gtk4::gdk::Key::Right
+            } else {
+                gtk4::gdk::Key::Left
+            };
             let back = key == gtk4::gdk::Key::Escape
-                || (key == gtk4::gdk::Key::Left
-                    && mods.contains(gtk4::gdk::ModifierType::ALT_MASK));
+                || (key == back_key && mods.contains(gtk4::gdk::ModifierType::ALT_MASK));
             if on_subpage && back {
                 stack.set_visible_child_name(MENU_ROOT);
                 stack.child_focus(gtk4::DirectionType::TabForward);

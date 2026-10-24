@@ -4,7 +4,7 @@
 
 # Fresco — Aplicación gratuita de fondos de pantalla en vivo, animados y de video para Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | **Español** | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | **Español** | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco es una aplicación gratuita y de código abierto de fondos de pantalla en vivo para Linux: convierte cualquier video, GIF o imagen en un fondo de pantalla animado del escritorio, tanto en X11 como en Wayland.** Es una alternativa nativa a Wallpaper Engine para Linux, con una aplicación gráfica, reproducción acelerada por GPU y widgets de escritorio.
 
@@ -479,7 +479,7 @@ La conversación se identifica con un ticket aleatorio que se genera por separad
 | **Primera versión** | v0.0.1, junio de 2026 |
 | **Última versión** | 1.1.51 (2026-10-23); consulta [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) para ver la más reciente |
 | **Paquetes** | `.deb` (amd64), script de instalación de una línea, App Store de Deepin; compilación desde el código fuente en el resto |
-| **Idiomas de la interfaz** | Inglés más 12 traducciones: chino simplificado, ruso, español, francés, alemán, portugués (Brasil), turco, vietnamita, indonesio, hindi, bengalí y rumano |
+| **Idiomas de la interfaz** | Inglés más 13 traducciones: chino simplificado, ruso, español, francés, alemán, portugués (Brasil), turco, vietnamita, indonesio, hindi, bengalí, rumano y árabe |
 | **Usuarios** | Más de 3000 personas en 128 países |
 | **Mantenedor** | Dibbayajyoti Roy |
 | **Código fuente** | <https://github.com/DibbayajyotiRoy/fresco> |

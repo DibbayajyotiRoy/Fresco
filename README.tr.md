@@ -4,7 +4,7 @@
 
 # Fresco — Linux için Ücretsiz Canlı ve Video Duvar Kağıdı Uygulaması
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | **Türkçe** | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | **Türkçe** | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco, Linux için ücretsiz ve açık kaynaklı bir canlı duvar kağıdı (hareketli duvar kağıdı) uygulamasıdır; herhangi bir videoyu, GIF’i veya görseli X11 ve Wayland üzerinde hareketli masaüstü duvar kağıdı olarak ayarlar.** Linux için yerel bir Wallpaper Engine alternatifidir; grafik arayüzlü bir uygulama, GPU hızlandırmalı oynatma ve masaüstü widget’ları sunar.
 
@@ -475,7 +475,7 @@ Konuşma, telemetriden ayrı üretilen ve farklı bir dosyada saklanan rastgele 
 | **İlk sürüm** | v0.0.1, Haziran 2026 |
 | **Son sürüm** | 1.1.51 (2026-10-23) — en yenisi için [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) sayfasına bakın |
 | **Paketler** | `.deb` (amd64), tek satırlık kurulum betiği, Deepin Uygulama Mağazası; diğer yerlerde kaynaktan derleme |
-| **Arayüz dilleri** | İngilizce artı 12 çeviri: Basitleştirilmiş Çince, Rusça, İspanyolca, Fransızca, Almanca, Portekizce (Brezilya), Türkçe, Vietnamca, Endonezce, Hintçe, Bengalce ve Romence |
+| **Arayüz dilleri** | İngilizce artı 13 çeviri: Basitleştirilmiş Çince, Rusça, İspanyolca, Fransızca, Almanca, Portekizce (Brezilya), Türkçe, Vietnamca, Endonezce, Hintçe, Bengalce, Romence ve Arapça |
 | **Kullanıcılar** | 128 ülkede 3.000’den fazla kişi |
 | **Geliştirici** | Dibbayajyoti Roy |
 | **Kaynak kodu** | <https://github.com/DibbayajyotiRoy/fresco> |

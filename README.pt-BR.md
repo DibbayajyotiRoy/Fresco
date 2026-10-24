@@ -4,7 +4,7 @@
 
 # Fresco — app gratuito de papel de parede animado e em vídeo para Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | **Português (Brasil)** | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | **Português (Brasil)** | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **O Fresco é um app gratuito e de código aberto de papel de parede animado (papel de parede ao vivo) para Linux: ele define qualquer vídeo, GIF ou imagem como plano de fundo animado da área de trabalho, no X11 e no Wayland.** É uma alternativa nativa ao Wallpaper Engine para Linux, com interface gráfica, reprodução acelerada por GPU e widgets de desktop.
 
@@ -478,7 +478,7 @@ A conversa é identificada por um ticket aleatório gerado separadamente da tele
 | **Primeira versão** | v0.0.1, junho de 2026 |
 | **Versão mais recente** | 1.1.51 (2026-10-23) — veja [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) para a mais nova |
 | **Pacotes** | `.deb` (amd64), script de instalação em uma linha, Loja de Aplicativos do Deepin; compilação a partir do código-fonte nos demais casos |
-| **Idiomas da interface** | Inglês mais 12 traduções: chinês simplificado, russo, espanhol, francês, alemão, português (Brasil), turco, vietnamita, indonésio, hindi, bengali e romeno |
+| **Idiomas da interface** | Inglês mais 13 traduções: chinês simplificado, russo, espanhol, francês, alemão, português (Brasil), turco, vietnamita, indonésio, hindi, bengali, romeno e árabe |
 | **Usuários** | Mais de 3.000 pessoas em 128 países |
 | **Mantenedor** | Dibbayajyoti Roy |
 | **Código-fonte** | <https://github.com/DibbayajyotiRoy/fresco> |

@@ -4,7 +4,7 @@
 
 # Fresco — бесплатные живые обои и видеообои для Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | **Русский** | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | **Русский** | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco — это бесплатное приложение с открытым исходным кодом для установки живых обоев в Linux: любое видео, GIF или изображение становится анимированными обоями рабочего стола в X11 и Wayland.** Это нативная альтернатива Wallpaper Engine для Linux: графический интерфейс, воспроизведение с ускорением на GPU и виджеты рабочего стола.
 
@@ -474,7 +474,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 | **Первый релиз** | v0.0.1, июнь 2026 |
 | **Последняя версия** | 1.1.51 (2026-10-23) — самую свежую смотрите на странице [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **Пакеты** | `.deb` (amd64), однострочный скрипт установки, Магазин приложений Deepin; в остальных дистрибутивах — сборка из исходников |
-| **Языки интерфейса** | Английский и 12 переводов: упрощённый китайский, русский, испанский, французский, немецкий, португальский (Бразилия), турецкий, вьетнамский, индонезийский, хинди, бенгальский и румынский |
+| **Языки интерфейса** | Английский и 13 переводов: упрощённый китайский, русский, испанский, французский, немецкий, португальский (Бразилия), турецкий, вьетнамский, индонезийский, хинди, бенгальский, румынский и арабский |
 | **Пользователи** | 3 000+ человек в 128 странах |
 | **Мейнтейнер** | Dibbayajyoti Roy |
 | **Исходный код** | <https://github.com/DibbayajyotiRoy/fresco> |

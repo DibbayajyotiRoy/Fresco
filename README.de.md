@@ -4,7 +4,7 @@
 
 # Fresco — Kostenlose App für Live-Hintergrundbilder und Video-Hintergründe unter Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | **Deutsch** | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | **Deutsch** | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco ist eine kostenlose, quelloffene Live-Hintergrundbild-App für Linux. Sie legt jedes Video, GIF oder Bild als animiertes Hintergrundbild auf Ihrem Desktop fest – unter X11 und Wayland.** Als native Wallpaper-Engine-Alternative für Linux bietet Fresco eine grafische Oberfläche, GPU-beschleunigte Wiedergabe und Desktop-Widgets.
 
@@ -482,7 +482,7 @@ Der Verlauf wird über ein zufälliges Ticket zugeordnet, das getrennt von der T
 | **Erste Version** | v0.0.1, Juni 2026 |
 | **Aktuelle Version** | 1.1.51 (2026-10-23) – die neueste steht auf [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **Pakete** | `.deb` (amd64), Einzeiler-Installationsskript, Deepin App Store; anderswo Quellcode-Build |
-| **Oberflächensprachen** | Englisch plus 12 Übersetzungen: Vereinfachtes Chinesisch, Russisch, Spanisch, Französisch, Deutsch, Portugiesisch (Brasilien), Türkisch, Vietnamesisch, Indonesisch, Hindi, Bengalisch und Rumänisch |
+| **Oberflächensprachen** | Englisch plus 13 Übersetzungen: Vereinfachtes Chinesisch, Russisch, Spanisch, Französisch, Deutsch, Portugiesisch (Brasilien), Türkisch, Vietnamesisch, Indonesisch, Hindi, Bengalisch, Rumänisch und Arabisch |
 | **Nutzer** | Über 3.000 Menschen in 128 Ländern |
 | **Maintainer** | Dibbayajyoti Roy |
 | **Quellcode** | <https://github.com/DibbayajyotiRoy/fresco> |

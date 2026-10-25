@@ -294,7 +294,6 @@
   "MISSING": "FEHLT",
   "Manage folders…": "Ordner verwalten…",
   "Margin": "Rand",
-  "Maximized window": "Maximiertes Fenster",
   "Menu": "Menü",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "Menü → „Hintergrundbilder durchsuchen…“ für kuratierte, lizenzierte Auswahl in zwei Klicks.",
   "Message the maintainer": "Nachricht an den Maintainer",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "Pinterest- oder direkten Video-/Bildlink einfügen",
   "Pause": "Pause",
   "Pause on battery": "Bei Akkubetrieb pausieren",
-  "Pause when an app is maximized": "Pausieren, wenn eine App maximiert ist",
   "Paused by you": "Manuell pausiert",
   "Per-monitor wallpapers": "Hintergrundbilder je Bildschirm",
   "Pick a style, then fine-tune it.": "Wählen Sie einen Stil und passen Sie ihn dann fein an.",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "Wie das Hintergrundbild der Arbeitsfläche",
   "Saved — takes effect when a wallpaper is playing.": "Gespeichert — wird wirksam, sobald ein Hintergrundbild abgespielt wird.",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "Gespeichert, aber dieser Desktop kann Fresco noch nicht auf dem Sperrbildschirm anzeigen — er verwendet weiterhin seinen eigenen Hintergrund",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "Spart CPU und GPU bei integrierter Grafik; Vollbild-Apps pausieren immer",
   "Scaling quality": "Skalierungsqualität",
   "Schedule": "Zeitplan",
   "Screen locked": "Bildschirm gesperrt",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "„{name}“ als Hintergrundbild festgelegt",
   "“{name}” set on {display}": "„{name}“ auf {display} festgelegt",
   "“{name}” set. Close the window; it keeps playing": "„{name}“ festgelegt. Schließen Sie das Fenster; die Wiedergabe läuft weiter",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ Navigieren · Eingabetaste Ausführen · Esc Schließen"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ Navigieren · Eingabetaste Ausführen · Esc Schließen",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

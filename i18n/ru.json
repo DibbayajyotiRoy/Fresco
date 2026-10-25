@@ -294,7 +294,6 @@
   "MISSING": "НЕТ ФАЙЛА",
   "Manage folders…": "Управление папками…",
   "Margin": "Отступ",
-  "Maximized window": "Развёрнутое окно",
   "Menu": "Меню",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "Меню → «Обзор обоев…» — подборка лицензированных обоев в два клика.",
   "Message the maintainer": "Написать мейнтейнеру",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "Вставьте ссылку Pinterest или прямую ссылку на видео/изображение",
   "Pause": "Пауза",
   "Pause on battery": "Пауза от батареи",
-  "Pause when an app is maximized": "Пауза, когда приложение развёрнуто",
   "Paused by you": "Приостановлено вручную",
   "Per-monitor wallpapers": "Свои обои для каждого монитора",
   "Pick a style, then fine-tune it.": "Выберите стиль, затем настройте его детально.",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "Как обои рабочего стола",
   "Saved — takes effect when a wallpaper is playing.": "Сохранено — вступит в силу, когда воспроизводятся обои.",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "Сохранено, но этот рабочий стол пока не может показывать Fresco на экране блокировки — он продолжает использовать собственный фон",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "Экономит ЦП и ГП на встроенной графике; полноэкранные приложения всегда ставят паузу",
   "Scaling quality": "Качество масштабирования",
   "Schedule": "Расписание",
   "Screen locked": "Экран заблокирован",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "«{name}» установлено как обои",
   "“{name}” set on {display}": "«{name}» установлено на {display}",
   "“{name}” set. Close the window; it keeps playing": "«{name}» установлено. Закройте окно — воспроизведение продолжится",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ — навигация · Enter — выполнить · Esc — закрыть"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ — навигация · Enter — выполнить · Esc — закрыть",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

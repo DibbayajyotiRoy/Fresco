@@ -294,7 +294,6 @@
   "MISSING": "EKSİK",
   "Manage folders…": "Klasörleri yönet…",
   "Margin": "Kenar boşluğu",
-  "Maximized window": "Büyütülmüş pencere",
   "Menu": "Menü",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "Menü → “Duvar kâğıtlarına göz at…”; iki tıkla derlenmiş, lisanslı seçimlere ulaşın.",
   "Message the maintainer": "Geliştiriciye mesaj gönder",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "Bir Pinterest bağlantısı veya doğrudan video/görsel bağlantısı yapıştırın",
   "Pause": "Duraklat",
   "Pause on battery": "Pilde duraklat",
-  "Pause when an app is maximized": "Bir uygulama ekranı kapladığında duraklat",
   "Paused by you": "Elle duraklatıldı",
   "Per-monitor wallpapers": "Monitör başına duvar kâğıdı",
   "Pick a style, then fine-tune it.": "Bir stil seçin, ardından ince ayar yapın.",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "Masaüstü duvar kâğıdıyla aynı",
   "Saved — takes effect when a wallpaper is playing.": "Kaydedildi — bir duvar kâğıdı oynatılırken etkili olur.",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "Kaydedildi, ancak bu masaüstü Fresco’yu henüz kilit ekranında gösteremiyor — kendi arka planını kullanmaya devam ediyor",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "Tümleşik grafiklerde CPU ve GPU kullanımını azaltır; tam ekran uygulamalar her zaman duraklatır",
   "Scaling quality": "Ölçekleme kalitesi",
   "Schedule": "Zamanlama",
   "Screen locked": "Ekran kilitli",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "“{name}” duvar kâğıdı olarak ayarlandı",
   "“{name}” set on {display}": "“{name}”, {display} üzerinde ayarlandı",
   "“{name}” set. Close the window; it keeps playing": "“{name}” ayarlandı. Pencereyi kapatabilirsiniz; oynatmaya devam eder",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ gezinme · Enter çalıştır · Esc kapat"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ gezinme · Enter çalıştır · Esc kapat",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

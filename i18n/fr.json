@@ -294,7 +294,6 @@
   "MISSING": "MANQUANT",
   "Manage folders…": "Gérer les dossiers…",
   "Margin": "Marge",
-  "Maximized window": "Fenêtre maximisée",
   "Menu": "Menu",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "Menu → « Parcourir les fonds d’écran… » pour une sélection de fonds d’écran sous licence, en deux clics.",
   "Message the maintainer": "Écrire au mainteneur",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "Collez un lien Pinterest ou un lien direct vers une vidéo/image",
   "Pause": "Pause",
   "Pause on battery": "Mettre en pause sur batterie",
-  "Pause when an app is maximized": "Mettre en pause quand une application est maximisée",
   "Paused by you": "Mis en pause manuellement",
   "Per-monitor wallpapers": "Fonds d’écran par écran",
   "Pick a style, then fine-tune it.": "Choisissez un style, puis affinez-le.",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "Identique au fond d’écran du bureau",
   "Saved — takes effect when a wallpaper is playing.": "Enregistré — prend effet lorsqu’un fond d’écran est en lecture.",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "Enregistré, mais ce bureau ne peut pas encore afficher Fresco sur l’écran de verrouillage — il continue d’utiliser son propre arrière-plan",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "Économise le CPU et le GPU sur les graphiques intégrés ; les applications en plein écran mettent toujours en pause",
   "Scaling quality": "Qualité de mise à l’échelle",
   "Schedule": "Horaire",
   "Screen locked": "Écran verrouillé",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "« {name} » défini comme fond d’écran",
   "“{name}” set on {display}": "« {name} » défini sur {display}",
   "“{name}” set. Close the window; it keeps playing": "« {name} » défini. Fermez la fenêtre ; la lecture continue",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ naviguer · Entrée exécuter · Échap fermer"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ naviguer · Entrée exécuter · Échap fermer",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

@@ -294,7 +294,6 @@
   "MISSING": "অনুপস্থিত",
   "Manage folders…": "ফোল্ডার পরিচালনা করুন…",
   "Margin": "মার্জিন",
-  "Maximized window": "ম্যাক্সিমাইজ করা উইন্ডো",
   "Menu": "মেনু",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "মেনু → “ওয়ালপেপার দেখুন…”, দুই ক্লিকেই নির্বাচিত ও লাইসেন্সপ্রাপ্ত ওয়ালপেপার পান।",
   "Message the maintainer": "রক্ষণাবেক্ষণকারীকে বার্তা পাঠান",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "একটি Pinterest বা সরাসরি ভিডিও/ছবি লিংক পেস্ট করুন",
   "Pause": "বিরতি",
   "Pause on battery": "ব্যাটারিতে থাকলে বিরতি দিন",
-  "Pause when an app is maximized": "কোনো অ্যাপ ম্যাক্সিমাইজ করা থাকলে বিরতি দিন",
   "Paused by you": "আপনি বিরতি দিয়েছেন",
   "Per-monitor wallpapers": "প্রতি মনিটরে আলাদা ওয়ালপেপার",
   "Pick a style, then fine-tune it.": "প্রথমে একটি স্টাইল বেছে নিন, তারপর সূক্ষ্মভাবে ঠিক করুন।",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "ডেস্কটপ ওয়ালপেপারের মতোই",
   "Saved — takes effect when a wallpaper is playing.": "সংরক্ষিত হয়েছে — ওয়ালপেপার চলার সময় কার্যকর হবে।",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "সংরক্ষিত হয়েছে, কিন্তু এই ডেস্কটপ এখনও লক স্ক্রিনে Fresco দেখাতে পারে না — এটি নিজস্ব ব্যাকগ্রাউন্ডই ব্যবহার করতে থাকবে",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "ইন্টিগ্রেটেড গ্রাফিক্সে CPU ও GPU বাঁচায়; ফুলস্ক্রিন অ্যাপ চললে সবসময় বিরতি দেওয়া হয়",
   "Scaling quality": "স্কেলিং মান",
   "Schedule": "সময়সূচি",
   "Screen locked": "স্ক্রিন লক করা আছে",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "“{name}” ওয়ালপেপার হিসেবে সেট করা হয়েছে",
   "“{name}” set on {display}": "“{name}” {display}-তে সেট করা হয়েছে",
   "“{name}” set. Close the window; it keeps playing": "“{name}” সেট করা হয়েছে। উইন্ডো বন্ধ করুন; এটি চলতেই থাকবে",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ নেভিগেট · Enter চালান · Esc বন্ধ করুন"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ নেভিগেট · Enter চালান · Esc বন্ধ করুন",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

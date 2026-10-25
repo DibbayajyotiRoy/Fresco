@@ -191,6 +191,7 @@ pub fn run() -> i32 {
         &wallpaper,
         scaling,
         power_saving,
+        config.low_memory,
         &[("input-ipc-server", sock_str.as_str())],
     ) {
         Ok(p) => p,

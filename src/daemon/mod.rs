@@ -1206,6 +1206,7 @@ impl Daemon {
                 &wallpaper,
                 self.config.scaling,
                 wallpaper.effective_power_saving(self.config.power_saving),
+                self.config.low_memory,
                 kind,
             ) {
                 Ok(r) => {
@@ -1398,6 +1399,7 @@ impl Daemon {
         wallpaper: &Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
         kind: WindowKind,
     ) -> Result<Renderer> {
         let window = WallpaperWindow::create(conn, screen, atoms, monitor, kind)?;
@@ -1406,6 +1408,7 @@ impl Daemon {
             wallpaper,
             scaling,
             power_saving,
+            low_memory,
         )?);
         let slideshow = build_slideshow(wallpaper, &player);
         Ok(Renderer {
@@ -2879,7 +2882,13 @@ fn run_wayland_layershell() -> Result<()> {
             continue; // nothing configured for this output
         }
         let effective_ps = wallpaper.effective_power_saving(config.power_saving);
-        let mut out = WlOutput::new(m.connector.clone(), wallpaper, config.scaling, effective_ps);
+        let mut out = WlOutput::new(
+            m.connector.clone(),
+            wallpaper,
+            config.scaling,
+            effective_ps,
+            config.low_memory,
+        );
         out.set_show_on_lock(show_on_lock);
         out.respawn(false, false);
         outputs.insert(m.connector.clone(), out);
@@ -2970,7 +2979,13 @@ fn run_wayland_layershell() -> Result<()> {
                                 let effective_ps = wp.effective_power_saving(config.power_saving);
                                 match (outputs.get_mut(&m.connector), has) {
                                     (Some(o), true) => {
-                                        o.apply_wallpaper(wp, config.scaling, effective_ps, paused);
+                                        o.apply_wallpaper(
+                                            wp,
+                                            config.scaling,
+                                            effective_ps,
+                                            config.low_memory,
+                                            paused,
+                                        );
                                         // `apply_wallpaper` may already have
                                         // respawned for an unrelated reason;
                                         // a second one here only fires when
@@ -2990,6 +3005,7 @@ fn run_wayland_layershell() -> Result<()> {
                                             wp,
                                             config.scaling,
                                             effective_ps,
+                                            config.low_memory,
                                         );
                                         o.set_show_on_lock(show_on_lock);
                                         o.respawn(paused, false);
@@ -3681,6 +3697,8 @@ struct WlOutput {
     scaling: Scaling,
     /// Effective power-saving level for this output; applied at spawn.
     power_saving: PowerSaving,
+    /// Use tiny mpv buffers and fewer decode threads; applied at spawn.
+    low_memory: bool,
     /// Whether the next (re)spawn should ask mpvpaper to mark its surface
     /// show-on-lock — see [`WaylandPlayer::spawn`]'s doc comment. `false`
     /// until [`WlOutput::set_show_on_lock`] says otherwise; read only at
@@ -3806,6 +3824,7 @@ impl WlOutput {
         wallpaper: Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
     ) -> WlOutput {
         WlOutput {
             anim: Anim::new(transition::crop_base(&wallpaper)),
@@ -3813,6 +3832,7 @@ impl WlOutput {
             wallpaper,
             scaling,
             power_saving,
+            low_memory,
             show_on_lock: false,
             player: None,
             slideshow: None,
@@ -3912,6 +3932,7 @@ impl WlOutput {
             &self.wallpaper,
             self.scaling,
             self.power_saving,
+            self.low_memory,
             &file,
             self.show_on_lock,
         ) {
@@ -3955,12 +3976,14 @@ impl WlOutput {
         new: Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
         paused: bool,
     ) {
         let media_only = self.player.is_some()
             && !self.static_fallback
             && scaling == self.scaling
             && power_saving == self.power_saving
+            && low_memory == self.low_memory
             && new.fit == self.wallpaper.fit
             && new.rotation == self.wallpaper.rotation
             && new.mute == self.wallpaper.mute
@@ -3972,6 +3995,7 @@ impl WlOutput {
         self.wallpaper = new;
         self.scaling = scaling;
         self.power_saving = power_saving;
+        self.low_memory = low_memory;
         self.audio_heal = AudioHeal::new();
         self.anim.set_base(transition::crop_base(&self.wallpaper));
         if media_only {
@@ -5193,6 +5217,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
 
         for _ in 0..MAX * 3 {
@@ -5227,6 +5252,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
 
         // Away: every tick parks instead of restarting, however long it lasts.
@@ -5276,6 +5302,7 @@ mod tests {
             Wallpaper::default(),
             Scaling::default(),
             PowerSaving::default(),
+            false,
         );
         assert_eq!(o.generation, 0, "a fresh output has not respawned yet");
 
@@ -5566,6 +5593,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
         assert_eq!(o.last_down, "never_started");
         o.supervise(false, 5, true);
@@ -5606,6 +5634,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
         assert!(!o.giveup_reported);
         // MAX failing restarts, then the tick that crosses the cap.
@@ -5711,6 +5740,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
         o.respawn(false, false);
         assert!(
@@ -5736,6 +5766,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
                 },
                 Scaling::Balanced,
                 PowerSaving::Full,
+                false,
                 false,
             );
             assert_eq!(

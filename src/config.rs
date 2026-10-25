@@ -1791,21 +1791,16 @@ impl Default for Wallpaper {
 }
 
 /// What pool the daemon auto-cycler draws from.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "lowercase")]
 pub enum CycleSource {
     /// The whole library, honouring the saved sort and folder view.
+    #[default]
     Library,
     /// Only entries filed in this collection.
     Collection(String),
     /// A filesystem folder watched outside the library.
     Folder(PathBuf),
-}
-
-impl Default for CycleSource {
-    fn default() -> Self {
-        CycleSource::Library
-    }
 }
 
 fn default_auto_cycle_interval() -> u32 {

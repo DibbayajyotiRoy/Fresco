@@ -98,13 +98,13 @@ pub fn covered_connectors<C: Connection>(
 
         for m in monitors {
             if is_fullscreen && overlap_at_least(x, y, w, h, m, threshold) {
-                covered.entry(m.connector.clone()).or_insert_with(|| {
-                    format!("fullscreen window ({:?})", title)
-                });
+                covered
+                    .entry(m.connector.clone())
+                    .or_insert_with(|| format!("fullscreen window ({:?})", title));
             } else if pause_on_covered && overlap_at_least(x, y, w, h, m, 0.9) {
-                covered.entry(m.connector.clone()).or_insert_with(|| {
-                    format!("covered window ({:?})", title)
-                });
+                covered
+                    .entry(m.connector.clone())
+                    .or_insert_with(|| format!("covered window ({:?})", title));
             }
         }
     }
@@ -116,11 +116,7 @@ fn wm_class_is_fresco<C: Connection>(conn: &C, win: Window, atoms: &Atoms) -> bo
     conn.get_property(false, win, atoms.WM_CLASS, AtomEnum::STRING, 0, 64)
         .ok()
         .and_then(|c| c.reply().ok())
-        .map(|r| {
-            r.value
-                .split(|&b| b == 0)
-                .any(|s| s == b"fresco-wallpaper")
-        })
+        .map(|r| r.value.split(|&b| b == 0).any(|s| s == b"fresco-wallpaper"))
         .unwrap_or(false)
 }
 

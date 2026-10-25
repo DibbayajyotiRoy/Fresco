@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "“{name}”, {display} üzerinde ayarlandı",
   "“{name}” set. Close the window; it keeps playing": "“{name}” ayarlandı. Pencereyi kapatabilirsiniz; oynatmaya devam eder",
   "↑↓ navigate · Enter run · Esc close": "↑↓ gezinme · Enter çalıştır · Esc kapat",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "Bir uygulama ekranı kapladığında duraklat",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Herhangi bir büyük pencere ekranın %90’ını kapladığında duraklatır; tam ekran uygulamalar her zaman duraklatır",
+  "Window covers screen": "Pencere ekranı kaplıyor"
 }

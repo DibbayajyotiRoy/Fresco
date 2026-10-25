@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "„{name}” setată pe {display}",
   "“{name}” set. Close the window; it keeps playing": "„{name}” setată. Închideți fereastra; continuă să ruleze",
   "↑↓ navigate · Enter run · Esc close": "↑↓ — navigare · Enter — executare · Esc — închidere",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "Pauză când o aplicație acoperă ecranul",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Face pauză când orice fereastră mare acoperă 90% din ecran; aplicațiile în ecran complet fac mereu pauză",
+  "Window covers screen": "Fereastră acoperă ecranul"
 }

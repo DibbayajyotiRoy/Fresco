@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "“{name}” {display}-তে সেট করা হয়েছে",
   "“{name}” set. Close the window; it keeps playing": "“{name}” সেট করা হয়েছে। উইন্ডো বন্ধ করুন; এটি চলতেই থাকবে",
   "↑↓ navigate · Enter run · Esc close": "↑↓ নেভিগেট · Enter চালান · Esc বন্ধ করুন",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "কোনো অ্যাপ স্ক্রিন ঢেকে দিলে বিরতি দিন",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "কোনো বড় উইন্ডো স্ক্রিনের 90% ঢেকে দিলে বিরতি দেয়; ফুলস্ক্রিন অ্যাপ চললে সবসময় বিরতি দেওয়া হয়",
+  "Window covers screen": "উইন্ডো স্ক্রিন ঢেকে রেখেছে"
 }

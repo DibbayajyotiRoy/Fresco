@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "“{name}” {display} पर सेट किया गया",
   "“{name}” set. Close the window; it keeps playing": "“{name}” सेट किया गया। विंडो बंद करें; यह चलता रहेगा",
   "↑↓ navigate · Enter run · Esc close": "↑↓ नेविगेट करें · Enter चलाएँ · Esc बंद करें",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "ऐप के स्क्रीन को ढकने पर रोकें",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "कोई भी बड़ी विंडो स्क्रीन का 90% ढकने पर रोकता है; फ़ुलस्क्रीन ऐप हमेशा रोकते हैं",
+  "Window covers screen": "विंडो स्क्रीन को ढक रही है"
 }

@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "Đã đặt “{name}” trên {display}",
   "“{name}” set. Close the window; it keeps playing": "Đã đặt “{name}”. Đóng cửa sổ lại, hình nền vẫn tiếp tục phát",
   "↑↓ navigate · Enter run · Esc close": "↑↓ di chuyển · Enter chạy · Esc đóng",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "Tạm dừng khi ứng dụng che phủ màn hình",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Tạm dừng khi bất kỳ cửa sổ lớn nào che phủ 90% màn hình; ứng dụng toàn màn hình luôn tạm dừng",
+  "Window covers screen": "Cửa sổ che phủ màn hình"
 }

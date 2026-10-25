@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "“{name}” diterapkan di {display}",
   "“{name}” set. Close the window; it keeps playing": "“{name}” diterapkan. Tutup jendela; wallpaper akan terus diputar",
   "↑↓ navigate · Enter run · Esc close": "↑↓ navigasi · Enter jalankan · Esc tutup",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "Jeda saat aplikasi menutupi layar",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Menjeda saat jendela besar apa pun menutupi 90% layar; aplikasi layar penuh selalu menjeda",
+  "Window covers screen": "Jendela menutupi layar"
 }

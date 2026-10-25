@@ -649,7 +649,7 @@
   "“{name}” set on {display}": "« {name} » défini sur {display}",
   "“{name}” set. Close the window; it keeps playing": "« {name} » défini. Fermez la fenêtre ; la lecture continue",
   "↑↓ navigate · Enter run · Esc close": "↑↓ naviguer · Entrée exécuter · Échap fermer",
-  "Pause when an app covers the screen": "Pause when an app covers the screen",
-  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
-  "Window covers screen": "Window covers screen"
+  "Pause when an app covers the screen": "Mettre en pause quand une application couvre l’écran",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Met en pause quand une grande fenêtre couvre 90% de l’écran ; les applications en plein écran mettent toujours en pause",
+  "Window covers screen": "Fenêtre couvrant l’écran"
 }

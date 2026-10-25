@@ -25,7 +25,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skipped, and a monitor that has a wallpaper of its own keeps it. The timer
   does not run while you have paused the wallpaper, while it is paused on
   battery, or while the screen is locked, and setting a wallpaper yourself
-  restarts the countdown. It keeps running while a fullscreen or covering
+  restarts the countdown. The countdown also starts when Fresco starts, when
+  you resume a paused wallpaper and when the screen is unlocked, so the first
+  change in each case comes a full interval later, never at once. The timer
+  keeps running while a fullscreen or covering
   window pauses playback, so the picture behind that window still changes. It
   works on X11, on Wayland compositors with live wallpapers, and on GNOME on
   Wayland, where it changes the still frame. The wallpaper the timer picks is
@@ -126,12 +129,10 @@ Not yet confirmed on real hardware, and the most useful things to check:
   and month names in English.
 - **Auto-cycle with pauses.** Set `interval_min = 1` and watch it. It should
   not change while you have paused the wallpaper, while it is paused on
-  battery or while the screen is locked. Reading the code, the timer is
-  cleared during those pauses, so the wallpaper may change as soon as playback
-  resumes, the screen unlocks or Fresco starts, instead of after a full
-  interval; the comments in the code say that is not intended, so tell us what
-  you see. Also check that a monitor with its own wallpaper stays put, and
-  that an emptied collection or folder just stops changing.
+  battery or while the screen is locked, and after Fresco starts, a resume or
+  an unlock the first change should come a full minute later, not at once.
+  Also check that a monitor with its own wallpaper stays put, and that an
+  emptied collection or folder just stops changing.
 - **Covering windows.** On X11, switch it on and try a window dragged to about
   95% of the screen, a windowed game and a maximized window: each should pause
   that monitor only, and closing or minimizing it should resume. On Sway,
@@ -139,9 +140,8 @@ Not yet confirmed on real hardware, and the most useful things to check:
 - **Low-memory mode.** Compare the memory shown by `fresco status` with
   `low_memory` off and on, with a large video, on X11 and on Wayland.
 - **Known gaps.** Auto-cycle, low-memory mode and the tray icon can only be set
-  in `config.toml` for now. "Pause when an app covers the screen", its tooltip
-  and "Window covers screen" are still in English in every language, and the
-  tooltip's "covers 90% of the screen" is exact only on X11.
+  in `config.toml` for now, and the tooltip of "Pause when an app covers the
+  screen" says 90%, which is exact only on X11.
 
 ## [1.1.51] — 2026-10-23
 

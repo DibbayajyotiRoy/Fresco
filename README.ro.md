@@ -31,7 +31,7 @@ Fresco transformă un videoclip, un GIF, o imagine, o succesiune de imagini sau 
 - **Control:** aplicația, o paletă de comenzi cu Ctrl+K și `fresco next` / `fresco prev` / `fresco random` pentru scurtături de tastatură.
 - **Instalare:** un pachet `.deb` pentru Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali și Deepin (script dintr-o linie, descărcare manuală sau magazinul de aplicații Deepin); compilare din sursă pe Fedora, Arch și altele — vedeți [Instalare](#instalare).
 - **Licență:** gratuit și open source sub [GPL-3.0-or-later](LICENSE), fără reclame și fără cont.
-- **Utilizatori:** peste 3.000 de persoane din 128 de țări. Ultima versiune: 1.1.51.
+- **Utilizatori:** peste 3.000 de persoane din 128 de țări. Ultima versiune: 1.1.52.
 
 ## Instalare
 
@@ -477,7 +477,7 @@ Conversația este identificată printr-un tichet aleatoriu generat separat de te
 | **Licență** | [GPL-3.0-or-later](LICENSE) — gratuit și open source, fără reclame și fără cont |
 | **Limbaj și stack** | Rust, GTK4 / libadwaita, libmpv; o randare mpvpaper inclusă pe Wayland |
 | **Prima versiune** | v0.0.1, iunie 2026 |
-| **Ultima versiune** | 1.1.51 (2026-10-23) — vedeți [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) pentru cea mai nouă |
+| **Ultima versiune** | 1.1.52 (2026-10-25) — vedeți [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) pentru cea mai nouă |
 | **Pachete** | `.deb` (amd64), script de instalare dintr-o linie, magazinul de aplicații Deepin; compilare din sursă în rest |
 | **Limbile interfeței** | Engleză plus 13 traduceri: chineză simplificată, rusă, spaniolă, franceză, germană, portugheză (Brazilia), turcă, vietnameză, indoneziană, hindi, bengaleză, română și arabă |
 | **Utilizatori** | Peste 3.000 de persoane din 128 de țări |
@@ -495,4 +495,4 @@ Rapoartele de bug-uri, cererile de funcții și PR-urile sunt binevenite — des
 
 ---
 
-<sub>Fresco este o aplicație gratuită și open source de fundal animat și imagine de fundal video pentru Linux (X11 și Wayland), cu widgeturi de versuri, ceas, vizualizator audio și copertă de album desenate în imaginea de fundal. Este o alternativă nativă la Wallpaper Engine pentru Linux și un însoțitor de muzică și ceas pentru instrumente precum Conky. Folosit de peste 3.000 de persoane din 128 de țări. Ultima actualizare: 2026-10-23.</sub>
+<sub>Fresco este o aplicație gratuită și open source de fundal animat și imagine de fundal video pentru Linux (X11 și Wayland), cu widgeturi de versuri, ceas, vizualizator audio și copertă de album desenate în imaginea de fundal. Este o alternativă nativă la Wallpaper Engine pentru Linux și un însoțitor de muzică și ceas pentru instrumente precum Conky. Folosit de peste 3.000 de persoane din 128 de țări. Ultima actualizare: 2026-10-25.</sub>

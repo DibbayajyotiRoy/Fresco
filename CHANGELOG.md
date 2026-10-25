@@ -4,6 +4,145 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.52] — 2026-10-25
+
+### Added
+- **Change the wallpaper by itself every few minutes.** Fresco's background
+  process can now step to the next wallpaper on a timer, so a set of
+  wallpapers rotates without you touching anything (PR #91). It is off by
+  default, and there is no switch for it in the app yet: add an `[auto_cycle]`
+  block to `~/.config/fresco/config.toml` with `enabled = true`,
+  `interval_min` (minutes between changes; 30 if left out, 0 turns it off),
+  `shuffle = true` to pick a random wallpaper instead of the next one (it
+  never picks the one already showing), and `source`: the whole library
+  (`source = { kind = "library" }`, in the order the grid shows it, linked
+  folders included), one collection (`source = { kind = "collection", value
+  = "<collection id>" }`, in its manual order) or a plain folder (`source = {
+  kind = "folder", value = "/path/to/folder" }`: the images, GIFs and videos
+  directly inside it, by file name, without subfolders). Wallpapers taken from
+  the library or a collection keep the settings you saved for them; a file
+  from a plain folder plays with the defaults. Files that are missing are
+  skipped, and a monitor that has a wallpaper of its own keeps it. The timer
+  does not run while you have paused the wallpaper, while it is paused on
+  battery, or while the screen is locked, and setting a wallpaper yourself
+  restarts the countdown. It keeps running while a fullscreen or covering
+  window pauses playback, so the picture behind that window still changes. It
+  works on X11, on Wayland compositors with live wallpapers, and on GNOME on
+  Wayland, where it changes the still frame. The wallpaper the timer picks is
+  not written to `config.toml`, so after Fresco restarts it is the one you set
+  yourself that comes back.
+- **A low-memory mode for machines with little RAM.** Set `low_memory = true`
+  in `config.toml` and the video player reads ahead 8 MiB instead of 16 MiB,
+  keeps no already-played data (the X11 player kept 4 MiB) and decodes with
+  two threads. On Wayland the bundled mpvpaper now gets the same limits; until
+  now Fresco passed it none. The lock-screen video that Fresco draws itself
+  gets them too. It takes effect the next time the wallpaper is
+  applied or restarted. There is no switch in the app yet, and how much memory
+  it saves has not been measured.
+- **Pause when any large window covers the screen, not only a maximized
+  one** (PR #91). The switch in Menu, Behavior, formerly "Pause when an app is
+  maximized", is now "Pause when an app covers the screen", and a config that
+  had the old switch on keeps it on. On X11, with the switch on, a window that
+  covers at least 90% of a monitor pauses the wallpaper on that monitor,
+  maximized or not, so a window dragged to nearly full size or a windowed game
+  now counts. Minimized windows, panels, desktop-icon windows and Fresco's own
+  windows never count. Fullscreen windows always pause it, switch or no
+  switch. On Wayland (Sway, Hyprland and other wlroots compositors, and
+  COSMIC) the compositor does not tell Fresco how big a window is, so only
+  maximized windows count and a large window that is not maximized does not.
+  KDE Plasma still pauses for fullscreen windows, and for maximized ones with
+  the switch on.
+- **A system-tray icon with a small menu.** When Fresco's background process
+  starts with the wallpaper switched on, it shows an icon in the system tray
+  with Pause (or Resume), Next, Random, Open Fresco, Stop and Quit (PR #91).
+  Next and Random do what `fresco next` and `fresco random` do, and Open Fresco
+  opens the app. Stop turns the wallpaper off and keeps it off at the next
+  login, like Stop in the app; Quit ends the background process without
+  switching the wallpaper off, so "Restore on login" brings it back. The
+  Pause/Resume label follows whether you have paused the wallpaper and is
+  refreshed every two seconds. The icon is on by default; set
+  `tray_icon = false` in `config.toml` to remove it, which takes effect the
+  next time the background process starts. On a desktop with no tray, such as
+  stock GNOME, nothing is shown and Fresco works as before. The menu words are
+  in English in every language for now.
+- **Fresco is available in Arabic (العربية), with a right-to-left layout**
+  (PRs #84, #88, #90). Choose it in Settings, or leave the language on System
+  and an `ar_*` locale such as `ar_SA` or `ar_EG` picks it. When the language
+  is Arabic the whole window is mirrored: the close button moves to the left,
+  text is right-aligned, toolbars and menus run right to left, the update
+  progress bar runs right to left, and Alt+Right replaces Alt+Left as "back" in
+  the menu. A computer set to an Arabic locale but running Fresco in another
+  language gets the normal layout. Changing the language still needs a
+  restart. The crop editor and the transition preview are not mirrored on
+  purpose, because they draw the wallpaper itself. Arabic text on the
+  wallpaper (the clock, lyrics and other widgets) is joined and read right to
+  left, and drawn without letter spacing, which would open a gap in every
+  join. The 12-hour clock with the Arabic suffix (ص or م) kept losing its
+  digits, because the text library (cosmic-text 0.19.0) drops a number at the
+  start of a right-to-left line; Fresco now works around that. The `.deb` now
+  recommends `fonts-noto-core` for the Arabic fonts. The translation has not
+  been reviewed by a native Arabic speaker yet.
+- **`fresco status` and the app now say why the wallpaper is paused** (PRs
+  #86, #91). The `Paused` row reads, for example, `yes (on battery — turn off
+  Pause on battery to keep playing)`, `yes (you paused it)`, `yes (screen is
+  locked)`, `yes (a fullscreen app is open)` or `yes (a window covers most of
+  the screen)`, and the PAUSED pill in the app shows a short reason beside it:
+  "Paused by you", "On battery", "Screen locked", "Fullscreen app open" or
+  "Window covers screen". Before, the row said `no` and the pill said PLAYING
+  while a fullscreen app or the lock screen was holding the wallpaper. Scripts
+  get a new `paused_reason` field in `fresco status` JSON (`user`, `battery`,
+  `locked`, `fullscreen`, `covered`, or `null`); `paused` keeps meaning only
+  "you paused it, or it is paused on battery". If several things hold the
+  pause, only the first in that order is shown. On KDE Plasma the reason is
+  only ever yours or the battery, because the Plasma plugin handles fullscreen
+  by itself, and on GNOME on Wayland no reason is reported.
+
+### Docs and website
+- **The README is now available in 14 languages**, with Arabic (العربية) added
+  to the language switcher of every README (PR #85). The Arabic page uses the
+  app's own button names and the words Arabic speakers search for
+  ("خلفية حية لينكس", "خلفيات متحركة"). No native speaker has reviewed it yet.
+- **The website is now in Arabic and Turkish**, 9 languages in all (PR #87).
+  The Arabic site is laid out right to left, with Arabic search titles and
+  keywords, and the Turkish site follows the app's own Turkish wording.
+  Neither translation has been reviewed by a native speaker yet.
+
+### Packaging
+- **`fonts-noto-core` is now a Recommends of the `.deb`**, so Arabic text on
+  the wallpaper is drawn with a real Arabic face. Nothing else is required.
+
+### Notes for testers
+Not yet confirmed on real hardware, and the most useful things to check:
+- **The tray icon.** It has not been tried on a real desktop. Stock GNOME shows
+  nothing unless the AppIndicator (KStatusNotifierItem) extension is
+  installed. On a desktop that has a tray, check that the icon appears, that
+  each menu item does what it says, and that Stop stays stopped after logging
+  out and back in.
+- **Arabic and right-to-left.** The layout was checked on an isolated X
+  server, never on a real right-to-left desktop session. Look for a mirrored
+  layout that reads wrongly, text that is cut off or misplaced, and Arabic
+  wording a native speaker would change. The lyrics widget (libass) was not
+  tested with Arabic, and the world clock still writes AM/PM and the weekday
+  and month names in English.
+- **Auto-cycle with pauses.** Set `interval_min = 1` and watch it. It should
+  not change while you have paused the wallpaper, while it is paused on
+  battery or while the screen is locked. Reading the code, the timer is
+  cleared during those pauses, so the wallpaper may change as soon as playback
+  resumes, the screen unlocks or Fresco starts, instead of after a full
+  interval; the comments in the code say that is not intended, so tell us what
+  you see. Also check that a monitor with its own wallpaper stays put, and
+  that an emptied collection or folder just stops changing.
+- **Covering windows.** On X11, switch it on and try a window dragged to about
+  95% of the screen, a windowed game and a maximized window: each should pause
+  that monitor only, and closing or minimizing it should resume. On Sway,
+  Hyprland and COSMIC only maximized windows should pause it.
+- **Low-memory mode.** Compare the memory shown by `fresco status` with
+  `low_memory` off and on, with a large video, on X11 and on Wayland.
+- **Known gaps.** Auto-cycle, low-memory mode and the tray icon can only be set
+  in `config.toml` for now. "Pause when an app covers the screen", its tooltip
+  and "Window covers screen" are still in English in every language, and the
+  tooltip's "covers 90% of the screen" is exact only on X11.
+
 ## [1.1.51] — 2026-10-23
 
 ### Added

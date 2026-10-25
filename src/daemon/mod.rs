@@ -55,6 +55,18 @@ use mpvpaper::WaylandPlayer;
 use transition::{Anim, Step, Surface};
 use x11win::{Atoms, WallpaperWindow, WindowKind};
 
+/// Resolve the next auto-cycle wallpaper. When the `gui` feature is disabled the
+/// daemon has no access to the library/collection sources, so cycling is a no-op.
+#[cfg(feature = "gui")]
+fn auto_cycle_next(config: &Config, current: &Wallpaper) -> Option<Wallpaper> {
+    crate::cycle::next_wallpaper(config, current)
+}
+
+#[cfg(not(feature = "gui"))]
+fn auto_cycle_next(_config: &Config, _current: &Wallpaper) -> Option<Wallpaper> {
+    None
+}
+
 const TICK: Duration = Duration::from_millis(100);
 
 /// Floor on a widget-clamped wait, so a widget that reports itself permanently
@@ -932,6 +944,10 @@ pub struct Daemon {
     /// un-pausing a video the user paused themself. `None` = not currently
     /// applied.
     lock_paused: Option<bool>,
+    /// Daemon-side auto-cycle timer. `None` until the first tick after a cycle
+    /// becomes enabled, so the first interval starts then rather than from
+    /// daemon startup.
+    last_cycle: Option<Instant>,
 }
 
 impl Daemon {
@@ -976,6 +992,7 @@ impl Daemon {
             last_heartbeat_check: Instant::now(),
             lock: LockRuntime::new(),
             lock_paused: None,
+            last_cycle: None,
         })
     }
 
@@ -1062,6 +1079,68 @@ impl Daemon {
                 }
             }
         }
+    }
+
+    /// Advance the daemon-side auto-cycle if it is enabled and the interval
+    /// has elapsed. Paused or locked desktops never count toward the interval,
+    /// so the first cycle after resuming waits the full interval rather than
+    /// firing immediately.
+    fn check_auto_cycle(&mut self, now: Instant) {
+        if !self.config.auto_cycle.enabled || self.config.auto_cycle.interval_min == 0 {
+            self.last_cycle = None;
+            return;
+        }
+        if self.user_paused || self.battery_paused || self.lock.locked {
+            self.last_cycle = None;
+            return;
+        }
+        let interval = Duration::from_secs(u64::from(self.config.auto_cycle.interval_min) * 60);
+        if let Some(last) = self.last_cycle {
+            if now.duration_since(last) < interval {
+                return;
+            }
+        }
+        self.last_cycle = Some(now);
+        let current = self.config.wallpaper.clone();
+        let Some(next) = auto_cycle_next(&self.config, &current) else {
+            return;
+        };
+        if let Some(path) = next.effective_path() {
+            log::info!("auto-cycle: switching to {}", path.display());
+        } else {
+            log::info!("auto-cycle: switching wallpaper");
+        }
+        self.config.wallpaper = next.clone();
+        self.apply_auto_cycle_wallpaper();
+    }
+
+    /// Apply an auto-cycled wallpaper to the renderers showing the default
+    /// (non-per-monitor-override) wallpaper, plus the usual still-frame hosts.
+    fn apply_auto_cycle_wallpaper(&mut self) {
+        let wp = &self.config.wallpaper;
+        let scaling = self.config.scaling;
+        let power_saving = self.config.power_saving;
+        for r in &mut self.renderers {
+            if self.config.monitors.contains_key(&r.window.connector) {
+                continue;
+            }
+            r.player.set_rotation(wp.rotation);
+            r.player.apply_scalers(
+                scaling,
+                wp.effective_power_saving(power_saving),
+                wp.rotation,
+            );
+            r.player.apply_crop(wp);
+            r.anim.set_base(transition::crop_base(wp));
+            if let Some(path) = wp.effective_path() {
+                r.anim.start(wp.transition, path.to_path_buf(), &r.player);
+            }
+            r.cache_raised.set(false);
+        }
+        overview::apply(wp);
+        cosmic_bg::apply(&self.config);
+        dde_lock::apply(&self.config);
+        kde_desktop::apply(&self.config);
     }
 
     /// Push any widget overlay whose content changed onto the renderer that
@@ -1515,6 +1594,7 @@ impl Daemon {
             self.check_startup_renderers(now);
             self.check_cold_boot_stall(now);
             self.reconcile_lock(now);
+            self.check_auto_cycle(now);
             // While locked, the desktop widget engine is frozen rather than
             // ticked: `clear_for_lock` may have left the clock/disc believing
             // they are "due" (cleared, not merely hidden), and calling
@@ -1551,6 +1631,11 @@ impl Daemon {
             Request::Apply => {
                 self.config_watch.mark();
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
+                self.last_cycle = if self.config.auto_cycle.enabled {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
                 self.sched.hold_current(&self.config);
                 // Widget settings live in the same file, so a GUI toggle arrives
                 // here. Re-push unconditionally: a style change must repaint even
@@ -2556,10 +2641,67 @@ fn run_x11() -> Result<()> {
     daemon.run()
 }
 
+/// Compute how long the GNOME static-frame loop may block before it needs to
+/// check the auto-cycle again. When cycling is enabled the timeout is capped so
+/// the cycle fires promptly; otherwise the usual long heartbeat timeout is used.
+fn gnome_static_cycle_timeout(config: &Config, last_cycle: Option<Instant>) -> Duration {
+    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+        return HEARTBEAT_RECHECK_INTERVAL;
+    }
+    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
+    let since = last_cycle.map_or(Duration::ZERO, |last| Instant::now().duration_since(last));
+    let remaining = interval.saturating_sub(since);
+    // Cap at one second so we never oversleep the cycle by much, but still
+    // avoid a busy loop.
+    std::cmp::min(
+        remaining.max(Duration::from_secs(1)),
+        HEARTBEAT_RECHECK_INTERVAL,
+    )
+}
+
+/// Advance the daemon-side auto-cycle in GNOME static-frame mode. Only the
+/// still-frame hosts are updated; there is no live renderer.
+fn gnome_static_auto_cycle(
+    config: &mut Config,
+    last_cycle: &mut Option<Instant>,
+    now: Instant,
+    locked: bool,
+) {
+    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+        *last_cycle = None;
+        return;
+    }
+    if locked {
+        *last_cycle = None;
+        return;
+    }
+    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
+    if let Some(last) = *last_cycle {
+        if now.duration_since(last) < interval {
+            return;
+        }
+    }
+    *last_cycle = Some(now);
+    let current = config.wallpaper.clone();
+    let Some(next) = auto_cycle_next(config, &current) else {
+        return;
+    };
+    if let Some(path) = next.effective_path() {
+        log::info!("auto-cycle: switching to {}", path.display());
+    } else {
+        log::info!("auto-cycle: switching wallpaper");
+    }
+    config.wallpaper = next;
+    if config.enabled {
+        overview::apply(&config.wallpaper);
+        cosmic_bg::apply(config);
+    }
+}
+
 /// GNOME-on-Wayland fallback: GNOME Mutter has no layer-shell, so a live
 /// wallpaper window is impossible. Reuse the existing still-frame path (set as
 /// the desktop background via gsettings) and serve IPC so the GUI can
-/// apply/stop. Blocks on the control channel between commands → ~0% CPU.
+/// apply/stop. Blocks on the command channel between commands → ~0% CPU.
 fn run_gnome_static() -> Result<()> {
     let mut config = Config::load().unwrap_or_default();
     if !config.enabled {
@@ -2583,6 +2725,7 @@ fn run_gnome_static() -> Result<()> {
     // cadence of its own, which would work against this mode's whole point
     // ("blocks on the control channel between commands -> ~0% CPU").
     let mut lock_rt = LockRuntime::new();
+    let mut last_cycle: Option<Instant> = None;
 
     // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
     // never wakes on its own, so a daemon left running for days without an
@@ -2590,10 +2733,13 @@ fn run_gnome_static() -> Result<()> {
     // then gone quiet in the usage numbers. `heartbeat` self-throttles to
     // roughly once a day via its own marker file either way.
     loop {
-        let (req, reply) = match commands.recv_timeout(HEARTBEAT_RECHECK_INTERVAL) {
+        let timeout = gnome_static_cycle_timeout(&config, last_cycle);
+        let (req, reply) = match commands.recv_timeout(timeout) {
             Ok(pair) => pair,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                lock_rt.poll(Instant::now());
+                let now = Instant::now();
+                lock_rt.poll(now);
+                gnome_static_auto_cycle(&mut config, &mut last_cycle, now, lock_rt.locked);
                 crate::telemetry::heartbeat(Some("gnome-static"), None, None);
                 continue;
             }
@@ -2655,9 +2801,11 @@ fn run_gnome_static() -> Result<()> {
         // redecode too.
         if is_apply {
             if config.enabled {
+                last_cycle = Some(Instant::now());
                 overview::apply(&config.wallpaper);
                 cosmic_bg::apply(&config);
             } else {
+                last_cycle = None;
                 overview::restore();
                 cosmic_bg::restore();
             }
@@ -2705,6 +2853,61 @@ fn static_status(config: &Config, lockscreen: &LockStatus) -> StatusReply {
         lockscreen: Some(lockscreen.clone()),
         wallpaper_path: playing_media_path(&config.wallpaper),
     }
+}
+
+/// Apply the daemon-side auto-cycle on Wayland. Same rules as the X11 path:
+/// enabled + interval elapsed + not paused + not locked. The default wallpaper
+/// (outputs without a per-monitor override) is switched media-only; lock-screen
+/// and still-frame hosts are updated too.
+fn wayland_auto_cycle(
+    config: &mut Config,
+    outputs: &mut std::collections::BTreeMap<String, WlOutput>,
+    last_cycle: &mut Option<Instant>,
+    now: Instant,
+    paused: bool,
+    locked: bool,
+) {
+    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+        *last_cycle = None;
+        return;
+    }
+    if paused || locked {
+        *last_cycle = None;
+        return;
+    }
+    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
+    if let Some(last) = *last_cycle {
+        if now.duration_since(last) < interval {
+            return;
+        }
+    }
+    *last_cycle = Some(now);
+    let current = config.wallpaper.clone();
+    let Some(next) = auto_cycle_next(config, &current) else {
+        return;
+    };
+    if let Some(path) = next.effective_path() {
+        log::info!("auto-cycle: switching to {}", path.display());
+    } else {
+        log::info!("auto-cycle: switching wallpaper");
+    }
+    config.wallpaper = next.clone();
+    let paused_for_outputs = false;
+    for (connector, o) in outputs.iter_mut() {
+        if config.monitors.contains_key(connector) {
+            continue;
+        }
+        let effective_ps = config.wallpaper.effective_power_saving(config.power_saving);
+        o.apply_wallpaper(
+            config.wallpaper.clone(),
+            config.scaling,
+            effective_ps,
+            paused_for_outputs,
+        );
+    }
+    cosmic_bg::apply(config);
+    dde_lock::apply(config);
+    kde_desktop::apply(config);
 }
 
 /// The experimental Wayland (mpvpaper) backend is opt-in while it stabilizes.
@@ -2803,6 +3006,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut next_output_probe = Instant::now();
     let mut probed = false;
     let mut sched = SchedState::default();
+    let mut last_cycle: Option<Instant> = None;
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
     // wlroots compositors (wlr protocol) and COSMIC (zcosmic-toplevel-info); absent
@@ -2927,6 +3131,11 @@ fn run_wayland_layershell() -> Result<()> {
                         clear_wayland_widgets(&mut widget_engine, &outputs);
                         config_watch.mark();
                         config = Config::load().unwrap_or_else(|_| config.clone());
+                        last_cycle = if config.auto_cycle.enabled {
+                            Some(Instant::now())
+                        } else {
+                            None
+                        };
                         sched.hold_current(&config);
                         // Widget settings ride in the same file, so a GUI toggle
                         // arrives here. invalidate() re-pushes even when the
@@ -3161,6 +3370,16 @@ fn run_wayland_layershell() -> Result<()> {
                 }
             }
         }
+
+        let paused = user_paused || battery_paused || lock_rt.forces_pause(&config);
+        wayland_auto_cycle(
+            &mut config,
+            &mut outputs,
+            &mut last_cycle,
+            now,
+            paused,
+            lock_rt.locked,
+        );
 
         // Advance the lock engine's own content (clock/battery/media) while
         // locked. `Desktop` returns updates to dispatch here, exactly like

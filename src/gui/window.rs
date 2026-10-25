@@ -2082,7 +2082,7 @@ fn plan_sections(
 /// (Favorites lead, so a starred entry would otherwise appear twice). What
 /// `fresco next` / `prev` cycle through, so a hotkey steps through the same
 /// sequence the user sees. Honours the open folder and sort like the grid.
-pub(super) fn display_order(
+pub(crate) fn display_order(
     entries: &[LibraryEntry],
     collections: &[library::Collection],
     view: library::LibraryView,
@@ -9609,7 +9609,7 @@ fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
             .any(|w| entry_matches_wallpaper(entry, w))
 }
 
-pub(super) fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
+pub(crate) fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
     if entry.kind != w.kind {
         return false;
     }

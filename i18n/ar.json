@@ -294,7 +294,6 @@
   "MISSING": "مفقود",
   "Manage folders…": "إدارة المجلدات…",
   "Margin": "الهامش",
-  "Maximized window": "نافذة مكبّرة",
   "Menu": "القائمة",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "القائمة ← “تصفح الخلفيات…” لاختيارات مرخّصة منتقاة بنقرتين.",
   "Message the maintainer": "مراسلة المشرف",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "الصق رابط Pinterest أو رابط فيديو/صورة مباشرًا",
   "Pause": "إيقاف مؤقت",
   "Pause on battery": "إيقاف مؤقت عند العمل على البطارية",
-  "Pause when an app is maximized": "إيقاف مؤقت عند تكبير أي تطبيق",
   "Paused by you": "إيقاف مؤقت يدوي",
   "Per-monitor wallpapers": "خلفية مستقلة لكل شاشة",
   "Pick a style, then fine-tune it.": "اختر نمطًا، ثم اضبطه بدقة.",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "مثل خلفية سطح المكتب",
   "Saved — takes effect when a wallpaper is playing.": "تم الحفظ — يسري عند تشغيل خلفية.",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "تم الحفظ، لكن سطح المكتب هذا لا يستطيع عرض Fresco على شاشة القفل بعد — ويواصل استخدام خلفيته الخاصة",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "يوفر موارد المعالج ووحدة الرسومات في الرسومات المدمجة؛ وتتوقف تطبيقات ملء الشاشة مؤقتًا دائمًا",
   "Scaling quality": "جودة التحجيم",
   "Schedule": "الجدول الزمني",
   "Screen locked": "الشاشة مقفلة",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "تم تعيين “{name}” كخلفية",
   "“{name}” set on {display}": "تم تعيين “{name}” على {display}",
   "“{name}” set. Close the window; it keeps playing": "تم تعيين “{name}”. أغلق النافذة؛ سيستمر التشغيل",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ تنقّل · Enter تشغيل · Esc إغلاق"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ تنقّل · Enter تشغيل · Esc إغلاق",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

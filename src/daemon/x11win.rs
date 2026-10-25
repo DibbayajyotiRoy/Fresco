@@ -35,6 +35,7 @@ x11rb::atom_manager! {
         UTF8_STRING,
         _MOTIF_WM_HINTS,
         WM_HINTS,
+        WM_CLASS,
     }
 }
 
@@ -481,6 +482,7 @@ pub(super) mod tests {
             UTF8_STRING: 13,
             _MOTIF_WM_HINTS: 14,
             WM_HINTS: 15,
+            WM_CLASS: 19,
         }
     }
 

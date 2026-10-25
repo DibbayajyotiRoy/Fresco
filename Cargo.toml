@@ -22,6 +22,9 @@ daemon = [
     "dep:tiny-skia", "dep:cosmic-text",
     # World-clock widget: IANA zone names -> UTC offsets (see src/worldclock.rs).
     "dep:chrono-tz",
+    # System-tray icon (D-Bus StatusNotifierItem). Degrades to nothing on
+    # desktops without a tray host (e.g. stock GNOME).
+    "dep:ksni",
 ]
 
 [[bin]]
@@ -81,6 +84,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # full rationale, including why cosmic-text won over fontdue/ab_glyph.
 tiny-skia = { version = "0.12", optional = true }
 cosmic-text = { version = "0.19", optional = true }
+# System-tray icon for the daemon (D-Bus StatusNotifierItem). Optional because
+# the tray is owned by the daemon binary; the GUI does not need it.
+ksni = { version = "0.3", features = ["blocking"], optional = true }
 
 [profile.release]
 opt-level = 3

@@ -294,7 +294,6 @@
   "MISSING": "文件缺失",
   "Manage folders…": "管理分类…",
   "Margin": "边距",
-  "Maximized window": "窗口已最大化",
   "Menu": "菜单",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "菜单 → “浏览壁纸…”，两次点击即可选用精选的授权壁纸。",
   "Message the maintainer": "联系维护者",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "粘贴 Pinterest 链接或视频/图片直链",
   "Pause": "暂停",
   "Pause on battery": "使用电池时暂停",
-  "Pause when an app is maximized": "应用窗口最大化时暂停",
   "Paused by you": "已手动暂停",
   "Per-monitor wallpapers": "每台显示器独立壁纸",
   "Pick a style, then fine-tune it.": "先选择样式，再微调细节。",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "与桌面壁纸相同",
   "Saved — takes effect when a wallpaper is playing.": "已保存——播放壁纸时生效。",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "已保存，但此桌面环境暂时无法在锁屏上显示 Fresco——它会继续使用自己的背景",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "在集成显卡上节省 CPU 和 GPU；全屏应用始终会暂停",
   "Scaling quality": "缩放质量",
   "Schedule": "定时切换",
   "Screen locked": "屏幕已锁定",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "已将“{name}”设为壁纸",
   "“{name}” set on {display}": "已在 {display} 上设置“{name}”",
   "“{name}” set. Close the window; it keeps playing": "已设置“{name}”。关闭窗口后它仍会继续播放",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ 导航 · Enter 执行 · Esc 关闭"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ 导航 · Enter 执行 · Esc 关闭",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

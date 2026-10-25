@@ -294,7 +294,6 @@
   "MISSING": "LIPSĂ",
   "Manage folders…": "Gestionare dosare…",
   "Margin": "Margine",
-  "Maximized window": "Fereastră maximizată",
   "Menu": "Meniu",
   "Menu → “Browse wallpapers…” for curated, licensed picks in two clicks.": "Meniu → „Răsfoire imagini de fundal…” pentru selecții licențiate, curatoriate, în două clicuri.",
   "Message the maintainer": "Trimiteți un mesaj întreținătorului",
@@ -378,7 +377,6 @@
   "Paste a Pinterest or direct video/image link": "Lipiți un link Pinterest sau un link direct către video/imagine",
   "Pause": "Pauză",
   "Pause on battery": "Pauză când e pe baterie",
-  "Pause when an app is maximized": "Pauză când o aplicație este maximizată",
   "Paused by you": "Pus pe pauză manual",
   "Per-monitor wallpapers": "Imagini de fundal per monitor",
   "Pick a style, then fine-tune it.": "Alegeți un stil, apoi ajustați-l în detaliu.",
@@ -447,7 +445,6 @@
   "Same as desktop wallpaper": "La fel ca imaginea de fundal a spațiului de lucru",
   "Saved — takes effect when a wallpaper is playing.": "Salvat — are efect când o imagine de fundal este redată.",
   "Saved, but this desktop can’t show Fresco on the lock screen yet — it keeps using its own background": "Salvat, dar acest desktop nu poate încă afișa Fresco pe ecranul de blocare — continuă să folosească propriul fundal",
-  "Saves CPU and GPU on integrated graphics; fullscreen apps always pause": "Economisește CPU și GPU pe grafica integrată; aplicațiile în ecran complet fac mereu pauză",
   "Scaling quality": "Calitatea scalării",
   "Schedule": "Program",
   "Screen locked": "Ecran blocat",
@@ -651,5 +648,8 @@
   "“{name}” set as wallpaper": "„{name}” setată ca imagine de fundal",
   "“{name}” set on {display}": "„{name}” setată pe {display}",
   "“{name}” set. Close the window; it keeps playing": "„{name}” setată. Închideți fereastra; continuă să ruleze",
-  "↑↓ navigate · Enter run · Esc close": "↑↓ — navigare · Enter — executare · Esc — închidere"
+  "↑↓ navigate · Enter run · Esc close": "↑↓ — navigare · Enter — executare · Esc — închidere",
+  "Pause when an app covers the screen": "Pause when an app covers the screen",
+  "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pauses when any large window covers 90% of the screen; fullscreen apps always pause",
+  "Window covers screen": "Window covers screen"
 }

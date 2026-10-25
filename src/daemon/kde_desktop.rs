@@ -291,7 +291,7 @@ fn js_str(s: &str) -> String {
 /// The plugin's `PauseMode` (`contents/config/main.xml`): 0 pauses the video
 /// while a window is fullscreen, 1 also while one is maximized, 2 never.
 fn kde_pause_mode(config: &Config) -> i32 {
-    i32::from(config.pause_on_maximized)
+    i32::from(config.pause_on_covered)
 }
 
 /// The plugin's `FillMode` (`contents/config/main.xml`) for a fit option, as
@@ -509,7 +509,7 @@ mod tests {
     fn pause_mode_follows_the_maximized_switch() {
         let mut config = Config::default();
         assert_eq!(kde_pause_mode(&config), 0);
-        config.pause_on_maximized = true;
+        config.pause_on_covered = true;
         assert_eq!(kde_pause_mode(&config), 1);
     }
 

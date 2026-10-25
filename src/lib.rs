@@ -10,6 +10,8 @@ pub mod catalog;
 pub mod cli;
 pub mod clock;
 pub mod config;
+#[cfg(feature = "gui")]
+pub mod cycle;
 #[cfg(feature = "daemon")]
 pub mod daemon;
 #[cfg(any(feature = "gui", feature = "daemon"))]

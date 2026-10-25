@@ -23,6 +23,7 @@ mod notifier;
 mod overview;
 pub mod saver;
 mod transition;
+mod tray;
 mod wayland_outputs;
 mod webbridge;
 #[allow(dead_code)]
@@ -55,6 +56,18 @@ use mpvpaper::WaylandPlayer;
 use transition::{Anim, Step, Surface};
 use x11win::{Atoms, WallpaperWindow, WindowKind};
 
+/// Resolve the next auto-cycle wallpaper. When the `gui` feature is disabled the
+/// daemon has no access to the library/collection sources, so cycling is a no-op.
+#[cfg(feature = "gui")]
+fn auto_cycle_next(config: &Config, current: &Wallpaper) -> Option<Wallpaper> {
+    crate::cycle::next_wallpaper(config, current)
+}
+
+#[cfg(not(feature = "gui"))]
+fn auto_cycle_next(_config: &Config, _current: &Wallpaper) -> Option<Wallpaper> {
+    None
+}
+
 const TICK: Duration = Duration::from_millis(100);
 
 /// Floor on a widget-clamped wait, so a widget that reports itself permanently
@@ -74,7 +87,7 @@ fn config_mtime() -> Option<std::time::SystemTime> {
         .ok()
 }
 
-/// Gets the GUI's "Pause on battery" and "Pause when an app is maximized"
+/// Gets the GUI's "Pause on battery" and "Pause when an app covers the screen"
 /// switches to the running daemon. Those switches only save config.toml: an
 /// `Apply` would rebuild the renderers (X11) or re-issue `loadfile` (Wayland),
 /// restarting the video for a setting that never touches it. So the run loops
@@ -121,14 +134,14 @@ impl PauseConfigWatch {
 
 /// Copy the two pause switches from `fresh` into `cached`, leaving every other
 /// field (a scheduled wallpaper swap lives only in `cached`) alone. Returns
-/// which of them changed: `(pause_on_battery, pause_on_maximized)`.
+/// which of them changed: `(pause_on_battery, pause_on_covered)`.
 fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     let changed = (
         cached.pause_on_battery != fresh.pause_on_battery,
-        cached.pause_on_maximized != fresh.pause_on_maximized,
+        cached.pause_on_covered != fresh.pause_on_covered,
     );
     cached.pause_on_battery = fresh.pause_on_battery;
-    cached.pause_on_maximized = fresh.pause_on_maximized;
+    cached.pause_on_covered = fresh.pause_on_covered;
     changed
 }
 /// Audio recovery cadence/backoff (see `AudioHeal`).
@@ -870,9 +883,9 @@ pub struct Daemon {
     last_battery_check: Instant,
     last_cache_check: Instant,
     last_sync_check: Instant,
-    /// Connectors currently covered by a viewable fullscreen (or, with
-    /// `pause_on_maximized`, maximized) window (EWMH), with a "kind window
-    /// (title)" description for the log.
+    /// Connectors currently covered by a viewable fullscreen (always) or large
+    /// non-fullscreen (when `pause_on_covered`) window (EWMH), with a "kind
+    /// window (title)" description for the log.
     fullscreen_covered: std::collections::HashMap<String, String>,
     last_fullscreen_check: Instant,
     sched: SchedState,
@@ -932,6 +945,10 @@ pub struct Daemon {
     /// un-pausing a video the user paused themself. `None` = not currently
     /// applied.
     lock_paused: Option<bool>,
+    /// Daemon-side auto-cycle timer. `None` until the first tick after a cycle
+    /// becomes enabled, so the first interval starts then rather than from
+    /// daemon startup.
+    last_cycle: Option<Instant>,
 }
 
 impl Daemon {
@@ -976,6 +993,7 @@ impl Daemon {
             last_heartbeat_check: Instant::now(),
             lock: LockRuntime::new(),
             lock_paused: None,
+            last_cycle: None,
         })
     }
 
@@ -1062,6 +1080,68 @@ impl Daemon {
                 }
             }
         }
+    }
+
+    /// Advance the daemon-side auto-cycle if it is enabled and the interval
+    /// has elapsed. Paused or locked desktops never count toward the interval,
+    /// so the first cycle after resuming waits the full interval rather than
+    /// firing immediately.
+    fn check_auto_cycle(&mut self, now: Instant) {
+        if !self.config.auto_cycle.enabled || self.config.auto_cycle.interval_min == 0 {
+            self.last_cycle = None;
+            return;
+        }
+        if self.user_paused || self.battery_paused || self.lock.locked {
+            self.last_cycle = None;
+            return;
+        }
+        let interval = Duration::from_secs(u64::from(self.config.auto_cycle.interval_min) * 60);
+        if let Some(last) = self.last_cycle {
+            if now.duration_since(last) < interval {
+                return;
+            }
+        }
+        self.last_cycle = Some(now);
+        let current = self.config.wallpaper.clone();
+        let Some(next) = auto_cycle_next(&self.config, &current) else {
+            return;
+        };
+        if let Some(path) = next.effective_path() {
+            log::info!("auto-cycle: switching to {}", path.display());
+        } else {
+            log::info!("auto-cycle: switching wallpaper");
+        }
+        self.config.wallpaper = next.clone();
+        self.apply_auto_cycle_wallpaper();
+    }
+
+    /// Apply an auto-cycled wallpaper to the renderers showing the default
+    /// (non-per-monitor-override) wallpaper, plus the usual still-frame hosts.
+    fn apply_auto_cycle_wallpaper(&mut self) {
+        let wp = &self.config.wallpaper;
+        let scaling = self.config.scaling;
+        let power_saving = self.config.power_saving;
+        for r in &mut self.renderers {
+            if self.config.monitors.contains_key(&r.window.connector) {
+                continue;
+            }
+            r.player.set_rotation(wp.rotation);
+            r.player.apply_scalers(
+                scaling,
+                wp.effective_power_saving(power_saving),
+                wp.rotation,
+            );
+            r.player.apply_crop(wp);
+            r.anim.set_base(transition::crop_base(wp));
+            if let Some(path) = wp.effective_path() {
+                r.anim.start(wp.transition, path.to_path_buf(), &r.player);
+            }
+            r.cache_raised.set(false);
+        }
+        overview::apply(wp);
+        cosmic_bg::apply(&self.config);
+        dde_lock::apply(&self.config);
+        kde_desktop::apply(&self.config);
     }
 
     /// Push any widget overlay whose content changed onto the renderer that
@@ -1206,6 +1286,7 @@ impl Daemon {
                 &wallpaper,
                 self.config.scaling,
                 wallpaper.effective_power_saving(self.config.power_saving),
+                self.config.low_memory,
                 kind,
             ) {
                 Ok(r) => {
@@ -1398,6 +1479,7 @@ impl Daemon {
         wallpaper: &Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
         kind: WindowKind,
     ) -> Result<Renderer> {
         let window = WallpaperWindow::create(conn, screen, atoms, monitor, kind)?;
@@ -1406,6 +1488,7 @@ impl Daemon {
             wallpaper,
             scaling,
             power_saving,
+            low_memory,
         )?);
         let slideshow = build_slideshow(wallpaper, &player);
         Ok(Renderer {
@@ -1515,6 +1598,7 @@ impl Daemon {
             self.check_startup_renderers(now);
             self.check_cold_boot_stall(now);
             self.reconcile_lock(now);
+            self.check_auto_cycle(now);
             // While locked, the desktop widget engine is frozen rather than
             // ticked: `clear_for_lock` may have left the clock/disc believing
             // they are "due" (cleared, not merely hidden), and calling
@@ -1551,6 +1635,11 @@ impl Daemon {
             Request::Apply => {
                 self.config_watch.mark();
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
+                self.last_cycle = if self.config.auto_cycle.enabled {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
                 self.sched.hold_current(&self.config);
                 // Widget settings live in the same file, so a GUI toggle arrives
                 // here. Re-push unconditionally: a style change must repaint even
@@ -1646,8 +1735,8 @@ impl Daemon {
         let video = self.renderers.first().and_then(|r| r.player.video_status());
         let geoms = self.output_geoms_all();
         let ctx = self.lock.ctx(&self.config, &geoms);
-        // `fullscreen_covered` values start with `cover_kind`'s label
-        // ("fullscreen window (..)" / "maximized window (..)").
+        // `fullscreen_covered` values start with the cover kind label
+        // ("fullscreen window (..)" / "covered window (..)").
         let covered_by = |kind: &str| {
             self.fullscreen_covered
                 .values()
@@ -1661,7 +1750,7 @@ impl Daemon {
                 battery: self.battery_paused,
                 locked: self.lock_paused.is_some(),
                 fullscreen: covered_by("fullscreen"),
-                maximized: covered_by("maximized"),
+                covered: covered_by("covered"),
             }
             .reason(),
             hwdec,
@@ -1731,7 +1820,7 @@ impl Daemon {
         }
     }
 
-    /// Poll EWMH fullscreen (and, if configured, maximized) state and
+    /// Poll EWMH fullscreen (and, if configured, covered) state and
     /// reconcile per-monitor pause on change.
     fn check_fullscreen(&mut self) {
         let covered = x11_fullscreen::covered_connectors(
@@ -1739,7 +1828,7 @@ impl Daemon {
             self.screen().root,
             &self.atoms,
             &self.monitors,
-            self.config.pause_on_maximized,
+            self.config.pause_on_covered,
         );
         if covered != self.fullscreen_covered {
             for (c, what) in &covered {
@@ -1843,15 +1932,15 @@ impl Daemon {
         let Some(fresh) = self.config_watch.poll() else {
             return;
         };
-        let (battery, maximized) = adopt_pause_flags(&mut self.config, &fresh);
+        let (battery, covered) = adopt_pause_flags(&mut self.config, &fresh);
         if battery {
             log::info!("pause on battery = {}", self.config.pause_on_battery);
             self.check_battery(); // reconciles now, in either direction
         }
-        if maximized {
+        if covered {
             log::info!(
-                "pause when an app is maximized = {}",
-                self.config.pause_on_maximized
+                "pause when an app covers the screen = {}",
+                self.config.pause_on_covered
             );
             // The caller's `check_fullscreen` runs next with the new flag.
             kde_desktop::set_pause_mode(&self.config);
@@ -2506,6 +2595,11 @@ pub fn run() -> Result<()> {
         if cfg.browser_bridge {
             webbridge::spawn(webbridge::PORT);
         }
+        // System-tray icon: owned by the daemon, started once at startup.
+        // Changing tray_icon at runtime requires a daemon restart.
+        if cfg.tray_icon && cfg.enabled {
+            tray::spawn();
+        }
     }
     let capability = detect();
     log::info!("session capability: {}", capability.id());
@@ -2556,10 +2650,67 @@ fn run_x11() -> Result<()> {
     daemon.run()
 }
 
+/// Compute how long the GNOME static-frame loop may block before it needs to
+/// check the auto-cycle again. When cycling is enabled the timeout is capped so
+/// the cycle fires promptly; otherwise the usual long heartbeat timeout is used.
+fn gnome_static_cycle_timeout(config: &Config, last_cycle: Option<Instant>) -> Duration {
+    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+        return HEARTBEAT_RECHECK_INTERVAL;
+    }
+    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
+    let since = last_cycle.map_or(Duration::ZERO, |last| Instant::now().duration_since(last));
+    let remaining = interval.saturating_sub(since);
+    // Cap at one second so we never oversleep the cycle by much, but still
+    // avoid a busy loop.
+    std::cmp::min(
+        remaining.max(Duration::from_secs(1)),
+        HEARTBEAT_RECHECK_INTERVAL,
+    )
+}
+
+/// Advance the daemon-side auto-cycle in GNOME static-frame mode. Only the
+/// still-frame hosts are updated; there is no live renderer.
+fn gnome_static_auto_cycle(
+    config: &mut Config,
+    last_cycle: &mut Option<Instant>,
+    now: Instant,
+    locked: bool,
+) {
+    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+        *last_cycle = None;
+        return;
+    }
+    if locked {
+        *last_cycle = None;
+        return;
+    }
+    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
+    if let Some(last) = *last_cycle {
+        if now.duration_since(last) < interval {
+            return;
+        }
+    }
+    *last_cycle = Some(now);
+    let current = config.wallpaper.clone();
+    let Some(next) = auto_cycle_next(config, &current) else {
+        return;
+    };
+    if let Some(path) = next.effective_path() {
+        log::info!("auto-cycle: switching to {}", path.display());
+    } else {
+        log::info!("auto-cycle: switching wallpaper");
+    }
+    config.wallpaper = next;
+    if config.enabled {
+        overview::apply(&config.wallpaper);
+        cosmic_bg::apply(config);
+    }
+}
+
 /// GNOME-on-Wayland fallback: GNOME Mutter has no layer-shell, so a live
 /// wallpaper window is impossible. Reuse the existing still-frame path (set as
 /// the desktop background via gsettings) and serve IPC so the GUI can
-/// apply/stop. Blocks on the control channel between commands → ~0% CPU.
+/// apply/stop. Blocks on the command channel between commands → ~0% CPU.
 fn run_gnome_static() -> Result<()> {
     let mut config = Config::load().unwrap_or_default();
     if !config.enabled {
@@ -2583,6 +2734,7 @@ fn run_gnome_static() -> Result<()> {
     // cadence of its own, which would work against this mode's whole point
     // ("blocks on the control channel between commands -> ~0% CPU").
     let mut lock_rt = LockRuntime::new();
+    let mut last_cycle: Option<Instant> = None;
 
     // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
     // never wakes on its own, so a daemon left running for days without an
@@ -2590,10 +2742,13 @@ fn run_gnome_static() -> Result<()> {
     // then gone quiet in the usage numbers. `heartbeat` self-throttles to
     // roughly once a day via its own marker file either way.
     loop {
-        let (req, reply) = match commands.recv_timeout(HEARTBEAT_RECHECK_INTERVAL) {
+        let timeout = gnome_static_cycle_timeout(&config, last_cycle);
+        let (req, reply) = match commands.recv_timeout(timeout) {
             Ok(pair) => pair,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                lock_rt.poll(Instant::now());
+                let now = Instant::now();
+                lock_rt.poll(now);
+                gnome_static_auto_cycle(&mut config, &mut last_cycle, now, lock_rt.locked);
                 crate::telemetry::heartbeat(Some("gnome-static"), None, None);
                 continue;
             }
@@ -2655,9 +2810,11 @@ fn run_gnome_static() -> Result<()> {
         // redecode too.
         if is_apply {
             if config.enabled {
+                last_cycle = Some(Instant::now());
                 overview::apply(&config.wallpaper);
                 cosmic_bg::apply(&config);
             } else {
+                last_cycle = None;
                 overview::restore();
                 cosmic_bg::restore();
             }
@@ -2705,6 +2862,62 @@ fn static_status(config: &Config, lockscreen: &LockStatus) -> StatusReply {
         lockscreen: Some(lockscreen.clone()),
         wallpaper_path: playing_media_path(&config.wallpaper),
     }
+}
+
+/// Apply the daemon-side auto-cycle on Wayland. Same rules as the X11 path:
+/// enabled + interval elapsed + not paused + not locked. The default wallpaper
+/// (outputs without a per-monitor override) is switched media-only; lock-screen
+/// and still-frame hosts are updated too.
+fn wayland_auto_cycle(
+    config: &mut Config,
+    outputs: &mut std::collections::BTreeMap<String, WlOutput>,
+    last_cycle: &mut Option<Instant>,
+    now: Instant,
+    paused: bool,
+    locked: bool,
+) {
+    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+        *last_cycle = None;
+        return;
+    }
+    if paused || locked {
+        *last_cycle = None;
+        return;
+    }
+    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
+    if let Some(last) = *last_cycle {
+        if now.duration_since(last) < interval {
+            return;
+        }
+    }
+    *last_cycle = Some(now);
+    let current = config.wallpaper.clone();
+    let Some(next) = auto_cycle_next(config, &current) else {
+        return;
+    };
+    if let Some(path) = next.effective_path() {
+        log::info!("auto-cycle: switching to {}", path.display());
+    } else {
+        log::info!("auto-cycle: switching wallpaper");
+    }
+    config.wallpaper = next.clone();
+    let paused_for_outputs = false;
+    for (connector, o) in outputs.iter_mut() {
+        if config.monitors.contains_key(connector) {
+            continue;
+        }
+        let effective_ps = config.wallpaper.effective_power_saving(config.power_saving);
+        o.apply_wallpaper(
+            config.wallpaper.clone(),
+            config.scaling,
+            effective_ps,
+            config.low_memory,
+            paused_for_outputs,
+        );
+    }
+    cosmic_bg::apply(config);
+    dde_lock::apply(config);
+    kde_desktop::apply(config);
 }
 
 /// The experimental Wayland (mpvpaper) backend is opt-in while it stabilizes.
@@ -2803,6 +3016,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut next_output_probe = Instant::now();
     let mut probed = false;
     let mut sched = SchedState::default();
+    let mut last_cycle: Option<Instant> = None;
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
     // wlroots compositors (wlr protocol) and COSMIC (zcosmic-toplevel-info); absent
@@ -2819,8 +3033,8 @@ fn run_wayland_layershell() -> Result<()> {
         }
     );
     let mut hidden: HashSet<String> = HashSet::new();
-    // Whether a *fullscreen* (rather than merely maximized) window is among
-    // what `hidden` reflects; only the pause reason reads it.
+    // Whether a *fullscreen* (rather than merely covered/maximized) window is
+    // among what `hidden` reflects; only the pause reason reads it.
     let mut hidden_fullscreen = false;
     let mut last_fs_poll = Instant::now() - FS_POLL;
     // Sum of every output's respawn counter. A fresh mpv has no overlays, so a
@@ -2879,7 +3093,13 @@ fn run_wayland_layershell() -> Result<()> {
             continue; // nothing configured for this output
         }
         let effective_ps = wallpaper.effective_power_saving(config.power_saving);
-        let mut out = WlOutput::new(m.connector.clone(), wallpaper, config.scaling, effective_ps);
+        let mut out = WlOutput::new(
+            m.connector.clone(),
+            wallpaper,
+            config.scaling,
+            effective_ps,
+            config.low_memory,
+        );
         out.set_show_on_lock(show_on_lock);
         out.respawn(false, false);
         outputs.insert(m.connector.clone(), out);
@@ -2927,6 +3147,11 @@ fn run_wayland_layershell() -> Result<()> {
                         clear_wayland_widgets(&mut widget_engine, &outputs);
                         config_watch.mark();
                         config = Config::load().unwrap_or_else(|_| config.clone());
+                        last_cycle = if config.auto_cycle.enabled {
+                            Some(Instant::now())
+                        } else {
+                            None
+                        };
                         sched.hold_current(&config);
                         // Widget settings ride in the same file, so a GUI toggle
                         // arrives here. invalidate() re-pushes even when the
@@ -2970,7 +3195,13 @@ fn run_wayland_layershell() -> Result<()> {
                                 let effective_ps = wp.effective_power_saving(config.power_saving);
                                 match (outputs.get_mut(&m.connector), has) {
                                     (Some(o), true) => {
-                                        o.apply_wallpaper(wp, config.scaling, effective_ps, paused);
+                                        o.apply_wallpaper(
+                                            wp,
+                                            config.scaling,
+                                            effective_ps,
+                                            config.low_memory,
+                                            paused,
+                                        );
                                         // `apply_wallpaper` may already have
                                         // respawned for an unrelated reason;
                                         // a second one here only fires when
@@ -2990,6 +3221,7 @@ fn run_wayland_layershell() -> Result<()> {
                                             wp,
                                             config.scaling,
                                             effective_ps,
+                                            config.low_memory,
                                         );
                                         o.set_show_on_lock(show_on_lock);
                                         o.respawn(paused, false);
@@ -3048,7 +3280,7 @@ fn run_wayland_layershell() -> Result<()> {
                                 battery: battery_paused,
                                 locked: lock_rt.forces_pause(&config),
                                 fullscreen: covered && hidden_fullscreen,
-                                maximized: covered && !hidden_fullscreen,
+                                covered: covered && !hidden_fullscreen,
                             },
                             lock_rt.status(&ctx, &config),
                         ))
@@ -3161,6 +3393,16 @@ fn run_wayland_layershell() -> Result<()> {
                 }
             }
         }
+
+        let paused = user_paused || battery_paused || lock_rt.forces_pause(&config);
+        wayland_auto_cycle(
+            &mut config,
+            &mut outputs,
+            &mut last_cycle,
+            now,
+            paused,
+            lock_rt.locked,
+        );
 
         // Advance the lock engine's own content (clock/battery/media) while
         // locked. `Desktop` returns updates to dispatch here, exactly like
@@ -3282,14 +3524,14 @@ fn run_wayland_layershell() -> Result<()> {
             if now.duration_since(last_config_poll) >= CONFIG_POLL {
                 last_config_poll = now;
                 if let Some(fresh) = config_watch.poll() {
-                    let (battery, maximized) = adopt_pause_flags(&mut config, &fresh);
+                    let (battery, covered) = adopt_pause_flags(&mut config, &fresh);
                     if battery {
                         log::info!("pause on battery = {}", config.pause_on_battery);
                     }
-                    if maximized {
+                    if covered {
                         log::info!(
-                            "pause when an app is maximized = {}",
-                            config.pause_on_maximized
+                            "pause when an app covers the screen = {}",
+                            config.pause_on_covered
                         );
                         kde_desktop::set_pause_mode(&config);
                     }
@@ -3422,7 +3664,7 @@ fn run_wayland_layershell() -> Result<()> {
         if let Some(w) = fs_watch.as_mut() {
             if now.duration_since(last_fs_poll) >= FS_POLL {
                 last_fs_poll = now;
-                let now_hidden = w.fullscreen_connectors(config.pause_on_maximized);
+                let now_hidden = w.fullscreen_connectors(config.pause_on_covered);
                 if now_hidden != hidden {
                     // The Wayland twin of the X11 loop's "detected"/"cleared"
                     // lines: a covered output pauses and takes no widget
@@ -3433,7 +3675,7 @@ fn run_wayland_layershell() -> Result<()> {
                         v
                     }
                     log::info!(
-                        "covered outputs (fullscreen/maximized window): {:?} -> {:?}",
+                        "covered outputs (fullscreen/covered window): {:?} -> {:?}",
                         sorted(&hidden),
                         sorted(&now_hidden)
                     );
@@ -3681,6 +3923,8 @@ struct WlOutput {
     scaling: Scaling,
     /// Effective power-saving level for this output; applied at spawn.
     power_saving: PowerSaving,
+    /// Use tiny mpv buffers and fewer decode threads; applied at spawn.
+    low_memory: bool,
     /// Whether the next (re)spawn should ask mpvpaper to mark its surface
     /// show-on-lock — see [`WaylandPlayer::spawn`]'s doc comment. `false`
     /// until [`WlOutput::set_show_on_lock`] says otherwise; read only at
@@ -3806,6 +4050,7 @@ impl WlOutput {
         wallpaper: Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
     ) -> WlOutput {
         WlOutput {
             anim: Anim::new(transition::crop_base(&wallpaper)),
@@ -3813,6 +4058,7 @@ impl WlOutput {
             wallpaper,
             scaling,
             power_saving,
+            low_memory,
             show_on_lock: false,
             player: None,
             slideshow: None,
@@ -3912,6 +4158,7 @@ impl WlOutput {
             &self.wallpaper,
             self.scaling,
             self.power_saving,
+            self.low_memory,
             &file,
             self.show_on_lock,
         ) {
@@ -3955,12 +4202,14 @@ impl WlOutput {
         new: Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
         paused: bool,
     ) {
         let media_only = self.player.is_some()
             && !self.static_fallback
             && scaling == self.scaling
             && power_saving == self.power_saving
+            && low_memory == self.low_memory
             && new.fit == self.wallpaper.fit
             && new.rotation == self.wallpaper.rotation
             && new.mute == self.wallpaper.mute
@@ -3972,6 +4221,7 @@ impl WlOutput {
         self.wallpaper = new;
         self.scaling = scaling;
         self.power_saving = power_saving;
+        self.low_memory = low_memory;
         self.audio_heal = AudioHeal::new();
         self.anim.set_base(transition::crop_base(&self.wallpaper));
         if media_only {
@@ -4979,14 +5229,14 @@ mod tests {
         // Nothing flipped: nothing reported, wallpaper untouched.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
 
-        fresh.pause_on_maximized = true;
+        fresh.pause_on_covered = true;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, true));
-        assert!(cached.pause_on_maximized && !cached.pause_on_battery);
+        assert!(cached.pause_on_covered && !cached.pause_on_battery);
 
         fresh.pause_on_battery = true;
-        fresh.pause_on_maximized = false;
+        fresh.pause_on_covered = false;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (true, true));
-        assert!(cached.pause_on_battery && !cached.pause_on_maximized);
+        assert!(cached.pause_on_battery && !cached.pause_on_covered);
 
         // Already in step: a second look reports nothing.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
@@ -5193,6 +5443,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
 
         for _ in 0..MAX * 3 {
@@ -5227,6 +5478,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
 
         // Away: every tick parks instead of restarting, however long it lasts.
@@ -5276,6 +5528,7 @@ mod tests {
             Wallpaper::default(),
             Scaling::default(),
             PowerSaving::default(),
+            false,
         );
         assert_eq!(o.generation, 0, "a fresh output has not respawned yet");
 
@@ -5566,6 +5819,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
         assert_eq!(o.last_down, "never_started");
         o.supervise(false, 5, true);
@@ -5606,6 +5860,7 @@ mod tests {
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
         assert!(!o.giveup_reported);
         // MAX failing restarts, then the tick that crosses the cap.
@@ -5711,6 +5966,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
             },
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
         );
         o.respawn(false, false);
         assert!(
@@ -5736,6 +5992,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
                 },
                 Scaling::Balanced,
                 PowerSaving::Full,
+                false,
                 false,
             );
             assert_eq!(

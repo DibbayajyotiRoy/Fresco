@@ -481,7 +481,7 @@ fn pause_reason_label(reason: PauseReason) -> &'static str {
         PauseReason::Battery => t!("On battery"),
         PauseReason::Locked => t!("Screen locked"),
         PauseReason::Fullscreen => t!("Fullscreen app open"),
-        PauseReason::Maximized => t!("Maximized window"),
+        PauseReason::Covered => t!("Window covers screen"),
     }
 }
 
@@ -572,7 +572,7 @@ mod tests {
             PauseReason::Battery,
             PauseReason::Locked,
             PauseReason::Fullscreen,
-            PauseReason::Maximized,
+            PauseReason::Covered,
         ];
         let texts: std::collections::HashSet<_> = all.into_iter().map(pause_reason_label).collect();
         assert_eq!(texts.len(), all.len());

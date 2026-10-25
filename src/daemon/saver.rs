@@ -355,8 +355,8 @@ fn pick_connector(monitors: &[Monitor], geometry: (i32, i32, u32, u32)) -> Optio
 
 /// Intersection area (px²) between the rectangle `(x, y, w, h)` and monitor
 /// `m` — `0` when they don't overlap at all. Same shape as
-/// `daemon::x11_fullscreen::overlap_at_least_half`'s own math, but returning
-/// the raw area rather than a yes/no past a 50% threshold: picking the *best*
+/// `daemon::x11_fullscreen::overlap_at_least`'s own math, but returning
+/// the raw area rather than a yes/no past a threshold: picking the *best*
 /// match matters here, since a saver window should exactly equal one
 /// monitor's rectangle in the common case and this is only a tie-breaker for
 /// when it doesn't line up perfectly.

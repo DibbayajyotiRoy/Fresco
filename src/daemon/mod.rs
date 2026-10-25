@@ -74,7 +74,7 @@ fn config_mtime() -> Option<std::time::SystemTime> {
         .ok()
 }
 
-/// Gets the GUI's "Pause on battery" and "Pause when an app is maximized"
+/// Gets the GUI's "Pause on battery" and "Pause when an app covers the screen"
 /// switches to the running daemon. Those switches only save config.toml: an
 /// `Apply` would rebuild the renderers (X11) or re-issue `loadfile` (Wayland),
 /// restarting the video for a setting that never touches it. So the run loops
@@ -870,9 +870,9 @@ pub struct Daemon {
     last_battery_check: Instant,
     last_cache_check: Instant,
     last_sync_check: Instant,
-    /// Connectors currently covered by a viewable fullscreen (or, with
-    /// `pause_on_maximized`, maximized) window (EWMH), with a "kind window
-    /// (title)" description for the log.
+    /// Connectors currently covered by a viewable fullscreen (always) or large
+    /// non-fullscreen (when `pause_on_covered`) window (EWMH), with a "kind
+    /// window (title)" description for the log.
     fullscreen_covered: std::collections::HashMap<String, String>,
     last_fullscreen_check: Instant,
     sched: SchedState,
@@ -1649,8 +1649,8 @@ impl Daemon {
         let video = self.renderers.first().and_then(|r| r.player.video_status());
         let geoms = self.output_geoms_all();
         let ctx = self.lock.ctx(&self.config, &geoms);
-        // `fullscreen_covered` values start with `cover_kind`'s label
-        // ("fullscreen window (..)" / "maximized window (..)").
+        // `fullscreen_covered` values start with the cover kind label
+        // ("fullscreen window (..)" / "covered window (..)").
         let covered_by = |kind: &str| {
             self.fullscreen_covered
                 .values()
@@ -1664,7 +1664,7 @@ impl Daemon {
                 battery: self.battery_paused,
                 locked: self.lock_paused.is_some(),
                 fullscreen: covered_by("fullscreen"),
-                covered: covered_by("maximized"),
+                covered: covered_by("covered"),
             }
             .reason(),
             hwdec,
@@ -1734,7 +1734,7 @@ impl Daemon {
         }
     }
 
-    /// Poll EWMH fullscreen (and, if configured, maximized) state and
+    /// Poll EWMH fullscreen (and, if configured, covered) state and
     /// reconcile per-monitor pause on change.
     fn check_fullscreen(&mut self) {
         let covered = x11_fullscreen::covered_connectors(
@@ -2822,8 +2822,8 @@ fn run_wayland_layershell() -> Result<()> {
         }
     );
     let mut hidden: HashSet<String> = HashSet::new();
-    // Whether a *fullscreen* (rather than merely maximized) window is among
-    // what `hidden` reflects; only the pause reason reads it.
+    // Whether a *fullscreen* (rather than merely covered/maximized) window is
+    // among what `hidden` reflects; only the pause reason reads it.
     let mut hidden_fullscreen = false;
     let mut last_fs_poll = Instant::now() - FS_POLL;
     // Sum of every output's respawn counter. A fresh mpv has no overlays, so a
@@ -3449,7 +3449,7 @@ fn run_wayland_layershell() -> Result<()> {
                         v
                     }
                     log::info!(
-                        "covered outputs (fullscreen/maximized window): {:?} -> {:?}",
+                        "covered outputs (fullscreen/covered window): {:?} -> {:?}",
                         sorted(&hidden),
                         sorted(&now_hidden)
                     );

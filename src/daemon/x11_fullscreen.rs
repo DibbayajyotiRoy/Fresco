@@ -1,12 +1,13 @@
-//! Poll-based X11 fullscreen detection (ROADMAP 1.3 — parity with the Wayland
-//! `fullscreen.rs` auto-pause).
+//! Poll-based X11 fullscreen/covered detection (ROADMAP 1.3 — parity with the
+//! Wayland `fullscreen.rs` auto-pause).
 //!
 //! Reads the WM-maintained EWMH state: `_NET_CLIENT_LIST_STACKING` on the root
 //! plus each client's `_NET_WM_STATE`, and reports which monitors are covered
-//! by a viewable fullscreen window (or, when asked, a maximized one).
-//! Deliberately POLLED on the daemon's 2s
-//! cadence, never event-driven — reacting to X events is how the historical
-//! ConfigureNotify storm froze laptops (see the note in `Daemon::run`).
+//! by a viewable fullscreen window (always) or, when `pause_on_covered` is
+//! enabled, by any large non-fullscreen window overlapping at least 90% of the
+//! monitor. Deliberately POLLED on the daemon's 2s cadence, never event-driven
+//! — reacting to X events is how the historical ConfigureNotify storm froze
+//! laptops (see the note in `Daemon::run`).
 //!
 //! On a WM-less X server (or a non-EWMH WM) the root property is absent and
 //! this returns an empty set — the feature degrades to "never pauses", which
@@ -20,16 +21,19 @@ use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, MapState, Window};
 use super::monitors::Monitor;
 use super::x11win::Atoms;
 
-/// Connectors whose monitor is ≥50% covered by a viewable fullscreen window
-/// (or, with `maximized`, a maximized one), mapped to a short description of
-/// that window (kind + title, for the pause log — so a misfiring compositor
-/// surface is identifiable from the log alone).
+/// Connectors whose monitor is covered by a viewable window, mapped to a short
+/// description of that window (kind + title, for the pause log — so a misfiring
+/// compositor surface is identifiable from the log alone).
+///
+/// Fullscreen windows always count. When `pause_on_covered` is `true`, any
+/// viewable, non-minimized, non-skip-taskbar window whose geometry overlaps at
+/// least 90% of a monitor also counts.
 pub fn covered_connectors<C: Connection>(
     conn: &C,
     root: Window,
     atoms: &Atoms,
     monitors: &[Monitor],
-    maximized: bool,
+    pause_on_covered: bool,
 ) -> HashMap<String, String> {
     let mut covered = HashMap::new();
     let Ok(list) = conn
@@ -61,20 +65,45 @@ pub fn covered_connectors<C: Connection>(
         if !viewable {
             continue;
         }
+
+        // Ignore Fresco's own wallpaper windows; they are below apps but can
+        // appear in the client list on some WMs.
+        if wm_class_is_fresco(conn, win, atoms) {
+            continue;
+        }
+
         let Some(states) = window_states(conn, win, atoms) else {
             continue;
         };
-        let Some(kind) = cover_kind(&states, atoms, maximized) else {
+        let has = |a| states.contains(&a);
+        if has(atoms._NET_WM_STATE_HIDDEN) || has(atoms._NET_WM_STATE_SKIP_TASKBAR) {
+            continue; // minimized, or a panel/desktop-icon window
+        }
+
+        let is_fullscreen = has(atoms._NET_WM_STATE_FULLSCREEN);
+        // Without the covered switch, only fullscreen windows can pause.
+        if !is_fullscreen && !pause_on_covered {
             continue;
-        };
+        }
+
         // Absolute geometry: the WM reparents clients, so translate to root.
         let Some((x, y, w, h)) = absolute_geometry(conn, root, win) else {
             continue;
         };
+        let title = window_title(conn, win, atoms);
+
+        // Overlap threshold: 0.9 when covered mode is enabled, 0.5 otherwise.
+        // Fullscreen windows match the monitor exactly, so 0.9 is still met.
+        let threshold = if pause_on_covered { 0.9 } else { 0.5 };
+
         for m in monitors {
-            if overlap_at_least_half(x, y, w, h, m) {
+            if is_fullscreen && overlap_at_least(x, y, w, h, m, threshold) {
                 covered.entry(m.connector.clone()).or_insert_with(|| {
-                    format!("{kind} window ({:?})", window_title(conn, win, atoms))
+                    format!("fullscreen window ({:?})", title)
+                });
+            } else if pause_on_covered && overlap_at_least(x, y, w, h, m, 0.9) {
+                covered.entry(m.connector.clone()).or_insert_with(|| {
+                    format!("covered window ({:?})", title)
                 });
             }
         }
@@ -82,23 +111,17 @@ pub fn covered_connectors<C: Connection>(
     covered
 }
 
-/// How a client's `_NET_WM_STATE` makes it cover the screen: `"fullscreen"`,
-/// or (only when `maximized` is asked for) `"maximized"`; `None` if it doesn't
-/// or is minimized. Maximized candidates that skip the taskbar are ignored —
-/// that is how desktop-icon windows and panels look, and they must never pause.
-fn cover_kind(states: &[u32], atoms: &Atoms, maximized: bool) -> Option<&'static str> {
-    let has = |a| states.contains(&a);
-    if has(atoms._NET_WM_STATE_HIDDEN) {
-        return None;
-    }
-    if has(atoms._NET_WM_STATE_FULLSCREEN) {
-        return Some("fullscreen");
-    }
-    (maximized
-        && has(atoms._NET_WM_STATE_MAXIMIZED_VERT)
-        && has(atoms._NET_WM_STATE_MAXIMIZED_HORZ)
-        && !has(atoms._NET_WM_STATE_SKIP_TASKBAR))
-    .then_some("maximized")
+/// True when the window's `WM_CLASS` names Fresco's own wallpaper windows.
+fn wm_class_is_fresco<C: Connection>(conn: &C, win: Window, atoms: &Atoms) -> bool {
+    conn.get_property(false, win, atoms.WM_CLASS, AtomEnum::STRING, 0, 64)
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .map(|r| {
+            r.value
+                .split(|&b| b == 0)
+                .any(|s| s == b"fresco-wallpaper")
+        })
+        .unwrap_or(false)
 }
 
 /// Best-effort window title (`_NET_WM_NAME`), for the pause log.
@@ -140,11 +163,9 @@ fn absolute_geometry<C: Connection>(
     ))
 }
 
-/// True when the window rect covers at least half of the monitor's area —
-/// fullscreen windows match the monitor exactly; 50% keeps us robust against
-/// off-by-frame geometry without pausing for mere large windows on overlap
-/// edges of adjacent monitors.
-fn overlap_at_least_half(x: i32, y: i32, w: u32, h: u32, m: &Monitor) -> bool {
+/// True when the window rect covers at least `threshold` of the monitor's area.
+/// `threshold` is a ratio in the range [0, 1] (e.g. 0.9 for 90%).
+fn overlap_at_least(x: i32, y: i32, w: u32, h: u32, m: &Monitor, threshold: f64) -> bool {
     let (mx, my) = (i32::from(m.x), i32::from(m.y));
     let (mw, mh) = (i32::from(m.width), i32::from(m.height));
     let ix = (x + w as i32).min(mx + mw) - x.max(mx);
@@ -154,7 +175,10 @@ fn overlap_at_least_half(x: i32, y: i32, w: u32, h: u32, m: &Monitor) -> bool {
     }
     let inter = i64::from(ix) * i64::from(iy);
     let marea = i64::from(mw) * i64::from(mh);
-    inter * 2 >= marea
+    // Integer-scaled comparison avoids floating-point drift.
+    let scale = 1000i64;
+    let num = (threshold * scale as f64).round() as i64;
+    inter * scale >= marea * num
 }
 
 #[cfg(test)]
@@ -176,50 +200,115 @@ mod tests {
     }
 
     #[test]
-    fn cover_kind_predicate() {
-        use crate::daemon::x11win::tests::atoms;
-        let a = atoms();
-        let both = [
-            a._NET_WM_STATE_MAXIMIZED_VERT,
-            a._NET_WM_STATE_MAXIMIZED_HORZ,
-        ];
-        // Fullscreen always counts, flag or not; hidden never does.
-        let fs = [a._NET_WM_STATE_FULLSCREEN];
-        assert_eq!(cover_kind(&fs, &a, false), Some("fullscreen"));
-        assert_eq!(cover_kind(&fs, &a, true), Some("fullscreen"));
-        assert_eq!(cover_kind(&[fs[0], a._NET_WM_STATE_HIDDEN], &a, true), None);
-        // Fullscreen wins the label over maximized.
-        assert_eq!(
-            cover_kind(&[both[0], both[1], fs[0]], &a, true),
-            Some("fullscreen")
-        );
-        // Maximized needs the flag and BOTH axes.
-        assert_eq!(cover_kind(&both, &a, false), None);
-        assert_eq!(cover_kind(&both, &a, true), Some("maximized"));
-        assert_eq!(cover_kind(&both[..1], &a, true), None);
-        assert_eq!(cover_kind(&both[1..], &a, true), None);
-        assert_eq!(cover_kind(&[], &a, true), None);
-        // Minimized, or a taskbar-skipping desktop/panel window: not a cover.
-        assert_eq!(
-            cover_kind(&[both[0], both[1], a._NET_WM_STATE_HIDDEN], &a, true),
-            None
-        );
-        assert_eq!(
-            cover_kind(&[both[0], both[1], a._NET_WM_STATE_SKIP_TASKBAR], &a, true),
-            None
-        );
+    fn overlap_math() {
+        let m = mon("A", 0, 0, 1920, 1080);
+        // Exact and overshoot still count at 0.5 and 0.9.
+        assert!(overlap_at_least(0, 0, 1920, 1080, &m, 0.9));
+        assert!(overlap_at_least(-10, -10, 1940, 1100, &m, 0.9));
+        // Small window does not count even at 0.5.
+        assert!(!overlap_at_least(0, 0, 800, 600, &m, 0.5));
+        // Adjacent monitor does not count.
+        assert!(!overlap_at_least(1920, 0, 1920, 1080, &m, 0.5));
+
+        // 90% threshold boundary.
+        assert!(overlap_at_least(0, 0, 1920, 1080, &m, 0.9)); // 100%
+        assert!(overlap_at_least(0, 0, 1728, 1080, &m, 0.9)); // 90% width
+        assert!(!overlap_at_least(0, 0, 1727, 1080, &m, 0.9)); // just under 90%
+        assert!(overlap_at_least(0, 0, 1920, 972, &m, 0.9)); // 90% height
+        assert!(!overlap_at_least(0, 0, 1920, 971, &m, 0.9)); // just under 90%
+
+        let b = mon("B", 1920, 0, 1920, 1080);
+        assert!(overlap_at_least(1920, 0, 1920, 1080, &b, 0.5));
+        assert!(!overlap_at_least(0, 0, 1920, 1080, &b, 0.5));
     }
 
     #[test]
-    fn overlap_math() {
-        let m = mon("A", 0, 0, 1920, 1080);
-        assert!(overlap_at_least_half(0, 0, 1920, 1080, &m)); // exact
-        assert!(overlap_at_least_half(-10, -10, 1940, 1100, &m)); // overshoot
-        assert!(!overlap_at_least_half(0, 0, 800, 600, &m)); // small window
-        assert!(!overlap_at_least_half(1920, 0, 1920, 1080, &m)); // next monitor
-        let b = mon("B", 1920, 0, 1920, 1080);
-        assert!(overlap_at_least_half(1920, 0, 1920, 1080, &b));
-        assert!(!overlap_at_least_half(0, 0, 1920, 1080, &b));
+    fn fresco_wallpaper_windows_are_ignored() {
+        use crate::WALLPAPER_WM_CLASS;
+
+        // Needs a real X server to read WM_CLASS back.
+        if std::env::var("FRESCO_EWMH_TEST").ok().as_deref() != Some("1") {
+            eprintln!("skip fresco_wallpaper_windows_are_ignored: set FRESCO_EWMH_TEST=1 inside a scratch X server");
+            return;
+        }
+        if std::env::var("DISPLAY").is_err() {
+            eprintln!("skip fresco_wallpaper_windows_are_ignored: no DISPLAY");
+            return;
+        }
+        let (conn, screen_num) = match x11rb::connect(None) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("skip: cannot connect to X: {e}");
+                return;
+            }
+        };
+        let screen = conn.setup().roots[screen_num].clone();
+        let atoms = Atoms::new(&conn).unwrap().reply().unwrap();
+
+        let win = conn.generate_id().unwrap();
+        conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            win,
+            screen.root,
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new(),
+        )
+        .unwrap();
+        conn.map_window(win).unwrap();
+
+        // Set WM_CLASS to Fresco's wallpaper class and make it fullscreen-sized.
+        let mut wm_class = Vec::new();
+        wm_class.extend_from_slice(WALLPAPER_WM_CLASS.as_bytes());
+        wm_class.push(0);
+        wm_class.extend_from_slice(WALLPAPER_WM_CLASS.as_bytes());
+        wm_class.push(0);
+        conn.change_property8(
+            PropMode::REPLACE,
+            win,
+            AtomEnum::WM_CLASS,
+            AtomEnum::STRING,
+            &wm_class,
+        )
+        .unwrap();
+        conn.change_property32(
+            PropMode::REPLACE,
+            screen.root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            &[win],
+        )
+        .unwrap();
+        conn.sync().unwrap();
+
+        let monitors = [mon(
+            "TEST-1",
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+        )];
+        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, false);
+        assert!(
+            !covered.contains_key("TEST-1"),
+            "fresco-wallpaper window should not count as a cover: {covered:?}"
+        );
+
+        // Leave the root property empty so nothing lingers for other tests.
+        conn.change_property32(
+            PropMode::REPLACE,
+            screen.root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            &[],
+        )
+        .unwrap();
+        conn.sync().unwrap();
     }
 
     /// End-to-end against a real X server: this test PLAYS THE WM — it creates

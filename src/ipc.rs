@@ -145,8 +145,8 @@ pub enum PauseReason {
     Locked,
     /// A fullscreen window covers an output.
     Fullscreen,
-    /// A maximized window covers an output ("Pause on maximized").
-    Maximized,
+    /// A large window (fullscreen or not) covers most of an output.
+    Covered,
 }
 
 /// The pause sources the daemon folds into one decision; the input of
@@ -158,7 +158,7 @@ pub struct PauseSources {
     pub battery: bool,
     pub locked: bool,
     pub fullscreen: bool,
-    pub maximized: bool,
+    pub covered: bool,
 }
 
 impl PauseSources {
@@ -174,7 +174,7 @@ impl PauseSources {
             (self.battery, PauseReason::Battery),
             (self.locked, PauseReason::Locked),
             (self.fullscreen, PauseReason::Fullscreen),
-            (self.maximized, PauseReason::Maximized),
+            (self.covered, PauseReason::Covered),
         ]
         .into_iter()
         .find_map(|(on, reason)| on.then_some(reason))
@@ -861,10 +861,10 @@ mod tests {
             ),
             (
                 PauseSources {
-                    maximized: true,
+                    covered: true,
                     ..off
                 },
-                PauseReason::Maximized,
+                PauseReason::Covered,
             ),
         ] {
             assert_eq!(sources.reason(), Some(want), "{sources:?}");
@@ -873,7 +873,7 @@ mod tests {
 
     /// With several sources active the actionable one wins: the user's own
     /// pause, then battery, then the session, then a covering window — and
-    /// fullscreen outranks maximized.
+    /// fullscreen outranks a merely large window.
     #[test]
     fn pause_reason_priority_when_sources_overlap() {
         let mut s = PauseSources {
@@ -881,7 +881,7 @@ mod tests {
             battery: true,
             locked: true,
             fullscreen: true,
-            maximized: true,
+            covered: true,
         };
         assert_eq!(s.reason(), Some(PauseReason::User));
         s.user = false;
@@ -891,7 +891,7 @@ mod tests {
         s.locked = false;
         assert_eq!(s.reason(), Some(PauseReason::Fullscreen));
         s.fullscreen = false;
-        assert_eq!(s.reason(), Some(PauseReason::Maximized));
+        assert_eq!(s.reason(), Some(PauseReason::Covered));
     }
 
     #[test]

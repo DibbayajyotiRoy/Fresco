@@ -121,14 +121,14 @@ impl PauseConfigWatch {
 
 /// Copy the two pause switches from `fresh` into `cached`, leaving every other
 /// field (a scheduled wallpaper swap lives only in `cached`) alone. Returns
-/// which of them changed: `(pause_on_battery, pause_on_maximized)`.
+/// which of them changed: `(pause_on_battery, pause_on_covered)`.
 fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     let changed = (
         cached.pause_on_battery != fresh.pause_on_battery,
-        cached.pause_on_maximized != fresh.pause_on_maximized,
+        cached.pause_on_covered != fresh.pause_on_covered,
     );
     cached.pause_on_battery = fresh.pause_on_battery;
-    cached.pause_on_maximized = fresh.pause_on_maximized;
+    cached.pause_on_covered = fresh.pause_on_covered;
     changed
 }
 /// Audio recovery cadence/backoff (see `AudioHeal`).
@@ -1661,7 +1661,7 @@ impl Daemon {
                 battery: self.battery_paused,
                 locked: self.lock_paused.is_some(),
                 fullscreen: covered_by("fullscreen"),
-                maximized: covered_by("maximized"),
+                covered: covered_by("maximized"),
             }
             .reason(),
             hwdec,
@@ -1739,7 +1739,7 @@ impl Daemon {
             self.screen().root,
             &self.atoms,
             &self.monitors,
-            self.config.pause_on_maximized,
+            self.config.pause_on_covered,
         );
         if covered != self.fullscreen_covered {
             for (c, what) in &covered {
@@ -1843,15 +1843,15 @@ impl Daemon {
         let Some(fresh) = self.config_watch.poll() else {
             return;
         };
-        let (battery, maximized) = adopt_pause_flags(&mut self.config, &fresh);
+        let (battery, covered) = adopt_pause_flags(&mut self.config, &fresh);
         if battery {
             log::info!("pause on battery = {}", self.config.pause_on_battery);
             self.check_battery(); // reconciles now, in either direction
         }
-        if maximized {
+        if covered {
             log::info!(
-                "pause when an app is maximized = {}",
-                self.config.pause_on_maximized
+                "pause when an app covers the screen = {}",
+                self.config.pause_on_covered
             );
             // The caller's `check_fullscreen` runs next with the new flag.
             kde_desktop::set_pause_mode(&self.config);
@@ -3048,7 +3048,7 @@ fn run_wayland_layershell() -> Result<()> {
                                 battery: battery_paused,
                                 locked: lock_rt.forces_pause(&config),
                                 fullscreen: covered && hidden_fullscreen,
-                                maximized: covered && !hidden_fullscreen,
+                                covered: covered && !hidden_fullscreen,
                             },
                             lock_rt.status(&ctx, &config),
                         ))
@@ -3282,14 +3282,14 @@ fn run_wayland_layershell() -> Result<()> {
             if now.duration_since(last_config_poll) >= CONFIG_POLL {
                 last_config_poll = now;
                 if let Some(fresh) = config_watch.poll() {
-                    let (battery, maximized) = adopt_pause_flags(&mut config, &fresh);
+                    let (battery, covered) = adopt_pause_flags(&mut config, &fresh);
                     if battery {
                         log::info!("pause on battery = {}", config.pause_on_battery);
                     }
-                    if maximized {
+                    if covered {
                         log::info!(
-                            "pause when an app is maximized = {}",
-                            config.pause_on_maximized
+                            "pause when an app covers the screen = {}",
+                            config.pause_on_covered
                         );
                         kde_desktop::set_pause_mode(&config);
                     }
@@ -3422,7 +3422,7 @@ fn run_wayland_layershell() -> Result<()> {
         if let Some(w) = fs_watch.as_mut() {
             if now.duration_since(last_fs_poll) >= FS_POLL {
                 last_fs_poll = now;
-                let now_hidden = w.fullscreen_connectors(config.pause_on_maximized);
+                let now_hidden = w.fullscreen_connectors(config.pause_on_covered);
                 if now_hidden != hidden {
                     // The Wayland twin of the X11 loop's "detected"/"cleared"
                     // lines: a covered output pauses and takes no widget
@@ -4979,14 +4979,14 @@ mod tests {
         // Nothing flipped: nothing reported, wallpaper untouched.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
 
-        fresh.pause_on_maximized = true;
+        fresh.pause_on_covered = true;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, true));
-        assert!(cached.pause_on_maximized && !cached.pause_on_battery);
+        assert!(cached.pause_on_covered && !cached.pause_on_battery);
 
         fresh.pause_on_battery = true;
-        fresh.pause_on_maximized = false;
+        fresh.pause_on_covered = false;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (true, true));
-        assert!(cached.pause_on_battery && !cached.pause_on_maximized);
+        assert!(cached.pause_on_battery && !cached.pause_on_covered);
 
         // Already in step: a second look reports nothing.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));

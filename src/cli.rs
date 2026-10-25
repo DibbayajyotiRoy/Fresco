@@ -390,7 +390,7 @@ fn paused_label(s: &StatusReply) -> String {
         Some(PauseReason::Battery) => "on battery — turn off Pause on battery to keep playing",
         Some(PauseReason::Locked) => "screen is locked",
         Some(PauseReason::Fullscreen) => "a fullscreen app is open",
-        Some(PauseReason::Maximized) => "a maximized window covers the screen",
+        Some(PauseReason::Covered) => "a window covers most of the screen",
         None => "",
     };
     match (s.paused || s.paused_reason.is_some(), why) {
@@ -1347,8 +1347,8 @@ mod paused_label_tests {
             "yes (a fullscreen app is open)"
         );
         assert_eq!(
-            label(false, Some(PauseReason::Maximized)),
-            "yes (a maximized window covers the screen)"
+            label(false, Some(PauseReason::Covered)),
+            "yes (a window covers most of the screen)"
         );
         assert_eq!(
             label(false, Some(PauseReason::Locked)),

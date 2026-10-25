@@ -187,7 +187,7 @@ pub struct StatusReply {
     pub paused: bool,
     /// Why playback is held right now, `None` when nothing holds it. Unlike
     /// `paused` (the user/battery toggle the pill's button flips) this also
-    /// covers a fullscreen/maximized window or the lock screen holding it, so
+    /// covers a fullscreen/covered window or the lock screen holding it, so
     /// it can be `Some` while `paused` is false. `#[serde(default)]` keeps an
     /// older daemon/GUI pair compatible in both directions.
     #[serde(default)]

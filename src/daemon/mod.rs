@@ -2911,6 +2911,7 @@ fn wayland_auto_cycle(
             config.wallpaper.clone(),
             config.scaling,
             effective_ps,
+            config.low_memory,
             paused_for_outputs,
         );
     }

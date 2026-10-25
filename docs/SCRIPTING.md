@@ -43,7 +43,9 @@ fresco_cmd status | jq
 fresco_cmd status | jq '{wallpaper, paused, hwdec, cpu_percent, rss_mb, audio_track, monitors_info}'
 ```
 
-Useful fields: `wallpaper` (name), `paused`, `hwdec` (`vaapi`/`nvdec`/`no`),
+Useful fields: `wallpaper` (name), `paused`, `paused_reason` (why playback is
+held: `user`/`battery`/`locked`/`fullscreen`/`covered`, else `null`; it can be
+set while `paused` is false, e.g. a fullscreen window), `hwdec` (`vaapi`/`nvdec`/`no`),
 `cpu_percent` (daemon + renderers, % of one core), `rss_mb`, `audio_track` /
 `mute` / `volume`, `source_w`/`source_h`/`bit_depth`/`dropped_frames`, and
 `monitors_info` (every connected display with geometry — connector names are

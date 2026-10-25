@@ -4,7 +4,7 @@
 
 # Fresco — Ứng dụng hình nền động và hình nền video miễn phí cho Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | **Tiếng Việt** | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | **Tiếng Việt** | [简体中文](README.zh-CN.md)
 
 **Fresco là ứng dụng hình nền động (live wallpaper) miễn phí, mã nguồn mở dành cho Linux: biến bất kỳ video, GIF hoặc ảnh nào thành hình nền động cho màn hình nền, trên cả X11 lẫn Wayland.** Đây là lựa chọn thay thế Wallpaper Engine chạy native trên Linux, với giao diện đồ họa, phát video tăng tốc bằng GPU và các widget trên màn hình nền.
 
@@ -31,7 +31,7 @@ Fresco biến video, GIF, ảnh, trình chiếu hoặc danh sách phát thành h
 - **Điều khiển:** ứng dụng, bảng lệnh Ctrl+K, cùng `fresco next` / `fresco prev` / `fresco random` để gán phím tắt.
 - **Cài đặt:** gói `.deb` cho Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali và Deepin (một dòng lệnh, tải thủ công hoặc qua Cửa hàng ứng dụng Deepin); trên Fedora, Arch và các bản phân phối khác thì biên dịch từ mã nguồn — xem [Cài đặt](#cài-đặt).
 - **Giấy phép:** miễn phí và mã nguồn mở theo [GPL-3.0-or-later](LICENSE), không quảng cáo, không cần tài khoản.
-- **Người dùng:** 3.000+ người ở 128 quốc gia. Phiên bản mới nhất: 1.1.51.
+- **Người dùng:** 3.000+ người ở 128 quốc gia. Phiên bản mới nhất: 1.1.52.
 
 ## Cài đặt
 
@@ -473,9 +473,9 @@ Cuộc trò chuyện được gắn với một phiếu ngẫu nhiên tạo riê
 | **Giấy phép** | [GPL-3.0-or-later](LICENSE) — miễn phí và mã nguồn mở, không quảng cáo, không cần tài khoản |
 | **Ngôn ngữ và công nghệ** | Rust, GTK4 / libadwaita, libmpv; trình kết xuất mpvpaper đóng kèm trên Wayland |
 | **Bản phát hành đầu tiên** | v0.0.1, tháng 6 năm 2026 |
-| **Phiên bản mới nhất** | 1.1.51 (2026-10-23) — xem [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) để biết bản mới nhất |
+| **Phiên bản mới nhất** | 1.1.52 (2026-10-25) — xem [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) để biết bản mới nhất |
 | **Gói** | `.deb` (amd64), tập lệnh cài đặt một dòng, Cửa hàng ứng dụng Deepin; biên dịch từ mã nguồn ở nơi khác |
-| **Ngôn ngữ giao diện** | Tiếng Anh cùng 12 bản dịch: Trung giản thể, Nga, Tây Ban Nha, Pháp, Đức, Bồ Đào Nha (Brazil), Thổ Nhĩ Kỳ, Việt, Indonesia, Hindi, Bengal và Romania |
+| **Ngôn ngữ giao diện** | Tiếng Anh cùng 13 bản dịch: Trung giản thể, Nga, Tây Ban Nha, Pháp, Đức, Bồ Đào Nha (Brazil), Thổ Nhĩ Kỳ, Việt, Indonesia, Hindi, Bengal, Romania và Ả Rập |
 | **Người dùng** | 3.000+ người ở 128 quốc gia |
 | **Người phát triển** | Dibbayajyoti Roy |
 | **Mã nguồn** | <https://github.com/DibbayajyotiRoy/fresco> |
@@ -491,4 +491,4 @@ Rất hoan nghênh báo cáo lỗi, đề xuất tính năng và PR — hãy m�
 
 ---
 
-<sub>Fresco là ứng dụng hình nền động và hình nền video miễn phí, mã nguồn mở cho Linux (X11 và Wayland), với các widget lời bài hát, đồng hồ, hiệu ứng hình ảnh âm thanh và ảnh bìa album được vẽ thẳng lên hình nền. Đây là lựa chọn thay thế Wallpaper Engine chạy native trên Linux, đồng thời là người bạn đồng hành về nhạc và thời gian cho các công cụ như Conky. Được 3.000+ người ở 128 quốc gia sử dụng. Cập nhật lần cuối: 2026-10-23.</sub>
+<sub>Fresco là ứng dụng hình nền động và hình nền video miễn phí, mã nguồn mở cho Linux (X11 và Wayland), với các widget lời bài hát, đồng hồ, hiệu ứng hình ảnh âm thanh và ảnh bìa album được vẽ thẳng lên hình nền. Đây là lựa chọn thay thế Wallpaper Engine chạy native trên Linux, đồng thời là người bạn đồng hành về nhạc và thời gian cho các công cụ như Conky. Được 3.000+ người ở 128 quốc gia sử dụng. Cập nhật lần cuối: 2026-10-25.</sub>

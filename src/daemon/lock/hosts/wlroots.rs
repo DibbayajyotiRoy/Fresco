@@ -459,8 +459,13 @@ fn build_plugin_command(
         };
         let sock = lock_socket_path(runtime_dir, &out.connector);
         let power_saving = wallpaper.effective_power_saving(config.power_saving);
-        let mut opts =
-            crate::daemon::mpvpaper::build_mpv_opts(wallpaper, config.scaling, power_saving, &sock);
+        let mut opts = crate::daemon::mpvpaper::build_mpv_opts(
+            wallpaper,
+            config.scaling,
+            power_saving,
+            config.low_memory,
+            &sock,
+        );
         if !playing_live {
             // Paused at the file's start = its first frame for a video, and a
             // no-op for a still image — see the module doc on
@@ -482,8 +487,13 @@ fn build_plugin_command(
     let default = fallback.effective_path().map(|media| {
         let sock = lock_socket_path(runtime_dir, "unknown");
         let power_saving = fallback.effective_power_saving(config.power_saving);
-        let mut opts =
-            crate::daemon::mpvpaper::build_mpv_opts(fallback, config.scaling, power_saving, &sock);
+        let mut opts = crate::daemon::mpvpaper::build_mpv_opts(
+            fallback,
+            config.scaling,
+            power_saving,
+            config.low_memory,
+            &sock,
+        );
         if !playing_live {
             opts.push_str(" pause=yes");
         }

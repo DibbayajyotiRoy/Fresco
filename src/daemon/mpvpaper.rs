@@ -550,6 +550,7 @@ impl WaylandPlayer {
         wallpaper: &Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
         file: &Path,
         show_on_lock: bool,
     ) -> Result<WaylandPlayer> {
@@ -558,7 +559,7 @@ impl WaylandPlayer {
         let socket_path = dir.join(format!("mpv-{}.sock", sanitize(connector)));
         std::fs::remove_file(&socket_path).ok();
 
-        let mut opts = build_mpv_opts(wallpaper, scaling, power_saving, &socket_path);
+        let mut opts = build_mpv_opts(wallpaper, scaling, power_saving, low_memory, &socket_path);
         // Same `-o` encoding limits as hwdec: no spaces or `#` in the value.
         if let Some(log) = crate::config::mpv_log_file(connector) {
             let log = log.to_string_lossy().into_owned();
@@ -1017,12 +1018,14 @@ pub(crate) fn build_mpv_opts(
     w: &Wallpaper,
     scaling: Scaling,
     power_saving: PowerSaving,
+    low_memory: bool,
     sock: &Path,
 ) -> String {
     build_mpv_opts_with_hwdec(
         w,
         scaling,
         power_saving,
+        low_memory,
         sock,
         &crate::config::hwdec(!w.rotation.is_multiple_of(360)),
     )
@@ -1046,6 +1049,7 @@ fn build_mpv_opts_with_hwdec(
     w: &Wallpaper,
     scaling: Scaling,
     power_saving: PowerSaving,
+    low_memory: bool,
     sock: &Path,
     hwdec: &str,
 ) -> String {
@@ -1071,6 +1075,11 @@ fn build_mpv_opts_with_hwdec(
         format!("hwdec={hwdec}"),
         "image-display-duration=inf".into(),
     ];
+    if low_memory {
+        o.push("demuxer-max-bytes=8MiB".into());
+        o.push("demuxer-max-back-bytes=0".into());
+        o.push("vd-lavc-threads=2".into());
+    }
     if w.kind == Kind::Playlist && w.paths.len() > 1 {
         o.push("loop-playlist=inf".into());
     } else {
@@ -1315,6 +1324,7 @@ mod tests {
             &w,
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
             Path::new("/tmp/s.sock"),
         );
         assert!(opts.contains("aid=no"));
@@ -1333,6 +1343,7 @@ mod tests {
             &unmuted,
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
             Path::new("/tmp/s.sock"),
         );
         assert!(!opts.contains("video-sync=display-resample"));
@@ -1349,8 +1360,14 @@ mod tests {
             };
             let rotated = rotation != 0;
             let hw = crate::config::select_hwdec(true, rotated, None);
-            let opts =
-                build_mpv_opts_with_hwdec(&w, Scaling::Balanced, PowerSaving::Full, sock, &hw);
+            let opts = build_mpv_opts_with_hwdec(
+                &w,
+                Scaling::Balanced,
+                PowerSaving::Full,
+                false,
+                sock,
+                &hw,
+            );
             // Exactly one space-separated token (= one config-file line) holds
             // the whole priority list.
             let tokens: Vec<&str> = opts
@@ -1369,6 +1386,7 @@ mod tests {
             &w,
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
             sock,
             "nvdec vaapi",
         );
@@ -1383,7 +1401,7 @@ mod tests {
             ..Default::default()
         };
         for level in [PowerSaving::Reduced, PowerSaving::Minimum] {
-            let opts = build_mpv_opts(&w, Scaling::High, level, Path::new("/tmp/s.sock"));
+            let opts = build_mpv_opts(&w, Scaling::High, level, false, Path::new("/tmp/s.sock"));
             // Cheap bilinear scaling, not the expensive lanczos of High.
             assert!(opts.contains("scale=bilinear"), "{level:?}: {opts}");
             assert!(!opts.contains("scale=lanczos"), "{level:?} overrides High");
@@ -1391,6 +1409,42 @@ mod tests {
             assert!(!opts.contains("vf="), "{level:?} must not add a filter");
             assert!(!opts.contains("vd-lavc-skipframe"), "{level:?}");
         }
+    }
+
+    #[test]
+    fn build_mpv_opts_low_memory_adds_tiny_cache_and_thread_cap() {
+        let w = Wallpaper {
+            kind: Kind::Video,
+            ..Default::default()
+        };
+        let opts = build_mpv_opts(
+            &w,
+            Scaling::Balanced,
+            PowerSaving::Full,
+            true,
+            Path::new("/tmp/s.sock"),
+        );
+        assert!(opts.contains("demuxer-max-bytes=8MiB"), "{opts}");
+        assert!(opts.contains("demuxer-max-back-bytes=0"), "{opts}");
+        assert!(opts.contains("vd-lavc-threads=2"), "{opts}");
+    }
+
+    #[test]
+    fn build_mpv_opts_non_low_memory_omits_low_memory_options() {
+        let w = Wallpaper {
+            kind: Kind::Video,
+            ..Default::default()
+        };
+        let opts = build_mpv_opts(
+            &w,
+            Scaling::Balanced,
+            PowerSaving::Full,
+            false,
+            Path::new("/tmp/s.sock"),
+        );
+        assert!(!opts.contains("demuxer-max-bytes=8MiB"), "{opts}");
+        assert!(!opts.contains("demuxer-max-back-bytes=0"), "{opts}");
+        assert!(!opts.contains("vd-lavc-threads=2"), "{opts}");
     }
 
     /// Every spawn failure must survive its `.context()` wrapper as a code the
@@ -1680,6 +1734,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
                 &wp,
                 Scaling::Balanced,
                 PowerSaving::Full,
+                false,
                 &std::env::temp_dir().join("fresco-none.mp4"),
                 false,
             )
@@ -1704,6 +1759,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
             &wp,
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
             &std::env::temp_dir().join("fresco-none.mp4"),
             false,
         ) else {
@@ -1727,6 +1783,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
                 },
                 Scaling::Balanced,
                 PowerSaving::Full,
+                false,
             );
             for _ in 0..MAX * 2 {
                 // As the daemon loop does: a tick without a probe carries no
@@ -1759,6 +1816,7 @@ exec mpv --idle=yes --vo=null --ao=null --no-config --no-terminal --really-quiet
             &wp,
             Scaling::Balanced,
             PowerSaving::Full,
+            false,
             &std::env::temp_dir().join("fresco-none.mp4"),
             false,
         )

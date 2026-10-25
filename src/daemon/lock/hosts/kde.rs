@@ -978,6 +978,9 @@ mod tests {
         config.lockscreen = Some(LockScreen {
             enabled: true,
             dim: 0.5,
+            // `Always` ignores the battery; the default (`Ac`) would make the
+            // PlayVideo assertion below depend on the machine running the test.
+            live_video: crate::config::LiveVideo::Always,
             ..LockScreen::default()
         });
         let c = ctx(&config);

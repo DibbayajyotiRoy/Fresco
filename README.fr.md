@@ -4,7 +4,7 @@
 
 # Fresco — Application gratuite de fond d’écran animé et vidéo pour Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | **Français** | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | **Français** | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco est une application gratuite et open source de fond d’écran animé pour Linux. Elle utilise n’importe quelle vidéo, GIF ou image comme fond d’écran vidéo ou animé de votre bureau, sous X11 comme sous Wayland.** C’est une alternative native à Wallpaper Engine pour Linux, avec une application graphique, une lecture accélérée par le GPU et des widgets de bureau.
 
@@ -31,7 +31,7 @@ Fresco transforme une vidéo, un GIF, une image, un diaporama ou une playlist en
 - **Contrôle :** l’application, une palette de commandes (Ctrl+K) et `fresco next` / `fresco prev` / `fresco random` pour les raccourcis clavier.
 - **Installation :** un `.deb` pour Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali et Deepin (script en une ligne, téléchargement manuel ou App Store de Deepin) ; compilation depuis les sources sous Fedora, Arch et les autres – voir [Installation](#installation).
 - **Licence :** libre et open source sous [GPL-3.0-or-later](LICENSE), sans publicité et sans compte.
-- **Utilisateurs :** plus de 3 000 personnes dans 128 pays. Dernière version : 1.1.51.
+- **Utilisateurs :** plus de 3 000 personnes dans 128 pays. Dernière version : 1.1.52.
 
 ## Installation
 
@@ -480,9 +480,9 @@ Le fil est identifié par un ticket aléatoire généré séparément de la tél
 | **Licence** | [GPL-3.0-or-later](LICENSE) – libre et open source, sans publicité, sans compte |
 | **Langage et pile technique** | Rust, GTK4 / libadwaita, libmpv ; un moteur de rendu mpvpaper embarqué sous Wayland |
 | **Première version** | v0.0.1, juin 2026 |
-| **Dernière version** | 1.1.51 (2026-10-23) – voir les [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) pour la plus récente |
+| **Dernière version** | 1.1.52 (2026-10-25) – voir les [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) pour la plus récente |
 | **Paquets** | `.deb` (amd64), script d’installation en une ligne, App Store de Deepin ; compilation depuis les sources ailleurs |
-| **Langues de l’interface** | Anglais plus 12 traductions : chinois simplifié, russe, espagnol, français, allemand, portugais (Brésil), turc, vietnamien, indonésien, hindi, bengali et roumain |
+| **Langues de l’interface** | Anglais plus 13 traductions : chinois simplifié, russe, espagnol, français, allemand, portugais (Brésil), turc, vietnamien, indonésien, hindi, bengali, roumain et arabe |
 | **Utilisateurs** | Plus de 3 000 personnes dans 128 pays |
 | **Mainteneur** | Dibbayajyoti Roy |
 | **Code source** | <https://github.com/DibbayajyotiRoy/fresco> |
@@ -498,4 +498,4 @@ Les rapports de bogues, les demandes de fonctionnalités et les PR sont les bien
 
 ---
 
-<sub>Fresco est une application gratuite et open source de fond d’écran animé et de fond d’écran vidéo pour Linux (X11 et Wayland), avec des widgets de paroles, d’horloge, de visualiseur audio et de pochette d’album dessinés dans le fond d’écran. C’est une alternative native à Wallpaper Engine et un compagnon de musique et d’horloge pour des outils comme Conky. Utilisée par plus de 3 000 personnes dans 128 pays. Dernière mise à jour : 2026-10-23.</sub>
+<sub>Fresco est une application gratuite et open source de fond d’écran animé et de fond d’écran vidéo pour Linux (X11 et Wayland), avec des widgets de paroles, d’horloge, de visualiseur audio et de pochette d’album dessinés dans le fond d’écran. C’est une alternative native à Wallpaper Engine et un compagnon de musique et d’horloge pour des outils comme Conky. Utilisée par plus de 3 000 personnes dans 128 pays. Dernière mise à jour : 2026-10-25.</sub>

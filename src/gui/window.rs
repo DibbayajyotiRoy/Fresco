@@ -321,6 +321,16 @@ fn build_ui(app: &adw::Application) {
         return;
     }
 
+    // Mirror the whole UI for a right-to-left language, and un-mirror it for
+    // any other: GTK seeds this from the process locale, which need not match
+    // the language picked in Settings. Before any widget exists, and fixed for
+    // the process like the catalog it follows (a language change restarts).
+    gtk4::Widget::set_default_direction(if crate::i18n::ui_is_rtl() {
+        gtk4::TextDirection::Rtl
+    } else {
+        gtk4::TextDirection::Ltr
+    });
+
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some("Fresco"));
     // Reopen at the size the user left it. Size and maximized only: GTK4 has
@@ -1403,16 +1413,21 @@ fn build_menu_popover(
         });
     }
     // Escape / Alt+Left step back out of a sub-page instead of closing the
-    // whole menu. Capture phase, so it runs before the popover's own Escape.
+    // whole menu (Alt+Right when mirrored: "back" points where text starts).
+    // Capture phase, so it runs before the popover's own Escape.
     {
         let keys = gtk4::EventControllerKey::new();
         keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let stack = stack.clone();
         keys.connect_key_pressed(move |_, key, _, mods| {
             let on_subpage = stack.visible_child_name().as_deref() != Some(MENU_ROOT);
+            let back_key = if stack.direction() == gtk4::TextDirection::Rtl {
+                gtk4::gdk::Key::Right
+            } else {
+                gtk4::gdk::Key::Left
+            };
             let back = key == gtk4::gdk::Key::Escape
-                || (key == gtk4::gdk::Key::Left
-                    && mods.contains(gtk4::gdk::ModifierType::ALT_MASK));
+                || (key == back_key && mods.contains(gtk4::gdk::ModifierType::ALT_MASK));
             if on_subpage && back {
                 stack.set_visible_child_name(MENU_ROOT);
                 stack.child_focus(gtk4::DirectionType::TabForward);
@@ -1674,22 +1689,22 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             }
         },
     ));
-    let maximized_row = switch_row(
-        t!("Pause when an app is maximized"),
-        state.borrow().config.pause_on_maximized,
+    let covered_row = switch_row(
+        t!("Pause when an app covers the screen"),
+        state.borrow().config.pause_on_covered,
         {
             let state2 = state.clone();
             move |active| {
                 let mut s = state2.borrow_mut();
-                s.config.pause_on_maximized = active;
+                s.config.pause_on_covered = active;
                 s.config.save().ok();
             }
         },
     );
-    maximized_row.set_tooltip_text(Some(t!(
-        "Saves CPU and GPU on integrated graphics; fullscreen apps always pause"
+    covered_row.set_tooltip_text(Some(t!(
+        "Pauses when any large window covers 90% of the screen; fullscreen apps always pause"
     )));
-    popover_box.append(&maximized_row);
+    popover_box.append(&covered_row);
     // Quick schedule pause — only shown when a schedule exists. Turning it off
     // here keeps the configured day/night setup (unlike Advanced's "Off",
     // which deletes it); users kept hunting for this switch.
@@ -2067,7 +2082,7 @@ fn plan_sections(
 /// (Favorites lead, so a starred entry would otherwise appear twice). What
 /// `fresco next` / `prev` cycle through, so a hotkey steps through the same
 /// sequence the user sees. Honours the open folder and sort like the grid.
-pub(super) fn display_order(
+pub(crate) fn display_order(
     entries: &[LibraryEntry],
     collections: &[library::Collection],
     view: library::LibraryView,
@@ -9594,7 +9609,7 @@ fn entry_is_active(entry: &LibraryEntry, cfg: &Config) -> bool {
             .any(|w| entry_matches_wallpaper(entry, w))
 }
 
-pub(super) fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
+pub(crate) fn entry_matches_wallpaper(entry: &LibraryEntry, w: &crate::config::Wallpaper) -> bool {
     if entry.kind != w.kind {
         return false;
     }

@@ -41,9 +41,9 @@ export function HowItWorks({ dict }: { dict: Dictionary }) {
                   {i > 0 ? (
                     <span
                       aria-hidden
-                      className="absolute top-1/2 -left-[26px] hidden size-7 -translate-y-1/2 place-items-center rounded-full border border-hairline bg-paper text-ink-faint md:grid"
+                      className="absolute top-1/2 -start-[26px] hidden size-7 -translate-y-1/2 place-items-center rounded-full border border-hairline bg-paper text-ink-faint md:grid"
                     >
-                      <ArrowRight className="size-3.5" />
+                      <ArrowRight className="size-3.5 rtl:-scale-x-100" />
                     </span>
                   ) : null}
 

@@ -70,18 +70,23 @@ pub use cosmic_text::FontSystem;
 
 /// Horizontal alignment of a text block **within its `max_width`**.
 ///
+/// Physical, not logical: an Arabic line in a `Start` box is flush left too,
+/// because a card's geometry (art on the left, text beside it) is laid out in
+/// screen space and does not mirror with the string. What the string's own
+/// direction does decide is the order of glyphs *inside* the line.
+///
 /// Without a `max_width` there is no box to align inside, so every value
 /// behaves as [`TextAlign::Start`]. That is cosmic-text's semantic and we do not
 /// paper over it: silently inventing a box would misplace text whenever the
 /// caller's own layout already positioned it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextAlign {
-    /// Flush left (flush right in an RTL paragraph).
+    /// Flush left.
     #[default]
     Start,
     /// Centred in `max_width`.
     Center,
-    /// Flush right (flush left in an RTL paragraph).
+    /// Flush right.
     End,
 }
 
@@ -298,6 +303,7 @@ impl TextMetrics {
 ///    that is `Noto Sans CJK SC/TC/HK/JP/KR` chosen by the process locale
 ///    (Simplified Chinese is the default, which is the right default for
 ///    Fresco's zh-CN users);
+///    Arabic gets `Noto Sans Arabic` (see [`ARABIC_FAMILIES`]);
 /// 3. common families: `Noto Sans`, `DejaVu Sans`, `FreeSans`, then the mono
 ///    and symbol Notos, then `Noto Color Emoji`;
 /// 4. **every other installed font**, in match order.
@@ -340,6 +346,20 @@ pub const CJK_FAMILIES: [&str; 5] = [
     "Noto Sans CJK SC",
     "WenQuanYi Zen Hei",
     "Microsoft YaHei",
+];
+
+/// Families that carry Arabic (also Persian and Urdu), in preference order.
+///
+/// Nothing needs to *request* one: cosmic-text's script fallback already tries
+/// `Noto Sans Arabic` for an Arabic word the requested family lacks, then every
+/// other installed face. This names what is known to cover the script, for
+/// [`FontStack::first_installed`] to answer "can this machine draw Arabic?".
+/// `fonts-noto-core` (a Recommends of the `.deb`) ships the first two.
+pub const ARABIC_FAMILIES: [&str; 4] = [
+    "Noto Sans Arabic",
+    "Noto Naskh Arabic",
+    "Noto Kufi Arabic",
+    "DejaVu Sans",
 ];
 
 /// Monospace, for LCD readouts, bitrate chips and tabular columns.
@@ -599,6 +619,48 @@ impl std::fmt::Debug for FontStack {
     }
 }
 
+/// True for a letter of a right-to-left script: Hebrew, Arabic and their kin
+/// (Syriac, Thaana, N'Ko, ...). Digits are not letters, so they never match.
+pub(crate) fn is_rtl_letter(c: char) -> bool {
+    c.is_alphabetic()
+        && matches!(c as u32,
+            0x0590..=0x08FF     // Hebrew through Arabic extended-A
+            | 0xFB1D..=0xFDFF   // Hebrew and Arabic presentation forms A
+            | 0xFE70..=0xFEFF   // Arabic presentation forms B
+        )
+}
+
+/// `text`, with a right-to-left mark put before any line that opens with a
+/// number in a right-to-left paragraph, such as the clock's `9:41 ص`.
+///
+/// cosmic-text 0.19 lays such a line out without its leading number (`9:41 ص`
+/// comes back as ` ص`: the digits are neither measured nor drawn). The mark is
+/// a strong right-to-left character with no width, so it gives the line a
+/// first run that survives, and the paragraph direction stays what it was: the
+/// guard only fires when the first letter is already right-to-left.
+fn rtl_safe(text: &str) -> std::borrow::Cow<'_, str> {
+    let opens_with_number = |l: &str| {
+        l.starts_with(char::is_numeric)
+            && l.chars()
+                .find(|c| c.is_alphabetic())
+                .is_some_and(is_rtl_letter)
+    };
+    if !text.lines().any(opens_with_number) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 6);
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        if opens_with_number(line) {
+            out.push('\u{200F}');
+        }
+        out.push_str(line);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Point the buffer at `run`, in device pixels.
 ///
 /// `limit` is what separates the two passes `measure` makes: `false` lays the
@@ -637,7 +699,7 @@ fn configure(fonts: &mut FontSystem, buf: &mut Buffer, run: &TextRun, scale: f32
         Ellipsize::None
     });
     buf.set_text(
-        &run.text,
+        &rtl_safe(&run.text),
         &run.attrs(),
         Shaping::Advanced,
         Some(run.align.to_cosmic()),
@@ -853,6 +915,83 @@ mod tests {
         let latin = s.measure(&run("abcd", 32.0), 1.0);
         assert!(m.width > latin.width, "cjk {m:?} vs latin {latin:?}");
         assert_eq!(m.lines, 1);
+    }
+
+    /// `text` laid out at 32 lu: whether the line is right-to-left, and each
+    /// glyph as `(first char of its cluster, glyph id, x, width)`, in layout
+    /// order. Keyed by char, not byte offset, because `configure` may prepend
+    /// a mark (see `rtl_safe`).
+    fn shaped(s: &mut FontStack, text: &str) -> (bool, Vec<(char, u16, f32, f32)>) {
+        let r = TextRun::new(text, 32.0);
+        s.with_buffer(|fonts, buf| {
+            configure(fonts, buf, &r, 1.0, true);
+            let line = buf.layout_runs().next().expect("one laid-out line");
+            let glyphs = line.glyphs.iter().map(|g| {
+                let c = line.text[g.start..g.end].chars().next().unwrap_or('\0');
+                (c, g.glyph_id, g.x, g.w)
+            });
+            (line.rtl, glyphs.collect())
+        })
+    }
+
+    #[test]
+    fn arabic_is_joined_ordered_right_to_left_and_drawn() {
+        // Skipped on coverage, as the CJK test is: a machine with no Arabic
+        // face draws notdef boxes whatever the code does.
+        let Some(mut s) = stack() else { return };
+        if s.first_installed(&ARABIC_FAMILIES).is_none() {
+            eprintln!("no Arabic-capable font installed; skipping");
+            return;
+        }
+
+        // Joining: beh is drawn in its initial, medial and final forms, so the
+        // three letters cannot all be the same glyph. Basic shaping would give
+        // three identical isolated forms.
+        let (rtl, g) = shaped(&mut s, "ببب");
+        assert!(rtl && g.len() == 3, "{g:?}");
+        let ids: std::collections::HashSet<_> = g.iter().map(|g| g.1).collect();
+        assert!(ids.len() > 1, "letters were not joined: {g:?}");
+        // Bidi: the first letter typed sits rightmost.
+        assert!(g[0].2 > g[2].2, "not in RTL order: {g:?}");
+
+        // The clock's suffix, `ص` / `م` after the figures. The first strong
+        // letter makes the line RTL, so the suffix lands left of the figures,
+        // which keep their own left-to-right order. The figures lead the
+        // string, which cosmic-text 0.19 drops unless `rtl_safe` guards them.
+        for text in ["9:41 ص", "9:41 م", "٩:٤١ ص"] {
+            let (rtl, g) = shaped(&mut s, text);
+            assert!(rtl, "{text:?}");
+            assert!(g.iter().all(|g| g.1 != 0), "notdef in {g:?}");
+            // The guard mark is there (the figures lead) and takes no room.
+            assert!(g.iter().any(|g| g.0 == '\u{200F}' && g.3 == 0.0), "{g:?}");
+            let at = |c: char| {
+                g.iter()
+                    .find(|g| g.0 == c)
+                    .unwrap_or_else(|| panic!("{c} missing: {g:?}"))
+            };
+            let (first, last) = (text.chars().next().unwrap(), text.chars().nth(3).unwrap());
+            let suffix = text.chars().last().unwrap();
+            assert!(
+                at(suffix).2 < at(first).2,
+                "suffix not left of the figures: {g:?}"
+            );
+            assert!(at(first).2 < at(last).2, "figures reversed: {g:?}");
+            let ink = s.ink_bounds(&TextRun::new(text, 32.0), 1.0).unwrap();
+            // Digits and suffix both inked, and the guard mark takes no room.
+            let bare = s.measure(&TextRun::new(" ص", 32.0), 1.0);
+            assert!(ink.w > bare.width, "{ink:?} vs {bare:?}");
+        }
+
+        // A line whose first strong letter is Latin stays left-to-right.
+        let (rtl, g) = shaped(&mut s, "9 abc ببب");
+        assert!(!rtl && g[0].0 == '9', "{g:?}");
+
+        // A lyric draws, measures, and ellipsises like any other text.
+        let lyric = "مرحبا بالعالم، هذا سطر طويل من الكلمات";
+        let free = s.measure(&TextRun::new(lyric, 24.0), 1.0);
+        assert!(free.width > 0.0 && free.lines == 1);
+        let tight = s.measure(&TextRun::new(lyric, 24.0).max_width(free.width / 2.0), 1.0);
+        assert!(tight.truncated && tight.width <= free.width / 2.0 + 0.5);
     }
 
     #[test]

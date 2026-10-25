@@ -3,7 +3,7 @@ import type { Dictionary } from "./dictionaries/en";
 
 /**
  * Dictionaries are dynamically imported so each statically generated locale
- * pulls in only its own copy, instead of shipping all seven in one chunk.
+ * pulls in only its own copy, instead of shipping all nine in one chunk.
  */
 const LOADERS: Record<Locale, () => Promise<{ default: Dictionary }>> = {
   en: () => import("./dictionaries/en").then((m) => ({ default: m.en })),
@@ -13,6 +13,8 @@ const LOADERS: Record<Locale, () => Promise<{ default: Dictionary }>> = {
   de: () => import("./dictionaries/de").then((m) => ({ default: m.de })),
   fr: () => import("./dictionaries/fr").then((m) => ({ default: m.fr })),
   "zh-cn": () => import("./dictionaries/zh-cn").then((m) => ({ default: m.zhCn })),
+  ar: () => import("./dictionaries/ar").then((m) => ({ default: m.ar })),
+  tr: () => import("./dictionaries/tr").then((m) => ({ default: m.tr })),
 };
 
 /** Loads the dictionary for `locale`, falling back to English if unknown. */

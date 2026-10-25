@@ -1790,6 +1790,47 @@ impl Default for Wallpaper {
     }
 }
 
+/// What pool the daemon auto-cycler draws from.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "lowercase")]
+pub enum CycleSource {
+    /// The whole library, honouring the saved sort and folder view.
+    #[default]
+    Library,
+    /// Only entries filed in this collection.
+    Collection(String),
+    /// A filesystem folder watched outside the library.
+    Folder(PathBuf),
+}
+
+fn default_auto_cycle_interval() -> u32 {
+    30
+}
+
+/// Daemon-side timed wallpaper cycling.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoCycle {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_auto_cycle_interval")]
+    pub interval_min: u32,
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default)]
+    pub source: CycleSource,
+}
+
+impl Default for AutoCycle {
+    fn default() -> Self {
+        AutoCycle {
+            enabled: false,
+            interval_min: default_auto_cycle_interval(),
+            shuffle: false,
+            source: CycleSource::Library,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_version")]
@@ -1802,16 +1843,19 @@ pub struct Config {
     pub enabled: bool,
     #[serde(default)]
     pub pause_on_battery: bool,
-    /// Also pause an output while a maximized window covers it. Fullscreen
-    /// windows always pause; this extends that to maximized ones, for
-    /// integrated GPUs that cannot render the wallpaper and a game/heavy app.
-    #[serde(default)]
-    pub pause_on_maximized: bool,
+    /// Pause an output while any large window (not just fullscreen/maximized)
+    /// covers most of the screen. The threshold is 90% of the monitor area, so
+    /// normal apps and non-fullscreen games also pause the wallpaper.
+    #[serde(default, alias = "pause_on_maximized")]
+    pub pause_on_covered: bool,
     #[serde(default)]
     pub scaling: Scaling,
     /// Global decode-load reduction; see [`PowerSaving`].
     #[serde(default)]
     pub power_saving: PowerSaving,
+    /// Use tiny mpv buffers and fewer decode threads. For low-RAM machines.
+    #[serde(default)]
+    pub low_memory: bool,
     /// Deprecated 1.1.32 frame-rate cap, in fps. Retained only so configs
     /// written by 1.1.32 still parse; the value is migrated to
     /// [`Config::power_saving`] on load (see `Config::migrate`) and never
@@ -1953,6 +1997,11 @@ pub struct Config {
     /// re-appear for that same version on the next check.
     #[serde(default)]
     pub update_skipped_version: String,
+    /// Show a system-tray icon owned by the daemon. On desktops without a tray
+    /// host (e.g. stock GNOME) the icon is simply absent and Fresco keeps
+    /// working.
+    #[serde(default = "default_true")]
+    pub tray_icon: bool,
     /// Optional time-of-day schedule for the default wallpaper (v1: does not
     /// apply to per-monitor overrides). Absent = no scheduling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1962,6 +2011,9 @@ pub struct Config {
     /// configured day/night setup just to pause it.
     #[serde(default)]
     pub schedule_paused: bool,
+    /// Daemon-side timed wallpaper cycling.
+    #[serde(default)]
+    pub auto_cycle: AutoCycle,
     /// Optional overlay widgets drawn on top of the wallpaper; see [`Widgets`].
     /// Absent = no widgets, which is what every config written before this
     /// feature existed says, so they all keep their current behaviour.
@@ -2025,9 +2077,10 @@ impl Default for Config {
             autostart: true,
             enabled: true,
             pause_on_battery: false,
-            pause_on_maximized: false,
+            pause_on_covered: false,
             scaling: Scaling::default(),
             power_saving: PowerSaving::default(),
+            low_memory: false,
             framerate: 0,
             dde_mode: DdeMode::default(),
             dde_icon_peek_secs: default_dde_icon_peek_secs(),
@@ -2054,8 +2107,10 @@ impl Default for Config {
             monitors: BTreeMap::new(),
             last_update_check: 0,
             update_skipped_version: String::new(),
+            tray_icon: true,
             schedule: None,
             schedule_paused: false,
+            auto_cycle: AutoCycle::default(),
             widgets: None,
             lockscreen: None,
         }
@@ -2553,7 +2608,7 @@ mod tests {
             h: 0.5,
         });
         cfg.pause_on_battery = true;
-        cfg.pause_on_maximized = true;
+        cfg.pause_on_covered = true;
         cfg.monitors.insert(
             "HDMI-1".into(),
             Wallpaper {

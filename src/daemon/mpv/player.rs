@@ -22,8 +22,9 @@ impl Player {
         wallpaper: &Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
     ) -> Result<Player> {
-        Self::new_with_extra_options(wid, wallpaper, scaling, power_saving, &[])
+        Self::new_with_extra_options(wid, wallpaper, scaling, power_saving, low_memory, &[])
     }
 
     /// Like [`Player::new`], but applies `extra_options` as additional
@@ -50,6 +51,7 @@ impl Player {
         wallpaper: &Wallpaper,
         scaling: Scaling,
         power_saving: PowerSaving,
+        low_memory: bool,
         extra_options: &[(&str, &str)],
     ) -> Result<Player> {
         let f = fns()?;
@@ -87,10 +89,19 @@ impl Player {
             // Memory: a looping wallpaper doesn't need big read-ahead caches.
             // Small caps cut tens of MB of RSS with no visible effect on a loop.
             ("cache", "no"),
-            ("demuxer-max-bytes", "16MiB"),
-            ("demuxer-max-back-bytes", "4MiB"),
+            (
+                "demuxer-max-bytes",
+                if low_memory { "8MiB" } else { "16MiB" },
+            ),
+            (
+                "demuxer-max-back-bytes",
+                if low_memory { "0" } else { "4MiB" },
+            ),
             ("demuxer-readahead-secs", "1"),
         ];
+        if low_memory {
+            unsafe { f.set_option(handle, "vd-lavc-threads", "2") };
+        }
         // SAFETY: `handle` is the live, non-null handle just created above and
         // is not destroyed until `Drop`. This invariant holds for every mpv
         // call in this module.

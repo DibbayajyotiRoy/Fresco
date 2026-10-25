@@ -75,7 +75,7 @@ export function LanguageSwitcher({
       <ul
         id={PANEL_ID}
         hidden={!open}
-        className="nav-pop nav-float absolute right-0 top-full z-50 mt-2 min-w-[200px] rounded-xl border border-hairline bg-surface p-1"
+        className="nav-pop nav-float absolute end-0 top-full z-50 mt-2 min-w-[200px] rounded-xl border border-hairline bg-surface p-1"
       >
         {LOCALES.map((option) => {
           const current = option === locale;

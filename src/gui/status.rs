@@ -9,7 +9,7 @@ use std::time::Duration;
 use gtk4::prelude::*;
 use gtk4::{glib, glib::ControlFlow};
 
-use crate::ipc::{self, MonitorInfo, Request, StatusReply};
+use crate::ipc::{self, MonitorInfo, PauseReason, Request, StatusReply};
 use crate::{t, tf};
 
 use super::lockscreen::{lock_support_of, LockSupport};
@@ -232,6 +232,8 @@ struct PillWidgets {
     overline: gtk4::Label,
     /// Prettified wallpaper name (CPU% lives in the tooltip).
     label: gtk4::Label,
+    /// Why playback is held ("On battery"…); hidden while nothing holds it.
+    reason: gtk4::Label,
     hwdec: gtk4::Label,
     toggle: gtk4::Button,
     pill: gtk4::Box,
@@ -270,6 +272,11 @@ pub fn build_status_pill() -> gtk4::Widget {
     text_col.append(&label);
     pill.append(&text_col);
 
+    let reason = gtk4::Label::new(None);
+    reason.add_css_class("dim");
+    reason.set_visible(false);
+    pill.append(&reason);
+
     let hwdec = gtk4::Label::new(None);
     hwdec.add_css_class("dim");
     hwdec.set_visible(false);
@@ -285,6 +292,7 @@ pub fn build_status_pill() -> gtk4::Widget {
         dot,
         overline,
         label,
+        reason,
         hwdec,
         toggle: toggle.clone(),
         pill: pill.clone(),
@@ -378,6 +386,7 @@ fn apply_off(w: &PillWidgets) {
     w.dot.add_css_class("dot-off");
     w.overline.set_visible(false);
     w.label.set_label(t!("Not running"));
+    w.reason.set_visible(false);
     w.hwdec.set_visible(false);
     w.toggle.set_visible(false);
     w.pill.set_tooltip_text(None);
@@ -402,11 +411,20 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
     // `daemon::WlOutput::supervise`) must not say PLAYING — the dot already
     // turns amber for it via `status.error`, but the overline used to keep
     // claiming the wallpaper was animating right through a give-up.
+    // A covering window or the lock screen holds playback without `paused`
+    // (the toggle's user/battery flag) being set; the overline still says so.
     w.overline.set_label(pill_overline(
         !status.gave_up.is_empty(),
-        status.paused,
+        status.paused || status.paused_reason.is_some(),
         w.still_frame,
     ));
+    match status.paused_reason {
+        Some(r) => {
+            w.reason.set_label(pause_reason_label(r));
+            w.reason.set_visible(true);
+        }
+        None => w.reason.set_visible(false),
+    }
     w.overline.set_visible(true);
     let name = status
         .wallpaper
@@ -452,6 +470,18 @@ fn pill_overline(gave_up: bool, paused: bool, still_frame: bool) -> &'static str
         t!("PAUSED")
     } else {
         t!("PLAYING")
+    }
+}
+
+/// Short, already-localized text for why playback is held, shown beside the
+/// PAUSED overline (the CLI spells the same causes out in `cli::paused_label`).
+fn pause_reason_label(reason: PauseReason) -> &'static str {
+    match reason {
+        PauseReason::User => t!("Paused by you"),
+        PauseReason::Battery => t!("On battery"),
+        PauseReason::Locked => t!("Screen locked"),
+        PauseReason::Fullscreen => t!("Fullscreen app open"),
+        PauseReason::Covered => t!("Window covers screen"),
     }
 }
 
@@ -533,6 +563,20 @@ mod tests {
                 assert_eq!(pill_overline(true, paused, still_frame), "NEEDS ATTENTION");
             }
         }
+    }
+
+    #[test]
+    fn every_pause_reason_has_distinct_text() {
+        let all = [
+            PauseReason::User,
+            PauseReason::Battery,
+            PauseReason::Locked,
+            PauseReason::Fullscreen,
+            PauseReason::Covered,
+        ];
+        let texts: std::collections::HashSet<_> = all.into_iter().map(pause_reason_label).collect();
+        assert_eq!(texts.len(), all.len());
+        assert!(texts.iter().all(|t| !t.is_empty()));
     }
 
     #[test]

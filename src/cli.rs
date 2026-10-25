@@ -38,7 +38,7 @@ use crate::capability::{
 };
 use crate::config::Config;
 use crate::hwdecode;
-use crate::ipc::{request, request_with_timeout, Request, Response, StatusReply};
+use crate::ipc::{request, request_with_timeout, PauseReason, Request, Response, StatusReply};
 
 const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
@@ -332,7 +332,7 @@ fn status() -> i32 {
                 }
             }
             println!("  Memory      {} MB", s.rss_mb);
-            println!("  Paused      {}", if s.paused { "yes" } else { "no" });
+            println!("  Paused      {}", paused_label(&s));
             // Decode honesty: software-decoding ≥4K is the classic silent cause
             // of stutter/artifacts — name it instead of leaving it a mystery.
             let software = matches!(s.hwdec.as_deref(), None | Some("no") | Some(""));
@@ -377,6 +377,26 @@ fn daemon_status() -> Option<StatusReply> {
     match request(&Request::Status) {
         Ok(Response::Status(s)) => Some(s),
         _ => None,
+    }
+}
+
+/// The `Paused` row: yes/no plus, when the daemon says why, the cause — a
+/// wallpaper that quietly stopped moving was the original complaint. A
+/// covering window or the lock screen holds playback without `paused` being
+/// set, so a reason alone also reads as "yes".
+fn paused_label(s: &StatusReply) -> String {
+    let why = match s.paused_reason {
+        Some(PauseReason::User) => "you paused it",
+        Some(PauseReason::Battery) => "on battery — turn off Pause on battery to keep playing",
+        Some(PauseReason::Locked) => "screen is locked",
+        Some(PauseReason::Fullscreen) => "a fullscreen app is open",
+        Some(PauseReason::Covered) => "a window covers most of the screen",
+        None => "",
+    };
+    match (s.paused || s.paused_reason.is_some(), why) {
+        (true, "") => "yes".into(),
+        (true, why) => format!("yes ({why})"),
+        (false, _) => "no".into(),
     }
 }
 
@@ -1291,6 +1311,49 @@ mod still_frame_tests {
             assert!(!hint.contains("GNOME"), "{hint}");
             assert!(hint.contains("layer-shell"), "{hint}");
         }
+    }
+}
+
+#[cfg(test)]
+mod paused_label_tests {
+    use super::*;
+
+    fn label(paused: bool, paused_reason: Option<PauseReason>) -> String {
+        paused_label(&StatusReply {
+            paused,
+            paused_reason,
+            ..StatusReply::default()
+        })
+    }
+
+    #[test]
+    fn paused_row_names_the_cause() {
+        assert_eq!(label(false, None), "no");
+        // An older daemon sends no reason: still a plain yes.
+        assert_eq!(label(true, None), "yes");
+        assert_eq!(
+            label(true, Some(PauseReason::Battery)),
+            "yes (on battery — turn off Pause on battery to keep playing)"
+        );
+        assert_eq!(label(true, Some(PauseReason::User)), "yes (you paused it)");
+    }
+
+    /// A covering window or the lock screen holds playback while `paused`
+    /// (the user/battery flag) stays false; the row must still say so.
+    #[test]
+    fn a_reason_alone_reads_as_paused() {
+        assert_eq!(
+            label(false, Some(PauseReason::Fullscreen)),
+            "yes (a fullscreen app is open)"
+        );
+        assert_eq!(
+            label(false, Some(PauseReason::Covered)),
+            "yes (a window covers most of the screen)"
+        );
+        assert_eq!(
+            label(false, Some(PauseReason::Locked)),
+            "yes (screen is locked)"
+        );
     }
 }
 

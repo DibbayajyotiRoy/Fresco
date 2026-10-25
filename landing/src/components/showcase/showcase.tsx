@@ -134,7 +134,7 @@ export function Showcase({ steps }: { steps: ShowcaseStep[] }) {
                 tabIndex={isActive ? 0 : -1}
                 onClick={() => select(i)}
                 onFocus={stopAuto}
-                className="flex w-full items-center gap-3 text-left"
+                className="flex w-full items-center gap-3 text-start"
               >
                 <span
                   aria-hidden
@@ -163,7 +163,7 @@ export function Showcase({ steps }: { steps: ShowcaseStep[] }) {
                 role="tabpanel"
                 aria-labelledby={`feature-tab-${step.id}`}
                 hidden={!isActive}
-                className="pl-10"
+                className="ps-10"
               >
                 <p className="mt-2 max-w-md text-base leading-7 text-pretty text-ink-subtle">
                   {step.body}

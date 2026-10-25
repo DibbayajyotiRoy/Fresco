@@ -28,13 +28,13 @@ pnpm start    # serve the production build
 ## Languages
 
 The home page ships in English, Japanese, Portuguese (Brazil), Spanish,
-German, French, and Simplified Chinese.
+German, French, Simplified Chinese, Arabic, and Turkish.
 
 - English keeps the bare URLs (`/`, `/alternatives/...`). `src/middleware.ts`
   rewrites those onto the `en` segment internally, so nothing that was already
   indexed or linked ever moves.
 - Every other language lives under its own prefix: `/ja`, `/pt-br`, `/es`,
-  `/de`, `/fr`, `/zh-cn`.
+  `/de`, `/fr`, `/zh-cn`, `/ar`, `/tr`.
 - A visitor landing on `/` is redirected (307) to their `Accept-Language`
   match, unless the `fresco.locale` cookie records a deliberate pick from the
   language switcher. Deeper pages are never auto-redirected.
@@ -46,7 +46,7 @@ German, French, and Simplified Chinese.
 
 All copy lives in `src/lib/i18n/dictionaries/`. `en.ts` is the source of truth
 and its shape *is* the `Dictionary` type, so adding a key there makes the other
-six fail to compile until they carry it too. `src/lib/content.ts` holds only
+eight fail to compile until they carry it too. `src/lib/content.ts` holds only
 what is language-independent (the comparison matrix, distro names, formats, the
 verbatim testimonial).
 
@@ -54,6 +54,14 @@ To add a language: add it to `LOCALES` and `LOCALE_META` in
 `src/lib/i18n/config.ts`, add a case to `matchLocale()`, register a loader in
 `src/lib/i18n/index.ts`, and write the dictionary. hreflang tags, the sitemap
 cluster, JSON-LD, and the switcher all follow from `LOCALES` automatically.
+
+Arabic is right-to-left: `LOCALE_META[locale].dir` drives `<html dir>`, and the
+components use logical Tailwind utilities (`ms-`, `me-`, `ps-`, `pe-`, `start-`,
+`end-`, `text-start`) plus `rtl:` variants to mirror directional arrows. Keep
+physical `left`/`right` only for things that must not mirror (the demo
+wallpaper, the mock desktop, the widget showcase, terminal commands). Latin
+product names inside Arabic text are fine; letter-spacing is forced to 0 on
+`:lang(ar)` because tracking breaks Arabic joins.
 
 Deliberately never translated: the community testimonial (quoting a named
 person), YouTube video titles (they must match the uploads), and product nouns

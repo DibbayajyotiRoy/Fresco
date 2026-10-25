@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.51"
+version = "1.1.52"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -22,6 +22,9 @@ daemon = [
     "dep:tiny-skia", "dep:cosmic-text",
     # World-clock widget: IANA zone names -> UTC offsets (see src/worldclock.rs).
     "dep:chrono-tz",
+    # System-tray icon (D-Bus StatusNotifierItem). Degrades to nothing on
+    # desktops without a tray host (e.g. stock GNOME).
+    "dep:ksni",
 ]
 
 [[bin]]
@@ -81,6 +84,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # full rationale, including why cosmic-text won over fontdue/ab_glyph.
 tiny-skia = { version = "0.12", optional = true }
 cosmic-text = { version = "0.19", optional = true }
+# System-tray icon for the daemon (D-Bus StatusNotifierItem). Optional because
+# the tray is owned by the daemon binary; the GUI does not need it.
+ksni = { version = "0.3", features = ["blocking"], optional = true }
 
 [profile.release]
 opt-level = 3
@@ -135,7 +141,12 @@ depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreame
 #     (src/daemon/kde_desktop.rs, issue #44), so without this module a Plasma
 #     user sees a still frame instead of the video; it is also what plays on
 #     the lock screen. Nothing else needs it.
-recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1, qml6-module-qtmultimedia"
+#   * fonts-noto-core — Noto Sans / Naskh Arabic (verified: `dpkg -S
+#     /usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf`), so Arabic
+#     lyrics and the clock's ص / م suffix on the wallpaper are drawn from a
+#     real face rather than whatever a bare install happens to carry. The
+#     daemon's text stack (src/widgetkit/text.rs) falls back to it by script.
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, fonts-noto-core, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1, qml6-module-qtmultimedia"
 # Suggests, not Recommends: each of these is needed by exactly one lock-screen
 # host, so installing it unconditionally would be a much stronger nudge than
 # "might be useful" warrants for most machines (docs/plan-lock-screen.md §4.3,

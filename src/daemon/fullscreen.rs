@@ -1,11 +1,22 @@
-//! Per-output fullscreen detection via `wlr-foreign-toplevel-management`, with a
-//! COSMIC-native fallback (`zcosmic-toplevel-info-v1`).
+//! Per-output fullscreen/covered detection via `wlr-foreign-toplevel-management`,
+//! with a COSMIC-native fallback (`zcosmic-toplevel-info-v1`).
 //!
 //! The daemon pauses the wallpaper on any output that currently has a fullscreen
-//! window (or, when `pause_on_maximized` is set, a maximized one), reclaiming
-//! the residual hardware-decode cost while the wallpaper is fully hidden.
-//! (Rendering already idles when occluded — the compositor stops sending frame
-//! callbacks — but mpv keeps *decoding* until we pause it.)
+//! window (always) or, when `pause_on_covered` is enabled, a maximized and
+//! non-minimized toplevel, reclaiming the residual hardware-decode cost while
+//! the wallpaper is fully hidden. (Rendering already idles when occluded — the
+//! compositor stops sending frame callbacks — but mpv keeps *decoding* until we
+//! pause it.)
+//!
+//! The wlr-foreign-toplevel and cosmic-toplevel protocols expose state
+//! (fullscreen, maximized, minimized, activated) but **not geometry** to ordinary
+//! clients. Geometry is available through separate, privileged protocols
+//! (wlr-foreign-toplevel-management v3's `done`/`rectangle` is not reliably
+//! exposed to unprivileged clients, and ext-foreign-toplevel-list has none). So
+//! this module does the best it can: it treats a maximized+non-minimized
+//! toplevel as "covered" when the setting is on. A large non-maximized window
+//! that happens to cover most of an output will not be detected here; on X11
+//! the daemon has exact geometry and can use the 90% overlap rule instead.
 //!
 //! The wlr protocol is implemented by wlroots compositors (Sway/Hyprland). KWin
 //! does NOT expose it to ordinary clients (its own toplevel management is
@@ -79,9 +90,13 @@ impl Toplevel {
     }
 
     /// Does this toplevel hide the wallpaper? Fullscreen always does; a
-    /// maximized, non-minimized one only when `maximized` is asked for.
-    fn covers(&self, maximized: bool) -> bool {
-        self.fullscreen || (maximized && self.maximized && !self.minimized)
+    /// maximized, non-minimized one only when `pause_on_covered` is enabled.
+    ///
+    /// Geometry is not available through these protocols for ordinary clients,
+    /// so maximized is the best available proxy for "a large window covers the
+    /// output". See the module-level note.
+    fn covers(&self, pause_on_covered: bool) -> bool {
+        self.fullscreen || (pause_on_covered && self.maximized && !self.minimized)
     }
 }
 
@@ -101,12 +116,12 @@ struct State {
 }
 
 impl State {
-    /// Connectors that currently have a fullscreen (or, with `maximized`, a
-    /// maximized) toplevel.
-    fn fullscreen_connectors(&self, maximized: bool) -> HashSet<String> {
+    /// Connectors that currently have a fullscreen (always) or covered
+    /// (maximized+non-minimized when `pause_on_covered`) toplevel.
+    fn fullscreen_connectors(&self, pause_on_covered: bool) -> HashSet<String> {
         let mut hidden = HashSet::new();
         for tl in self.toplevels.values() {
-            if !tl.covers(maximized) {
+            if !tl.covers(pause_on_covered) {
                 continue;
             }
             for oid in &tl.outputs {
@@ -119,7 +134,7 @@ impl State {
     }
 }
 
-/// A live view of which outputs have a fullscreen window.
+/// A live view of which outputs have a fullscreen/covered window.
 pub struct FullscreenWatch {
     queue: EventQueue<State>,
     state: State,
@@ -170,13 +185,20 @@ impl FullscreenWatch {
 
     /// Drain pending toplevel events (one bounded roundtrip — fast on a local
     /// compositor, never an open-ended wait) and return the connectors that
-    /// currently have a fullscreen window (or a maximized one when `maximized`).
-    /// Returns empty on any protocol error.
-    pub fn fullscreen_connectors(&mut self, maximized: bool) -> HashSet<String> {
+    /// currently have a fullscreen window, or a covered (maximized) one when
+    /// `pause_on_covered` is enabled. Returns empty on any protocol error.
+    pub fn fullscreen_connectors(&mut self, pause_on_covered: bool) -> HashSet<String> {
         if self.queue.roundtrip(&mut self.state).is_err() {
             return HashSet::new();
         }
-        self.state.fullscreen_connectors(maximized)
+        self.state.fullscreen_connectors(pause_on_covered)
+    }
+
+    /// Whether any toplevel is fullscreen, as of the last
+    /// [`FullscreenWatch::fullscreen_connectors`] roundtrip — tells that
+    /// call's result apart as "fullscreen" vs "only covered".
+    pub fn any_fullscreen(&self) -> bool {
+        self.state.toplevels.values().any(|t| t.fullscreen)
     }
 }
 
@@ -431,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn maximized_toplevels_count_only_when_asked_and_not_minimized() {
+    fn maximized_toplevels_count_only_when_covered_enabled_and_not_minimized() {
         let mut s = State::default();
         s.output_names.insert(10, "DP-1".into());
         s.toplevels.insert(

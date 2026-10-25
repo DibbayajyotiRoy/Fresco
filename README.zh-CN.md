@@ -3,7 +3,7 @@
 
 # Fresco — 免费开源的 Linux 动态壁纸与视频壁纸软件
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | **简体中文**
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | **简体中文**
 
 **Fresco 是一款免费、开源的 Linux 动态壁纸应用，可将任意视频、GIF 或图片设为动态桌面壁纸，同时支持 X11 与 Wayland。** 它是原生 Linux 平台上 Wallpaper Engine 的替代品，提供图形界面、GPU 硬件加速播放和桌面挂件，适合用来做 Linux 桌面美化。
 
@@ -30,7 +30,7 @@ Fresco 通过 GTK4 / libadwaita 图形界面，把视频、GIF、图片、幻灯
 - **操作方式：** 应用界面、Ctrl+K 命令面板，以及可绑定快捷键的 `fresco next` / `fresco prev` / `fresco random`。
 - **安装：** 面向 Ubuntu、Debian、Linux Mint、Pop!_OS、elementary OS、Kali 与 Deepin 的 `.deb` 包（一行脚本、手动下载或 Deepin 应用商店）；Fedora、Arch 等发行版从源码构建——见[安装](#安装)。
 - **许可证：** 免费开源，采用 [GPL-3.0-or-later](LICENSE)，无广告，无需注册账号。
-- **用户规模：** 来自 128 个国家/地区的 3,000+ 名用户。最新版本：1.1.51。
+- **用户规模：** 来自 128 个国家/地区的 3,000+ 名用户。最新版本：1.1.52。
 
 ## 安装
 
@@ -412,9 +412,9 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 | **许可证** | [GPL-3.0-or-later](LICENSE)——免费开源，无广告，无需账号 |
 | **语言与技术栈** | Rust、GTK4 / libadwaita、libmpv；Wayland 上内置 mpvpaper 渲染器 |
 | **首次发布** | v0.0.1，2026 年 6 月 |
-| **最新版本** | 1.1.51（2026-10-23）——最新版本见 [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
+| **最新版本** | 1.1.52（2026-10-25）——最新版本见 [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **安装包** | `.deb`（amd64）、一行安装脚本、Deepin 应用商店；其他发行版从源码构建 |
-| **界面语言** | 英文，另有 12 种翻译：简体中文、俄语、西班牙语、法语、德语、巴西葡萄牙语、土耳其语、越南语、印尼语、印地语、孟加拉语和罗马尼亚语 |
+| **界面语言** | 英文，另有 13 种翻译：简体中文、俄语、西班牙语、法语、德语、巴西葡萄牙语、土耳其语、越南语、印尼语、印地语、孟加拉语、罗马尼亚语和阿拉伯语 |
 | **用户规模** | 来自 128 个国家/地区的 3,000+ 名用户 |
 | **维护者** | Dibbayajyoti Roy |
 | **源代码** | <https://github.com/DibbayajyotiRoy/fresco> |
@@ -430,4 +430,4 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ---
 
-<sub>Fresco 是一款免费开源的 Linux 动态壁纸与视频壁纸软件（支持 X11 与 Wayland），带有绘制进壁纸的歌词、时钟、音频可视化和专辑封面挂件。它是原生 Linux 平台上 Wallpaper Engine 的替代品，也可作为 Conky 之类工具在音乐与时间展示上的补充。已有 128 个国家/地区的 3,000+ 人在使用。最后更新：2026-10-23。</sub>
+<sub>Fresco 是一款免费开源的 Linux 动态壁纸与视频壁纸软件（支持 X11 与 Wayland），带有绘制进壁纸的歌词、时钟、音频可视化和专辑封面挂件。它是原生 Linux 平台上 Wallpaper Engine 的替代品，也可作为 Conky 之类工具在音乐与时间展示上的补充。已有 128 个国家/地区的 3,000+ 人在使用。最后更新：2026-10-25。</sub>

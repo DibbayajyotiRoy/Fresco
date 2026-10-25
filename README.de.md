@@ -4,7 +4,7 @@
 
 # Fresco — Kostenlose App für Live-Hintergrundbilder und Video-Hintergründe unter Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | **Deutsch** | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | **Deutsch** | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco ist eine kostenlose, quelloffene Live-Hintergrundbild-App für Linux. Sie legt jedes Video, GIF oder Bild als animiertes Hintergrundbild auf Ihrem Desktop fest – unter X11 und Wayland.** Als native Wallpaper-Engine-Alternative für Linux bietet Fresco eine grafische Oberfläche, GPU-beschleunigte Wiedergabe und Desktop-Widgets.
 
@@ -31,7 +31,7 @@ Fresco macht aus einem Video, GIF, Bild, einer Diashow oder einer Wiedergabelist
 - **Steuerung:** die App, eine Befehlspalette (Strg+K) und `fresco next` / `fresco prev` / `fresco random` für Tastenkürzel.
 - **Installation:** ein `.deb` für Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali und Deepin (Einzeiler-Skript, manueller Download oder Deepin App Store); unter Fedora, Arch und anderen Distributionen aus dem Quellcode bauen – siehe [Installation](#installation).
 - **Lizenz:** frei und quelloffen unter [GPL-3.0-or-later](LICENSE), ohne Werbung und ohne Konto.
-- **Nutzer:** über 3.000 Menschen in 128 Ländern. Aktuelle Version: 1.1.51.
+- **Nutzer:** über 3.000 Menschen in 128 Ländern. Aktuelle Version: 1.1.52.
 
 ## Installation
 
@@ -480,9 +480,9 @@ Der Verlauf wird über ein zufälliges Ticket zugeordnet, das getrennt von der T
 | **Lizenz** | [GPL-3.0-or-later](LICENSE) – frei und quelloffen, keine Werbung, kein Konto |
 | **Sprache und Stack** | Rust, GTK4 / libadwaita, libmpv; ein mitgelieferter mpvpaper-Renderer unter Wayland |
 | **Erste Version** | v0.0.1, Juni 2026 |
-| **Aktuelle Version** | 1.1.51 (2026-10-23) – die neueste steht auf [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
+| **Aktuelle Version** | 1.1.52 (2026-10-25) – die neueste steht auf [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) |
 | **Pakete** | `.deb` (amd64), Einzeiler-Installationsskript, Deepin App Store; anderswo Quellcode-Build |
-| **Oberflächensprachen** | Englisch plus 12 Übersetzungen: Vereinfachtes Chinesisch, Russisch, Spanisch, Französisch, Deutsch, Portugiesisch (Brasilien), Türkisch, Vietnamesisch, Indonesisch, Hindi, Bengalisch und Rumänisch |
+| **Oberflächensprachen** | Englisch plus 13 Übersetzungen: Vereinfachtes Chinesisch, Russisch, Spanisch, Französisch, Deutsch, Portugiesisch (Brasilien), Türkisch, Vietnamesisch, Indonesisch, Hindi, Bengalisch, Rumänisch und Arabisch |
 | **Nutzer** | Über 3.000 Menschen in 128 Ländern |
 | **Maintainer** | Dibbayajyoti Roy |
 | **Quellcode** | <https://github.com/DibbayajyotiRoy/fresco> |
@@ -498,4 +498,4 @@ Fehlerberichte, Funktionswünsche und PRs sind willkommen – eröffnen Sie ein 
 
 ---
 
-<sub>Fresco ist eine kostenlose, quelloffene App für Live-Hintergrundbilder und Video-Hintergründe unter Linux (X11 und Wayland), mit Widgets für Songtexte, Uhr, Audiovisualisierung und Album-Cover, die ins Hintergrundbild gezeichnet werden. Es ist eine native Linux-Alternative zu Wallpaper Engine und ein Begleiter für Musik und Uhrzeit neben Werkzeugen wie Conky. Genutzt von über 3.000 Menschen in 128 Ländern. Zuletzt aktualisiert: 2026-10-23.</sub>
+<sub>Fresco ist eine kostenlose, quelloffene App für Live-Hintergrundbilder und Video-Hintergründe unter Linux (X11 und Wayland), mit Widgets für Songtexte, Uhr, Audiovisualisierung und Album-Cover, die ins Hintergrundbild gezeichnet werden. Es ist eine native Linux-Alternative zu Wallpaper Engine und ein Begleiter für Musik und Uhrzeit neben Werkzeugen wie Conky. Genutzt von über 3.000 Menschen in 128 Ländern. Zuletzt aktualisiert: 2026-10-25.</sub>

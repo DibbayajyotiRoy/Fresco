@@ -4,7 +4,7 @@
 
 # Fresco — Aplikasi Wallpaper Bergerak dan Wallpaper Video Gratis untuk Linux
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | **Bahasa Indonesia** | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [हिन्दी](README.hi.md) | **Bahasa Indonesia** | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco adalah aplikasi wallpaper hidup (live wallpaper) untuk Linux yang gratis dan open source. Dengan Fresco, video, GIF, atau gambar apa pun bisa menjadi wallpaper bergerak di desktop, baik di X11 maupun Wayland.** Fresco adalah alternatif Wallpaper Engine yang native untuk Linux, lengkap dengan aplikasi grafis, pemutaran berakselerasi GPU, dan widget desktop.
 
@@ -31,7 +31,7 @@ Fresco mengubah video, GIF, gambar, slideshow, atau daftar putar menjadi wallpap
 - **Kontrol:** aplikasinya sendiri, palet perintah Ctrl+K, serta `fresco next` / `fresco prev` / `fresco random` untuk pintasan keyboard.
 - **Instalasi:** paket `.deb` untuk Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali, dan Deepin (skrip satu baris, unduh manual, atau Toko Aplikasi Deepin); di Fedora, Arch, dan distro lain, bangun dari kode sumber — lihat [Instalasi](#instalasi).
 - **Lisensi:** gratis dan open source di bawah [GPL-3.0-or-later](LICENSE), tanpa iklan dan tanpa akun.
-- **Pengguna:** 3.000+ orang di 128 negara. Versi terbaru: 1.1.51.
+- **Pengguna:** 3.000+ orang di 128 negara. Versi terbaru: 1.1.52.
 
 ## Instalasi
 
@@ -474,9 +474,9 @@ Utas itu dikunci dengan tiket acak yang dibuat terpisah dari telemetri dan disim
 | **Lisensi** | [GPL-3.0-or-later](LICENSE) — gratis dan open source, tanpa iklan, tanpa akun |
 | **Bahasa dan stack** | Rust, GTK4 / libadwaita, libmpv; renderer mpvpaper bawaan paket di Wayland |
 | **Rilis pertama** | v0.0.1, Juni 2026 |
-| **Versi terbaru** | 1.1.51 (2026-10-23) — lihat [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) untuk yang terbaru |
+| **Versi terbaru** | 1.1.52 (2026-10-25) — lihat [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) untuk yang terbaru |
 | **Paket** | `.deb` (amd64), skrip instalasi satu baris, Toko Aplikasi Deepin; bangun dari kode sumber di tempat lain |
-| **Bahasa antarmuka** | Inggris ditambah 12 terjemahan: Tionghoa Sederhana, Rusia, Spanyol, Prancis, Jerman, Portugis (Brasil), Turki, Vietnam, Indonesia, Hindi, Bengali, dan Rumania |
+| **Bahasa antarmuka** | Inggris ditambah 13 terjemahan: Tionghoa Sederhana, Rusia, Spanyol, Prancis, Jerman, Portugis (Brasil), Turki, Vietnam, Indonesia, Hindi, Bengali, Rumania, dan Arab |
 | **Pengguna** | 3.000+ orang di 128 negara |
 | **Pengelola** | Dibbayajyoti Roy |
 | **Kode sumber** | <https://github.com/DibbayajyotiRoy/fresco> |
@@ -492,4 +492,4 @@ Laporan bug, permintaan fitur, dan PR sangat diterima — buka [issue](https://g
 
 ---
 
-<sub>Fresco adalah aplikasi wallpaper hidup dan wallpaper video yang gratis dan open source untuk Linux (X11 dan Wayland), dengan widget lirik, jam, visualizer audio, dan sampul album yang digambar langsung di wallpaper. Fresco adalah alternatif native Wallpaper Engine untuk Linux sekaligus pendamping musik dan jam bagi alat seperti Conky. Dipakai oleh 3.000+ orang di 128 negara. Terakhir diperbarui: 2026-10-23.</sub>
+<sub>Fresco adalah aplikasi wallpaper hidup dan wallpaper video yang gratis dan open source untuk Linux (X11 dan Wayland), dengan widget lirik, jam, visualizer audio, dan sampul album yang digambar langsung di wallpaper. Fresco adalah alternatif native Wallpaper Engine untuk Linux sekaligus pendamping musik dan jam bagi alat seperti Conky. Dipakai oleh 3.000+ orang di 128 negara. Terakhir diperbarui: 2026-10-25.</sub>

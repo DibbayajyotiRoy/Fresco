@@ -99,6 +99,7 @@ export function Viewscreen({ active }: { active: WidgetId }) {
   return (
     <div
       aria-hidden
+      dir="ltr"
       data-reveal="fade"
       className="sc-frame rounded-2xl border border-hairline bg-surface p-2"
     >

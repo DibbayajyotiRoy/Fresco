@@ -39,6 +39,10 @@
     transform: translateY(-2px) scale(0.97);
   }
 }
+/* RTL: the trigger (and so the popover) sits at the top left. */
+html[dir="rtl"] .nav-pop:not([hidden]) {
+  transform-origin: top left;
+}
 
 /* Soft static elevation for the popover (menus float; bars do not). */
 .nav-float {

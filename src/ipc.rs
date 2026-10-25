@@ -131,10 +131,67 @@ pub struct LockStatus {
     pub notes: Vec<String>,
 }
 
+/// Why the wallpaper is held paused, for `fresco status` and the GUI pill —
+/// "it stopped moving and I don't know why" was the bug report. See
+/// [`PauseSources::reason`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PauseReason {
+    /// The user pressed Pause (GUI, `fresco pause`, hotkey).
+    User,
+    /// "Pause on battery" and the machine is discharging.
+    Battery,
+    /// The session is locked and the lock screen's policy holds the video.
+    Locked,
+    /// A fullscreen window covers an output.
+    Fullscreen,
+    /// A large window (fullscreen or not) covers most of an output.
+    Covered,
+}
+
+/// The pause sources the daemon folds into one decision; the input of
+/// [`PauseSources::reason`], kept as named fields so call sites cannot swap
+/// two positional bools.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PauseSources {
+    pub user: bool,
+    pub battery: bool,
+    pub locked: bool,
+    pub fullscreen: bool,
+    pub covered: bool,
+}
+
+impl PauseSources {
+    /// The one reason to show. Order = what the user can act on first (their
+    /// own pause, then the battery setting), then the session, then what is
+    /// merely covering the screen.
+    // ponytail: a single reason, not a list — when two sources hold the pause,
+    // clearing the first reveals the second on the next poll. Make this a
+    // Vec if "both at once" ever needs to be visible.
+    pub fn reason(self) -> Option<PauseReason> {
+        [
+            (self.user, PauseReason::User),
+            (self.battery, PauseReason::Battery),
+            (self.locked, PauseReason::Locked),
+            (self.fullscreen, PauseReason::Fullscreen),
+            (self.covered, PauseReason::Covered),
+        ]
+        .into_iter()
+        .find_map(|(on, reason)| on.then_some(reason))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StatusReply {
     pub running: bool,
     pub paused: bool,
+    /// Why playback is held right now, `None` when nothing holds it. Unlike
+    /// `paused` (the user/battery toggle the pill's button flips) this also
+    /// covers a fullscreen/covered window or the lock screen holding it, so
+    /// it can be `Some` while `paused` is false. `#[serde(default)]` keeps an
+    /// older daemon/GUI pair compatible in both directions.
+    #[serde(default)]
+    pub paused_reason: Option<PauseReason>,
     /// Active mpv hwdec per monitor, e.g. "vaapi" / "nvdec" / "no" (software).
     pub hwdec: Option<String>,
     /// Human-readable description of what's playing.
@@ -746,6 +803,95 @@ mod tests {
         assert!(s.contains(r#""wallpaper_path":"/walls/night.mp4""#), "{s}");
         let back: Response = serde_json::from_str(&s).unwrap();
         assert_eq!(r, back);
+    }
+
+    /// `paused_reason` arrived late: an older daemon's reply (no key) must
+    /// parse as `None`, and a current one round-trips it as a snake_case tag.
+    #[test]
+    fn status_reply_paused_reason_backcompat_and_roundtrip() {
+        let old = r#"{"result":"status","running":true,"paused":true,"hwdec":null,
+                      "wallpaper":null,"cpu_percent":0.0,"rss_mb":10,"monitors":[],"error":null}"#;
+        match serde_json::from_str::<Response>(old).unwrap() {
+            Response::Status(s) => assert_eq!(s.paused_reason, None),
+            other => panic!("expected a status reply, got {other:?}"),
+        }
+
+        let r = Response::Status(StatusReply {
+            running: true,
+            paused: true,
+            paused_reason: Some(PauseReason::Battery),
+            ..Default::default()
+        });
+        let s = serde_json::to_string(&r).unwrap();
+        assert!(s.contains(r#""paused_reason":"battery""#), "{s}");
+        let back: Response = serde_json::from_str(&s).unwrap();
+        assert_eq!(r, back);
+    }
+
+    #[test]
+    fn pause_reason_none_when_nothing_holds_the_pause() {
+        assert_eq!(PauseSources::default().reason(), None);
+    }
+
+    #[test]
+    fn pause_reason_maps_each_source() {
+        let off = PauseSources::default();
+        for (sources, want) in [
+            (PauseSources { user: true, ..off }, PauseReason::User),
+            (
+                PauseSources {
+                    battery: true,
+                    ..off
+                },
+                PauseReason::Battery,
+            ),
+            (
+                PauseSources {
+                    locked: true,
+                    ..off
+                },
+                PauseReason::Locked,
+            ),
+            (
+                PauseSources {
+                    fullscreen: true,
+                    ..off
+                },
+                PauseReason::Fullscreen,
+            ),
+            (
+                PauseSources {
+                    covered: true,
+                    ..off
+                },
+                PauseReason::Covered,
+            ),
+        ] {
+            assert_eq!(sources.reason(), Some(want), "{sources:?}");
+        }
+    }
+
+    /// With several sources active the actionable one wins: the user's own
+    /// pause, then battery, then the session, then a covering window — and
+    /// fullscreen outranks a merely large window.
+    #[test]
+    fn pause_reason_priority_when_sources_overlap() {
+        let mut s = PauseSources {
+            user: true,
+            battery: true,
+            locked: true,
+            fullscreen: true,
+            covered: true,
+        };
+        assert_eq!(s.reason(), Some(PauseReason::User));
+        s.user = false;
+        assert_eq!(s.reason(), Some(PauseReason::Battery));
+        s.battery = false;
+        assert_eq!(s.reason(), Some(PauseReason::Locked));
+        s.locked = false;
+        assert_eq!(s.reason(), Some(PauseReason::Fullscreen));
+        s.fullscreen = false;
+        assert_eq!(s.reason(), Some(PauseReason::Covered));
     }
 
     #[test]

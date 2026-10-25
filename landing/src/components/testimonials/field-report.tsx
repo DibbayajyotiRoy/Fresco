@@ -16,7 +16,7 @@ export function FieldReport({ dict }: { dict: Dictionary }) {
         {dict.testimonials.namedLabel}
       </p>
 
-      <blockquote lang="en" className="tm-card-body">
+      <blockquote lang="en" dir="ltr" className="tm-card-body">
         <p className="tm-q tm-report-q">{TESTIMONIAL.quote}</p>
       </blockquote>
 

@@ -4,7 +4,7 @@
 
 # Fresco — Linux के लिए मुफ़्त लाइव वॉलपेपर और वीडियो वॉलपेपर ऐप
 
-[English](README.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | **हिन्दी** | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [العربية](README.ar.md) | [বাংলা](README.bn.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | **हिन्दी** | [Bahasa Indonesia](README.id.md) | [Português (Brasil)](README.pt-BR.md) | [Română](README.ro.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md)
 
 **Fresco, Linux के लिए एक मुफ़्त और ओपन-सोर्स लाइव वॉलपेपर ऐप है, जो किसी भी वीडियो, GIF या इमेज को X11 और Wayland पर एनिमेटेड डेस्कटॉप वॉलपेपर के रूप में सेट कर देता है।** Linux पर यह Wallpaper Engine का एक नेटिव विकल्प है, जिसमें ग्राफ़िकल ऐप, GPU-एक्सेलरेटेड प्लेबैक और डेस्कटॉप विजेट मिलते हैं।
 
@@ -31,7 +31,7 @@ Fresco एक GTK4 / libadwaita ऐप के ज़रिए किसी व�
 - **नियंत्रण:** ऐप, Ctrl+K कमांड पैलेट, और कीबोर्ड शॉर्टकट के लिए `fresco next` / `fresco prev` / `fresco random`।
 - **इंस्टॉल:** Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali और Deepin के लिए `.deb` (एक लाइन की स्क्रिप्ट, मैन्युअल डाउनलोड या Deepin App Store); Fedora, Arch और अन्य डिस्ट्रिब्यूशन पर सोर्स से बिल्ड करें — देखें [इंस्टॉलेशन](#इंस्टॉलेशन)।
 - **लाइसेंस:** [GPL-3.0-or-later](LICENSE) के तहत मुफ़्त और ओपन-सोर्स; कोई विज्ञापन नहीं, कोई खाता नहीं।
-- **उपयोगकर्ता:** 128 देशों में 3,000+ लोग। नवीनतम वर्ज़न: 1.1.51।
+- **उपयोगकर्ता:** 128 देशों में 3,000+ लोग। नवीनतम वर्ज़न: 1.1.52।
 
 ## इंस्टॉलेशन
 
@@ -413,9 +413,9 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 | **लाइसेंस** | [GPL-3.0-or-later](LICENSE) — मुफ़्त और ओपन-सोर्स, कोई विज्ञापन नहीं, कोई खाता नहीं |
 | **भाषा और स्टैक** | Rust, GTK4 / libadwaita, libmpv; Wayland पर बंडल किया हुआ mpvpaper रेंडरर |
 | **पहली रिलीज़** | v0.0.1, जून 2026 |
-| **नवीनतम वर्ज़न** | 1.1.51 (2026-10-23) — सबसे नए के लिए [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) देखें |
+| **नवीनतम वर्ज़न** | 1.1.52 (2026-10-25) — सबसे नए के लिए [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) देखें |
 | **पैकेज** | `.deb` (amd64), एक लाइन की इंस्टॉल स्क्रिप्ट, Deepin App Store; बाक़ी जगह सोर्स से बिल्ड |
-| **इंटरफ़ेस की भाषाएँ** | अंग्रेज़ी और 12 अनुवाद: सरलीकृत चीनी, रूसी, स्पेनिश, फ़्रेंच, जर्मन, पुर्तगाली (ब्राज़ील), तुर्की, वियतनामी, इंडोनेशियाई, हिन्दी, बांग्ला और रोमानियाई |
+| **इंटरफ़ेस की भाषाएँ** | अंग्रेज़ी और 13 अनुवाद: सरलीकृत चीनी, रूसी, स्पेनिश, फ़्रेंच, जर्मन, पुर्तगाली (ब्राज़ील), तुर्की, वियतनामी, इंडोनेशियाई, हिन्दी, बांग्ला, रोमानियाई और अरबी |
 | **उपयोगकर्ता** | 128 देशों में 3,000+ लोग |
 | **अनुरक्षक** | Dibbayajyoti Roy |
 | **सोर्स कोड** | <https://github.com/DibbayajyotiRoy/fresco> |
@@ -431,4 +431,4 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ---
 
-<sub>Fresco, Linux (X11 और Wayland) के लिए एक मुफ़्त और ओपन-सोर्स लाइव वॉलपेपर और वीडियो वॉलपेपर ऐप है, जिसमें वॉलपेपर के भीतर बनने वाले गीत के बोल, घड़ी, ऑडियो विज़ुअलाइज़र और एल्बम कवर विजेट हैं। यह Linux पर Wallpaper Engine का एक नेटिव विकल्प है और Conky जैसे टूल के साथ संगीत-और-घड़ी के साथी की तरह काम करता है। 128 देशों में 3,000+ लोग इसका इस्तेमाल करते हैं। आख़िरी अपडेट: 2026-10-23।</sub>
+<sub>Fresco, Linux (X11 और Wayland) के लिए एक मुफ़्त और ओपन-सोर्स लाइव वॉलपेपर और वीडियो वॉलपेपर ऐप है, जिसमें वॉलपेपर के भीतर बनने वाले गीत के बोल, घड़ी, ऑडियो विज़ुअलाइज़र और एल्बम कवर विजेट हैं। यह Linux पर Wallpaper Engine का एक नेटिव विकल्प है और Conky जैसे टूल के साथ संगीत-और-घड़ी के साथी की तरह काम करता है। 128 देशों में 3,000+ लोग इसका इस्तेमाल करते हैं। आख़िरी अपडेट: 2026-10-25।</sub>

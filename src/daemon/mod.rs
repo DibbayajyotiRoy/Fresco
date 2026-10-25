@@ -23,6 +23,7 @@ mod notifier;
 mod overview;
 pub mod saver;
 mod transition;
+mod tray;
 mod wayland_outputs;
 mod webbridge;
 #[allow(dead_code)]
@@ -2505,6 +2506,11 @@ pub fn run() -> Result<()> {
         // restart.
         if cfg.browser_bridge {
             webbridge::spawn(webbridge::PORT);
+        }
+        // System-tray icon: owned by the daemon, started once at startup.
+        // Changing tray_icon at runtime requires a daemon restart.
+        if cfg.tray_icon && cfg.enabled {
+            tray::spawn();
         }
     }
     let capability = detect();

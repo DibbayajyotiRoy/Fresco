@@ -68,6 +68,42 @@ fn auto_cycle_next(_config: &Config, _current: &Wallpaper) -> Option<Wallpaper> 
     None
 }
 
+/// How often the GNOME static-frame loop looks again while the auto-cycle timer
+/// is not running (just started, or cleared by a lock), so the timer starts
+/// promptly on unlock instead of one whole interval later.
+const AUTO_CYCLE_IDLE_RECHECK: Duration = Duration::from_secs(5);
+
+/// One tick of the auto-cycle timer, shared by the X11, Wayland and GNOME
+/// static-frame loops. Returns `true` when the wallpaper should switch now.
+///
+/// Disabled, a zero interval, or `blocked` (paused / locked) clears the timer.
+/// A timer that is not running (daemon start, resume, unlock, just enabled)
+/// starts now and does *not* switch, so the first change comes a full interval
+/// later; after that a switch is due once an interval has passed since the last.
+fn auto_cycle_due(
+    cycle: &crate::config::AutoCycle,
+    last_cycle: &mut Option<Instant>,
+    now: Instant,
+    blocked: bool,
+) -> bool {
+    if !cycle.enabled || cycle.interval_min == 0 || blocked {
+        *last_cycle = None;
+        return false;
+    }
+    let interval = Duration::from_secs(u64::from(cycle.interval_min) * 60);
+    match *last_cycle {
+        None => {
+            *last_cycle = Some(now);
+            false
+        }
+        Some(last) if now.duration_since(last) < interval => false,
+        Some(_) => {
+            *last_cycle = Some(now);
+            true
+        }
+    }
+}
+
 const TICK: Duration = Duration::from_millis(100);
 
 /// Floor on a widget-clamped wait, so a widget that reports itself permanently
@@ -1085,23 +1121,12 @@ impl Daemon {
     /// Advance the daemon-side auto-cycle if it is enabled and the interval
     /// has elapsed. Paused or locked desktops never count toward the interval,
     /// so the first cycle after resuming waits the full interval rather than
-    /// firing immediately.
+    /// firing immediately (see [`auto_cycle_due`]).
     fn check_auto_cycle(&mut self, now: Instant) {
-        if !self.config.auto_cycle.enabled || self.config.auto_cycle.interval_min == 0 {
-            self.last_cycle = None;
+        let blocked = self.user_paused || self.battery_paused || self.lock.locked;
+        if !auto_cycle_due(&self.config.auto_cycle, &mut self.last_cycle, now, blocked) {
             return;
         }
-        if self.user_paused || self.battery_paused || self.lock.locked {
-            self.last_cycle = None;
-            return;
-        }
-        let interval = Duration::from_secs(u64::from(self.config.auto_cycle.interval_min) * 60);
-        if let Some(last) = self.last_cycle {
-            if now.duration_since(last) < interval {
-                return;
-            }
-        }
-        self.last_cycle = Some(now);
         let current = self.config.wallpaper.clone();
         let Some(next) = auto_cycle_next(&self.config, &current) else {
             return;
@@ -2658,8 +2683,12 @@ fn gnome_static_cycle_timeout(config: &Config, last_cycle: Option<Instant>) -> D
         return HEARTBEAT_RECHECK_INTERVAL;
     }
     let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
-    let since = last_cycle.map_or(Duration::ZERO, |last| Instant::now().duration_since(last));
-    let remaining = interval.saturating_sub(since);
+    // No timer running (start, or cleared by a lock): look again soon so it
+    // starts promptly; `auto_cycle_due` starts it without switching.
+    let Some(last) = last_cycle else {
+        return AUTO_CYCLE_IDLE_RECHECK;
+    };
+    let remaining = interval.saturating_sub(Instant::now().duration_since(last));
     // Cap at one second so we never oversleep the cycle by much, but still
     // avoid a busy loop.
     std::cmp::min(
@@ -2676,21 +2705,9 @@ fn gnome_static_auto_cycle(
     now: Instant,
     locked: bool,
 ) {
-    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
-        *last_cycle = None;
+    if !auto_cycle_due(&config.auto_cycle, last_cycle, now, locked) {
         return;
     }
-    if locked {
-        *last_cycle = None;
-        return;
-    }
-    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
-    if let Some(last) = *last_cycle {
-        if now.duration_since(last) < interval {
-            return;
-        }
-    }
-    *last_cycle = Some(now);
     let current = config.wallpaper.clone();
     let Some(next) = auto_cycle_next(config, &current) else {
         return;
@@ -2876,21 +2893,9 @@ fn wayland_auto_cycle(
     paused: bool,
     locked: bool,
 ) {
-    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
-        *last_cycle = None;
+    if !auto_cycle_due(&config.auto_cycle, last_cycle, now, paused || locked) {
         return;
     }
-    if paused || locked {
-        *last_cycle = None;
-        return;
-    }
-    let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
-    if let Some(last) = *last_cycle {
-        if now.duration_since(last) < interval {
-            return;
-        }
-    }
-    *last_cycle = Some(now);
     let current = config.wallpaper.clone();
     let Some(next) = auto_cycle_next(config, &current) else {
         return;
@@ -5195,12 +5200,114 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
 #[cfg(test)]
 mod tests {
     use super::{
-        adopt_pause_flags, decode_display, parse_stat_ticks, presentation_confirmed, stall_step,
-        widget_wait, WlOutput, ANIM_TICK, CONFIRM_GRACE, MIN_WIDGET_WAIT, MONITOR_INTERVAL,
-        STALL_STRIKES, TICK,
+        adopt_pause_flags, auto_cycle_due, decode_display, gnome_static_cycle_timeout,
+        parse_stat_ticks, presentation_confirmed, stall_step, widget_wait, WlOutput, ANIM_TICK,
+        AUTO_CYCLE_IDLE_RECHECK, CONFIRM_GRACE, HEARTBEAT_RECHECK_INTERVAL, MIN_WIDGET_WAIT,
+        MONITOR_INTERVAL, STALL_STRIKES, TICK,
     };
-    use crate::config::{Config, Kind, PowerSaving, Scaling, Wallpaper};
+    use crate::config::{AutoCycle, Config, Kind, PowerSaving, Scaling, Wallpaper};
     use std::time::{Duration, Instant};
+
+    fn cycle_every(min: u32) -> AutoCycle {
+        AutoCycle {
+            enabled: true,
+            interval_min: min,
+            ..AutoCycle::default()
+        }
+    }
+
+    /// Daemon start, resume from a pause and unlock all arrive as "timer not
+    /// running"; none may switch at once. The first switch is a full interval
+    /// after the timer starts, and each one restarts the interval.
+    #[test]
+    fn auto_cycle_starts_its_timer_without_switching_and_waits_a_full_interval() {
+        let ac = cycle_every(10);
+        let iv = Duration::from_secs(600);
+        let t0 = Instant::now();
+        let mut last = None;
+
+        // Start: the timer starts now, nothing switches.
+        assert!(!auto_cycle_due(&ac, &mut last, t0, false));
+        assert_eq!(last, Some(t0));
+        // One second short of the interval: still waiting, timer untouched.
+        let almost = t0 + iv - Duration::from_secs(1);
+        assert!(!auto_cycle_due(&ac, &mut last, almost, false));
+        assert_eq!(last, Some(t0));
+        // The full interval: switch, and the next interval counts from here.
+        assert!(!auto_cycle_due(&ac, &mut last, almost, false));
+        assert!(auto_cycle_due(&ac, &mut last, t0 + iv, false));
+        assert_eq!(last, Some(t0 + iv));
+        assert!(!auto_cycle_due(
+            &ac,
+            &mut last,
+            t0 + iv * 2 - Duration::from_secs(1),
+            false
+        ));
+        assert!(auto_cycle_due(&ac, &mut last, t0 + iv * 2, false));
+    }
+
+    #[test]
+    fn auto_cycle_pause_or_lock_clears_the_timer_and_resume_waits_a_full_interval() {
+        let ac = cycle_every(10);
+        let iv = Duration::from_secs(600);
+        let t0 = Instant::now();
+        let mut last = Some(t0);
+
+        // Paused / locked well past the interval: no switch, timer cleared.
+        let t1 = t0 + iv * 3;
+        assert!(!auto_cycle_due(&ac, &mut last, t1, true));
+        assert_eq!(last, None);
+        // Resume / unlock: starts the timer, still no switch.
+        let t2 = t1 + Duration::from_secs(30);
+        assert!(!auto_cycle_due(&ac, &mut last, t2, false));
+        assert_eq!(last, Some(t2));
+        assert!(!auto_cycle_due(
+            &ac,
+            &mut last,
+            t2 + iv - Duration::from_secs(1),
+            false
+        ));
+        assert!(auto_cycle_due(&ac, &mut last, t2 + iv, false));
+    }
+
+    #[test]
+    fn auto_cycle_disabled_or_zero_interval_never_switches_and_clears_the_timer() {
+        let t0 = Instant::now();
+        for ac in [
+            AutoCycle {
+                enabled: false,
+                ..cycle_every(1)
+            },
+            cycle_every(0),
+        ] {
+            let mut last = Some(t0);
+            assert!(!auto_cycle_due(
+                &ac,
+                &mut last,
+                t0 + Duration::from_secs(3600),
+                false
+            ));
+            assert_eq!(last, None);
+        }
+    }
+
+    /// The GNOME static-frame loop sleeps until the cycle is due; with no timer
+    /// running it must wake soon (to start the timer), not an interval later.
+    #[test]
+    fn gnome_static_wakes_soon_to_start_an_idle_cycle_timer() {
+        let mut c = Config::default();
+        assert_eq!(
+            gnome_static_cycle_timeout(&c, None),
+            HEARTBEAT_RECHECK_INTERVAL
+        );
+        c.auto_cycle = cycle_every(30);
+        assert_eq!(
+            gnome_static_cycle_timeout(&c, None),
+            AUTO_CYCLE_IDLE_RECHECK
+        );
+        let t = gnome_static_cycle_timeout(&c, Some(Instant::now()));
+        assert!(t > Duration::from_secs(29 * 60) && t <= Duration::from_secs(30 * 60));
+    }
 
     #[test]
     fn a_picked_number_colour_beats_the_accent_and_unset_changes_nothing() {

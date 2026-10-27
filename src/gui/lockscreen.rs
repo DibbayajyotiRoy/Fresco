@@ -78,6 +78,7 @@ pub fn show_lockscreen_window(parent: &adw::ApplicationWindow, state: Rc<RefCell
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(parent));
     dialog.set_modal(true);
+    dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Lock Screen")));
 
     let flatpak = crate::is_flatpak();

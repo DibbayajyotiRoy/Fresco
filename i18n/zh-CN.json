@@ -652,6 +652,8 @@
   "Pause when an app covers the screen": "应用窗口覆盖屏幕时暂停",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "任何大窗口覆盖屏幕 90% 时暂停；全屏应用始终会暂停",
   "Window covers screen": "窗口覆盖屏幕",
+  "Performance mode": "性能模式",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "关闭挂件、音频可视化和悬停预览，并降低视频质量——适合游戏和老旧电脑",
   "Pause playback": "暂停播放",
   "Resume playback": "继续播放",
   "Next wallpaper": "下一张",

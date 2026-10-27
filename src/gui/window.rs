@@ -1675,6 +1675,39 @@ fn build_appearance_page(state: &Rc<RefCell<AppState>>, subtitle: gtk4::Label) -
 /// Behavior page: the on/off switches.
 fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    // One switch for gaming and older PCs. It overrides the individual
+    // settings at runtime (see `Config::effective_*`) and never rewrites them,
+    // so turning it off restores everything. The daemon picks it up via Apply;
+    // the hover-preview policy lives in this process.
+    let performance_row = switch_row(
+        t!("Performance mode"),
+        state.borrow().config.performance_mode,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let (config, previews) = {
+                    let mut s = state2.borrow_mut();
+                    s.config.performance_mode = active;
+                    s.config.save().ok();
+                    (s.config.clone(), s.config.effective_hover_previews())
+                };
+                super::hover_preview::set_enabled(previews);
+                daemon_ctl::apply_async(&config, |_| {});
+            }
+        },
+    );
+    popover_box.append(&performance_row);
+    let performance_hint = gtk4::Label::new(Some(t!(
+        "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs"
+    )));
+    performance_hint.add_css_class("dim");
+    performance_hint.set_wrap(true);
+    performance_hint.set_max_width_chars(34);
+    performance_hint.set_xalign(0.0);
+    performance_hint.set_margin_start(4);
+    performance_hint.set_margin_end(4);
+    performance_hint.set_margin_bottom(6);
+    popover_box.append(&performance_hint);
     popover_box.append(&switch_row(
         t!("Restore on login"),
         state.borrow().config.autostart,
@@ -1799,12 +1832,13 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
         {
             let state2 = state.clone();
             move |active| {
-                {
+                let previews = {
                     let mut s = state2.borrow_mut();
                     s.config.hover_previews = active;
                     s.config.save().ok();
-                }
-                super::hover_preview::set_enabled(active);
+                    s.config.effective_hover_previews()
+                };
+                super::hover_preview::set_enabled(previews);
             }
         },
     ));

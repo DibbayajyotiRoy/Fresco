@@ -291,7 +291,7 @@ fn js_str(s: &str) -> String {
 /// The plugin's `PauseMode` (`contents/config/main.xml`): 0 pauses the video
 /// while a window is fullscreen, 1 also while one is maximized, 2 never.
 fn kde_pause_mode(config: &Config) -> i32 {
-    i32::from(config.pause_on_covered)
+    i32::from(config.effective_pause_on_covered())
 }
 
 /// The plugin's `FillMode` (`contents/config/main.xml`) for a fit option, as

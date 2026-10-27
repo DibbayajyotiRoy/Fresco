@@ -652,6 +652,8 @@
   "Pause when an app covers the screen": "Pausieren, wenn eine App den Bildschirm verdeckt",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pausiert, wenn ein großes Fenster 90% des Bildschirms verdeckt; Vollbild-Apps pausieren immer",
   "Window covers screen": "Fenster verdeckt den Bildschirm",
+  "Performance mode": "Leistungsmodus",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Schaltet Widgets, Audiovisualisierung und Vorschauen beim Darüberfahren ab und senkt die Videoqualität — für Spiele und ältere PCs",
   "Pause playback": "Wiedergabe pausieren",
   "Resume playback": "Wiedergabe fortsetzen",
   "Next wallpaper": "Nächstes Hintergrundbild",

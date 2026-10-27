@@ -458,12 +458,12 @@ fn build_plugin_command(
             continue;
         };
         let sock = lock_socket_path(runtime_dir, &out.connector);
-        let power_saving = wallpaper.effective_power_saving(config.power_saving);
+        let power_saving = config.effective_power_saving(wallpaper);
         let mut opts = crate::daemon::mpvpaper::build_mpv_opts(
             wallpaper,
             config.scaling,
             power_saving,
-            config.low_memory,
+            config.effective_low_memory(),
             &sock,
         );
         if !playing_live {
@@ -486,12 +486,12 @@ fn build_plugin_command(
     let fallback = config.lock_source(None);
     let default = fallback.effective_path().map(|media| {
         let sock = lock_socket_path(runtime_dir, "unknown");
-        let power_saving = fallback.effective_power_saving(config.power_saving);
+        let power_saving = config.effective_power_saving(fallback);
         let mut opts = crate::daemon::mpvpaper::build_mpv_opts(
             fallback,
             config.scaling,
             power_saving,
-            config.low_memory,
+            config.effective_low_memory(),
             &sock,
         );
         if !playing_live {

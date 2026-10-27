@@ -4,6 +4,24 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Fresco no longer burns a CPU core while your screen is locked.** On a
+  locked session the background process woke up about a thousand times a
+  second, and with the lock-screen live-video setting on COSMIC each of those
+  wake-ups also re-read the battery's files, which came to roughly 29,000 file
+  reads a second. A laptop left locked for hours used about a fifth of a core
+  for nothing. The widgets are frozen on a lock, and the process now waits the
+  normal tenth of a second instead of waiting for a clock that cannot move.
+  The battery state is also looked up at most once every two seconds.
+- **Widgets are no longer drawn while a window covers the screen.** With
+  "pause when an app covers the screen" on, the wallpaper video paused but the
+  clock, lyrics and audio visualiser kept being rendered to pictures nobody
+  could see. They now stop while every screen is covered and catch up the
+  moment one is uncovered. An idle desktop with a maximised window drops from
+  about 1% of a core to about 0.1%.
+
 ## [1.1.52] — 2026-10-25
 
 ### Added

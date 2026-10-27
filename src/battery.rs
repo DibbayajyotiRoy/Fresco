@@ -48,7 +48,8 @@
 //! voltage to convert between them and sysfs does not reliably expose one.
 
 use std::path::Path;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Charge/discharge state, straight off sysfs `status`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,8 +364,33 @@ fn hours_to_duration(remaining: u64, rate: u64) -> Option<Duration> {
 /// Every caller — including `daemon::mod`'s `pause_on_battery` check — goes
 /// through this one function, so there is exactly one place that can get the
 /// peripheral case wrong again.
+///
+/// The answer is reused for [`ON_BATTERY_TTL`]: the lock-screen live-video
+/// policy (`LockRuntime::forces_pause`) asks this on every run-loop pass, and
+/// each uncached call is a full `/sys/class/power_supply` scan — tens of
+/// `read(2)`s. Spinning at ~1000 passes a second that was 29,000 reads a second
+/// and a core's worth of kernel time while the screen sat locked. A plug or
+/// unplug is seen within the TTL, which is far inside every caller's own poll
+/// period.
 pub fn on_battery() -> bool {
-    on_battery_from(read())
+    static LAST: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    cached(&mut last, Instant::now(), || on_battery_from(read()))
+}
+
+/// How long [`on_battery`] reuses its last answer.
+const ON_BATTERY_TTL: Duration = Duration::from_secs(2);
+
+/// [`on_battery`]'s TTL rule with the clock and the sysfs scan handed in.
+fn cached(last: &mut Option<(Instant, bool)>, now: Instant, scan: impl FnOnce() -> bool) -> bool {
+    match *last {
+        Some((at, answer)) if now.saturating_duration_since(at) < ON_BATTERY_TTL => answer,
+        _ => {
+            let answer = scan();
+            *last = Some((now, answer));
+            answer
+        }
+    }
 }
 
 /// [`on_battery`]'s formula, pulled out as a pure function of a
@@ -607,6 +633,30 @@ mod tests {
             &[("type", "Battery"), ("status", "Full"), ("capacity", "150")],
         );
         assert_eq!(read_from(&root).unwrap().percent, 100);
+    }
+
+    #[test]
+    fn on_battery_scans_sysfs_once_per_ttl() {
+        let t0 = Instant::now();
+        let mut last = None;
+        let mut scans = 0;
+        let mut ask = |at: Instant, truth: bool| {
+            cached(&mut last, at, || {
+                scans += 1;
+                truth
+            })
+        };
+        assert!(ask(t0, true));
+        // A run loop spinning on the answer reuses it ...
+        for ms in [1, 10, 500, 1999] {
+            assert!(
+                ask(t0 + Duration::from_millis(ms), false),
+                "stale at {ms}ms"
+            );
+        }
+        // ... until the TTL lapses, then it looks again.
+        assert!(!ask(t0 + ON_BATTERY_TTL, false));
+        assert_eq!(scans, 2);
     }
 
     #[test]

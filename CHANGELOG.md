@@ -14,7 +14,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads a second. A laptop left locked for hours used about a fifth of a core
   for nothing. The widgets are frozen on a lock, and the process now waits the
   normal tenth of a second instead of waiting for a clock that cannot move.
-  The battery state is also looked up at most once every two seconds.
+  The same busy-wait happened whenever the widgets were set to a monitor that
+  is not plugged in. The battery state is also looked up at most once every
+  two seconds.
 - **Widgets are no longer drawn while a window covers the screen.** With
   "pause when an app covers the screen" on, the wallpaper video paused but the
   clock, lyrics and audio visualiser kept being rendered to pictures nobody

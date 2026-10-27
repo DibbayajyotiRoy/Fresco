@@ -10,9 +10,10 @@
 //! shell out to the `fresco` binary so they reuse the existing library cycling
 //! logic without dragging GUI/library code into the daemon.
 //!
-//! Dynamic show/hide: the tray is created once when the daemon starts if
-//! `config.tray_icon` is true at that moment. Changing the setting later
-//! requires a daemon restart to take effect.
+//! Dynamic show/hide: a supervisor thread watches `config.tray_icon` and
+//! starts or drops the D-Bus service as it changes, so the Settings switch
+//! works without restarting the daemon, and switching the icon off never
+//! touches the wallpaper.
 
 use std::path::PathBuf;
 use std::thread;
@@ -24,6 +25,7 @@ use ksni::Tray;
 
 use crate::config::Config;
 use crate::ipc::{request, Request, Response};
+use crate::t;
 
 /// How often the tray refreshes its pause label from daemon status.
 const STATUS_POLL: Duration = Duration::from_secs(2);
@@ -62,9 +64,9 @@ impl Tray for FrescoTray {
         vec![
             StandardItem {
                 label: if paused {
-                    "Resume".into()
+                    t!("Resume playback").into()
                 } else {
-                    "Pause".into()
+                    t!("Pause playback").into()
                 },
                 activate: Box::new(|this: &mut FrescoTray| {
                     let req = if this.state.paused {
@@ -80,7 +82,7 @@ impl Tray for FrescoTray {
             }
             .into(),
             StandardItem {
-                label: "Next".into(),
+                label: t!("Next wallpaper").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
                     if let Err(e) = spawn_fresco(&["next"]) {
                         log::warn!("tray: failed to launch 'fresco next': {e:#}");
@@ -90,7 +92,7 @@ impl Tray for FrescoTray {
             }
             .into(),
             StandardItem {
-                label: "Random".into(),
+                label: t!("Random wallpaper").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
                     if let Err(e) = spawn_fresco(&["random"]) {
                         log::warn!("tray: failed to launch 'fresco random': {e:#}");
@@ -100,7 +102,7 @@ impl Tray for FrescoTray {
             }
             .into(),
             StandardItem {
-                label: "Open Fresco".into(),
+                label: t!("Open main window").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
                     if let Err(e) = spawn_fresco(&[]) {
                         log::warn!("tray: failed to launch Fresco: {e:#}");
@@ -110,7 +112,7 @@ impl Tray for FrescoTray {
             }
             .into(),
             StandardItem {
-                label: "Stop".into(),
+                label: t!("Stop wallpaper").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
                     stop_daemon();
                 }),
@@ -118,9 +120,12 @@ impl Tray for FrescoTray {
             }
             .into(),
             StandardItem {
-                label: "Quit".into(),
+                label: t!("Quit Fresco").into(),
+                // Fresco's only process is this daemon, so quitting it is
+                // stopping the wallpaper: restore the desktop, stay off at the
+                // next login (issue #98).
                 activate: Box::new(|_: &mut FrescoTray| {
-                    quit_daemon();
+                    stop_daemon();
                 }),
                 ..Default::default()
             }
@@ -135,19 +140,51 @@ impl Tray for FrescoTray {
     }
 }
 
-/// Start the tray service on a background thread.
+/// Start the tray supervisor on a background thread.
 ///
-/// This is a no-op if the tray cannot register on D-Bus; the error is logged
-/// and the thread exits.
+/// It owns the D-Bus service for the daemon's lifetime: started when
+/// `config.tray_icon` is (or becomes) true, dropped when it turns false. A
+/// service that cannot register is logged and left alone until the setting is
+/// toggled again, so a broken session bus is not retried every poll.
 pub fn spawn() {
-    thread::spawn(|| {
-        if let Err(e) = run_tray() {
-            log::warn!("tray: could not start: {e:#}");
-        }
-    });
+    thread::spawn(supervise);
 }
 
-fn run_tray() -> anyhow::Result<()> {
+fn supervise() {
+    let mut handle: Option<ksni::blocking::Handle<FrescoTray>> = None;
+    let mut wanted = false;
+    loop {
+        // An unreadable config keeps whatever is running.
+        let want = Config::load().map_or(wanted, |c| c.tray_icon);
+        if want != wanted {
+            wanted = want;
+            if want {
+                match start_tray() {
+                    Ok(h) => handle = Some(h),
+                    Err(e) => log::warn!("tray: could not start: {e:#}"),
+                }
+            } else if let Some(h) = handle.take() {
+                h.shutdown().wait();
+                log::info!("tray: icon removed (tray_icon = false)");
+            }
+        }
+        // Keep the pause label in sync without blocking the wallpaper loop.
+        if let Some(h) = &handle {
+            match request(&Request::Status) {
+                Ok(Response::Status(status)) => {
+                    h.update(|tray: &mut FrescoTray| {
+                        tray.state.paused = status.paused;
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => log::debug!("tray: status poll failed: {e:#}"),
+            }
+        }
+        thread::sleep(STATUS_POLL);
+    }
+}
+
+fn start_tray() -> anyhow::Result<ksni::blocking::Handle<FrescoTray>> {
     let tray = FrescoTray {
         state: State::default(),
     };
@@ -162,21 +199,7 @@ fn run_tray() -> anyhow::Result<()> {
     // Assume SNI is available so that missing tray hosts (stock GNOME,
     // headless containers) become a soft offline event rather than a hard
     // error that would prevent the daemon from starting.
-    let handle = builder.assume_sni_available(true).spawn()?;
-
-    // Keep the pause label in sync without blocking the wallpaper loop.
-    loop {
-        thread::sleep(STATUS_POLL);
-        match request(&Request::Status) {
-            Ok(Response::Status(status)) => {
-                handle.update(|tray: &mut FrescoTray| {
-                    tray.state.paused = status.paused;
-                });
-            }
-            Ok(_) => {}
-            Err(e) => log::debug!("tray: status poll failed: {e:#}"),
-        }
-    }
+    Ok(builder.assume_sni_available(true).spawn()?)
 }
 
 /// Best-effort check for a packaged Fresco icon.
@@ -204,23 +227,29 @@ fn spawn_fresco(args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Stop the wallpaper and keep it stopped on the next login.
+/// Mark `cfg` as stopped: the same `enabled = false` the GUI's "Stop
+/// wallpaper" saves, so the library no longer shows a wallpaper as playing and
+/// login does not start a daemon for it. False when it already was.
+fn disable_wallpaper(cfg: &mut Config) -> bool {
+    std::mem::replace(&mut cfg.enabled, false)
+}
+
+/// Stop the wallpaper, restore the desktop's own background and keep it that
+/// way at the next login. "Stop" and "Quit" both land here: the daemon is
+/// Fresco's only background process, so quitting it and stopping the
+/// wallpaper are one act (issue #98).
 fn stop_daemon() {
-    // Mirror the GUI's stop behaviour: disable autorestore first so a killed
-    // daemon does not resurrect the wallpaper.
+    // Disable first, as the GUI does: a daemon that dies mid-stop must not be
+    // resurrected with the wallpaper still enabled.
     if let Ok(mut cfg) = Config::load() {
-        if cfg.enabled {
-            cfg.enabled = false;
+        if disable_wallpaper(&mut cfg) {
             if let Err(e) = cfg.save() {
                 log::warn!("tray: failed to disable wallpaper in config: {e:#}");
             }
         }
     }
-    quit_daemon();
-}
-
-/// Ask the daemon to tear down wallpaper windows and exit.
-fn quit_daemon() {
+    // `Stop` runs the daemon's full shutdown, which puts the desktop's own
+    // background back (DDE, GNOME, COSMIC, KDE, MATE, Xfce).
     if let Err(e) = request(&Request::Stop) {
         log::warn!("tray: stop request failed: {e:#}");
     }
@@ -237,11 +266,11 @@ mod tests {
         };
         let menu = tray.menu();
         assert_eq!(menu.len(), 6);
-        assert!(label_at(&menu, 0).contains("Pause"));
+        assert_eq!(label_at(&menu, 0), "Pause playback");
 
         tray.state.paused = true;
         let menu = tray.menu();
-        assert!(label_at(&menu, 0).contains("Resume"));
+        assert_eq!(label_at(&menu, 0), "Resume playback");
     }
 
     #[test]
@@ -252,8 +281,32 @@ mod tests {
         let labels: Vec<String> = tray.menu().iter().map(label_at_root).collect();
         assert_eq!(
             labels,
-            vec!["Pause", "Next", "Random", "Open Fresco", "Stop", "Quit"]
+            vec![
+                "Pause playback",
+                "Next wallpaper",
+                "Random wallpaper",
+                "Open main window",
+                "Stop wallpaper",
+                "Quit Fresco",
+            ]
         );
+    }
+
+    /// Issue #98: "Quit" used to leave `enabled = true` behind, so the library
+    /// kept showing the wallpaper as playing and the next login started a
+    /// daemon for it. Quit and Stop now share `stop_daemon`; this is the config
+    /// half of it.
+    #[test]
+    fn stopping_turns_the_wallpaper_off_once() {
+        let mut cfg = Config {
+            enabled: true,
+            ..Default::default()
+        };
+        assert!(disable_wallpaper(&mut cfg));
+        assert!(!cfg.enabled);
+        // Already off: nothing to save.
+        assert!(!disable_wallpaper(&mut cfg));
+        assert!(!cfg.enabled);
     }
 
     fn label_at(menu: &[MenuItem<FrescoTray>], idx: usize) -> String {

@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ Navigieren · Eingabetaste Ausführen · Esc Schließen",
   "Pause when an app covers the screen": "Pausieren, wenn eine App den Bildschirm verdeckt",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pausiert, wenn ein großes Fenster 90% des Bildschirms verdeckt; Vollbild-Apps pausieren immer",
-  "Window covers screen": "Fenster verdeckt den Bildschirm"
+  "Window covers screen": "Fenster verdeckt den Bildschirm",
+  "Pause playback": "Wiedergabe pausieren",
+  "Resume playback": "Wiedergabe fortsetzen",
+  "Next wallpaper": "Nächstes Hintergrundbild",
+  "Open main window": "Hauptfenster öffnen",
+  "Quit Fresco": "Fresco beenden",
+  "Show icon in the system tray": "Symbol im Infobereich anzeigen"
 }

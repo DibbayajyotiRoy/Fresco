@@ -1888,6 +1888,23 @@ impl Daemon {
     /// raise waits out `dde_icon_peek_secs` before taking the stack back (see
     /// [`dde::IconPeek`]).
     fn reassert_stacking(&mut self) {
+        // Started before dde-shell mapped its desktop window: we picked
+        // transparency, which shows black there. Redo the choice now that the
+        // window exists. Not looping: a rebuild that finds nothing to show
+        // leaves no renderers, and one that succeeds leaves `Restack`.
+        if self.dde_mode == dde::Mode::DBus
+            && !self.renderers.is_empty()
+            && dde::transparency_is_stale(
+                &self.conn,
+                &self.atoms,
+                self.screen().root,
+                self.config.dde_mode,
+            )
+        {
+            log::info!("DDE: dde-shell's desktop window appeared after start; switching from transparency to restack");
+            let _ = self.rebuild();
+            return;
+        }
         if let Some(desktop) = self.dde_mode.mirror_desktop() {
             // The mirror thread owns stacking here: it lowers the desktop
             // window the moment the window manager raises it, on its own
@@ -2620,9 +2637,9 @@ pub fn run() -> Result<()> {
         if cfg.browser_bridge {
             webbridge::spawn(webbridge::PORT);
         }
-        // System-tray icon: owned by the daemon, started once at startup.
-        // Changing tray_icon at runtime requires a daemon restart.
-        if cfg.tray_icon && cfg.enabled {
+        // System-tray icon: the supervisor follows `tray_icon` from config.toml,
+        // so the Settings switch takes effect without a restart.
+        if cfg.enabled {
             tray::spawn();
         }
     }

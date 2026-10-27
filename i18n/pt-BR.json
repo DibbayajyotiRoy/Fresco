@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ navegar · Enter executar · Esc fechar",
   "Pause when an app covers the screen": "Pausar quando um app cobrir a tela",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pausa quando qualquer janela grande cobre 90% da tela; apps em tela cheia sempre pausam",
-  "Window covers screen": "Janela cobrindo a tela"
+  "Window covers screen": "Janela cobrindo a tela",
+  "Pause playback": "Pausar reprodução",
+  "Resume playback": "Retomar reprodução",
+  "Next wallpaper": "Próximo papel de parede",
+  "Open main window": "Abrir janela principal",
+  "Quit Fresco": "Sair do Fresco",
+  "Show icon in the system tray": "Mostrar ícone na bandeja do sistema"
 }

@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ di chuyển · Enter chạy · Esc đóng",
   "Pause when an app covers the screen": "Tạm dừng khi ứng dụng che phủ màn hình",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Tạm dừng khi bất kỳ cửa sổ lớn nào che phủ 90% màn hình; ứng dụng toàn màn hình luôn tạm dừng",
-  "Window covers screen": "Cửa sổ che phủ màn hình"
+  "Window covers screen": "Cửa sổ che phủ màn hình",
+  "Pause playback": "Tạm dừng phát",
+  "Resume playback": "Tiếp tục phát",
+  "Next wallpaper": "Hình nền tiếp theo",
+  "Open main window": "Mở cửa sổ chính",
+  "Quit Fresco": "Thoát Fresco",
+  "Show icon in the system tray": "Hiện biểu tượng trên khay hệ thống"
 }

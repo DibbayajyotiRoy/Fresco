@@ -1689,6 +1689,20 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             }
         },
     ));
+    // The daemon watches config.toml and starts or drops the icon itself; the
+    // wallpaper keeps playing either way.
+    popover_box.append(&switch_row(
+        t!("Show icon in the system tray"),
+        state.borrow().config.tray_icon,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.tray_icon = active;
+                s.config.save().ok();
+            }
+        },
+    ));
     let covered_row = switch_row(
         t!("Pause when an app covers the screen"),
         state.borrow().config.pause_on_covered,

@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ — навигация · Enter — выполнить · Esc — закрыть",
   "Pause when an app covers the screen": "Пауза, когда приложение закрывает экран",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Ставит паузу, когда любое большое окно закрывает 90% экрана; полноэкранные приложения всегда ставят паузу",
-  "Window covers screen": "Окно закрывает экран"
+  "Window covers screen": "Окно закрывает экран",
+  "Pause playback": "Приостановить воспроизведение",
+  "Resume playback": "Продолжить воспроизведение",
+  "Next wallpaper": "Следующие обои",
+  "Open main window": "Открыть главное окно",
+  "Quit Fresco": "Выйти из Fresco",
+  "Show icon in the system tray": "Показывать значок в системном трее"
 }

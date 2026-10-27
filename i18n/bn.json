@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ নেভিগেট · Enter চালান · Esc বন্ধ করুন",
   "Pause when an app covers the screen": "কোনো অ্যাপ স্ক্রিন ঢেকে দিলে বিরতি দিন",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "কোনো বড় উইন্ডো স্ক্রিনের 90% ঢেকে দিলে বিরতি দেয়; ফুলস্ক্রিন অ্যাপ চললে সবসময় বিরতি দেওয়া হয়",
-  "Window covers screen": "উইন্ডো স্ক্রিন ঢেকে রেখেছে"
+  "Window covers screen": "উইন্ডো স্ক্রিন ঢেকে রেখেছে",
+  "Pause playback": "প্লেব্যাক বিরতি দিন",
+  "Resume playback": "প্লেব্যাক পুনরায় শুরু করুন",
+  "Next wallpaper": "পরবর্তী ওয়ালপেপার",
+  "Open main window": "প্রধান উইন্ডো খুলুন",
+  "Quit Fresco": "Fresco বন্ধ করুন",
+  "Show icon in the system tray": "সিস্টেম ট্রেতে আইকন দেখান"
 }

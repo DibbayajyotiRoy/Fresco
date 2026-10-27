@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ navigasi · Enter jalankan · Esc tutup",
   "Pause when an app covers the screen": "Jeda saat aplikasi menutupi layar",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Menjeda saat jendela besar apa pun menutupi 90% layar; aplikasi layar penuh selalu menjeda",
-  "Window covers screen": "Jendela menutupi layar"
+  "Window covers screen": "Jendela menutupi layar",
+  "Pause playback": "Jeda pemutaran",
+  "Resume playback": "Lanjutkan pemutaran",
+  "Next wallpaper": "Wallpaper berikutnya",
+  "Open main window": "Buka jendela utama",
+  "Quit Fresco": "Keluar dari Fresco",
+  "Show icon in the system tray": "Tampilkan ikon di baki sistem"
 }

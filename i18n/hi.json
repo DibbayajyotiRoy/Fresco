@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ नेविगेट करें · Enter चलाएँ · Esc बंद करें",
   "Pause when an app covers the screen": "ऐप के स्क्रीन को ढकने पर रोकें",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "कोई भी बड़ी विंडो स्क्रीन का 90% ढकने पर रोकता है; फ़ुलस्क्रीन ऐप हमेशा रोकते हैं",
-  "Window covers screen": "विंडो स्क्रीन को ढक रही है"
+  "Window covers screen": "विंडो स्क्रीन को ढक रही है",
+  "Pause playback": "प्लेबैक रोकें",
+  "Resume playback": "प्लेबैक फिर से शुरू करें",
+  "Next wallpaper": "अगला वॉलपेपर",
+  "Open main window": "मुख्य विंडो खोलें",
+  "Quit Fresco": "Fresco बंद करें",
+  "Show icon in the system tray": "सिस्टम ट्रे में आइकन दिखाएँ"
 }

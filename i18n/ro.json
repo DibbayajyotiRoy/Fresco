@@ -651,5 +651,11 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ — navigare · Enter — executare · Esc — închidere",
   "Pause when an app covers the screen": "Pauză când o aplicație acoperă ecranul",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Face pauză când orice fereastră mare acoperă 90% din ecran; aplicațiile în ecran complet fac mereu pauză",
-  "Window covers screen": "Fereastră acoperă ecranul"
+  "Window covers screen": "Fereastră acoperă ecranul",
+  "Pause playback": "Pauză redare",
+  "Resume playback": "Reluare redare",
+  "Next wallpaper": "Următoarea imagine de fundal",
+  "Open main window": "Deschide fereastra principală",
+  "Quit Fresco": "Ieșire din Fresco",
+  "Show icon in the system tray": "Afișează pictograma în zona de notificare"
 }

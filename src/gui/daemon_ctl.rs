@@ -1,6 +1,7 @@
 use std::cell::RefCell;
-use std::path::PathBuf;
-use std::process::Command;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::{
@@ -10,15 +11,80 @@ use crate::{
 use anyhow::Result;
 use gtk4::glib;
 
+/// How long a `systemd-run` gets to refuse before we trust that it became the
+/// daemon: a refusal (no user bus, policy) is reported within milliseconds.
+const SCOPE_REFUSAL_WINDOW: Duration = Duration::from_millis(200);
+
+extern "C" {
+    fn setsid() -> i32;
+}
+
+/// The command that starts the daemon so that it outlives this process.
+///
+/// frescod does NOT daemonize itself, and as a plain child it shares our
+/// process group, session and cgroup, so anything that ends the app ends the
+/// wallpaper too (its SIGTERM/SIGINT/SIGHUP handlers then restore the still
+/// background): Ctrl+C or closing the terminal Fresco was started from, and
+/// a desktop that runs apps as systemd units (`app-*.service`, VTE's
+/// `vte-spawn-*.scope`) and kills the whole cgroup when the app or terminal
+/// goes. So: a new session (no controlling terminal, no foreground-group
+/// signals) and, when `scoped`, a transient user scope of its own so the
+/// cgroup teardown never reaches it. `systemd-run --scope` execs the command
+/// in place, keeping our environment (DISPLAY, WAYLAND_DISPLAY, ...). No
+/// `--unit` name: a restart right after a Stop would collide with the old
+/// scope still being torn down.
+fn daemon_command(frescod: &Path, scoped: bool) -> Command {
+    let mut cmd = if scoped {
+        let mut c = Command::new("systemd-run");
+        c.args([
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            "--description=Fresco wallpaper daemon",
+            "--",
+        ])
+        .arg(frescod);
+        c
+    } else {
+        Command::new(frescod)
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: `setsid` is async-signal-safe and touches no memory; it can
+    // only fail for a group leader, which a freshly forked child never is, and
+    // a failure would merely leave the process in our session.
+    unsafe {
+        cmd.pre_exec(|| {
+            setsid();
+            Ok(())
+        });
+    }
+    cmd
+}
+
+/// A systemd user manager is running, so `systemd-run --user` can place the
+/// daemon in a scope of its own. Absent on non-systemd systems, containers
+/// and sessions without a user manager.
+fn systemd_user_available() -> bool {
+    dirs::runtime_dir().is_some_and(|d| d.join("systemd/private").exists())
+}
+
 /// Spawn frescod detached from the GUI process so it outlives it.
-/// The daemon binary is responsible for its own daemonization.
 pub fn spawn_daemon() -> Result<()> {
     let frescod = frescod_path();
-    Command::new(&frescod)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
+    if systemd_user_available() {
+        if let Ok(mut child) = daemon_command(&frescod, true).spawn() {
+            std::thread::sleep(SCOPE_REFUSAL_WINDOW);
+            // Still running means systemd-run became frescod. Only a failed
+            // exit this early is a refusal; fall back to the plain spawn.
+            if !matches!(child.try_wait(), Ok(Some(status)) if !status.success()) {
+                return Ok(());
+            }
+        }
+    }
+    daemon_command(&frescod, false).spawn()?;
     Ok(())
 }
 
@@ -317,6 +383,28 @@ pub fn stop_async(on_done: impl FnOnce(ApplyOutcome) + 'static) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn argv(cmd: &Command) -> Vec<String> {
+        std::iter::once(cmd.get_program())
+            .chain(cmd.get_args())
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// The daemon must never be started as a bare child of the GUI when a
+    /// user manager can give it its own cgroup, and the fallback must not
+    /// drag systemd-run along on systems without one.
+    #[test]
+    fn daemon_runs_in_its_own_scope_when_systemd_is_available() {
+        let scoped = argv(&daemon_command(Path::new("/usr/bin/frescod"), true));
+        assert_eq!(scoped[..4], ["systemd-run", "--user", "--scope", "--quiet"]);
+        assert!(scoped.contains(&"--collect".to_string()));
+        // frescod comes last, after the `--` that ends systemd-run's options.
+        assert_eq!(scoped[scoped.len() - 2..], ["--", "/usr/bin/frescod"]);
+
+        let plain = argv(&daemon_command(Path::new("/usr/bin/frescod"), false));
+        assert_eq!(plain, ["/usr/bin/frescod"]);
+    }
 
     #[test]
     fn is_superseded_marks_all_but_last() {

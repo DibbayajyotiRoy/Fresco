@@ -658,6 +658,7 @@
   "Resume playback": "Reluare redare",
   "Next wallpaper": "Următoarea imagine de fundal",
   "Open main window": "Deschide fereastra principală",
-  "Quit Fresco": "Ieșire din Fresco",
-  "Show icon in the system tray": "Afișează pictograma în zona de notificare"
+  "Quit Fresco (until next login)": "Ieșire din Fresco (până la următoarea autentificare)",
+  "Show icon in the system tray": "Afișează pictograma în zona de notificare",
+  "RESUMES AT NEXT LOGIN": "SE REIA LA URMĂTOAREA AUTENTIFICARE"
 }

@@ -658,6 +658,7 @@
   "Resume playback": "Tiếp tục phát",
   "Next wallpaper": "Hình nền tiếp theo",
   "Open main window": "Mở cửa sổ chính",
-  "Quit Fresco": "Thoát Fresco",
-  "Show icon in the system tray": "Hiện biểu tượng trên khay hệ thống"
+  "Quit Fresco (until next login)": "Thoát Fresco (đến lần đăng nhập sau)",
+  "Show icon in the system tray": "Hiện biểu tượng trên khay hệ thống",
+  "RESUMES AT NEXT LOGIN": "TIẾP TỤC KHI ĐĂNG NHẬP LẠI"
 }

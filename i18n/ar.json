@@ -658,6 +658,7 @@
   "Resume playback": "استئناف التشغيل",
   "Next wallpaper": "الخلفية التالية",
   "Open main window": "فتح النافذة الرئيسية",
-  "Quit Fresco": "إنهاء Fresco",
-  "Show icon in the system tray": "إظهار الأيقونة في صينية النظام"
+  "Quit Fresco (until next login)": "إنهاء Fresco (حتى تسجيل الدخول التالي)",
+  "Show icon in the system tray": "إظهار الأيقونة في صينية النظام",
+  "RESUMES AT NEXT LOGIN": "يُستأنف عند تسجيل الدخول التالي"
 }

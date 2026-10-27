@@ -9,9 +9,11 @@ use std::time::Duration;
 use gtk4::prelude::*;
 use gtk4::{glib, glib::ControlFlow};
 
+use crate::config::Config;
 use crate::ipc::{self, MonitorInfo, PauseReason, Request, StatusReply};
 use crate::{t, tf};
 
+use super::daemon_ctl;
 use super::lockscreen::{lock_support_of, LockSupport};
 
 thread_local! {
@@ -45,6 +47,48 @@ thread_local! {
     /// What the last status poll said reaches this desktop's real lock screen,
     /// for the app menu's "Lock Screen…" row — see `cached_lock_support`.
     static LAST_LOCK_SUPPORT: Cell<Option<LockSupport>> = const { Cell::new(None) };
+}
+
+thread_local! {
+    /// Whether the last status poll found the daemon running. `None` before the
+    /// first poll lands. The library's "active" card is judged by this as well
+    /// as by `enabled`: after the tray's "Quit" the config still says on, but
+    /// nothing is playing (#98) — see `cached_daemon_running`.
+    static LAST_RUNNING: Cell<Option<bool>> = const { Cell::new(None) };
+    /// Redraws the library when `LAST_RUNNING` changes; installed once by the
+    /// library view.
+    static RUNNING_HOOK: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// Whether the daemon answered the last status poll; `None` until one lands.
+pub(crate) fn cached_daemon_running() -> Option<bool> {
+    LAST_RUNNING.with(Cell::get)
+}
+
+/// Register the callback fired when [`cached_daemon_running`] changes in a way
+/// the library must show (not for the first poll finding the daemon up, which
+/// is what the library already assumes).
+pub(crate) fn on_daemon_running_changed(hook: impl Fn() + 'static) {
+    RUNNING_HOOK.with(|h| *h.borrow_mut() = Some(Rc::new(hook)));
+}
+
+/// Cache a poll's verdict; true when the library's picture of it changes.
+fn set_cached_daemon_running(running: bool) -> bool {
+    // Until the first poll the library draws from config.toml alone, which is
+    // the same picture as "running".
+    LAST_RUNNING
+        .with(|r| r.replace(Some(running)))
+        .unwrap_or(true)
+        != running
+}
+
+fn note_daemon_running(running: bool) {
+    if set_cached_daemon_running(running) {
+        let hook = RUNNING_HOOK.with(|h| h.borrow().clone());
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
 }
 
 /// Resolves the playing file to the name its library card shows.
@@ -249,6 +293,9 @@ struct PillWidgets {
     hwdec: gtk4::Label,
     toggle: gtk4::Button,
     pill: gtk4::Box,
+    /// The toggle currently means "Start" (the daemon is gone but the config
+    /// wants it), not Pause/Resume.
+    starts: Cell<bool>,
     /// This session only ever paints a still frame (GNOME Wayland): the daemon
     /// reports "running" for it, but nothing is playing and Pause/Resume are
     /// no-ops, so the pill must not say PLAYING or offer a pause button.
@@ -308,6 +355,7 @@ pub fn build_status_pill() -> gtk4::Widget {
         hwdec,
         toggle: toggle.clone(),
         pill: pill.clone(),
+        starts: Cell::new(false),
         still_frame: crate::capability::detect()
             == crate::capability::Capability::WaylandGnomeStatic,
     });
@@ -315,6 +363,10 @@ pub fn build_status_pill() -> gtk4::Widget {
     {
         let widgets = widgets.clone();
         toggle.connect_clicked(move |btn| {
+            if widgets.starts.get() {
+                start_now();
+                return;
+            }
             let paused = btn.icon_name().as_deref() == Some("media-playback-start-symbolic");
             let req = if paused {
                 Request::Resume
@@ -351,30 +403,37 @@ fn poll_once(widgets: Rc<PillWidgets>) {
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let result = ipc::request(&Request::Status);
-        let _ = tx.send_blocking(result);
+        // What config.toml says matters only when nothing is answering.
+        let off = match &result {
+            Ok(crate::ipc::Response::Status(s)) if s.running => Off::Idle,
+            _ => Config::load().map_or(Off::Idle, |c| off_state(&c)),
+        };
+        let _ = tx.send_blocking((result, off));
     });
 
     glib::spawn_future_local(async move {
-        let Ok(result) = rx.recv().await else {
+        let Ok((result, off)) = rx.recv().await else {
             return;
         };
         match result {
             Ok(crate::ipc::Response::Status(status)) => {
+                note_daemon_running(status.running);
                 LAST_MONITORS.with(|m| *m.borrow_mut() = status.monitors_info.clone());
                 note_playing_path(status.wallpaper_path.clone());
                 LAST_LOCK_SUPPORT
                     .with(|c| c.set(status.lockscreen.as_ref().and_then(lock_support_of)));
-                apply_status(&widgets, &status);
+                apply_status(&widgets, &status, off);
                 notify_reachable(status.running);
             }
             Ok(_) => {}
             Err(e) => {
                 // Daemon not running — expected and common, not an error.
                 log::debug!("status poll: daemon unreachable: {e:#}");
+                note_daemon_running(false);
                 LAST_MONITORS.with(|m| m.borrow_mut().clear());
                 note_playing_path(None);
                 LAST_LOCK_SUPPORT.with(|c| c.set(None));
-                apply_off(&widgets);
+                apply_off(&widgets, off);
                 notify_reachable(false);
             }
         }
@@ -392,23 +451,82 @@ fn send_fire_and_forget(req: Request) {
     });
 }
 
-fn apply_off(w: &PillWidgets) {
+/// What the saved config says about a daemon that is not running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Off {
+    /// Stopped on purpose (`enabled = false`), or never set up.
+    Idle,
+    /// `enabled = true` yet no daemon: the tray's "Quit", or a crash. Start
+    /// brings it back now; `resumes_at_login` says the autostart entry will too.
+    Wanted { resumes_at_login: bool },
+}
+
+fn off_state(cfg: &Config) -> Off {
+    if cfg.enabled {
+        Off::Wanted {
+            resumes_at_login: cfg.autostart,
+        }
+    } else {
+        Off::Idle
+    }
+}
+
+/// The pill's overline for a stopped daemon; only a wallpaper that login will
+/// bring back says so (#98: it must not read as playing, nor as gone for good).
+fn off_overline(off: Off) -> Option<&'static str> {
+    matches!(
+        off,
+        Off::Wanted {
+            resumes_at_login: true
+        }
+    )
+    .then(|| t!("RESUMES AT NEXT LOGIN"))
+}
+
+/// The pill's Start button: apply the saved config, which starts the daemon.
+fn start_now() {
+    // `apply_async` saves what it is given, so never hand it a default made
+    // from a config that failed to load.
+    if let Ok(cfg) = Config::load() {
+        daemon_ctl::apply_async(&cfg, |outcome| {
+            if let Err(e) = outcome.result {
+                log::warn!("start from the status pill failed: {e}");
+            }
+            poll_soon();
+        });
+    }
+}
+
+fn apply_off(w: &PillWidgets, off: Off) {
     w.dot.remove_css_class("dot-ok");
     w.dot.remove_css_class("dot-warn");
     w.dot.add_css_class("dot-off");
-    w.overline.set_visible(false);
+    match off_overline(off) {
+        Some(text) => {
+            w.overline.set_label(text);
+            w.overline.set_visible(true);
+        }
+        None => w.overline.set_visible(false),
+    }
     w.label.set_label(t!("Not running"));
     w.reason.set_visible(false);
     w.hwdec.set_visible(false);
-    w.toggle.set_visible(false);
+    let wanted = off != Off::Idle;
+    w.starts.set(wanted);
+    w.toggle.set_visible(wanted);
+    if wanted {
+        w.toggle.set_icon_name("media-playback-start-symbolic");
+        w.toggle.set_tooltip_text(Some(t!("Start")));
+    }
     w.pill.set_tooltip_text(None);
 }
 
-fn apply_status(w: &PillWidgets, status: &StatusReply) {
+fn apply_status(w: &PillWidgets, status: &StatusReply, off: Off) {
     if !status.running {
-        apply_off(w);
+        apply_off(w, off);
         return;
     }
+    w.starts.set(false);
 
     let warn = status.paused || status.error.is_some();
     w.dot.remove_css_class("dot-ok");
@@ -591,6 +709,63 @@ mod tests {
                 assert_eq!(pill_overline(true, paused, still_frame), "NEEDS ATTENTION");
             }
         }
+    }
+
+    /// #98: after the tray's "Quit" the config still says on but nothing runs.
+    /// The pill must say so (and offer Start), not claim it is playing or that
+    /// the wallpaper is gone for good; a deliberate Stop stays plain "Not running".
+    #[test]
+    fn pill_says_a_quit_wallpaper_resumes_at_login() {
+        let cfg = |enabled, autostart| Config {
+            enabled,
+            autostart,
+            ..Default::default()
+        };
+        let wanted = off_state(&cfg(true, true));
+        assert_eq!(
+            wanted,
+            Off::Wanted {
+                resumes_at_login: true
+            }
+        );
+        assert_eq!(off_overline(wanted), Some("RESUMES AT NEXT LOGIN"));
+
+        // No autostart entry: Start is still offered, but login won't help.
+        let manual = off_state(&cfg(true, false));
+        assert_eq!(
+            manual,
+            Off::Wanted {
+                resumes_at_login: false
+            }
+        );
+        assert_eq!(off_overline(manual), None);
+
+        // Stopped on purpose: nothing resumes, nothing to start.
+        assert_eq!(off_state(&cfg(false, true)), Off::Idle);
+        assert_eq!(off_overline(Off::Idle), None);
+    }
+
+    /// The library only redraws when its picture of the daemon changes: the
+    /// first poll finding it up changes nothing (it already assumed so).
+    #[test]
+    fn running_cache_reports_what_the_library_must_redraw() {
+        assert_eq!(cached_daemon_running(), None);
+        assert!(
+            !set_cached_daemon_running(true),
+            "first poll: up, as assumed"
+        );
+        assert!(!set_cached_daemon_running(true), "still up");
+        assert!(set_cached_daemon_running(false), "daemon quit");
+        assert!(!set_cached_daemon_running(false), "still gone");
+        assert!(set_cached_daemon_running(true), "daemon back");
+        assert_eq!(cached_daemon_running(), Some(true));
+    }
+
+    /// Opening the app with the daemon already quit: the library has drawn its
+    /// active card from config.toml and must now take it back.
+    #[test]
+    fn a_first_poll_finding_no_daemon_redraws_the_library() {
+        assert!(set_cached_daemon_running(false));
     }
 
     #[test]

@@ -658,6 +658,7 @@
   "Resume playback": "Reprendre la lecture",
   "Next wallpaper": "Fond d’écran suivant",
   "Open main window": "Ouvrir la fenêtre principale",
-  "Quit Fresco": "Quitter Fresco",
-  "Show icon in the system tray": "Afficher l’icône dans la zone de notification"
+  "Quit Fresco (until next login)": "Quitter Fresco (jusqu’à la prochaine connexion)",
+  "Show icon in the system tray": "Afficher l’icône dans la zone de notification",
+  "RESUMES AT NEXT LOGIN": "REPREND À LA PROCHAINE CONNEXION"
 }

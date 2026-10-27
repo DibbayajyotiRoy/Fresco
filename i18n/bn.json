@@ -658,6 +658,7 @@
   "Resume playback": "প্লেব্যাক পুনরায় শুরু করুন",
   "Next wallpaper": "পরবর্তী ওয়ালপেপার",
   "Open main window": "প্রধান উইন্ডো খুলুন",
-  "Quit Fresco": "Fresco বন্ধ করুন",
-  "Show icon in the system tray": "সিস্টেম ট্রেতে আইকন দেখান"
+  "Quit Fresco (until next login)": "Fresco বন্ধ করুন (পরবর্তী লগইন পর্যন্ত)",
+  "Show icon in the system tray": "সিস্টেম ট্রেতে আইকন দেখান",
+  "RESUMES AT NEXT LOGIN": "পরবর্তী লগইনে আবার চালু হবে"
 }

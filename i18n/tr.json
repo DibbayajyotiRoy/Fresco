@@ -658,6 +658,7 @@
   "Resume playback": "Oynatmayı sürdür",
   "Next wallpaper": "Sonraki duvar kâğıdı",
   "Open main window": "Ana pencereyi aç",
-  "Quit Fresco": "Fresco’dan çık",
-  "Show icon in the system tray": "Simgeyi sistem tepsisinde göster"
+  "Quit Fresco (until next login)": "Fresco’dan çık (sonraki oturum açmaya kadar)",
+  "Show icon in the system tray": "Simgeyi sistem tepsisinde göster",
+  "RESUMES AT NEXT LOGIN": "SONRAKİ OTURUMDA DEVAM EDER"
 }

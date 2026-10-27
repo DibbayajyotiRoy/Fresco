@@ -1230,11 +1230,17 @@ fn build_library_view(
     {
         let state = state.clone();
         let refresh = refresh.clone();
-        status::on_playing_path_changed(move || {
-            if schedule_active(&state.borrow().config) {
-                refresh();
+        status::on_playing_path_changed({
+            let refresh = refresh.clone();
+            move || {
+                if schedule_active(&state.borrow().config) {
+                    refresh();
+                }
             }
         });
+        // The daemon quitting (tray "Quit", #98) or coming back moves the
+        // active card whatever the schedule.
+        status::on_daemon_running_changed(move || refresh());
     }
 
     // The header pill names the playing file by its library entry, so a
@@ -2420,7 +2426,12 @@ fn populate_library(
     };
     // Judge "active" by what the daemon is showing while a schedule swaps
     // wallpapers behind config.toml's back, not by the stale saved default.
-    let cfg = config_for_active_cards(&cfg, &entries, status::cached_playing_path().as_deref());
+    let cfg = config_for_active_cards(
+        &cfg,
+        &entries,
+        status::cached_playing_path().as_deref(),
+        status::cached_daemon_running(),
+    );
 
     // A library holding only linked folders is not empty, even before their
     // first scan lands (or while one is unplugged): their headings must show.
@@ -6818,15 +6829,21 @@ fn remove_schedule(cfg: &mut Config, entries: &[LibraryEntry], playing: Option<&
 
 /// The config to judge "which card is active" against: while a live schedule
 /// is swapping wallpapers, what the daemon reports is the truth; otherwise
-/// (no schedule, or paused) config.toml is.
+/// (no schedule, or paused) config.toml is. A daemon known to be gone plays
+/// nothing, whatever `enabled` says (the tray's "Quit" leaves it on so login
+/// resumes the wallpaper, #98), so no card is active then.
 fn config_for_active_cards(
     cfg: &Config,
     entries: &[LibraryEntry],
     playing: Option<&std::path::Path>,
+    daemon_running: Option<bool>,
 ) -> Config {
     let mut view = cfg.clone();
     if schedule_active(cfg) {
         adopt_playing_wallpaper(&mut view, entries, playing);
+    }
+    if daemon_running == Some(false) {
+        view.enabled = false;
     }
     view
 }
@@ -11978,21 +11995,53 @@ mod tests {
         let playing = Some(std::path::Path::new("/b.mp4"));
 
         let live = always_slot_config("/b.mp4", "/a.mp4");
-        let view = config_for_active_cards(&live, &entries, playing);
+        let view = config_for_active_cards(&live, &entries, playing, Some(true));
         assert!(entry_is_active(&b, &view) && !entry_is_active(&a, &view));
         // A daemon that can't say falls back to the config.
-        let view = config_for_active_cards(&live, &entries, None);
+        let view = config_for_active_cards(&live, &entries, None, Some(true));
         assert!(entry_is_active(&a, &view));
 
         let mut paused = live.clone();
         paused.schedule_paused = true;
-        let view = config_for_active_cards(&paused, &entries, playing);
+        let view = config_for_active_cards(&paused, &entries, playing, Some(true));
         assert!(entry_is_active(&a, &view) && !entry_is_active(&b, &view));
 
         let mut off = live;
         off.schedule = None;
-        let view = config_for_active_cards(&off, &entries, playing);
+        let view = config_for_active_cards(&off, &entries, playing, Some(true));
         assert!(entry_is_active(&a, &view) && !entry_is_active(&b, &view));
+    }
+
+    /// #98: the tray's "Quit" leaves `enabled = true` so login resumes the
+    /// wallpaper, but no daemon means nothing is playing, so no card may claim
+    /// to be. Before the first poll lands the config is all there is.
+    #[test]
+    fn no_card_is_active_while_the_daemon_is_gone() {
+        let a = entry("/a.mp4");
+        let entries = [a.clone()];
+        let cfg = Config {
+            enabled: true,
+            wallpaper: a.to_wallpaper(),
+            ..Default::default()
+        };
+        let view = config_for_active_cards(&cfg, &entries, None, Some(false));
+        assert!(!entry_is_active(&a, &view));
+        // Even a live schedule's slot is not on screen without a daemon.
+        let live = always_slot_config("/a.mp4", "/b.mp4");
+        let view = config_for_active_cards(
+            &live,
+            &entries,
+            Some(std::path::Path::new("/a.mp4")),
+            Some(false),
+        );
+        assert!(!entry_is_active(&a, &view));
+        // Running, or not yet known: config.toml decides.
+        for running in [Some(true), None] {
+            let view = config_for_active_cards(&cfg, &entries, None, running);
+            assert!(entry_is_active(&a, &view));
+        }
+        // The saved config is never touched: Quit must keep `enabled`.
+        assert!(cfg.enabled);
     }
 
     /// Advanced "Off" then "Day / night" again: the wallpaper keeps playing

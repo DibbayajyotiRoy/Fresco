@@ -652,6 +652,8 @@
   "Pause when an app covers the screen": "Tạm dừng khi ứng dụng che phủ màn hình",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Tạm dừng khi bất kỳ cửa sổ lớn nào che phủ 90% màn hình; ứng dụng toàn màn hình luôn tạm dừng",
   "Window covers screen": "Cửa sổ che phủ màn hình",
+  "Performance mode": "Chế độ hiệu năng",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Tắt widget, hiệu ứng hình ảnh âm thanh và xem trước khi di chuột, đồng thời giảm chất lượng video — dành cho chơi game và máy cũ",
   "Pause playback": "Tạm dừng phát",
   "Resume playback": "Tiếp tục phát",
   "Next wallpaper": "Hình nền tiếp theo",

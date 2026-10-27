@@ -652,6 +652,8 @@
   "Pause when an app covers the screen": "Pauză când o aplicație acoperă ecranul",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Face pauză când orice fereastră mare acoperă 90% din ecran; aplicațiile în ecran complet fac mereu pauză",
   "Window covers screen": "Fereastră acoperă ecranul",
+  "Performance mode": "Mod performanță",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Dezactivează widgeturile, vizualizatorul audio și previzualizările la trecerea mouse-ului și scade calitatea video — pentru jocuri și PC-uri mai vechi",
   "Pause playback": "Pauză redare",
   "Resume playback": "Reluare redare",
   "Next wallpaper": "Următoarea imagine de fundal",

@@ -571,7 +571,7 @@ fn launch(state: &Rc<RefCell<AppState>>, queued: Queued) {
 fn apply(state: &Rc<RefCell<AppState>>, done: Done, progress: &mut Progress) {
     unpend(&done.id);
     progress.record(done.ok);
-    let previews_on = state.borrow().config.hover_previews;
+    let previews_on = state.borrow().config.effective_hover_previews();
     let meta_line = {
         let mut s = state.borrow_mut();
         match s.entries.iter_mut().find(|e| e.id == done.id) {

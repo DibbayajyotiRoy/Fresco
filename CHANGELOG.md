@@ -4,6 +4,20 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **One "Performance mode" switch for gaming and older PCs.** It is in the
+  menu's behaviour list in the app and in the tray icon's menu (and is
+  `performance_mode = true` in `config.toml`). While it is on, Fresco turns
+  off the widgets (lyrics, clocks, world clock, audio visualiser, album art)
+  and stops listening to the sound output, uses the lightest video scaling and
+  the small low-memory buffers, pauses whenever any large window covers the
+  screen (not only a fullscreen one), stops playing and preparing video
+  previews when you hover a card, and holds the automatic wallpaper change. It
+  only overrides your settings while it is on: none of them is rewritten, so
+  turning it off brings every widget and setting back exactly as you left it.
+
 ## [1.1.52] — 2026-10-25
 
 ### Added

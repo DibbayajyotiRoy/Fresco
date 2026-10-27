@@ -20,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use ksni::menu::{MenuItem, StandardItem};
+use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
 use ksni::Tray;
 
 use crate::config::Config;
@@ -34,6 +34,8 @@ const STATUS_POLL: Duration = Duration::from_secs(2);
 #[derive(Debug, Default)]
 struct State {
     paused: bool,
+    /// `Config::performance_mode`, re-read from config.toml with each status poll.
+    performance: bool,
 }
 
 struct FrescoTray {
@@ -101,6 +103,18 @@ impl Tray for FrescoTray {
                 ..Default::default()
             }
             .into(),
+            CheckmarkItem {
+                label: t!("Performance mode").into(),
+                checked: self.state.performance,
+                activate: Box::new(|this: &mut FrescoTray| {
+                    this.state.performance = !this.state.performance;
+                    let on = this.state.performance;
+                    // Apply respawns the renderers; keep the menu responsive.
+                    thread::spawn(move || set_performance_mode(on));
+                }),
+                ..Default::default()
+            }
+            .into(),
             StandardItem {
                 label: t!("Open main window").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
@@ -114,18 +128,18 @@ impl Tray for FrescoTray {
             StandardItem {
                 label: t!("Stop wallpaper").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
-                    stop_daemon();
+                    exit_daemon(Exit::Stop);
                 }),
                 ..Default::default()
             }
             .into(),
             StandardItem {
-                label: t!("Quit Fresco").into(),
-                // Fresco's only process is this daemon, so quitting it is
-                // stopping the wallpaper: restore the desktop, stay off at the
-                // next login (issue #98).
+                label: t!("Quit Fresco (until next login)").into(),
+                // Like Wallpaper Engine: the desktop is restored now, but
+                // `enabled` stays true so autostart brings the wallpaper back
+                // at the next login (issue #98).
                 activate: Box::new(|_: &mut FrescoTray| {
-                    stop_daemon();
+                    exit_daemon(Exit::Quit);
                 }),
                 ..Default::default()
             }
@@ -155,7 +169,8 @@ fn supervise() {
     let mut wanted = false;
     loop {
         // An unreadable config keeps whatever is running.
-        let want = Config::load().map_or(wanted, |c| c.tray_icon);
+        let cfg = Config::load().ok();
+        let want = cfg.as_ref().map_or(wanted, |c| c.tray_icon);
         if want != wanted {
             wanted = want;
             if want {
@@ -172,8 +187,13 @@ fn supervise() {
         if let Some(h) = &handle {
             match request(&Request::Status) {
                 Ok(Response::Status(status)) => {
+                    // Also follows a switch flipped in the app's menu.
+                    let performance = cfg.map(|c| c.performance_mode);
                     h.update(|tray: &mut FrescoTray| {
                         tray.state.paused = status.paused;
+                        if let Some(on) = performance {
+                            tray.state.performance = on;
+                        }
                     });
                 }
                 Ok(_) => {}
@@ -227,22 +247,45 @@ fn spawn_fresco(args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Mark `cfg` as stopped: the same `enabled = false` the GUI's "Stop
-/// wallpaper" saves, so the library no longer shows a wallpaper as playing and
-/// login does not start a daemon for it. False when it already was.
-fn disable_wallpaper(cfg: &mut Config) -> bool {
-    std::mem::replace(&mut cfg.enabled, false)
+/// Flip performance mode the way the app's menu switch does: save the flag,
+/// then ask the daemon to re-read config.toml and respawn its renderers.
+fn set_performance_mode(on: bool) {
+    let mut cfg = match Config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => return log::warn!("tray: could not read the config: {e:#}"),
+    };
+    cfg.performance_mode = on;
+    if let Err(e) = cfg.save() {
+        return log::warn!("tray: failed to save performance mode: {e:#}");
+    }
+    if let Err(e) = request(&Request::Apply) {
+        log::warn!("tray: apply after performance mode failed: {e:#}");
+    }
 }
 
-/// Stop the wallpaper, restore the desktop's own background and keep it that
-/// way at the next login. "Stop" and "Quit" both land here: the daemon is
-/// Fresco's only background process, so quitting it and stopping the
-/// wallpaper are one act (issue #98).
-fn stop_daemon() {
+/// How the tray ends the daemon. Both restore the desktop's own background now;
+/// they differ in what the next login does.
+#[derive(Clone, Copy)]
+enum Exit {
+    /// "Quit Fresco": `enabled` stays true, so autostart resumes the wallpaper
+    /// at the next login.
+    Quit,
+    /// "Stop wallpaper": `enabled = false`, the same switch the GUI's stop
+    /// saves, so the wallpaper stays off until the user starts it again.
+    Stop,
+}
+
+/// Apply `exit` to `cfg`; true when it changed and must be saved.
+fn apply_exit(cfg: &mut Config, exit: Exit) -> bool {
+    matches!(exit, Exit::Stop) && std::mem::replace(&mut cfg.enabled, false)
+}
+
+/// Restore the desktop's own background and end the daemon (see [`Exit`]).
+fn exit_daemon(exit: Exit) {
     // Disable first, as the GUI does: a daemon that dies mid-stop must not be
     // resurrected with the wallpaper still enabled.
     if let Ok(mut cfg) = Config::load() {
-        if disable_wallpaper(&mut cfg) {
+        if apply_exit(&mut cfg, exit) {
             if let Err(e) = cfg.save() {
                 log::warn!("tray: failed to disable wallpaper in config: {e:#}");
             }
@@ -262,10 +305,10 @@ mod tests {
     #[test]
     fn pause_label_reflects_state() {
         let mut tray = FrescoTray {
-            state: State { paused: false },
+            state: State::default(),
         };
         let menu = tray.menu();
-        assert_eq!(menu.len(), 6);
+        assert_eq!(menu.len(), 7);
         assert_eq!(label_at(&menu, 0), "Pause playback");
 
         tray.state.paused = true;
@@ -285,27 +328,33 @@ mod tests {
                 "Pause playback",
                 "Next wallpaper",
                 "Random wallpaper",
+                "Performance mode",
                 "Open main window",
                 "Stop wallpaper",
-                "Quit Fresco",
+                "Quit Fresco (until next login)",
             ]
         );
     }
 
-    /// Issue #98: "Quit" used to leave `enabled = true` behind, so the library
-    /// kept showing the wallpaper as playing and the next login started a
-    /// daemon for it. Quit and Stop now share `stop_daemon`; this is the config
-    /// half of it.
+    /// Issue #98: Quit restores the desktop but leaves `enabled = true`, so
+    /// autostart resumes the wallpaper at the next login; Stop turns it off for
+    /// good, and only once.
     #[test]
-    fn stopping_turns_the_wallpaper_off_once() {
+    fn quit_keeps_the_wallpaper_enabled_and_stop_turns_it_off() {
         let mut cfg = Config {
             enabled: true,
             ..Default::default()
         };
-        assert!(disable_wallpaper(&mut cfg));
+        assert!(
+            !apply_exit(&mut cfg, Exit::Quit),
+            "Quit has nothing to save"
+        );
+        assert!(cfg.enabled, "Quit must leave autostart able to resume it");
+
+        assert!(apply_exit(&mut cfg, Exit::Stop));
         assert!(!cfg.enabled);
         // Already off: nothing to save.
-        assert!(!disable_wallpaper(&mut cfg));
+        assert!(!apply_exit(&mut cfg, Exit::Stop));
         assert!(!cfg.enabled);
     }
 
@@ -316,7 +365,8 @@ mod tests {
     fn label_at_root(item: &MenuItem<FrescoTray>) -> String {
         match item {
             MenuItem::Standard(s) => s.label.clone(),
-            _ => panic!("expected a standard menu item"),
+            MenuItem::Checkmark(c) => c.label.clone(),
+            _ => panic!("expected a standard or checkmark menu item"),
         }
     }
 }

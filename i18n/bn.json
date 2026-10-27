@@ -652,10 +652,13 @@
   "Pause when an app covers the screen": "কোনো অ্যাপ স্ক্রিন ঢেকে দিলে বিরতি দিন",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "কোনো বড় উইন্ডো স্ক্রিনের 90% ঢেকে দিলে বিরতি দেয়; ফুলস্ক্রিন অ্যাপ চললে সবসময় বিরতি দেওয়া হয়",
   "Window covers screen": "উইন্ডো স্ক্রিন ঢেকে রেখেছে",
+  "Performance mode": "পারফরম্যান্স মোড",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "উইজেট, অডিও ভিজুয়ালাইজার ও কার্সার রাখলে ভিডিওর পূর্বরূপ বন্ধ করে এবং ভিডিওর মান কমায় — গেমিং ও পুরোনো পিসির জন্য",
   "Pause playback": "প্লেব্যাক বিরতি দিন",
   "Resume playback": "প্লেব্যাক পুনরায় শুরু করুন",
   "Next wallpaper": "পরবর্তী ওয়ালপেপার",
   "Open main window": "প্রধান উইন্ডো খুলুন",
-  "Quit Fresco": "Fresco বন্ধ করুন",
-  "Show icon in the system tray": "সিস্টেম ট্রেতে আইকন দেখান"
+  "Quit Fresco (until next login)": "Fresco বন্ধ করুন (পরবর্তী লগইন পর্যন্ত)",
+  "Show icon in the system tray": "সিস্টেম ট্রেতে আইকন দেখান",
+  "RESUMES AT NEXT LOGIN": "পরবর্তী লগইনে আবার চালু হবে"
 }

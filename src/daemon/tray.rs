@@ -114,18 +114,18 @@ impl Tray for FrescoTray {
             StandardItem {
                 label: t!("Stop wallpaper").into(),
                 activate: Box::new(|_: &mut FrescoTray| {
-                    stop_daemon();
+                    exit_daemon(Exit::Stop);
                 }),
                 ..Default::default()
             }
             .into(),
             StandardItem {
-                label: t!("Quit Fresco").into(),
-                // Fresco's only process is this daemon, so quitting it is
-                // stopping the wallpaper: restore the desktop, stay off at the
-                // next login (issue #98).
+                label: t!("Quit Fresco (until next login)").into(),
+                // Like Wallpaper Engine: the desktop is restored now, but
+                // `enabled` stays true so autostart brings the wallpaper back
+                // at the next login (issue #98).
                 activate: Box::new(|_: &mut FrescoTray| {
-                    stop_daemon();
+                    exit_daemon(Exit::Quit);
                 }),
                 ..Default::default()
             }
@@ -227,22 +227,29 @@ fn spawn_fresco(args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Mark `cfg` as stopped: the same `enabled = false` the GUI's "Stop
-/// wallpaper" saves, so the library no longer shows a wallpaper as playing and
-/// login does not start a daemon for it. False when it already was.
-fn disable_wallpaper(cfg: &mut Config) -> bool {
-    std::mem::replace(&mut cfg.enabled, false)
+/// How the tray ends the daemon. Both restore the desktop's own background now;
+/// they differ in what the next login does.
+#[derive(Clone, Copy)]
+enum Exit {
+    /// "Quit Fresco": `enabled` stays true, so autostart resumes the wallpaper
+    /// at the next login.
+    Quit,
+    /// "Stop wallpaper": `enabled = false`, the same switch the GUI's stop
+    /// saves, so the wallpaper stays off until the user starts it again.
+    Stop,
 }
 
-/// Stop the wallpaper, restore the desktop's own background and keep it that
-/// way at the next login. "Stop" and "Quit" both land here: the daemon is
-/// Fresco's only background process, so quitting it and stopping the
-/// wallpaper are one act (issue #98).
-fn stop_daemon() {
+/// Apply `exit` to `cfg`; true when it changed and must be saved.
+fn apply_exit(cfg: &mut Config, exit: Exit) -> bool {
+    matches!(exit, Exit::Stop) && std::mem::replace(&mut cfg.enabled, false)
+}
+
+/// Restore the desktop's own background and end the daemon (see [`Exit`]).
+fn exit_daemon(exit: Exit) {
     // Disable first, as the GUI does: a daemon that dies mid-stop must not be
     // resurrected with the wallpaper still enabled.
     if let Ok(mut cfg) = Config::load() {
-        if disable_wallpaper(&mut cfg) {
+        if apply_exit(&mut cfg, exit) {
             if let Err(e) = cfg.save() {
                 log::warn!("tray: failed to disable wallpaper in config: {e:#}");
             }
@@ -287,25 +294,30 @@ mod tests {
                 "Random wallpaper",
                 "Open main window",
                 "Stop wallpaper",
-                "Quit Fresco",
+                "Quit Fresco (until next login)",
             ]
         );
     }
 
-    /// Issue #98: "Quit" used to leave `enabled = true` behind, so the library
-    /// kept showing the wallpaper as playing and the next login started a
-    /// daemon for it. Quit and Stop now share `stop_daemon`; this is the config
-    /// half of it.
+    /// Issue #98: Quit restores the desktop but leaves `enabled = true`, so
+    /// autostart resumes the wallpaper at the next login; Stop turns it off for
+    /// good, and only once.
     #[test]
-    fn stopping_turns_the_wallpaper_off_once() {
+    fn quit_keeps_the_wallpaper_enabled_and_stop_turns_it_off() {
         let mut cfg = Config {
             enabled: true,
             ..Default::default()
         };
-        assert!(disable_wallpaper(&mut cfg));
+        assert!(
+            !apply_exit(&mut cfg, Exit::Quit),
+            "Quit has nothing to save"
+        );
+        assert!(cfg.enabled, "Quit must leave autostart able to resume it");
+
+        assert!(apply_exit(&mut cfg, Exit::Stop));
         assert!(!cfg.enabled);
         // Already off: nothing to save.
-        assert!(!disable_wallpaper(&mut cfg));
+        assert!(!apply_exit(&mut cfg, Exit::Stop));
         assert!(!cfg.enabled);
     }
 

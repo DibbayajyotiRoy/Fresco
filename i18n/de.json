@@ -656,6 +656,7 @@
   "Resume playback": "Wiedergabe fortsetzen",
   "Next wallpaper": "Nächstes Hintergrundbild",
   "Open main window": "Hauptfenster öffnen",
-  "Quit Fresco": "Fresco beenden",
-  "Show icon in the system tray": "Symbol im Infobereich anzeigen"
+  "Quit Fresco (until next login)": "Fresco beenden (bis zur nächsten Anmeldung)",
+  "Show icon in the system tray": "Symbol im Infobereich anzeigen",
+  "RESUMES AT NEXT LOGIN": "STARTET BEIM NÄCHSTEN LOGIN"
 }

@@ -656,6 +656,7 @@
   "Resume playback": "Retomar reprodução",
   "Next wallpaper": "Próximo papel de parede",
   "Open main window": "Abrir janela principal",
-  "Quit Fresco": "Sair do Fresco",
-  "Show icon in the system tray": "Mostrar ícone na bandeja do sistema"
+  "Quit Fresco (until next login)": "Sair do Fresco (até o próximo login)",
+  "Show icon in the system tray": "Mostrar ícone na bandeja do sistema",
+  "RESUMES AT NEXT LOGIN": "RETOMA NO PRÓXIMO LOGIN"
 }

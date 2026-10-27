@@ -656,6 +656,7 @@
   "Resume playback": "Продолжить воспроизведение",
   "Next wallpaper": "Следующие обои",
   "Open main window": "Открыть главное окно",
-  "Quit Fresco": "Выйти из Fresco",
-  "Show icon in the system tray": "Показывать значок в системном трее"
+  "Quit Fresco (until next login)": "Выйти из Fresco (до следующего входа)",
+  "Show icon in the system tray": "Показывать значок в системном трее",
+  "RESUMES AT NEXT LOGIN": "ВОЗОБНОВИТСЯ ПРИ СЛЕДУЮЩЕМ ВХОДЕ"
 }

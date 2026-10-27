@@ -885,7 +885,8 @@ mod tests {
             "Random wallpaper",
             "Open main window",
             "Stop wallpaper",
-            "Quit Fresco",
+            "Quit Fresco (until next login)",
+            "RESUMES AT NEXT LOGIN",
             "Show icon in the system tray",
         ];
         for lang in Language::ALL {
@@ -910,7 +911,8 @@ mod tests {
             ("Random wallpaper", "随机一张"),
             ("Open main window", "打开主界面"),
             ("Stop wallpaper", "停止壁纸"),
-            ("Quit Fresco", "关闭程序"),
+            ("Quit Fresco (until next login)", "关闭程序（下次登录恢复）"),
+            ("RESUMES AT NEXT LOGIN", "下次登录时恢复"),
         ] {
             assert_eq!(zh[en], cn);
         }

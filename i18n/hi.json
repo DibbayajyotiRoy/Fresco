@@ -656,6 +656,7 @@
   "Resume playback": "प्लेबैक फिर से शुरू करें",
   "Next wallpaper": "अगला वॉलपेपर",
   "Open main window": "मुख्य विंडो खोलें",
-  "Quit Fresco": "Fresco बंद करें",
-  "Show icon in the system tray": "सिस्टम ट्रे में आइकन दिखाएँ"
+  "Quit Fresco (until next login)": "Fresco बंद करें (अगले लॉगिन तक)",
+  "Show icon in the system tray": "सिस्टम ट्रे में आइकन दिखाएँ",
+  "RESUMES AT NEXT LOGIN": "अगले लॉगिन पर फिर शुरू होगा"
 }

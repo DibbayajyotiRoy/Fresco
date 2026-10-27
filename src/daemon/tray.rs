@@ -19,11 +19,12 @@ use std::thread;
 use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
-use ksni::menu::{MenuItem, StandardItem};
+use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
 use ksni::Tray;
 
 use crate::config::Config;
 use crate::ipc::{request, Request, Response};
+use crate::t;
 
 /// How often the tray refreshes its pause label from daemon status.
 const STATUS_POLL: Duration = Duration::from_secs(2);
@@ -32,6 +33,8 @@ const STATUS_POLL: Duration = Duration::from_secs(2);
 #[derive(Debug, Default)]
 struct State {
     paused: bool,
+    /// `Config::performance_mode`, re-read from config.toml with each status poll.
+    performance: bool,
 }
 
 struct FrescoTray {
@@ -95,6 +98,18 @@ impl Tray for FrescoTray {
                     if let Err(e) = spawn_fresco(&["random"]) {
                         log::warn!("tray: failed to launch 'fresco random': {e:#}");
                     }
+                }),
+                ..Default::default()
+            }
+            .into(),
+            CheckmarkItem {
+                label: t!("Performance mode").into(),
+                checked: self.state.performance,
+                activate: Box::new(|this: &mut FrescoTray| {
+                    this.state.performance = !this.state.performance;
+                    let on = this.state.performance;
+                    // Apply respawns the renderers; keep the menu responsive.
+                    thread::spawn(move || set_performance_mode(on));
                 }),
                 ..Default::default()
             }
@@ -169,8 +184,11 @@ fn run_tray() -> anyhow::Result<()> {
         thread::sleep(STATUS_POLL);
         match request(&Request::Status) {
             Ok(Response::Status(status)) => {
+                // Also follows a switch flipped in the app's menu.
+                let performance = Config::load().is_ok_and(|c| c.performance_mode);
                 handle.update(|tray: &mut FrescoTray| {
                     tray.state.paused = status.paused;
+                    tray.state.performance = performance;
                 });
             }
             Ok(_) => {}
@@ -204,6 +222,22 @@ fn spawn_fresco(args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Flip performance mode the way the app's menu switch does: save the flag,
+/// then ask the daemon to re-read config.toml and respawn its renderers.
+fn set_performance_mode(on: bool) {
+    let mut cfg = match Config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => return log::warn!("tray: could not read the config: {e:#}"),
+    };
+    cfg.performance_mode = on;
+    if let Err(e) = cfg.save() {
+        return log::warn!("tray: failed to save performance mode: {e:#}");
+    }
+    if let Err(e) = request(&Request::Apply) {
+        log::warn!("tray: apply after performance mode failed: {e:#}");
+    }
+}
+
 /// Stop the wallpaper and keep it stopped on the next login.
 fn stop_daemon() {
     // Mirror the GUI's stop behaviour: disable autorestore first so a killed
@@ -233,10 +267,10 @@ mod tests {
     #[test]
     fn pause_label_reflects_state() {
         let mut tray = FrescoTray {
-            state: State { paused: false },
+            state: State::default(),
         };
         let menu = tray.menu();
-        assert_eq!(menu.len(), 6);
+        assert_eq!(menu.len(), 7);
         assert!(label_at(&menu, 0).contains("Pause"));
 
         tray.state.paused = true;
@@ -252,7 +286,15 @@ mod tests {
         let labels: Vec<String> = tray.menu().iter().map(label_at_root).collect();
         assert_eq!(
             labels,
-            vec!["Pause", "Next", "Random", "Open Fresco", "Stop", "Quit"]
+            vec![
+                "Pause",
+                "Next",
+                "Random",
+                "Performance mode",
+                "Open Fresco",
+                "Stop",
+                "Quit"
+            ]
         );
     }
 
@@ -263,7 +305,8 @@ mod tests {
     fn label_at_root(item: &MenuItem<FrescoTray>) -> String {
         match item {
             MenuItem::Standard(s) => s.label.clone(),
-            _ => panic!("expected a standard menu item"),
+            MenuItem::Checkmark(c) => c.label.clone(),
+            _ => panic!("expected a standard or checkmark menu item"),
         }
     }
 }

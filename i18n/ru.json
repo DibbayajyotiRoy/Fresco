@@ -651,5 +651,7 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ — навигация · Enter — выполнить · Esc — закрыть",
   "Pause when an app covers the screen": "Пауза, когда приложение закрывает экран",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Ставит паузу, когда любое большое окно закрывает 90% экрана; полноэкранные приложения всегда ставят паузу",
-  "Window covers screen": "Окно закрывает экран"
+  "Window covers screen": "Окно закрывает экран",
+  "Performance mode": "Режим производительности",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Отключает виджеты, аудиовизуализацию и предпросмотр при наведении и снижает качество видео — для игр и старых ПК"
 }

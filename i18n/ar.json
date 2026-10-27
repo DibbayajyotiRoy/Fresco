@@ -651,5 +651,7 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ تنقّل · Enter تشغيل · Esc إغلاق",
   "Pause when an app covers the screen": "إيقاف مؤقت عند تغطية أي تطبيق للشاشة",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "يتوقف مؤقتًا عندما تغطي أي نافذة كبيرة 90% من الشاشة؛ وتتوقف تطبيقات ملء الشاشة مؤقتًا دائمًا",
-  "Window covers screen": "نافذة تغطي الشاشة"
+  "Window covers screen": "نافذة تغطي الشاشة",
+  "Performance mode": "وضع الأداء",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "يوقف الأدوات ومرئيات الصوت ومعاينات التمرير ويخفّض جودة الفيديو — للألعاب والأجهزة القديمة"
 }

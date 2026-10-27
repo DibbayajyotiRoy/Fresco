@@ -651,5 +651,7 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ gezinme · Enter çalıştır · Esc kapat",
   "Pause when an app covers the screen": "Bir uygulama ekranı kapladığında duraklat",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Herhangi bir büyük pencere ekranın %90’ını kapladığında duraklatır; tam ekran uygulamalar her zaman duraklatır",
-  "Window covers screen": "Pencere ekranı kaplıyor"
+  "Window covers screen": "Pencere ekranı kaplıyor",
+  "Performance mode": "Performans modu",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Widget’ları, ses görselleştiriciyi ve üzerine gelince önizlemeleri kapatır, video kalitesini düşürür — oyunlar ve eski bilgisayarlar için"
 }

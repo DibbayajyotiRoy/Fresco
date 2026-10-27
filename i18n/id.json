@@ -653,5 +653,11 @@
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Menjeda saat jendela besar apa pun menutupi 90% layar; aplikasi layar penuh selalu menjeda",
   "Window covers screen": "Jendela menutupi layar",
   "Performance mode": "Mode performa",
-  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Menonaktifkan widget, visualizer audio, dan pratinjau saat kursor diarahkan, serta menurunkan kualitas video — untuk gaming dan PC lama"
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Menonaktifkan widget, visualizer audio, dan pratinjau saat kursor diarahkan, serta menurunkan kualitas video — untuk gaming dan PC lama",
+  "Pause playback": "Jeda pemutaran",
+  "Resume playback": "Lanjutkan pemutaran",
+  "Next wallpaper": "Wallpaper berikutnya",
+  "Open main window": "Buka jendela utama",
+  "Quit Fresco": "Keluar dari Fresco",
+  "Show icon in the system tray": "Tampilkan ikon di baki sistem"
 }

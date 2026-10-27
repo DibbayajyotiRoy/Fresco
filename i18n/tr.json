@@ -653,5 +653,11 @@
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Herhangi bir büyük pencere ekranın %90’ını kapladığında duraklatır; tam ekran uygulamalar her zaman duraklatır",
   "Window covers screen": "Pencere ekranı kaplıyor",
   "Performance mode": "Performans modu",
-  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Widget’ları, ses görselleştiriciyi ve üzerine gelince önizlemeleri kapatır, video kalitesini düşürür — oyunlar ve eski bilgisayarlar için"
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Widget’ları, ses görselleştiriciyi ve üzerine gelince önizlemeleri kapatır, video kalitesini düşürür — oyunlar ve eski bilgisayarlar için",
+  "Pause playback": "Oynatmayı duraklat",
+  "Resume playback": "Oynatmayı sürdür",
+  "Next wallpaper": "Sonraki duvar kâğıdı",
+  "Open main window": "Ana pencereyi aç",
+  "Quit Fresco": "Fresco’dan çık",
+  "Show icon in the system tray": "Simgeyi sistem tepsisinde göster"
 }

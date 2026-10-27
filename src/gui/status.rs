@@ -2,7 +2,7 @@
 //! `ipc::request(&Request::Status)`.
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -37,11 +37,23 @@ thread_local! {
     /// Redraws the library when `LAST_PLAYING` changes; installed once by the
     /// library view (mirrors `NOTICE_HOOK`).
     static PLAYING_HOOK: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+    /// Library name for a playing file, installed by the library view (it owns
+    /// the entries). Unset until then, so the pill falls back to the file name.
+    static NAME_LOOKUP: RefCell<Option<NameLookup>> = const { RefCell::new(None) };
     /// The pill the poll loop feeds, kept so [`poll_soon`] can poll on demand.
     static POLL_WIDGETS: RefCell<Option<Rc<PillWidgets>>> = const { RefCell::new(None) };
     /// What the last status poll said reaches this desktop's real lock screen,
     /// for the app menu's "Lock Screen…" row — see `cached_lock_support`.
     static LAST_LOCK_SUPPORT: Cell<Option<LockSupport>> = const { Cell::new(None) };
+}
+
+/// Resolves the playing file to the name its library card shows.
+type NameLookup = Rc<dyn Fn(&Path) -> Option<String>>;
+
+/// Install the lookup the pill uses to show a wallpaper's library name (what the
+/// user renamed it to) instead of its file name.
+pub(crate) fn set_name_lookup(f: impl Fn(&Path) -> Option<String> + 'static) {
+    NAME_LOOKUP.with(|l| *l.borrow_mut() = Some(Rc::new(f)));
 }
 
 /// How long [`poll_soon`] waits: long enough for the daemon to have finished
@@ -426,11 +438,13 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
         None => w.reason.set_visible(false),
     }
     w.overline.set_visible(true);
-    let name = status
-        .wallpaper
-        .as_deref()
-        .unwrap_or(t!("Wallpaper active"));
-    w.label.set_label(&pretty_status_name(name));
+    // Clone the lookup out first: it borrows the app state.
+    let lookup = NAME_LOOKUP.with(|l| l.borrow().clone());
+    let library_name = lookup
+        .zip(status.wallpaper_path.as_deref())
+        .and_then(|(f, p)| f(p));
+    let (title, file) = pill_title(library_name, status.wallpaper.as_deref());
+    w.label.set_label(&title);
 
     match status.hwdec.as_deref() {
         Some(raw) if raw != "no" => {
@@ -450,6 +464,9 @@ fn apply_status(w: &PillWidgets, status: &StatusReply) {
     }
 
     let mut tip = tf!("CPU {percent}%", "percent" => format!("{:.0}", status.cpu_percent));
+    if let Some(file) = file {
+        tip.insert_str(0, &format!("{file}\n"));
+    }
     if let Some(err) = status.error.as_deref() {
         tip.push('\n');
         tip.push_str(err);
@@ -489,6 +506,17 @@ fn pause_reason_label(reason: PauseReason) -> &'static str {
 /// still-frame session the daemon ignores both, so don't offer the button.
 fn pill_shows_toggle(still_frame: bool) -> bool {
     !still_frame
+}
+
+/// The pill's wallpaper title, plus the file name for the tooltip when the
+/// title doesn't already say it. A wallpaper in the library is shown under the
+/// name the user gave it (#99), as on its card; anything else falls back to the
+/// daemon's file name, prettified.
+fn pill_title(library_name: Option<String>, file: Option<&str>) -> (String, Option<&str>) {
+    let title =
+        library_name.unwrap_or_else(|| pretty_status_name(file.unwrap_or(t!("Wallpaper active"))));
+    let file = file.filter(|f| *f != title);
+    (title, file)
 }
 
 /// Prettify the daemon-reported wallpaper name for the pill: strip a trailing
@@ -577,6 +605,30 @@ mod tests {
         let texts: std::collections::HashSet<_> = all.into_iter().map(pause_reason_label).collect();
         assert_eq!(texts.len(), all.len());
         assert!(texts.iter().all(|t| !t.is_empty()));
+    }
+
+    /// #99: a renamed library wallpaper reads as its custom name, with the file
+    /// name moved to the tooltip; one the library doesn't know keeps the
+    /// prettified file name.
+    #[test]
+    fn pill_title_prefers_the_library_name() {
+        assert_eq!(
+            pill_title(Some("自在".into()), Some("动画2-42054c1530dc.mp4")),
+            ("自在".to_string(), Some("动画2-42054c1530dc.mp4"))
+        );
+        assert_eq!(
+            pill_title(None, Some("CAR.mp4")),
+            ("CAR".to_string(), Some("CAR.mp4"))
+        );
+        // Nothing to add to the tooltip when the title already is the name.
+        assert_eq!(
+            pill_title(None, Some("Playlist (3 items)")),
+            ("Playlist (3 items)".to_string(), None)
+        );
+        assert_eq!(
+            pill_title(None, None),
+            ("Wallpaper active".to_string(), None)
+        );
     }
 
     #[test]

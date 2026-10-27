@@ -653,5 +653,11 @@
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pausa cuando cualquier ventana grande cubre el 90% de la pantalla; las aplicaciones a pantalla completa siempre pausan",
   "Window covers screen": "Ventana que cubre la pantalla",
   "Performance mode": "Modo de rendimiento",
-  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Desactiva los widgets, el visualizador de audio y las vistas previas al pasar el cursor, y reduce la calidad del video — para juegos y PC antiguos"
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Desactiva los widgets, el visualizador de audio y las vistas previas al pasar el cursor, y reduce la calidad del video — para juegos y PC antiguos",
+  "Pause playback": "Pausar reproducción",
+  "Resume playback": "Reanudar reproducción",
+  "Next wallpaper": "Siguiente fondo de pantalla",
+  "Open main window": "Abrir ventana principal",
+  "Quit Fresco": "Salir de Fresco",
+  "Show icon in the system tray": "Mostrar icono en la bandeja del sistema"
 }

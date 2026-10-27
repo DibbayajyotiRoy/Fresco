@@ -759,6 +759,16 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// The entry whose single file is `path` — what the daemon reports as playing.
+/// Imported and linked-folder entries alike (the latter arrive with their
+/// `linked.json` name already applied), so the caller gets the name the cards
+/// show. Playlists and slideshows have no one file and never match.
+pub fn entry_for_path<'a>(entries: &'a [LibraryEntry], path: &Path) -> Option<&'a LibraryEntry> {
+    entries
+        .iter()
+        .find(|e| matches!(e.kind, Kind::Video | Kind::Image) && e.path.as_deref() == Some(path))
+}
+
 pub fn load_entries() -> Result<Vec<LibraryEntry>> {
     let path = entries_path();
     if !path.exists() {
@@ -1653,6 +1663,28 @@ pub fn is_image(p: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The status pill names the playing file by its library entry (#99):
+    /// renamed imports and linked-folder files resolve, unknown paths and
+    /// multi-file kinds do not.
+    #[test]
+    fn entry_for_path_finds_imported_and_linked_entries() {
+        let mut imported =
+            LibraryEntry::new_video(PathBuf::from("/lib/imports/动画2-42054c1530dc.mp4"));
+        imported.name = "自在".into();
+        let mut linked = LibraryEntry::new_image(PathBuf::from("/pics/beach.png"));
+        linked.id = linked::file_id(Path::new("/pics/beach.png"));
+        linked.name = "Beach day".into();
+        let playlist = LibraryEntry::new_playlist(vec![PathBuf::from("/lib/a.mp4")]);
+        let entries = vec![playlist, imported, linked];
+
+        let found = |p: &str| entry_for_path(&entries, Path::new(p)).map(|e| e.name.as_str());
+        assert_eq!(found("/lib/imports/动画2-42054c1530dc.mp4"), Some("自在"));
+        assert_eq!(found("/pics/beach.png"), Some("Beach day"));
+        assert_eq!(found("/elsewhere/other.mp4"), None);
+        // A playlist's first item is not "the playing file".
+        assert_eq!(found("/lib/a.mp4"), None);
+    }
 
     #[test]
     fn thumb_dims_fits_longest_side_without_upscaling() {

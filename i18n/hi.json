@@ -653,5 +653,11 @@
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "कोई भी बड़ी विंडो स्क्रीन का 90% ढकने पर रोकता है; फ़ुलस्क्रीन ऐप हमेशा रोकते हैं",
   "Window covers screen": "विंडो स्क्रीन को ढक रही है",
   "Performance mode": "परफ़ॉर्मेंस मोड",
-  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "विजेट, ऑडियो विज़ुअलाइज़र और होवर पूर्वावलोकन बंद करता है और वीडियो गुणवत्ता घटाता है — गेमिंग और पुराने पीसी के लिए"
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "विजेट, ऑडियो विज़ुअलाइज़र और होवर पूर्वावलोकन बंद करता है और वीडियो गुणवत्ता घटाता है — गेमिंग और पुराने पीसी के लिए",
+  "Pause playback": "प्लेबैक रोकें",
+  "Resume playback": "प्लेबैक फिर से शुरू करें",
+  "Next wallpaper": "अगला वॉलपेपर",
+  "Open main window": "मुख्य विंडो खोलें",
+  "Quit Fresco": "Fresco बंद करें",
+  "Show icon in the system tray": "सिस्टम ट्रे में आइकन दिखाएँ"
 }

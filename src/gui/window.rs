@@ -1237,6 +1237,17 @@ fn build_library_view(
         });
     }
 
+    // The header pill names the playing file by its library entry, so a
+    // renamed wallpaper reads the same there as on its card (#99).
+    {
+        let state = state.clone();
+        status::set_name_lookup(move |path| {
+            let s = state.try_borrow().ok()?;
+            let e = library::entry_for_path(&s.entries, path)?;
+            Some(display_name(&e.name, e.kind))
+        });
+    }
+
     // Search re-runs populate with the query (rebuilds the matching sections).
     {
         let home_query = home_query.clone();
@@ -1718,6 +1729,20 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             move |active| {
                 let mut s = state2.borrow_mut();
                 s.config.pause_on_battery = active;
+                s.config.save().ok();
+            }
+        },
+    ));
+    // The daemon watches config.toml and starts or drops the icon itself; the
+    // wallpaper keeps playing either way.
+    popover_box.append(&switch_row(
+        t!("Show icon in the system tray"),
+        state.borrow().config.tray_icon,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.tray_icon = active;
                 s.config.save().ok();
             }
         },
@@ -4003,6 +4028,8 @@ fn commit_rename(state: &Rc<RefCell<AppState>>, id: &str, input: &str) -> bool {
         if let Some(r) = refresh {
             glib::idle_add_local_once(move || r());
         }
+        // The pill shows this name too when the card is what is playing.
+        status::poll_soon();
     }
     changed
 }
@@ -9683,7 +9710,7 @@ fn connected_monitors() -> Vec<crate::ipc::MonitorInfo> {
 /// auto-names become "Video · aeb8", marketing prefixes like "From <site>- "
 /// are trimmed, and long titles are middle-truncated. The untouched name stays
 /// available as the card tooltip.
-fn display_name(name: &str, kind: Kind) -> String {
+pub(crate) fn display_name(name: &str, kind: Kind) -> String {
     let mut n = name.trim().to_string();
 
     // Hex/uuid-ish stems (downloader auto-names) → "<Kind> · <last 4>".

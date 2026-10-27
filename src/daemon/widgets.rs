@@ -2850,6 +2850,10 @@ pub struct WidgetEngine {
     /// [`clear_all`](WidgetEngine::clear_all) reads it to pick between an empty
     /// ASS payload and `overlay-remove`.
     on_screen: [Option<OverlayKind>; OVERLAY_SLOTS],
+    /// When [`tick_at`](Self::tick_at) last ran. Only a tick moves the schedule
+    /// ([`Self::clock_due`] and friends), so [`next_deadline`](Self::next_deadline)
+    /// is meaningful only while the loop is actually driving the engine.
+    last_tick: Option<Instant>,
 }
 
 /// How many overlay ids this engine owns. See [`overlay_slot`].
@@ -2914,6 +2918,7 @@ impl WidgetEngine {
             world_due: None,
             repush: false,
             on_screen: [None; OVERLAY_SLOTS],
+            last_tick: None,
         };
         engine.set_config(cfg, accent);
         engine
@@ -3362,14 +3367,34 @@ impl WidgetEngine {
     ///   the loop should take `min(its own tick, this)` rather than sleeping
     ///   here unconditionally. The lyric deadline is only armed while playback
     ///   is actually running, so a paused song contributes nothing.
+    ///
+    /// **Only while the loop is driving the engine.** The schedule below is
+    /// advanced by [`tick`](Self::tick) and by nothing else. A loop that stops
+    /// ticking — the desktop engine is frozen while the session is locked, and
+    /// skipped when no output is a target — leaves the clock "overdue", and an
+    /// overdue deadline is a zero wait: the loop spun at ~1000 wakes a second
+    /// for as long as the screen stayed locked. So a deadline is reported only
+    /// if a tick ran within [`DRIVEN_WITHIN`]; otherwise `None`, and the loop
+    /// falls back to its own tick.
     pub fn next_deadline(&self) -> Option<Instant> {
+        let now = Instant::now();
+        if !self.is_driven(now) {
+            return None;
+        }
         let snapshot = if self.lyrics_cfg.enabled || self.disc_cfg.enabled {
             self.now_playing()
         } else {
             None
         };
         let wall = (self.clock_cfg.enabled || self.world_on_wallpaper()).then(Local::now);
-        self.next_deadline_at(snapshot.as_ref(), Instant::now(), wall)
+        self.next_deadline_at(snapshot.as_ref(), now, wall)
+    }
+
+    /// Whether a tick ran recently enough for [`Self::next_deadline`] to mean
+    /// anything. See [`DRIVEN_WITHIN`].
+    fn is_driven(&self, now: Instant) -> bool {
+        self.last_tick
+            .is_some_and(|t| now.saturating_duration_since(t) <= DRIVEN_WITHIN)
     }
 
     /// Updates that blank every overlay this engine owns.
@@ -3618,6 +3643,7 @@ impl WidgetEngine {
         wall: Option<DateTime<Local>>,
     ) -> Vec<WidgetUpdate> {
         let mut out = Vec::new();
+        self.last_tick = Some(now);
 
         if self.lyrics_live() {
             self.adopt_track(snapshot);
@@ -4246,6 +4272,11 @@ impl WidgetEngine {
 /// float→integer conversion against a hand-edited `[99999999:00]` timestamp
 /// turning into a nonsense [`Duration`].
 const MAX_WAIT_US: f64 = 86_400e6;
+
+/// How recently a tick must have run for [`WidgetEngine::next_deadline`] to be
+/// trusted. The run loops tick every iteration (their own wait is at most
+/// 100 ms), so half a second is several missed ticks, not one slow one.
+const DRIVEN_WITHIN: Duration = Duration::from_millis(500);
 
 /// The smaller of two optional instants.
 fn min_instant(a: Option<Instant>, b: Instant) -> Option<Instant> {
@@ -5063,6 +5094,29 @@ mod tests {
         let none = snapshot_at(t0, None, us(10.0), PlaybackStatus::Playing, 2);
         engine.tick_at(Some(&none), t0, None);
         assert_eq!(engine.next_deadline_at(Some(&none), t0, None), None);
+    }
+
+    #[test]
+    fn an_engine_nobody_ticks_reports_no_deadline() {
+        // The lock screen freezes the desktop engine and a loop with no target
+        // output never ticks it: its clock then stays "overdue" forever, which
+        // used to read as a zero wait and spun the loop at ~1000 wakes/s.
+        let mut engine = WidgetEngine::new(None, ACCENT);
+        engine.set_clock(Some(&clock_cfg()));
+        assert_eq!(engine.next_deadline(), None, "never ticked");
+
+        engine.tick_at(None, Instant::now(), Some(at(14, 32, 30)));
+        assert!(engine.next_deadline().is_some(), "just ticked");
+
+        let t = Instant::now();
+        engine.last_tick = Some(t);
+        assert!(engine.is_driven(t + DRIVEN_WITHIN));
+        assert!(!engine.is_driven(t + DRIVEN_WITHIN + Duration::from_millis(1)));
+        // (`checked_sub`: a monotonic clock younger than 5 s cannot go back.)
+        if let Some(old) = t.checked_sub(Duration::from_secs(5)) {
+            engine.last_tick = Some(old);
+            assert_eq!(engine.next_deadline(), None, "ticks stopped");
+        }
     }
 
     #[test]

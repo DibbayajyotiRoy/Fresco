@@ -1193,7 +1193,14 @@ impl Daemon {
             .map(|r| r.window.connector.clone())
             .filter(|c| want.as_deref().is_none_or(|w| w == c.as_str()))
             .collect();
-        if targets.is_empty() {
+        // Every target covered: nothing on screen to update, so don't rasterise
+        // for it (see the Wayland loop's twin of this check).
+        // `check_fullscreen` invalidates the engine on uncover.
+        if targets.is_empty()
+            || targets
+                .iter()
+                .all(|c| self.fullscreen_covered.contains_key(c))
+        {
             return;
         }
         // Geometry **before** the tick, not after: a bitmap widget computes its
@@ -3762,7 +3769,11 @@ fn run_wayland_layershell() -> Result<()> {
                 .filter(|c| want.as_deref().is_none_or(|w| w == c.as_str()))
                 .cloned()
                 .collect();
-            if !targets.is_empty() {
+            // Every target covered: nothing on screen to update, and ticking
+            // anyway rasterises each widget (a bitmap a second for the clock,
+            // ~24 a second for the visualiser) only to throw the push away.
+            // `invalidate()` on uncover (above) brings everything back.
+            if !targets.is_empty() && !targets.iter().all(|c| hidden.contains(c)) {
                 // Geometry before the tick, and one entry per target: bitmap
                 // widgets place pixels in real output coordinates, so a
                 // mixed-DPI pair needs a size each, not whichever one the

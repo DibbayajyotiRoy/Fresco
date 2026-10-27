@@ -28,6 +28,7 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
     win.set_transient_for(Some(parent));
     win.set_modal(false);
     win.set_default_size(760, 560);
+    win.add_css_class("tight-shadow");
     win.set_title(Some(t!("Browse wallpapers")));
 
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);

@@ -1301,7 +1301,7 @@ impl Daemon {
 
         for monitor in self.monitors.clone() {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
-            if wallpaper.effective_path().is_none() && wallpaper.kind != Kind::Slideshow {
+            if !wallpaper.is_configured() {
                 continue; // nothing configured for this monitor
             }
             if slideshow_has_no_images(&wallpaper) {
@@ -2160,7 +2160,7 @@ impl Daemon {
         if kde_desktop::enabled() {
             return 0; // plasmashell draws the wallpaper; we create no window
         }
-        let wants = |w: &Wallpaper| w.effective_path().is_some() || w.kind == Kind::Slideshow;
+        let wants = Wallpaper::is_configured;
         if self.monitors.is_empty() {
             let any = wants(&self.config.wallpaper) || self.config.monitors.values().any(wants);
             return usize::from(any);

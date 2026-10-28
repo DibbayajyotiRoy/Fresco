@@ -1763,6 +1763,12 @@ impl Wallpaper {
             .or_else(|| self.paths.first().map(|p| p.as_path()))
     }
 
+    /// Whether anything is set to play: a media file, or a slideshow (which
+    /// has no single path). The daemon builds a renderer only for these.
+    pub fn is_configured(&self) -> bool {
+        self.effective_path().is_some() || self.kind == Kind::Slideshow
+    }
+
     /// Power-saving level actually applied to this wallpaper: the per-wallpaper
     /// override if set, otherwise the `global` default.
     pub fn effective_power_saving(&self, global: PowerSaving) -> PowerSaving {

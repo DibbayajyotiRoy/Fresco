@@ -258,6 +258,12 @@ fn adopt_external_config(mem: &mut Config, disk: Config) -> bool {
     moved
 }
 
+thread_local! {
+    /// The Performance mode switch in the menu, so an external change to
+    /// config.toml can move it. Set once by `build_behavior_page`.
+    static PERFORMANCE_SWITCH: RefCell<Option<gtk4::Switch>> = const { RefCell::new(None) };
+}
+
 /// Keep `state.config` in step with config.toml while the window is open:
 /// `fresco next/prev/random` and hand edits rewrite it behind the GUI's back.
 fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) {
@@ -287,7 +293,7 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
         let Ok(disk) = Config::load() else {
             return;
         };
-        let (moved, refresh) = {
+        let (moved, refresh, performance, previews) = {
             // Held elsewhere (a handler mid-edit): the next change event retries.
             let Ok(mut s) = state.try_borrow_mut() else {
                 return;
@@ -295,8 +301,18 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
             (
                 adopt_external_config(&mut s.config, disk),
                 s.refresh.clone(),
+                s.config.performance_mode,
+                s.config.effective_hover_previews(),
             )
         };
+        // The tray (or a hand edit) can flip performance mode: the hover-preview
+        // policy and the menu switch live here and would otherwise stay stale.
+        super::hover_preview::set_enabled(previews);
+        PERFORMANCE_SWITCH.with(|sw| {
+            if let Some(sw) = sw.borrow().as_ref() {
+                sw.set_active(performance); // the handler skips an unchanged value
+            }
+        });
         if moved {
             log::debug!("config.toml changed on disk: wallpaper moved, rebuilding the grid");
             status::forget_playing_path();
@@ -1687,6 +1703,9 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             move |active| {
                 let (config, previews) = {
                     let mut s = state2.borrow_mut();
+                    if s.config.performance_mode == active {
+                        return; // synced from config.toml, already saved and applied
+                    }
                     s.config.performance_mode = active;
                     s.config.save().ok();
                     (s.config.clone(), s.config.effective_hover_previews())
@@ -1696,6 +1715,9 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             }
         },
     );
+    PERFORMANCE_SWITCH.with(|sw| {
+        *sw.borrow_mut() = performance_row.last_child().and_downcast::<gtk4::Switch>();
+    });
     popover_box.append(&performance_row);
     let performance_hint = gtk4::Label::new(Some(t!(
         "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs"
@@ -6296,6 +6318,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
+    dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Advanced")));
 
     let page = adw::PreferencesPage::new();

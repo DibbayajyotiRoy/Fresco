@@ -9,7 +9,7 @@ use std::time::Duration;
 use gtk4::prelude::*;
 use gtk4::{glib, glib::ControlFlow};
 
-use crate::config::Config;
+use crate::config::{Config, Wallpaper};
 use crate::ipc::{self, MonitorInfo, PauseReason, Request, StatusReply};
 use crate::{t, tf};
 
@@ -427,6 +427,12 @@ fn poll_once(widgets: Rc<PillWidgets>) {
             }
             Ok(_) => {}
             Err(e) => {
+                // Connected but no answer in time: busy, not gone. Keep the
+                // last picture rather than flip the pill and redraw the library.
+                if timed_out(&e) {
+                    log::debug!("status poll: daemon slow to answer: {e:#}");
+                    return;
+                }
                 // Daemon not running — expected and common, not an error.
                 log::debug!("status poll: daemon unreachable: {e:#}");
                 note_daemon_running(false);
@@ -438,6 +444,19 @@ fn poll_once(widgets: Rc<PillWidgets>) {
             }
         }
     });
+}
+
+/// Whether a request failed by reaching the daemon but timing out waiting on it
+/// (`ipc::request_at` sets a read/write timeout), as opposed to finding no daemon.
+fn timed_out(e: &anyhow::Error) -> bool {
+    e.chain()
+        .filter_map(|c| c.downcast_ref::<std::io::Error>())
+        .any(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            )
+        })
 }
 
 /// Fire a Pause/Resume request on a background thread; the result isn't
@@ -462,7 +481,11 @@ enum Off {
 }
 
 fn off_state(cfg: &Config) -> Off {
-    if cfg.enabled {
+    // `enabled` is on by default: with nothing to play (a fresh install) there
+    // is nothing to resume or start.
+    let configured =
+        cfg.wallpaper.is_configured() || cfg.monitors.values().any(Wallpaper::is_configured);
+    if cfg.enabled && configured {
         Off::Wanted {
             resumes_at_login: cfg.autostart,
         }
@@ -719,6 +742,10 @@ mod tests {
         let cfg = |enabled, autostart| Config {
             enabled,
             autostart,
+            wallpaper: Wallpaper {
+                path: Some("/w/a.mp4".into()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let wanted = off_state(&cfg(true, true));
@@ -743,6 +770,34 @@ mod tests {
         // Stopped on purpose: nothing resumes, nothing to start.
         assert_eq!(off_state(&cfg(false, true)), Off::Idle);
         assert_eq!(off_overline(Off::Idle), None);
+
+        // A per-monitor wallpaper alone counts as configured.
+        let mut per_monitor = Config::default();
+        per_monitor
+            .monitors
+            .insert("DP-1".into(), cfg(true, true).wallpaper);
+        assert!(matches!(off_state(&per_monitor), Off::Wanted { .. }));
+    }
+
+    /// A fresh install defaults to enabled + autostart but has nothing to play:
+    /// no "RESUMES AT NEXT LOGIN", no Start.
+    #[test]
+    fn pill_is_idle_when_no_wallpaper_is_configured() {
+        let fresh = Config::default();
+        assert!(fresh.enabled && fresh.autostart);
+        assert_eq!(off_state(&fresh), Off::Idle);
+    }
+
+    /// A status poll that connects but gets no reply in time is a busy daemon,
+    /// not an absent one; a refused or missing socket is absent.
+    #[test]
+    fn timed_out_tells_a_slow_daemon_from_an_absent_one() {
+        use std::io::{Error, ErrorKind};
+        let io = |kind| anyhow::Error::new(Error::new(kind, "x")).context("ctx");
+        assert!(timed_out(&io(ErrorKind::WouldBlock)));
+        assert!(timed_out(&io(ErrorKind::TimedOut)));
+        assert!(!timed_out(&io(ErrorKind::NotFound)));
+        assert!(!timed_out(&io(ErrorKind::ConnectionRefused)));
     }
 
     /// The library only redraws when its picture of the daemon changes: the

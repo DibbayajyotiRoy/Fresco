@@ -5121,8 +5121,17 @@ mod tests {
         engine.set_clock(Some(&clock_cfg()));
         assert_eq!(engine.next_deadline(), None, "never ticked");
 
-        engine.tick_at(None, Instant::now(), Some(at(14, 32, 30)));
-        assert!(engine.next_deadline().is_some(), "just ticked");
+        // An explicit instant: `next_deadline()` reads the clock itself, and a
+        // loaded machine can take longer than `DRIVEN_WITHIN` to get there.
+        let t0 = Instant::now();
+        engine.tick_at(None, t0, Some(at(14, 32, 30)));
+        assert!(engine.is_driven(t0), "just ticked");
+        assert!(
+            engine
+                .next_deadline_at(None, t0, Some(at(14, 32, 30)))
+                .is_some(),
+            "just ticked"
+        );
 
         let t = Instant::now();
         engine.last_tick = Some(t);

@@ -1819,11 +1819,15 @@ impl Daemon {
             lockscreen: Some(self.lock.status(&ctx, &self.config)),
             // `check_schedule` writes the swapped slot into this in-memory copy
             // (never to disk), so it — not config.toml — is what is on screen.
-            wallpaper_path: playing_media_path(&self.config.wallpaper),
+            wallpaper_path: playing_media_path(&self.config.wallpaper)
+                .filter(|_| self.config.enabled),
         }
     }
 
     fn describe_wallpaper(&self) -> Option<String> {
+        if !self.config.enabled {
+            return None; // lock-screen-only: no desktop wallpaper is playing
+        }
         let w = &self.config.wallpaper;
         match w.kind {
             Kind::Video | Kind::Image => w
@@ -2331,6 +2335,9 @@ impl Daemon {
         caja_mirror::restore_key_background(caja_mirror::Desktop::Dde);
         self.dde_mode = dde::Mode::Inactive;
         self.teardown_renderers();
+        // No window left to be covered, and `check_fullscreen` no longer runs
+        // to clear it: a stale entry would pin `paused_reason` in `status`.
+        self.fullscreen_covered.clear();
     }
 }
 
@@ -2950,7 +2957,8 @@ fn static_status(config: &Config, lockscreen: &LockStatus) -> StatusReply {
         .wallpaper
         .effective_path()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .or_else(|| Some("Static frame".to_string()));
+        .or_else(|| Some("Static frame".to_string()))
+        .filter(|_| config.enabled); // off: lock-screen-only
     StatusReply {
         running: true,
         paused: false,
@@ -2971,7 +2979,7 @@ fn static_status(config: &Config, lockscreen: &LockStatus) -> StatusReply {
         monitors_info: Vec::new(),
         gave_up: Vec::new(),
         lockscreen: Some(lockscreen.clone()),
-        wallpaper_path: playing_media_path(&config.wallpaper),
+        wallpaper_path: playing_media_path(&config.wallpaper).filter(|_| config.enabled),
     }
 }
 
@@ -3395,6 +3403,7 @@ fn run_wayland_layershell() -> Result<()> {
                             &monitors,
                             &outputs,
                             &config.wallpaper,
+                            config.enabled,
                             PauseSources {
                                 user: user_paused,
                                 battery: battery_paused,
@@ -4904,6 +4913,7 @@ fn wayland_status(
     monitors: &[Monitor],
     outputs: &std::collections::BTreeMap<String, WlOutput>,
     default_wallpaper: &Wallpaper,
+    desktop_on: bool,
     pause: PauseSources,
     lockscreen: LockStatus,
 ) -> StatusReply {
@@ -4959,7 +4969,7 @@ fn wayland_status(
         // The DEFAULT wallpaper, not whichever output sorts first — that one
         // may carry a per-monitor override. The loop's `config.wallpaper` is
         // where a schedule swap lands (and is never saved).
-        wallpaper_path: playing_media_path(default_wallpaper),
+        wallpaper_path: playing_media_path(default_wallpaper).filter(|_| desktop_on),
     }
 }
 

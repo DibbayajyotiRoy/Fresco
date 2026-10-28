@@ -61,6 +61,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   screen's Lyrics and Visualizer widgets do nothing (they are desktop
   overlays); its other widgets work as usual.
 
+- **The tray icon is now a monochrome symbolic icon** that follows the panel's
+  colours, like the other tray icons, instead of the full-colour app icon.
+
 ### Fixed
 - **Closing Fresco no longer drops the live wallpaper back to a still image**
   (PR #102). The background process was started as a child of the app, so

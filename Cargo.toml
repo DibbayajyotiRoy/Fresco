@@ -177,6 +177,8 @@ assets = [
     ["scripts/fresco-update.sh", "usr/lib/fresco/fresco-update.sh", "755"],
     ["data/io.github.dibbayajyotiroy.Fresco.desktop", "usr/share/applications/", "644"],
     ["data/icons/io.github.dibbayajyotiroy.Fresco.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    # Monochrome tray icon: panels recolour it to match their other tray icons.
+    ["data/icons/hicolor/symbolic/apps/io.github.dibbayajyotiroy.Fresco-symbolic.svg", "usr/share/icons/hicolor/symbolic/apps/", "644"],
     # Fixed-size PNGs: some icon themes (e.g. Deepin 25's "bloom") never look in
     # scalable/, so ship raster fallbacks that hicolor inheritance always finds.
     ["data/icons/hicolor/48x48/apps/io.github.dibbayajyotiroy.Fresco.png", "usr/share/icons/hicolor/48x48/apps/", "644"],

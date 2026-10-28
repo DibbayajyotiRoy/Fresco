@@ -61,6 +61,9 @@ package() {
     "$pkgdir/usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop"
   install -Dm644 "data/icons/io.github.dibbayajyotiroy.Fresco.svg" \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.dibbayajyotiroy.Fresco.svg"
+  # Monochrome tray icon: panels recolour it to match their other tray icons.
+  install -Dm644 "data/icons/hicolor/symbolic/apps/io.github.dibbayajyotiroy.Fresco-symbolic.svg" \
+    "$pkgdir/usr/share/icons/hicolor/symbolic/apps/io.github.dibbayajyotiroy.Fresco-symbolic.svg"
   # Fixed-size PNGs: some icon themes (e.g. Deepin 25's "bloom") never look in
   # scalable/, so ship raster fallbacks that hicolor inheritance always finds.
   for _size in 48 64 128 256 512; do

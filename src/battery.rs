@@ -365,7 +365,7 @@ fn hours_to_duration(remaining: u64, rate: u64) -> Option<Duration> {
 /// through this one function, so there is exactly one place that can get the
 /// peripheral case wrong again.
 ///
-/// The answer is reused for [`ON_BATTERY_TTL`]: the lock-screen live-video
+/// The answer is reused for `ON_BATTERY_TTL`: the lock-screen live-video
 /// policy (`LockRuntime::forces_pause`) asks this on every run-loop pass, and
 /// each uncached call is a full `/sys/class/power_supply` scan — tens of
 /// `read(2)`s. Spinning at ~1000 passes a second that was 29,000 reads a second

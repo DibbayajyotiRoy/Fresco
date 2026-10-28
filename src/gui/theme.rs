@@ -283,7 +283,14 @@ popover label, popover > contents label {{ color: {window_fg}; }}
 
 /* ===== Glass modals ===== translucent surface (readable), glass edge + sheen.
    GTK4 CSS has no backdrop blur, so this is a high-opacity smoked-glass look. */
-window.glass {{ background-color: alpha(@window_bg_color, {glass_alpha}); border: 1px solid alpha(@window_fg_color, 0.14); border-radius: 22px; box-shadow: inset 0 1px 0 alpha(@window_fg_color, 0.08), 0 32px 80px {shadow_md}, 0 4px 14px {shadow_sm}; }}
+window.glass {{ background-color: alpha(@window_bg_color, {glass_alpha}); border: 1px solid alpha(@window_fg_color, 0.14); border-radius: 22px; box-shadow: inset 0 1px 0 alpha(@window_fg_color, 0.08), 0 4px 8px {shadow_md}; }}
+/* Secondary windows (glass modals, Lock Screen, Browse) keep their CSD shadow
+   tight (#100). GTK makes the whole shadow extent a resize-handle zone, so the
+   old 80px blur left a ~113-145px invisible band around each dialog where a
+   press starts a resize toward the pointer; deepin-kwin apparently delivers clicks there
+   (the X input shape only passes 12px), stretching and jumping the dialog.
+   A blur <= 8px keeps the extents at GTK's 12px minimum: don't grow it. */
+window.tight-shadow {{ box-shadow: 0 4px 8px {shadow_md}; }}
 window.glass headerbar, window.glass headerbar.flat {{ background: transparent; box-shadow: none; border-bottom: 1px solid alpha(@window_fg_color, 0.07); }}
 window.glass .background {{ background: transparent; }}
 
@@ -570,6 +577,24 @@ mod tests {
                 let bad: Vec<&str> = css.lines().filter(|l| is_reference(l)).collect();
                 assert!(bad.is_empty(), "frozen color reference: {bad:?}");
             }
+        }
+    }
+
+    /// #100: GTK turns the whole CSD shadow extent into a resize-handle band
+    /// around a window, so a big drop shadow on a dialog makes clicks near it
+    /// resize (stretch + jump) the dialog on WMs that deliver them. Keep every
+    /// shadow length on the secondary-window rules within GTK's own 12px.
+    #[test]
+    fn secondary_window_shadows_stay_tight() {
+        let css = build_css(Accent::Blue, true);
+        for sel in ["window.glass {", "window.tight-shadow {"] {
+            let rule = css.lines().find(|l| l.starts_with(sel)).expect(sel);
+            let shadow = rule.split("box-shadow:").nth(1).unwrap_or("");
+            let max_px = shadow
+                .split_whitespace()
+                .filter_map(|t| t.strip_suffix("px")?.parse::<u32>().ok())
+                .max();
+            assert!(max_px.is_some_and(|px| px <= 12), "{sel} shadow: {shadow}");
         }
     }
 

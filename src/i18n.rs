@@ -872,6 +872,52 @@ mod tests {
         }
     }
 
+    /// Issue #98: the tray menu was English-only. Its labels get their own
+    /// msgids because "Next" and "Pause" already mean "next step" / a bare
+    /// button in the app. Every catalog must carry them, and none may leave one
+    /// untranslated (a copy of the English text).
+    #[test]
+    fn tray_menu_and_switch_are_translated_everywhere() {
+        let keys = [
+            "Pause playback",
+            "Resume playback",
+            "Next wallpaper",
+            "Random wallpaper",
+            "Open main window",
+            "Stop wallpaper",
+            "Quit Fresco (until next login)",
+            "RESUMES AT NEXT LOGIN",
+            "Show icon in the system tray",
+        ];
+        for lang in Language::ALL {
+            let Some(src) = catalog_source(lang) else {
+                continue;
+            };
+            let map: HashMap<String, String> = serde_json::from_str(src).unwrap();
+            for k in keys {
+                let v = map
+                    .get(k)
+                    .unwrap_or_else(|| panic!("catalog {} lacks {k:?}", lang.code()));
+                assert_ne!(v, k, "catalog {}: {k:?} is left in English", lang.code());
+            }
+        }
+        // The wording the reporter asked for.
+        let zh: HashMap<String, String> =
+            serde_json::from_str(catalog_source(Language::ChineseSimplified).unwrap()).unwrap();
+        for (en, cn) in [
+            ("Pause playback", "暂停播放"),
+            ("Resume playback", "继续播放"),
+            ("Next wallpaper", "下一张"),
+            ("Random wallpaper", "随机一张"),
+            ("Open main window", "打开主界面"),
+            ("Stop wallpaper", "停止壁纸"),
+            ("Quit Fresco (until next login)", "关闭程序（下次登录恢复）"),
+            ("RESUMES AT NEXT LOGIN", "下次登录时恢复"),
+        ] {
+            assert_eq!(zh[en], cn);
+        }
+    }
+
     #[test]
     fn trf_substitutes_named_placeholders_and_leaves_unknown_ones() {
         assert_eq!(

@@ -4,6 +4,124 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.53] — 2026-10-28
+
+### Added
+- **One "Performance mode" switch for gaming and older PCs** (PR #104). It is
+  in the menu's behaviour list in the app and in the tray icon's menu (and is
+  `performance_mode = true` in `config.toml`). While it is on, Fresco turns
+  off the widgets (lyrics, clocks, world clock, audio visualiser, album art)
+  and stops listening to the sound output, uses the lightest video scaling and
+  the small low-memory buffers, pauses whenever any large window covers the
+  screen (not only a fullscreen one), stops playing and preparing video
+  previews when you hover a card, and holds the automatic wallpaper change. It
+  only overrides your settings while it is on: none of them is rewritten, so
+  turning it off brings every widget and setting back exactly as you left it.
+  Switching it from the tray moves the switch in an open Fresco window and
+  turns the hover previews off or back on with it.
+- **A switch to hide the tray icon** (PR #103). Menu, Behavior, "Show icon in
+  the system tray" does what `tray_icon = false` in `config.toml` did, and the
+  icon now appears or disappears at once, without restarting the background
+  process, while the wallpaper keeps playing.
+- **The tray menu is translated** (PR #103, issue #98). Its words were English
+  in every language; they are now in all 13 translations. Simplified Chinese
+  follows the wording suggested in the issue.
+
+### Changed
+- **Tray "Quit" now means "until next login", like Wallpaper Engine's** (PRs
+  #103, #106; issue #98). The item is called "Quit Fresco (until next login)":
+  it stops the wallpaper and puts your desktop's own background back right
+  away, but leaves the wallpaper switched on, so "Restore on login" starts it
+  again at the next login. "Stop wallpaper" is still the permanent stop. Before,
+  Quit left the app showing the wallpaper as playing when nothing was running.
+  Now a card in the library is shown as playing only while the background
+  process is really running, and the status pill reads "Not running" under a
+  small "RESUMES AT NEXT LOGIN" label, with a Start button. If "Restore on
+  login" is off the label is left out, because logging in would not bring the
+  wallpaper back, and a wallpaper you stopped with Stop is just "Not running".
+  A fresh install with no wallpaper chosen yet shows the idle pill, not that
+  label.
+
+### Fixed
+- **Closing Fresco no longer drops the live wallpaper back to a still image**
+  (PR #102). The background process was started as a child of the app, so
+  anything that ended the app ended the wallpaper too: Ctrl+C, closing the
+  terminal Fresco was started from, or a desktop that launches apps as systemd
+  units and kills the whole unit when the app goes. It now starts in a session
+  and, where a systemd user manager is running, a systemd scope of its own, so
+  it outlives the app. If that scope cannot be created, or the process does not
+  come up within the startup timeout, Fresco retries once with a plain start
+  (PR #109). Stop in the app, and the update relaunch, still end it as before.
+- **Fresco no longer burns a CPU core while your screen is locked** (PR #107).
+  On a locked session the background process woke up about a thousand times a
+  second, and with the lock-screen live-video setting on COSMIC each of those
+  wake-ups also re-read the battery's files, which came to roughly 29,000 file
+  reads a second. A laptop left locked for hours used about a fifth of a core
+  for nothing. The widgets are frozen on a lock, and the process now waits the
+  normal tenth of a second instead of waiting for a clock that cannot move.
+  The same busy-wait happened whenever the widgets were set to a monitor that
+  is not plugged in. The battery state is also looked up at most once every
+  two seconds. In a test setup with a stand-in COSMIC compositor, the locked
+  case went from about 22% of a core to about 0.2%.
+- **Widgets are no longer drawn while a window covers the screen** (PR #107).
+  With "pause when an app covers the screen" on, the wallpaper video paused
+  but the clock, lyrics and audio visualiser kept being rendered to pictures
+  nobody could see. They now stop while every screen is covered and catch up
+  the moment one is uncovered. An idle desktop with a maximised window drops
+  from about 1% of a core to about 0.1%.
+- **Deepin 25: black desktop after logging out and back in** (PR #103, issue
+  #98). When the wallpaper started before Deepin's desktop window existed,
+  Fresco picked a way of drawing that Deepin composites onto black, and never
+  looked again. It now rebuilds the stacking once the desktop window appears.
+  Not yet confirmed on a real Deepin session.
+- **The status pill shows the name you gave the wallpaper** (PR #101, issue
+  #99). It used to show the stored file name (`动画2-42054c1530dc`) while the
+  library card showed your name ("自在"). Renaming a card now updates the pill
+  in about half a second, and the full file name is in its tooltip.
+  `fresco status` and `fresco doctor` still print the file name, and a playlist
+  or slideshow still shows its own label.
+- **Dialogs no longer stretch and jump when you click the main window**
+  (PRs #105, #108, issue #100). Fresco's dialogs carried a large soft shadow
+  that GTK counts as part of the window, so around each dialog there was an
+  invisible band, over the main window, in which a click was treated as the
+  start of a resize. On Deepin's window manager that stretched the dialog
+  toward the click. The shadow is now small (the Lock Screen, Browse and
+  Advanced windows too), which removes the band; the dialogs lose their wide
+  soft halo and keep a tight shadow. Not yet confirmed on a real Deepin
+  session.
+- **The Browse window no longer grows to about 1750 pixels wide** when the
+  wallpaper catalog cannot be loaded; the error message now wraps (PR #108).
+- **A slow answer from the background process no longer flips the status pill
+  to "Not running"** and rebuilds the library grid; only a missing process
+  counts as not running (PR #108).
+- **Tray fixes** (PR #109). Pause/Resume now changes at once and a second click
+  sends Resume, not Pause again. Open main window, Next and Random start the
+  `fresco` that sits next to the running background process, so a development
+  or staged build no longer opens a different version from `/usr/bin`.
+- **Low-memory mode decodes with two threads again** (PR #109). The video
+  player's "low-latency" profile was resetting it to one. In low-memory or
+  Performance mode a 4K video also no longer raises the read-ahead cache to
+  64 MiB.
+
+### Notes for testers
+Not yet confirmed on real hardware, and the most useful things to check:
+- **Deepin 25 (X11).** Log out and back in with the wallpaper on: the desktop
+  should show the wallpaper, not black. Click the main window while a dialog is
+  open: the dialog should stay where it is. Both fixes are based on reading
+  the code and GTK's behaviour, not on a Deepin session.
+- **Closing the app.** Close Fresco from its window, with Ctrl+C in a terminal,
+  and by closing that terminal, on GNOME, KDE and Deepin with the `.deb`: the
+  wallpaper should keep playing every time.
+- **The tray.** On a desktop with a tray, check Quit (the desktop's own
+  background comes back, and the wallpaper returns at the next login), Stop
+  (stays stopped), the new tray-icon switch, and Performance mode from the
+  tray. The pill and library after a real Quit have only been tested in code.
+- **Performance mode and the CPU numbers.** Measured in a test setup with a
+  stand-in compositor, not on a live desktop; a long lock on a real laptop is
+  the check that matters.
+- **Windows and dialogs.** The Browse, Advanced and status-pill changes were not
+  hand-checked in a live GTK session.
+
 ## [1.1.52] — 2026-10-25
 
 ### Added

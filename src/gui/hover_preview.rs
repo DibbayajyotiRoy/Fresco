@@ -692,7 +692,8 @@ pub(super) fn startup(app: &gio::Application, state: &Rc<RefCell<AppState>>) {
         std::fs::remove_file(&path).ok();
     }
 
-    let mut enabled = previews_on;
+    // Performance mode keeps them off without touching the saved switch.
+    let mut enabled = previews_on && !state.borrow().config.performance_mode;
     if recovery(verdict, previews_on) == Recovery::DisableAndTell {
         log::warn!(
             "hover previews: the previous Fresco died with a preview showing; turning them off"

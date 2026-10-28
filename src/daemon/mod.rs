@@ -992,7 +992,7 @@ impl Daemon {
         let (conn, screen_num) =
             x11rb::connect(None).context("connecting to X11 (is DISPLAY set?)")?;
         let atoms = Atoms::new(&conn)?.reply()?;
-        let mut widgets = widgets::WidgetEngine::new(config.widgets.as_ref(), config.accent);
+        let mut widgets = widgets::WidgetEngine::new(config.effective_widgets(), config.accent);
         apply_widget_config(&mut widgets, &config);
         Ok(Daemon {
             conn,
@@ -1123,7 +1123,12 @@ impl Daemon {
     /// so the first cycle after resuming waits the full interval rather than
     /// firing immediately (see [`auto_cycle_due`]).
     fn check_auto_cycle(&mut self, now: Instant) {
-        let blocked = self.user_paused || self.battery_paused || self.lock.locked;
+        // Performance mode holds the cycle like a pause: it clears the timer, so
+        // leaving it waits a full interval instead of switching at once.
+        let blocked = self.user_paused
+            || self.battery_paused
+            || self.lock.locked
+            || self.config.performance_mode;
         if !auto_cycle_due(&self.config.auto_cycle, &mut self.last_cycle, now, blocked) {
             return;
         }
@@ -1145,17 +1150,13 @@ impl Daemon {
     fn apply_auto_cycle_wallpaper(&mut self) {
         let wp = &self.config.wallpaper;
         let scaling = self.config.scaling;
-        let power_saving = self.config.power_saving;
         for r in &mut self.renderers {
             if self.config.monitors.contains_key(&r.window.connector) {
                 continue;
             }
             r.player.set_rotation(wp.rotation);
-            r.player.apply_scalers(
-                scaling,
-                wp.effective_power_saving(power_saving),
-                wp.rotation,
-            );
+            r.player
+                .apply_scalers(scaling, self.config.effective_power_saving(wp), wp.rotation);
             r.player.apply_crop(wp);
             r.anim.set_base(transition::crop_base(wp));
             if let Some(path) = wp.effective_path() {
@@ -1192,7 +1193,14 @@ impl Daemon {
             .map(|r| r.window.connector.clone())
             .filter(|c| want.as_deref().is_none_or(|w| w == c.as_str()))
             .collect();
-        if targets.is_empty() {
+        // Every target covered: nothing on screen to update, so don't rasterise
+        // for it (see the Wayland loop's twin of this check).
+        // `check_fullscreen` invalidates the engine on uncover.
+        if targets.is_empty()
+            || targets
+                .iter()
+                .all(|c| self.fullscreen_covered.contains_key(c))
+        {
             return;
         }
         // Geometry **before** the tick, not after: a bitmap widget computes its
@@ -1293,7 +1301,7 @@ impl Daemon {
 
         for monitor in self.monitors.clone() {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
-            if wallpaper.effective_path().is_none() && wallpaper.kind != Kind::Slideshow {
+            if !wallpaper.is_configured() {
                 continue; // nothing configured for this monitor
             }
             if slideshow_has_no_images(&wallpaper) {
@@ -1310,8 +1318,8 @@ impl Daemon {
                 &monitor,
                 &wallpaper,
                 self.config.scaling,
-                wallpaper.effective_power_saving(self.config.power_saving),
-                self.config.low_memory,
+                self.config.effective_power_saving(&wallpaper),
+                self.config.effective_low_memory(),
                 kind,
             ) {
                 Ok(r) => {
@@ -1853,7 +1861,7 @@ impl Daemon {
             self.screen().root,
             &self.atoms,
             &self.monitors,
-            self.config.pause_on_covered,
+            self.config.effective_pause_on_covered(),
         );
         if covered != self.fullscreen_covered {
             for (c, what) in &covered {
@@ -1888,6 +1896,23 @@ impl Daemon {
     /// raise waits out `dde_icon_peek_secs` before taking the stack back (see
     /// [`dde::IconPeek`]).
     fn reassert_stacking(&mut self) {
+        // Started before dde-shell mapped its desktop window: we picked
+        // transparency, which shows black there. Redo the choice now that the
+        // window exists. Not looping: a rebuild that finds nothing to show
+        // leaves no renderers, and one that succeeds leaves `Restack`.
+        if self.dde_mode == dde::Mode::DBus
+            && !self.renderers.is_empty()
+            && dde::transparency_is_stale(
+                &self.conn,
+                &self.atoms,
+                self.screen().root,
+                self.config.dde_mode,
+            )
+        {
+            log::info!("DDE: dde-shell's desktop window appeared after start; switching from transparency to restack");
+            let _ = self.rebuild();
+            return;
+        }
         if let Some(desktop) = self.dde_mode.mirror_desktop() {
             // The mirror thread owns stacking here: it lowers the desktop
             // window the moment the window manager raises it, on its own
@@ -2041,7 +2066,7 @@ impl Daemon {
                 r.player.set_rotation(want.rotation);
                 r.player.apply_scalers(
                     self.config.scaling,
-                    want.effective_power_saving(self.config.power_saving),
+                    self.config.effective_power_saving(&want),
                     want.rotation,
                 );
                 r.player.apply_crop(&want);
@@ -2108,6 +2133,10 @@ impl Daemon {
     /// One-shot demuxer-cache raise once a ≥4K source is known (its resolution
     /// only becomes readable after the first load). See ROADMAP 1.8.5.
     fn check_cache(&mut self) {
+        // Low-memory / performance mode keeps the small demuxer cap, even at 4K.
+        if self.config.effective_low_memory() {
+            return;
+        }
         for r in &self.renderers {
             if r.cache_raised.get() {
                 continue;
@@ -2135,7 +2164,7 @@ impl Daemon {
         if kde_desktop::enabled() {
             return 0; // plasmashell draws the wallpaper; we create no window
         }
-        let wants = |w: &Wallpaper| w.effective_path().is_some() || w.kind == Kind::Slideshow;
+        let wants = Wallpaper::is_configured;
         if self.monitors.is_empty() {
             let any = wants(&self.config.wallpaper) || self.config.monitors.values().any(wants);
             return usize::from(any);
@@ -2620,9 +2649,9 @@ pub fn run() -> Result<()> {
         if cfg.browser_bridge {
             webbridge::spawn(webbridge::PORT);
         }
-        // System-tray icon: owned by the daemon, started once at startup.
-        // Changing tray_icon at runtime requires a daemon restart.
-        if cfg.tray_icon && cfg.enabled {
+        // System-tray icon: the supervisor follows `tray_icon` from config.toml,
+        // so the Settings switch takes effect without a restart.
+        if cfg.enabled {
             tray::spawn();
         }
     }
@@ -2705,7 +2734,12 @@ fn gnome_static_auto_cycle(
     now: Instant,
     locked: bool,
 ) {
-    if !auto_cycle_due(&config.auto_cycle, last_cycle, now, locked) {
+    if !auto_cycle_due(
+        &config.auto_cycle,
+        last_cycle,
+        now,
+        locked || config.performance_mode,
+    ) {
         return;
     }
     let current = config.wallpaper.clone();
@@ -2893,7 +2927,12 @@ fn wayland_auto_cycle(
     paused: bool,
     locked: bool,
 ) {
-    if !auto_cycle_due(&config.auto_cycle, last_cycle, now, paused || locked) {
+    if !auto_cycle_due(
+        &config.auto_cycle,
+        last_cycle,
+        now,
+        paused || locked || config.performance_mode,
+    ) {
         return;
     }
     let current = config.wallpaper.clone();
@@ -2911,12 +2950,12 @@ fn wayland_auto_cycle(
         if config.monitors.contains_key(connector) {
             continue;
         }
-        let effective_ps = config.wallpaper.effective_power_saving(config.power_saving);
+        let effective_ps = config.effective_power_saving(&config.wallpaper);
         o.apply_wallpaper(
             config.wallpaper.clone(),
             config.scaling,
             effective_ps,
-            config.low_memory,
+            config.effective_low_memory(),
             paused_for_outputs,
         );
     }
@@ -3050,7 +3089,7 @@ fn run_wayland_layershell() -> Result<()> {
     let mut last_generations: u64 = 0;
     // On-wallpaper widgets. Same engine the X11 loop uses, so the two backends
     // cannot drift apart — the failure mode `raise_demuxer_cache` is named for.
-    let mut widget_engine = widgets::WidgetEngine::new(config.widgets.as_ref(), config.accent);
+    let mut widget_engine = widgets::WidgetEngine::new(config.effective_widgets(), config.accent);
     apply_widget_config(&mut widget_engine, &config);
 
     // Lock-screen host detection, state monitor and widget engine (see
@@ -3097,13 +3136,13 @@ fn run_wayland_layershell() -> Result<()> {
         {
             continue; // nothing configured for this output
         }
-        let effective_ps = wallpaper.effective_power_saving(config.power_saving);
+        let effective_ps = config.effective_power_saving(&wallpaper);
         let mut out = WlOutput::new(
             m.connector.clone(),
             wallpaper,
             config.scaling,
             effective_ps,
-            config.low_memory,
+            config.effective_low_memory(),
         );
         out.set_show_on_lock(show_on_lock);
         out.respawn(false, false);
@@ -3197,14 +3236,14 @@ fn run_wayland_layershell() -> Result<()> {
                                     && (wp.effective_path().is_some()
                                         || !wp.paths.is_empty()
                                         || wp.kind == Kind::Slideshow);
-                                let effective_ps = wp.effective_power_saving(config.power_saving);
+                                let effective_ps = config.effective_power_saving(&wp);
                                 match (outputs.get_mut(&m.connector), has) {
                                     (Some(o), true) => {
                                         o.apply_wallpaper(
                                             wp,
                                             config.scaling,
                                             effective_ps,
-                                            config.low_memory,
+                                            config.effective_low_memory(),
                                             paused,
                                         );
                                         // `apply_wallpaper` may already have
@@ -3226,7 +3265,7 @@ fn run_wayland_layershell() -> Result<()> {
                                             wp,
                                             config.scaling,
                                             effective_ps,
-                                            config.low_memory,
+                                            config.effective_low_memory(),
                                         );
                                         o.set_show_on_lock(show_on_lock);
                                         o.respawn(paused, false);
@@ -3498,7 +3537,7 @@ fn run_wayland_layershell() -> Result<()> {
                                 pl.set_rotation(want.rotation);
                                 pl.apply_scalers(
                                     o.scaling,
-                                    want.effective_power_saving(config.power_saving),
+                                    config.effective_power_saving(&want),
                                     want.rotation,
                                 );
                                 pl.apply_crop(&want);
@@ -3511,7 +3550,7 @@ fn run_wayland_layershell() -> Result<()> {
                             o.wallpaper.rotation = want.rotation;
                             o.wallpaper.power_saving = want.power_saving;
                             o.wallpaper.crop = want.crop;
-                            o.power_saving = want.effective_power_saving(config.power_saving);
+                            o.power_saving = config.effective_power_saving(&want);
                         }
                     }
                     config.wallpaper.path = Some(path.clone());
@@ -3669,7 +3708,7 @@ fn run_wayland_layershell() -> Result<()> {
         if let Some(w) = fs_watch.as_mut() {
             if now.duration_since(last_fs_poll) >= FS_POLL {
                 last_fs_poll = now;
-                let now_hidden = w.fullscreen_connectors(config.pause_on_covered);
+                let now_hidden = w.fullscreen_connectors(config.effective_pause_on_covered());
                 if now_hidden != hidden {
                     // The Wayland twin of the X11 loop's "detected"/"cleared"
                     // lines: a covered output pauses and takes no widget
@@ -3734,7 +3773,11 @@ fn run_wayland_layershell() -> Result<()> {
                 .filter(|c| want.as_deref().is_none_or(|w| w == c.as_str()))
                 .cloned()
                 .collect();
-            if !targets.is_empty() {
+            // Every target covered: nothing on screen to update, and ticking
+            // anyway rasterises each widget (a bitmap a second for the clock,
+            // ~24 a second for the visualiser) only to throw the push away.
+            // `invalidate()` on uncover (above) brings everything back.
+            if !targets.is_empty() && !targets.iter().all(|c| hidden.contains(c)) {
                 // Geometry before the tick, and one entry per target: bitmap
                 // widgets place pixels in real output coordinates, so a
                 // mixed-DPI pair needs a size each, not whichever one the
@@ -5128,7 +5171,7 @@ fn lock_widget_theme(config: &Config) -> crate::widgetkit::Theme {
 /// Push every widget setting from `config` into `engine`, in one place so the
 /// three loops cannot drift on which widgets they remember to update.
 fn apply_widget_config(engine: &mut widgets::WidgetEngine, config: &Config) {
-    let w = config.widgets.as_ref();
+    let w = config.effective_widgets();
     engine.set_config(w, config.accent);
     engine.set_clock(w.map(|w| widget_clock_cfg(&w.clock)).as_ref());
     engine.set_world_clock(w.map(|w| widget_world_clock_cfg(&w.world_clock)).as_ref());

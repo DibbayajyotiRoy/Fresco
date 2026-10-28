@@ -608,6 +608,23 @@ fn current_strategy<C: Connection>(
     )
 }
 
+/// True when a [`Mode::DBus`] run now has a better strategy. Autostart can
+/// start the daemon before dde-shell has mapped its desktop window; with no
+/// such window the strategy is transparency, and once dde-shell appears its
+/// transparent wallpaper composites onto BLACK (see the module docs) — a black
+/// desktop at every login, until the wallpaper is set again. The daemon checks
+/// this on its stacking pass and rebuilds, which restacks and puts the user's
+/// own wallpaper back. Never true for an explicit `transparent` preference, or
+/// on a DDE that has no such window (older releases).
+pub fn transparency_is_stale<C: Connection>(
+    conn: &C,
+    atoms: &Atoms,
+    root: Window,
+    config_pref: DdeMode,
+) -> bool {
+    current_strategy(conn, atoms, root, config_pref) != Strategy::Transparent
+}
+
 /// Which flavour of wallpaper window this session must create. Called before
 /// any window exists, because the DDE raise only works when the window was
 /// created declaring `[DESKTOP, NORMAL]`.

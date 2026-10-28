@@ -651,5 +651,14 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ naviguer · Entrée exécuter · Échap fermer",
   "Pause when an app covers the screen": "Mettre en pause quand une application couvre l’écran",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Met en pause quand une grande fenêtre couvre 90% de l’écran ; les applications en plein écran mettent toujours en pause",
-  "Window covers screen": "Fenêtre couvrant l’écran"
+  "Window covers screen": "Fenêtre couvrant l’écran",
+  "Performance mode": "Mode performance",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Désactive les widgets, le visualiseur audio et les aperçus au survol, et réduit la qualité vidéo — pour les jeux et les PC anciens",
+  "Pause playback": "Mettre la lecture en pause",
+  "Resume playback": "Reprendre la lecture",
+  "Next wallpaper": "Fond d’écran suivant",
+  "Open main window": "Ouvrir la fenêtre principale",
+  "Quit Fresco (until next login)": "Quitter Fresco (jusqu’à la prochaine connexion)",
+  "Show icon in the system tray": "Afficher l’icône dans la zone de notification",
+  "RESUMES AT NEXT LOGIN": "REPREND À LA PROCHAINE CONNEXION"
 }

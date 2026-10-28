@@ -173,7 +173,7 @@ pub fn run() -> i32 {
 
     let wallpaper = resolve_wallpaper(&config, connector.as_deref());
     let scaling = config.scaling;
-    let power_saving = wallpaper.effective_power_saving(config.power_saving);
+    let power_saving = config.effective_power_saving(&wallpaper);
 
     let rt_dir = runtime_dir();
     if let Err(e) = std::fs::create_dir_all(&rt_dir) {
@@ -191,7 +191,7 @@ pub fn run() -> i32 {
         &wallpaper,
         scaling,
         power_saving,
-        config.low_memory,
+        config.effective_low_memory(),
         &[("input-ipc-server", sock_str.as_str())],
     ) {
         Ok(p) => p,

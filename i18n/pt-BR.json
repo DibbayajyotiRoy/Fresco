@@ -651,5 +651,14 @@
   "↑↓ navigate · Enter run · Esc close": "↑↓ navegar · Enter executar · Esc fechar",
   "Pause when an app covers the screen": "Pausar quando um app cobrir a tela",
   "Pauses when any large window covers 90% of the screen; fullscreen apps always pause": "Pausa quando qualquer janela grande cobre 90% da tela; apps em tela cheia sempre pausam",
-  "Window covers screen": "Janela cobrindo a tela"
+  "Window covers screen": "Janela cobrindo a tela",
+  "Performance mode": "Modo de desempenho",
+  "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Desativa widgets, visualizador de áudio e pré-visualizações ao passar o mouse, e reduz a qualidade do vídeo — para jogos e PCs mais antigos",
+  "Pause playback": "Pausar reprodução",
+  "Resume playback": "Retomar reprodução",
+  "Next wallpaper": "Próximo papel de parede",
+  "Open main window": "Abrir janela principal",
+  "Quit Fresco (until next login)": "Sair do Fresco (até o próximo login)",
+  "Show icon in the system tray": "Mostrar ícone na bandeja do sistema",
+  "RESUMES AT NEXT LOGIN": "RETOMA NO PRÓXIMO LOGIN"
 }

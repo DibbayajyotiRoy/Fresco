@@ -258,6 +258,12 @@ fn adopt_external_config(mem: &mut Config, disk: Config) -> bool {
     moved
 }
 
+thread_local! {
+    /// The Performance mode switch in the menu, so an external change to
+    /// config.toml can move it. Set once by `build_behavior_page`.
+    static PERFORMANCE_SWITCH: RefCell<Option<gtk4::Switch>> = const { RefCell::new(None) };
+}
+
 /// Keep `state.config` in step with config.toml while the window is open:
 /// `fresco next/prev/random` and hand edits rewrite it behind the GUI's back.
 fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) {
@@ -287,7 +293,7 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
         let Ok(disk) = Config::load() else {
             return;
         };
-        let (moved, refresh) = {
+        let (moved, refresh, performance, previews) = {
             // Held elsewhere (a handler mid-edit): the next change event retries.
             let Ok(mut s) = state.try_borrow_mut() else {
                 return;
@@ -295,8 +301,18 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
             (
                 adopt_external_config(&mut s.config, disk),
                 s.refresh.clone(),
+                s.config.performance_mode,
+                s.config.effective_hover_previews(),
             )
         };
+        // The tray (or a hand edit) can flip performance mode: the hover-preview
+        // policy and the menu switch live here and would otherwise stay stale.
+        super::hover_preview::set_enabled(previews);
+        PERFORMANCE_SWITCH.with(|sw| {
+            if let Some(sw) = sw.borrow().as_ref() {
+                sw.set_active(performance); // the handler skips an unchanged value
+            }
+        });
         if moved {
             log::debug!("config.toml changed on disk: wallpaper moved, rebuilding the grid");
             status::forget_playing_path();
@@ -1230,10 +1246,27 @@ fn build_library_view(
     {
         let state = state.clone();
         let refresh = refresh.clone();
-        status::on_playing_path_changed(move || {
-            if schedule_active(&state.borrow().config) {
-                refresh();
+        status::on_playing_path_changed({
+            let refresh = refresh.clone();
+            move || {
+                if schedule_active(&state.borrow().config) {
+                    refresh();
+                }
             }
+        });
+        // The daemon quitting (tray "Quit", #98) or coming back moves the
+        // active card whatever the schedule.
+        status::on_daemon_running_changed(move || refresh());
+    }
+
+    // The header pill names the playing file by its library entry, so a
+    // renamed wallpaper reads the same there as on its card (#99).
+    {
+        let state = state.clone();
+        status::set_name_lookup(move |path| {
+            let s = state.try_borrow().ok()?;
+            let e = library::entry_for_path(&s.entries, path)?;
+            Some(display_name(&e.name, e.kind))
         });
     }
 
@@ -1658,6 +1691,45 @@ fn build_appearance_page(state: &Rc<RefCell<AppState>>, subtitle: gtk4::Label) -
 /// Behavior page: the on/off switches.
 fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    // One switch for gaming and older PCs. It overrides the individual
+    // settings at runtime (see `Config::effective_*`) and never rewrites them,
+    // so turning it off restores everything. The daemon picks it up via Apply;
+    // the hover-preview policy lives in this process.
+    let performance_row = switch_row(
+        t!("Performance mode"),
+        state.borrow().config.performance_mode,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let (config, previews) = {
+                    let mut s = state2.borrow_mut();
+                    if s.config.performance_mode == active {
+                        return; // synced from config.toml, already saved and applied
+                    }
+                    s.config.performance_mode = active;
+                    s.config.save().ok();
+                    (s.config.clone(), s.config.effective_hover_previews())
+                };
+                super::hover_preview::set_enabled(previews);
+                daemon_ctl::apply_async(&config, |_| {});
+            }
+        },
+    );
+    PERFORMANCE_SWITCH.with(|sw| {
+        *sw.borrow_mut() = performance_row.last_child().and_downcast::<gtk4::Switch>();
+    });
+    popover_box.append(&performance_row);
+    let performance_hint = gtk4::Label::new(Some(t!(
+        "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs"
+    )));
+    performance_hint.add_css_class("dim");
+    performance_hint.set_wrap(true);
+    performance_hint.set_max_width_chars(34);
+    performance_hint.set_xalign(0.0);
+    performance_hint.set_margin_start(4);
+    performance_hint.set_margin_end(4);
+    performance_hint.set_margin_bottom(6);
+    popover_box.append(&performance_hint);
     popover_box.append(&switch_row(
         t!("Restore on login"),
         state.borrow().config.autostart,
@@ -1685,6 +1757,20 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
             move |active| {
                 let mut s = state2.borrow_mut();
                 s.config.pause_on_battery = active;
+                s.config.save().ok();
+            }
+        },
+    ));
+    // The daemon watches config.toml and starts or drops the icon itself; the
+    // wallpaper keeps playing either way.
+    popover_box.append(&switch_row(
+        t!("Show icon in the system tray"),
+        state.borrow().config.tray_icon,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                s.config.tray_icon = active;
                 s.config.save().ok();
             }
         },
@@ -1768,12 +1854,13 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
         {
             let state2 = state.clone();
             move |active| {
-                {
+                let previews = {
                     let mut s = state2.borrow_mut();
                     s.config.hover_previews = active;
                     s.config.save().ok();
-                }
-                super::hover_preview::set_enabled(active);
+                    s.config.effective_hover_previews()
+                };
+                super::hover_preview::set_enabled(previews);
             }
         },
     ));
@@ -2361,7 +2448,12 @@ fn populate_library(
     };
     // Judge "active" by what the daemon is showing while a schedule swaps
     // wallpapers behind config.toml's back, not by the stale saved default.
-    let cfg = config_for_active_cards(&cfg, &entries, status::cached_playing_path().as_deref());
+    let cfg = config_for_active_cards(
+        &cfg,
+        &entries,
+        status::cached_playing_path().as_deref(),
+        status::cached_daemon_running(),
+    );
 
     // A library holding only linked folders is not empty, even before their
     // first scan lands (or while one is unplugged): their headings must show.
@@ -3969,6 +4061,8 @@ fn commit_rename(state: &Rc<RefCell<AppState>>, id: &str, input: &str) -> bool {
         if let Some(r) = refresh {
             glib::idle_add_local_once(move || r());
         }
+        // The pill shows this name too when the card is what is playing.
+        status::poll_soon();
     }
     changed
 }
@@ -6224,6 +6318,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
+    dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Advanced")));
 
     let page = adw::PreferencesPage::new();
@@ -6757,15 +6852,21 @@ fn remove_schedule(cfg: &mut Config, entries: &[LibraryEntry], playing: Option<&
 
 /// The config to judge "which card is active" against: while a live schedule
 /// is swapping wallpapers, what the daemon reports is the truth; otherwise
-/// (no schedule, or paused) config.toml is.
+/// (no schedule, or paused) config.toml is. A daemon known to be gone plays
+/// nothing, whatever `enabled` says (the tray's "Quit" leaves it on so login
+/// resumes the wallpaper, #98), so no card is active then.
 fn config_for_active_cards(
     cfg: &Config,
     entries: &[LibraryEntry],
     playing: Option<&std::path::Path>,
+    daemon_running: Option<bool>,
 ) -> Config {
     let mut view = cfg.clone();
     if schedule_active(cfg) {
         adopt_playing_wallpaper(&mut view, entries, playing);
+    }
+    if daemon_running == Some(false) {
+        view.enabled = false;
     }
     view
 }
@@ -9649,7 +9750,7 @@ fn connected_monitors() -> Vec<crate::ipc::MonitorInfo> {
 /// auto-names become "Video · aeb8", marketing prefixes like "From <site>- "
 /// are trimmed, and long titles are middle-truncated. The untouched name stays
 /// available as the card tooltip.
-fn display_name(name: &str, kind: Kind) -> String {
+pub(crate) fn display_name(name: &str, kind: Kind) -> String {
     let mut n = name.trim().to_string();
 
     // Hex/uuid-ish stems (downloader auto-names) → "<Kind> · <last 4>".
@@ -11917,21 +12018,53 @@ mod tests {
         let playing = Some(std::path::Path::new("/b.mp4"));
 
         let live = always_slot_config("/b.mp4", "/a.mp4");
-        let view = config_for_active_cards(&live, &entries, playing);
+        let view = config_for_active_cards(&live, &entries, playing, Some(true));
         assert!(entry_is_active(&b, &view) && !entry_is_active(&a, &view));
         // A daemon that can't say falls back to the config.
-        let view = config_for_active_cards(&live, &entries, None);
+        let view = config_for_active_cards(&live, &entries, None, Some(true));
         assert!(entry_is_active(&a, &view));
 
         let mut paused = live.clone();
         paused.schedule_paused = true;
-        let view = config_for_active_cards(&paused, &entries, playing);
+        let view = config_for_active_cards(&paused, &entries, playing, Some(true));
         assert!(entry_is_active(&a, &view) && !entry_is_active(&b, &view));
 
         let mut off = live;
         off.schedule = None;
-        let view = config_for_active_cards(&off, &entries, playing);
+        let view = config_for_active_cards(&off, &entries, playing, Some(true));
         assert!(entry_is_active(&a, &view) && !entry_is_active(&b, &view));
+    }
+
+    /// #98: the tray's "Quit" leaves `enabled = true` so login resumes the
+    /// wallpaper, but no daemon means nothing is playing, so no card may claim
+    /// to be. Before the first poll lands the config is all there is.
+    #[test]
+    fn no_card_is_active_while_the_daemon_is_gone() {
+        let a = entry("/a.mp4");
+        let entries = [a.clone()];
+        let cfg = Config {
+            enabled: true,
+            wallpaper: a.to_wallpaper(),
+            ..Default::default()
+        };
+        let view = config_for_active_cards(&cfg, &entries, None, Some(false));
+        assert!(!entry_is_active(&a, &view));
+        // Even a live schedule's slot is not on screen without a daemon.
+        let live = always_slot_config("/a.mp4", "/b.mp4");
+        let view = config_for_active_cards(
+            &live,
+            &entries,
+            Some(std::path::Path::new("/a.mp4")),
+            Some(false),
+        );
+        assert!(!entry_is_active(&a, &view));
+        // Running, or not yet known: config.toml decides.
+        for running in [Some(true), None] {
+            let view = config_for_active_cards(&cfg, &entries, None, running);
+            assert!(entry_is_active(&a, &view));
+        }
+        // The saved config is never touched: Quit must keep `enabled`.
+        assert!(cfg.enabled);
     }
 
     /// Advanced "Off" then "Day / night" again: the wallpaper keeps playing

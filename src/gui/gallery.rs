@@ -28,6 +28,7 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
     win.set_transient_for(Some(parent));
     win.set_modal(false);
     win.set_default_size(760, 560);
+    win.add_css_class("tight-shadow");
     win.set_title(Some(t!("Browse wallpapers")));
 
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -39,6 +40,10 @@ pub fn show_gallery_window(parent: &adw::ApplicationWindow, state: Rc<RefCell<Ap
 
     let status = gtk4::Label::new(Some(t!("Loading catalog…")));
     status.add_css_class("dim");
+    // A fetch error can be one long unbroken line; wrap it or it widens the window.
+    status.set_wrap(true);
+    status.set_wrap_mode(gtk4::pango::WrapMode::WordChar); // the error embeds a URL
+    status.set_max_width_chars(60);
     status.set_margin_top(24);
     root.append(&status);
 

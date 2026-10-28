@@ -1763,6 +1763,12 @@ impl Wallpaper {
             .or_else(|| self.paths.first().map(|p| p.as_path()))
     }
 
+    /// Whether anything is set to play: a media file, or a slideshow (which
+    /// has no single path). The daemon builds a renderer only for these.
+    pub fn is_configured(&self) -> bool {
+        self.effective_path().is_some() || self.kind == Kind::Slideshow
+    }
+
     /// Power-saving level actually applied to this wallpaper: the per-wallpaper
     /// override if set, otherwise the `global` default.
     pub fn effective_power_saving(&self, global: PowerSaving) -> PowerSaving {
@@ -1856,6 +1862,16 @@ pub struct Config {
     /// Use tiny mpv buffers and fewer decode threads. For low-RAM machines.
     #[serde(default)]
     pub low_memory: bool,
+    /// One switch for "use as little as possible" — gaming and older PCs.
+    ///
+    /// Never rewrites the settings below it: the daemon and GUI ask the
+    /// `Config::effective_*` helpers instead of reading the raw fields, so
+    /// turning this off puts every individual setting back exactly as the user
+    /// left it. While on: widgets off (and with them the audio capture),
+    /// Minimum power saving, low-memory buffers, pause when any large window
+    /// covers the screen, no hover previews or proxy clips, no auto-cycle.
+    #[serde(default)]
+    pub performance_mode: bool,
     /// Deprecated 1.1.32 frame-rate cap, in fps. Retained only so configs
     /// written by 1.1.32 still parse; the value is migrated to
     /// [`Config::power_saving`] on load (see `Config::migrate`) and never
@@ -2081,6 +2097,7 @@ impl Default for Config {
             scaling: Scaling::default(),
             power_saving: PowerSaving::default(),
             low_memory: false,
+            performance_mode: false,
             framerate: 0,
             dde_mode: DdeMode::default(),
             dde_icon_peek_secs: default_dde_icon_peek_secs(),
@@ -2241,6 +2258,40 @@ impl Config {
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, path)?;
         Ok(())
+    }
+
+    /// The widgets to run: none in [`Config::performance_mode`]. `None` stops
+    /// every widget, the now-playing worker and the audio capture.
+    pub fn effective_widgets(&self) -> Option<&Widgets> {
+        if self.performance_mode {
+            None
+        } else {
+            self.widgets.as_ref()
+        }
+    }
+
+    /// Power saving for `w`: Minimum in [`Config::performance_mode`], whatever
+    /// the wallpaper's own override says; otherwise the usual override-then-global.
+    pub fn effective_power_saving(&self, w: &Wallpaper) -> PowerSaving {
+        if self.performance_mode {
+            PowerSaving::Minimum
+        } else {
+            w.effective_power_saving(self.power_saving)
+        }
+    }
+
+    pub fn effective_low_memory(&self) -> bool {
+        self.performance_mode || self.low_memory
+    }
+
+    /// Fullscreen windows always pause the wallpaper; this is the extra "or
+    /// any window covering 90% of the screen" half.
+    pub fn effective_pause_on_covered(&self) -> bool {
+        self.performance_mode || self.pause_on_covered
+    }
+
+    pub fn effective_hover_previews(&self) -> bool {
+        self.hover_previews && !self.performance_mode
     }
 
     /// Effective wallpaper for a connector, honoring per-monitor overrides.
@@ -2594,6 +2645,75 @@ mod tests {
         let s = toml::to_string(&cfg).unwrap();
         let back: Config = toml::from_str(&s).unwrap();
         assert_eq!(back.power_saving, PowerSaving::Reduced);
+    }
+
+    #[test]
+    fn performance_mode_defaults_off_and_changes_nothing() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(!cfg.performance_mode);
+        let w = Wallpaper {
+            power_saving: Some(PowerSaving::Full),
+            ..Wallpaper::default()
+        };
+        let cfg = Config {
+            power_saving: PowerSaving::Reduced,
+            low_memory: false,
+            pause_on_covered: false,
+            widgets: Some(Widgets::default()),
+            ..Config::default()
+        };
+        assert!(cfg.effective_widgets().is_some());
+        assert_eq!(cfg.effective_power_saving(&w), PowerSaving::Full);
+        assert_eq!(
+            cfg.effective_power_saving(&Wallpaper::default()),
+            PowerSaving::Reduced
+        );
+        assert!(!cfg.effective_low_memory());
+        assert!(!cfg.effective_pause_on_covered());
+        assert!(cfg.effective_hover_previews());
+    }
+
+    #[test]
+    fn performance_mode_overrides_at_runtime_and_keeps_the_users_values() {
+        let w = Wallpaper {
+            power_saving: Some(PowerSaving::Full),
+            ..Wallpaper::default()
+        };
+        let widgets = Widgets {
+            visualizer: Visualizer {
+                enabled: true,
+                ..Visualizer::default()
+            },
+            ..Widgets::default()
+        };
+        let cfg = Config {
+            performance_mode: true,
+            power_saving: PowerSaving::Full,
+            hover_previews: true,
+            widgets: Some(widgets.clone()),
+            wallpaper: w.clone(),
+            ..Config::default()
+        };
+        // Everything is forced down, even past a wallpaper's own Full override.
+        assert!(cfg.effective_widgets().is_none());
+        assert_eq!(cfg.effective_power_saving(&w), PowerSaving::Minimum);
+        assert!(cfg.effective_low_memory());
+        assert!(cfg.effective_pause_on_covered());
+        assert!(!cfg.effective_hover_previews());
+        // ...without touching what the user chose.
+        assert_eq!(cfg.power_saving, PowerSaving::Full);
+        assert!(!cfg.low_memory && !cfg.pause_on_covered && cfg.hover_previews);
+        assert_eq!(cfg.widgets.as_ref(), Some(&widgets));
+        assert_eq!(cfg.wallpaper.power_saving, Some(PowerSaving::Full));
+        // Saved and reloaded, then switched off: all of it comes straight back.
+        let mut back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert!(back.performance_mode);
+        back.performance_mode = false;
+        assert_eq!(back.effective_widgets(), Some(&widgets));
+        assert_eq!(back.effective_power_saving(&w), PowerSaving::Full);
+        assert!(!back.effective_low_memory());
+        assert!(!back.effective_pause_on_covered());
+        assert!(back.effective_hover_previews());
     }
 
     #[test]

@@ -31,7 +31,7 @@ Fresco turns a video, GIF, image, slideshow or playlist into the wallpaper behin
 - **Control:** the app, a Ctrl+K command palette, and `fresco next` / `fresco prev` / `fresco random` for keyboard shortcuts.
 - **Install:** a `.deb` for Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali and Deepin (one-line script, manual download or the Deepin App Store); build from source on Fedora, Arch and others — see [Installation](#installation).
 - **License:** free and open source under [GPL-3.0-or-later](LICENSE), with no ads and no account.
-- **Users:** 3,000+ people in 128 countries. Latest version: 1.1.52.
+- **Users:** 3,000+ people in 128 countries. Latest version: 1.1.53.
 
 ## Installation
 
@@ -468,7 +468,7 @@ The thread is keyed by a random ticket generated separately from telemetry and s
 | **License** | [GPL-3.0-or-later](LICENSE) — free and open source, no ads, no account |
 | **Language and stack** | Rust, GTK4 / libadwaita, libmpv; a bundled mpvpaper renderer on Wayland |
 | **First release** | v0.0.1, June 2026 |
-| **Latest version** | 1.1.52 (2026-10-25) — see [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) for the newest |
+| **Latest version** | 1.1.53 (2026-10-28) — see [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) for the newest |
 | **Packages** | `.deb` (amd64), one-line install script, Deepin App Store; source build elsewhere |
 | **Interface languages** | English plus 13 translations: Simplified Chinese, Russian, Spanish, French, German, Portuguese (Brazil), Turkish, Vietnamese, Indonesian, Hindi, Bengali, Romanian and Arabic |
 | **Users** | 3,000+ people in 128 countries |
@@ -486,4 +486,4 @@ Bug reports, feature requests, and PRs are welcome — open an [issue](https://g
 
 ---
 
-<sub>Fresco is a free, open-source live wallpaper and video wallpaper app for Linux (X11 and Wayland), with lyrics, clock, audio-visualiser and album-art widgets drawn into the wallpaper. It is a native Linux alternative to Wallpaper Engine and a music-and-clock companion to tools like Conky. Used by 3,000+ people in 128 countries. Last updated: 2026-10-25.</sub>
+<sub>Fresco is a free, open-source live wallpaper and video wallpaper app for Linux (X11 and Wayland), with lyrics, clock, audio-visualiser and album-art widgets drawn into the wallpaper. It is a native Linux alternative to Wallpaper Engine and a music-and-clock companion to tools like Conky. Used by 3,000+ people in 128 countries. Last updated: 2026-10-28.</sub>

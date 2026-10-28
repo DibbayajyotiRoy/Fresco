@@ -3374,7 +3374,7 @@ impl WidgetEngine {
     /// skipped when no output is a target — leaves the clock "overdue", and an
     /// overdue deadline is a zero wait: the loop spun at ~1000 wakes a second
     /// for as long as the screen stayed locked. So a deadline is reported only
-    /// if a tick ran within [`DRIVEN_WITHIN`]; otherwise `None`, and the loop
+    /// if a tick ran within `DRIVEN_WITHIN`; otherwise `None`, and the loop
     /// falls back to its own tick.
     pub fn next_deadline(&self) -> Option<Instant> {
         let now = Instant::now();

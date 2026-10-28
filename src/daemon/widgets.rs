@@ -2815,6 +2815,10 @@ pub struct WidgetEngine {
     /// [`DiscWidgetCfg::enabled`] is false. See
     /// [`WidgetEngine::set_lock_album_art`].
     lock_wants_art: bool,
+    /// The lock screen's Now Playing widget wants the player's metadata, even
+    /// with no lyric or disc widget on (always so in lock-screen-only runs).
+    /// See [`WidgetEngine::set_lock_now_playing`].
+    lock_wants_player: bool,
     /// `Some` exactly while the lyric widget is enabled.
     worker: Option<Worker>,
     /// [`Track::seq`] of the track currently loaded into `lyrics`.
@@ -2906,6 +2910,7 @@ impl WidgetEngine {
             fonts: Fonts::new(),
             lyrics: LyricsRuntime::new(&config::Lyrics::default()),
             lock_wants_art: false,
+            lock_wants_player: false,
             worker: None,
             track_seq: None,
             lyrics_view: None,
@@ -2998,7 +3003,7 @@ impl WidgetEngine {
         // widget currently wants it.
         let wants_art = self.disc_cfg.enabled || self.lock_wants_art;
         let art = wants_art.then_some(self.disc_cfg.size_px);
-        if self.lyrics_cfg.enabled || wants_art {
+        if self.lyrics_cfg.enabled || wants_art || self.lock_wants_player {
             match &self.worker {
                 Some(worker) => {
                     worker.set_folder(folder);
@@ -3282,6 +3287,17 @@ impl WidgetEngine {
             return;
         }
         self.lock_wants_art = wants;
+        self.sync_worker();
+    }
+
+    /// Tell the engine whether the lock screen's Now Playing widget needs the
+    /// player's metadata, whatever the desktop widgets are doing. Shares the
+    /// one worker like [`set_lock_album_art`](Self::set_lock_album_art).
+    pub fn set_lock_now_playing(&mut self, wants: bool) {
+        if wants == self.lock_wants_player {
+            return;
+        }
+        self.lock_wants_player = wants;
         self.sync_worker();
     }
 

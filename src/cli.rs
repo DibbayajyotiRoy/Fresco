@@ -286,13 +286,19 @@ fn doctor() -> i32 {
         }
     }
 
-    let configured = Config::load()
-        .map(|c| {
-            c.enabled && (c.wallpaper.effective_path().is_some() || !c.wallpaper.paths.is_empty())
-        })
-        .unwrap_or(false);
+    let cfg = Config::load().ok();
+    let configured = cfg.as_ref().is_some_and(|c| {
+        c.enabled && (c.wallpaper.effective_path().is_some() || !c.wallpaper.paths.is_empty())
+    });
     if configured {
         check("Wallpaper configured", true, "", &mut problems);
+    } else if cfg.is_some_and(|c| !c.enabled && c.daemon_wanted()) {
+        check(
+            "Lock screen only (desktop wallpaper off)",
+            true,
+            "",
+            &mut problems,
+        );
     } else {
         warn("Wallpaper configured", "none yet — open Fresco to set one");
     }

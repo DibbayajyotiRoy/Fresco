@@ -57,7 +57,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   support the lock screen *is* the desktop background, so with the desktop
   wallpaper off it keeps showing your own background. On COSMIC with live
   lock-screen support the lock-screen video is started when the screen locks
-  and stopped when it unlocks.
+  and stopped when it unlocks. With the desktop wallpaper off, the lock
+  screen's Lyrics and Visualizer widgets do nothing (they are desktop
+  overlays); its other widgets work as usual.
 
 ### Fixed
 - **Closing Fresco no longer drops the live wallpaper back to a still image**

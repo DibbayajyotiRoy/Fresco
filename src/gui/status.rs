@@ -408,10 +408,8 @@ fn poll_once(widgets: Rc<PillWidgets>) {
             Ok(crate::ipc::Response::Status(s)) if s.running => Off::Idle,
             _ => Config::load().map_or(Off::Idle, |c| off_state(&c)),
         };
-        // A daemon that runs with the desktop wallpaper off runs for the lock
-        // screen alone (it exits when neither is wanted).
         let lock_only = matches!(&result, Ok(crate::ipc::Response::Status(s)) if s.running)
-            && Config::load().is_ok_and(|c| !c.enabled);
+            && Config::load().is_ok_and(|c| lock_only(&c));
         let _ = tx.send_blocking((result, off, lock_only));
     });
 
@@ -478,11 +476,19 @@ fn send_fire_and_forget(req: Request) {
 /// What the saved config says about a daemon that is not running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Off {
-    /// Stopped on purpose (`enabled = false`), or never set up.
+    /// Stopped on purpose (`enabled = false`, no lock screen), or never set up.
     Idle,
-    /// `enabled = true` yet no daemon: the tray's "Quit", or a crash. Start
-    /// brings it back now; `resumes_at_login` says the autostart entry will too.
+    /// A wallpaper (`enabled = true`) or the lock screen wants a daemon that is
+    /// not there: the tray's "Quit", or a crash. Start brings it back now;
+    /// `resumes_at_login` says the autostart entry will too.
     Wanted { resumes_at_login: bool },
+}
+
+/// A running daemon is serving the lock screen alone: the desktop wallpaper is
+/// off but the lock screen still wants it. Without the lock screen it is just
+/// finishing a Stop, and the pill must not call that "lock screen only".
+fn lock_only(cfg: &Config) -> bool {
+    !cfg.enabled && cfg.daemon_wanted()
 }
 
 fn off_state(cfg: &Config) -> Off {
@@ -490,8 +496,8 @@ fn off_state(cfg: &Config) -> Off {
     // is nothing to resume or start.
     let configured =
         cfg.wallpaper.is_configured() || cfg.monitors.values().any(Wallpaper::is_configured);
-    // With the desktop wallpaper off, only the lock screen can want the daemon.
-    if (cfg.enabled && configured) || (!cfg.enabled && cfg.daemon_wanted()) {
+    // The lock screen wants the daemon whether or not a wallpaper is picked.
+    if (cfg.enabled && configured) || cfg.lockscreen.as_ref().is_some_and(|l| l.enabled) {
         Off::Wanted {
             resumes_at_login: cfg.autostart,
         }
@@ -816,6 +822,22 @@ mod tests {
             ..Default::default()
         });
         assert!(matches!(off_state(&cfg), Off::Wanted { .. }));
+        assert!(lock_only(&cfg), "serving the lock screen alone");
+        cfg.lockscreen = None;
+        assert!(
+            !lock_only(&cfg),
+            "a normal Stop's dying daemon is not lock-only"
+        );
+        cfg.enabled = true;
+        assert!(!lock_only(&cfg), "desktop wallpaper on");
+        cfg.lockscreen = Some(crate::config::LockScreen {
+            enabled: true,
+            ..Default::default()
+        });
+        assert!(
+            matches!(off_state(&cfg), Off::Wanted { .. }),
+            "lock screen on with no wallpaper still offers Start"
+        );
     }
 
     /// A status poll that connects but gets no reply in time is a busy daemon,

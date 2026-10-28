@@ -1070,6 +1070,11 @@ impl Daemon {
                     .widgets
                     .contains(&crate::lockscreen::LockWidget::AlbumArt),
             );
+            self.widgets.set_lock_now_playing(
+                resolved
+                    .widgets
+                    .contains(&crate::lockscreen::LockWidget::NowPlaying),
+            );
             let targets = self.lock.begin_lock(&resolved, &ctx, theme);
             if targets != lock::hosts::LockTargets::Desktop {
                 self.lock_paused = Some(self.user_paused || self.battery_paused);
@@ -1081,6 +1086,7 @@ impl Daemon {
             let cleared = self.lock.end_lock();
             self.dispatch_widget_updates(cleared);
             self.widgets.set_lock_album_art(false);
+            self.widgets.set_lock_now_playing(false);
             if let Some(prev) = self.lock_paused.take() {
                 for r in &self.renderers {
                     r.player.set_paused(prev);
@@ -1865,6 +1871,9 @@ impl Daemon {
     /// Poll EWMH fullscreen (and, if configured, covered) state and
     /// reconcile per-monitor pause on change.
     fn check_fullscreen(&mut self) {
+        if self.renderers.is_empty() {
+            return; // lock-screen-only (or Plasma): nothing here to pause
+        }
         let covered = x11_fullscreen::covered_connectors(
             &self.conn,
             self.screen().root,
@@ -1905,6 +1914,9 @@ impl Daemon {
     /// raise waits out `dde_icon_peek_secs` before taking the stack back (see
     /// [`dde::IconPeek`]).
     fn reassert_stacking(&mut self) {
+        if self.renderers.is_empty() {
+            return; // lock-screen-only (or Plasma): no window of ours to place
+        }
         // Started before dde-shell mapped its desktop window: we picked
         // transparency, which shows black there. Redo the choice now that the
         // window exists. Not looping: a rebuild that finds nothing to show
@@ -3471,6 +3483,13 @@ fn run_wayland_layershell() -> Result<()> {
                 // wallpaper off none is running — so run one for as long as
                 // the screen is locked (cleared again on unlock, below).
                 if !config.enabled && show_on_lock {
+                    // `monitors` is only refreshed at start and on Apply, so
+                    // pick up displays plugged in since.
+                    if let Ok(m) = wayland_outputs::list_outputs() {
+                        if !m.is_empty() {
+                            monitors = m;
+                        }
+                    }
                     for m in &monitors {
                         let wp = config.lock_source(Some(&m.connector)).clone();
                         if !wp.is_configured() {
@@ -3504,6 +3523,11 @@ fn run_wayland_layershell() -> Result<()> {
                             .widgets
                             .contains(&crate::lockscreen::LockWidget::AlbumArt),
                     );
+                    widget_engine.set_lock_now_playing(
+                        resolved
+                            .widgets
+                            .contains(&crate::lockscreen::LockWidget::NowPlaying),
+                    );
                     let geoms = wayland_all_output_geoms(&monitors);
                     let ctx = lock_rt.ctx(&config, &geoms);
                     let theme = lock_widget_theme(&config);
@@ -3513,6 +3537,7 @@ fn run_wayland_layershell() -> Result<()> {
                 let cleared = lock_rt.end_lock();
                 dispatch_wayland_lock_updates(cleared, &outputs);
                 widget_engine.set_lock_album_art(false);
+                widget_engine.set_lock_now_playing(false);
                 widget_engine.invalidate();
                 // Restore whatever the lock's own live-video/dim policy
                 // touched — `reconcile_pause`'s own change-gating (below,

@@ -2287,9 +2287,12 @@ impl Config {
     }
 
     /// The widgets to run: none in [`Config::performance_mode`], and none
-    /// while the desktop wallpaper is off (the lock screen's widgets are the
-    /// lock engine's, not these). `None` stops every widget, the now-playing
-    /// worker and the audio capture.
+    /// while the desktop wallpaper is off. `None` stops every widget, the
+    /// now-playing worker and the audio capture, except that the lock screen
+    /// still asks for the worker while locked (its Now Playing and Album Art
+    /// widgets, run by the lock engine). The lock screen's Lyrics and
+    /// Visualizer widgets are desktop overlays, so they do nothing while the
+    /// desktop wallpaper is off.
     pub fn effective_widgets(&self) -> Option<&Widgets> {
         if self.performance_mode || !self.enabled {
             None

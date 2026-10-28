@@ -3726,10 +3726,8 @@ fn spawn_metadata_probe(state: &Rc<RefCell<AppState>>) {
     });
 }
 
-/// Remove a library entry (and its cached thumbnail). Does not touch the
-/// original media file. Refreshes the grid afterwards.
 /// Turn the wallpaper off and revert the desktop to its own background, without
-/// deleting anything. Disables autostart (so login doesn't resurrect it),
+/// deleting anything. Sets `enabled = false` (so login doesn't resurrect it),
 /// clears the active wallpaper from config, and stops the daemon — which tears
 /// down its renderers (destroying the desktop window / restoring the DDE
 /// wallpaper). Setting any wallpaper again re-enables and respawns it. With the
@@ -3769,6 +3767,8 @@ fn stop_wallpaper(state: &Rc<RefCell<AppState>>) {
     }
 }
 
+/// Remove a library entry (and its cached thumbnail). Does not touch the
+/// original media file. Refreshes the grid afterwards.
 fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     let was_active;
     {

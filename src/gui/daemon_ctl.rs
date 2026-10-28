@@ -127,8 +127,9 @@ pub(super) fn apply_blocking() -> Result<()> {
         // fresh daemon here would resurrect the wallpaper the user just
         // stopped, reading as "Stop did nothing" (issue #33). The disk
         // config is the source of truth — when it says off, there is
-        // nothing to apply to.
-        if !Config::load().unwrap_or_default().enabled {
+        // nothing to apply to. The lock screen counts: with only it on, the
+        // daemon starts (and runs with no desktop wallpaper).
+        if !Config::load().unwrap_or_default().daemon_wanted() {
             return Ok(());
         }
         let mut scoped = spawn_daemon()?;

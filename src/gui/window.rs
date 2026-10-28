@@ -3726,23 +3726,20 @@ fn spawn_metadata_probe(state: &Rc<RefCell<AppState>>) {
     });
 }
 
-/// Remove a library entry (and its cached thumbnail). Does not touch the
-/// original media file. Refreshes the grid afterwards.
 /// Turn the wallpaper off and revert the desktop to its own background, without
-/// deleting anything. Disables autostart (so login doesn't resurrect it),
+/// deleting anything. Sets `enabled = false` (so login doesn't resurrect it),
 /// clears the active wallpaper from config, and stops the daemon — which tears
 /// down its renderers (destroying the desktop window / restoring the DDE
-/// wallpaper). Setting any wallpaper again re-enables and respawns it.
+/// wallpaper). Setting any wallpaper again re-enables and respawns it. With the
+/// lock screen on, the daemon (and the wallpaper the lock follows) stays: only
+/// the desktop is switched off.
 fn stop_wallpaper(state: &Rc<RefCell<AppState>>) {
-    {
+    let keep_daemon = {
         let mut s = state.borrow_mut();
-        s.config.enabled = false;
-        s.config.wallpaper.path = None;
-        s.config.wallpaper.paths.clear();
-        s.config.wallpaper.slideshow = None;
-        s.config.monitors.clear();
+        let keep = s.config.stop_desktop();
         s.config.save().ok();
-    }
+        keep
+    };
     // Stop takes the daemon down, and the scheduler with it; say so instead of
     // letting a configured schedule silently stop switching.
     if schedule_active(&state.borrow().config) {
@@ -3755,13 +3752,23 @@ fn stop_wallpaper(state: &Rc<RefCell<AppState>>) {
     // says "off" on disk and callers already update the UI optimistically
     // (toast + refresh), so there's nothing worth blocking the GTK thread on
     // here. Its own queue, not the apply queue — see `daemon_ctl::stop_async`.
-    daemon_ctl::stop_async(|outcome| {
+    let done = |outcome: daemon_ctl::ApplyOutcome| {
         if let Err(e) = outcome.result {
             log::warn!("stop request failed: {e}");
         }
-    });
+    };
+    if keep_daemon {
+        // The lock screen still needs the daemon: an Apply makes it drop the
+        // desktop wallpaper and carry on.
+        let config = state.borrow().config.clone();
+        daemon_ctl::apply_async(&config, done);
+    } else {
+        daemon_ctl::stop_async(done);
+    }
 }
 
+/// Remove a library entry (and its cached thumbnail). Does not touch the
+/// original media file. Refreshes the grid afterwards.
 fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
     let was_active;
     {

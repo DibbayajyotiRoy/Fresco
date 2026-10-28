@@ -660,5 +660,6 @@
   "Open main window": "Abrir janela principal",
   "Quit Fresco (until next login)": "Sair do Fresco (até o próximo login)",
   "Show icon in the system tray": "Mostrar ícone na bandeja do sistema",
-  "RESUMES AT NEXT LOGIN": "RETOMA NO PRÓXIMO LOGIN"
+  "RESUMES AT NEXT LOGIN": "RETOMA NO PRÓXIMO LOGIN",
+  "LOCK SCREEN ONLY": "SOMENTE TELA DE BLOQUEIO"
 }

@@ -408,21 +408,24 @@ fn poll_once(widgets: Rc<PillWidgets>) {
             Ok(crate::ipc::Response::Status(s)) if s.running => Off::Idle,
             _ => Config::load().map_or(Off::Idle, |c| off_state(&c)),
         };
-        let _ = tx.send_blocking((result, off));
+        let lock_only = matches!(&result, Ok(crate::ipc::Response::Status(s)) if s.running)
+            && Config::load().is_ok_and(|c| lock_only(&c));
+        let _ = tx.send_blocking((result, off, lock_only));
     });
 
     glib::spawn_future_local(async move {
-        let Ok((result, off)) = rx.recv().await else {
+        let Ok((result, off, lock_only)) = rx.recv().await else {
             return;
         };
         match result {
             Ok(crate::ipc::Response::Status(status)) => {
                 note_daemon_running(status.running);
                 LAST_MONITORS.with(|m| *m.borrow_mut() = status.monitors_info.clone());
-                note_playing_path(status.wallpaper_path.clone());
+                // Nothing plays on the desktop then, whatever the config names.
+                note_playing_path(status.wallpaper_path.clone().filter(|_| !lock_only));
                 LAST_LOCK_SUPPORT
                     .with(|c| c.set(status.lockscreen.as_ref().and_then(lock_support_of)));
-                apply_status(&widgets, &status, off);
+                apply_status(&widgets, &status, off, lock_only);
                 notify_reachable(status.running);
             }
             Ok(_) => {}
@@ -473,11 +476,19 @@ fn send_fire_and_forget(req: Request) {
 /// What the saved config says about a daemon that is not running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Off {
-    /// Stopped on purpose (`enabled = false`), or never set up.
+    /// Stopped on purpose (`enabled = false`, no lock screen), or never set up.
     Idle,
-    /// `enabled = true` yet no daemon: the tray's "Quit", or a crash. Start
-    /// brings it back now; `resumes_at_login` says the autostart entry will too.
+    /// A wallpaper (`enabled = true`) or the lock screen wants a daemon that is
+    /// not there: the tray's "Quit", or a crash. Start brings it back now;
+    /// `resumes_at_login` says the autostart entry will too.
     Wanted { resumes_at_login: bool },
+}
+
+/// A running daemon is serving the lock screen alone: the desktop wallpaper is
+/// off but the lock screen still wants it. Without the lock screen it is just
+/// finishing a Stop, and the pill must not call that "lock screen only".
+fn lock_only(cfg: &Config) -> bool {
+    !cfg.enabled && cfg.daemon_wanted()
 }
 
 fn off_state(cfg: &Config) -> Off {
@@ -485,7 +496,8 @@ fn off_state(cfg: &Config) -> Off {
     // is nothing to resume or start.
     let configured =
         cfg.wallpaper.is_configured() || cfg.monitors.values().any(Wallpaper::is_configured);
-    if cfg.enabled && configured {
+    // The lock screen wants the daemon whether or not a wallpaper is picked.
+    if (cfg.enabled && configured) || cfg.lockscreen.as_ref().is_some_and(|l| l.enabled) {
         Off::Wanted {
             resumes_at_login: cfg.autostart,
         }
@@ -544,7 +556,7 @@ fn apply_off(w: &PillWidgets, off: Off) {
     w.pill.set_tooltip_text(None);
 }
 
-fn apply_status(w: &PillWidgets, status: &StatusReply, off: Off) {
+fn apply_status(w: &PillWidgets, status: &StatusReply, off: Off, lock_only: bool) {
     if !status.running {
         apply_off(w, off);
         return;
@@ -585,6 +597,12 @@ fn apply_status(w: &PillWidgets, status: &StatusReply, off: Off) {
         .zip(status.wallpaper_path.as_deref())
         .and_then(|(f, p)| f(p));
     let (title, file) = pill_title(library_name, status.wallpaper.as_deref());
+    let (title, file) = if lock_only {
+        w.overline.set_label(t!("LOCK SCREEN ONLY"));
+        (t!("Lock screen").to_string(), None)
+    } else {
+        (title, file)
+    };
     w.label.set_label(&title);
 
     match status.hwdec.as_deref() {
@@ -595,7 +613,8 @@ fn apply_status(w: &PillWidgets, status: &StatusReply, off: Off) {
         _ => w.hwdec.set_visible(false),
     }
 
-    w.toggle.set_visible(pill_shows_toggle(w.still_frame));
+    w.toggle
+        .set_visible(pill_shows_toggle(w.still_frame) && !lock_only);
     if status.paused {
         w.toggle.set_icon_name("media-playback-start-symbolic");
         w.toggle.set_tooltip_text(Some(t!("Resume")));
@@ -786,6 +805,39 @@ mod tests {
         let fresh = Config::default();
         assert!(fresh.enabled && fresh.autostart);
         assert_eq!(off_state(&fresh), Off::Idle);
+    }
+
+    /// With the desktop wallpaper off the lock screen alone wants the daemon:
+    /// a dead one offers Start, a stopped-on-purpose one with no lock screen
+    /// stays idle.
+    #[test]
+    fn pill_offers_start_for_a_lock_screen_only_daemon() {
+        let mut cfg = Config {
+            enabled: false,
+            ..Default::default()
+        };
+        assert_eq!(off_state(&cfg), Off::Idle);
+        cfg.lockscreen = Some(crate::config::LockScreen {
+            enabled: true,
+            ..Default::default()
+        });
+        assert!(matches!(off_state(&cfg), Off::Wanted { .. }));
+        assert!(lock_only(&cfg), "serving the lock screen alone");
+        cfg.lockscreen = None;
+        assert!(
+            !lock_only(&cfg),
+            "a normal Stop's dying daemon is not lock-only"
+        );
+        cfg.enabled = true;
+        assert!(!lock_only(&cfg), "desktop wallpaper on");
+        cfg.lockscreen = Some(crate::config::LockScreen {
+            enabled: true,
+            ..Default::default()
+        });
+        assert!(
+            matches!(off_state(&cfg), Off::Wanted { .. }),
+            "lock screen on with no wallpaper still offers Start"
+        );
     }
 
     /// A status poll that connects but gets no reply in time is a busy daemon,

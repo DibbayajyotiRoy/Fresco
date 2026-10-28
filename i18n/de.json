@@ -660,5 +660,6 @@
   "Open main window": "Hauptfenster öffnen",
   "Quit Fresco (until next login)": "Fresco beenden (bis zur nächsten Anmeldung)",
   "Show icon in the system tray": "Symbol im Infobereich anzeigen",
-  "RESUMES AT NEXT LOGIN": "STARTET BEIM NÄCHSTEN LOGIN"
+  "RESUMES AT NEXT LOGIN": "STARTET BEIM NÄCHSTEN LOGIN",
+  "LOCK SCREEN ONLY": "NUR SPERRBILDSCHIRM"
 }

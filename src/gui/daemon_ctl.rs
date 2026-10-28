@@ -71,8 +71,9 @@ fn systemd_user_available() -> bool {
     dirs::runtime_dir().is_some_and(|d| d.join("systemd/private").exists())
 }
 
-/// Spawn frescod detached from the GUI process so it outlives it.
-pub fn spawn_daemon() -> Result<()> {
+/// Spawn frescod detached from the GUI process so it outlives it. True when
+/// it went through a systemd-run scope.
+pub fn spawn_daemon() -> Result<bool> {
     let frescod = frescod_path();
     if systemd_user_available() {
         if let Ok(mut child) = daemon_command(&frescod, true).spawn() {
@@ -80,12 +81,12 @@ pub fn spawn_daemon() -> Result<()> {
             // Still running means systemd-run became frescod. Only a failed
             // exit this early is a refusal; fall back to the plain spawn.
             if !matches!(child.try_wait(), Ok(Some(status)) if !status.success()) {
-                return Ok(());
+                return Ok(true);
             }
         }
     }
     daemon_command(&frescod, false).spawn()?;
-    Ok(())
+    Ok(false)
 }
 
 fn frescod_path() -> PathBuf {
@@ -130,16 +131,25 @@ pub(super) fn apply_blocking() -> Result<()> {
         if !Config::load().unwrap_or_default().enabled {
             return Ok(());
         }
-        spawn_daemon()?;
+        let mut scoped = spawn_daemon()?;
         // Poll instead of one fixed sleep: most daemons bind well under a
         // second, and this thread isn't the GTK thread so polling costs
         // nothing but wall time.
-        let start = std::time::Instant::now();
+        let mut start = std::time::Instant::now();
         while !ipc::daemon_alive() {
             if start.elapsed() >= STARTUP_TIMEOUT {
-                return Err(anyhow::anyhow!(
-                    "daemon failed to start — check ~/.local/state/fresco/frescod.log"
-                ));
+                if !scoped {
+                    return Err(anyhow::anyhow!(
+                        "daemon failed to start — check ~/.local/state/fresco/frescod.log"
+                    ));
+                }
+                // systemd-run accepted the scope but frescod never came up:
+                // retry once, plain. (A stray second frescod just exits on
+                // the single-instance check.)
+                scoped = false;
+                daemon_command(&frescod_path(), false).spawn()?;
+                start = std::time::Instant::now();
+                continue;
             }
             std::thread::sleep(STARTUP_POLL_INTERVAL);
         }

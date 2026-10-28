@@ -76,8 +76,14 @@ impl Tray for FrescoTray {
                     } else {
                         Request::Pause
                     };
-                    if let Err(e) = request(&req) {
-                        log::warn!("tray: pause/resume request failed: {e:#}");
+                    // Flip on success so the label and the next click follow
+                    // at once instead of waiting for the next status poll.
+                    match request(&req) {
+                        Ok(Response::Err { message }) => {
+                            log::warn!("tray: pause/resume refused: {message}");
+                        }
+                        Ok(_) => this.state.paused = !this.state.paused,
+                        Err(e) => log::warn!("tray: pause/resume request failed: {e:#}"),
                     }
                 }),
                 ..Default::default()
@@ -239,11 +245,19 @@ fn fresco_icon_installed() -> bool {
     candidates.iter().any(|p| p.exists())
 }
 
-/// Launch the `fresco` binary with the given arguments.
+/// Launch the `fresco` binary with the given arguments. Prefers the one next
+/// to this `frescod` so a staged/dev daemon never opens a different-version
+/// `fresco` from PATH (same lookup as `frescod_path` in `gui::daemon_ctl`).
 fn spawn_fresco(args: &[&str]) -> anyhow::Result<()> {
-    let mut cmd = std::process::Command::new("fresco");
-    cmd.args(args);
-    cmd.spawn()?;
+    let fresco = std::env::current_exe()
+        .map(|mut p| {
+            p.set_file_name("fresco");
+            p
+        })
+        .ok()
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from("fresco"));
+    std::process::Command::new(fresco).args(args).spawn()?;
     Ok(())
 }
 
@@ -284,12 +298,15 @@ fn apply_exit(cfg: &mut Config, exit: Exit) -> bool {
 fn exit_daemon(exit: Exit) {
     // Disable first, as the GUI does: a daemon that dies mid-stop must not be
     // resurrected with the wallpaper still enabled.
-    if let Ok(mut cfg) = Config::load() {
-        if apply_exit(&mut cfg, exit) {
-            if let Err(e) = cfg.save() {
-                log::warn!("tray: failed to disable wallpaper in config: {e:#}");
+    match Config::load() {
+        Ok(mut cfg) => {
+            if apply_exit(&mut cfg, exit) {
+                if let Err(e) = cfg.save() {
+                    log::warn!("tray: failed to disable wallpaper in config: {e:#}");
+                }
             }
         }
+        Err(e) => log::warn!("tray: could not read the config, 'enabled' left as is: {e:#}"),
     }
     // `Stop` runs the daemon's full shutdown, which puts the desktop's own
     // background back (DDE, GNOME, COSMIC, KDE, MATE, Xfce).

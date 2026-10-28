@@ -660,5 +660,6 @@
   "Open main window": "Открыть главное окно",
   "Quit Fresco (until next login)": "Выйти из Fresco (до следующего входа)",
   "Show icon in the system tray": "Показывать значок в системном трее",
-  "RESUMES AT NEXT LOGIN": "ВОЗОБНОВИТСЯ ПРИ СЛЕДУЮЩЕМ ВХОДЕ"
+  "RESUMES AT NEXT LOGIN": "ВОЗОБНОВИТСЯ ПРИ СЛЕДУЮЩЕМ ВХОДЕ",
+  "LOCK SCREEN ONLY": "ТОЛЬКО ЭКРАН БЛОКИРОВКИ"
 }

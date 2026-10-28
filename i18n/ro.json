@@ -660,5 +660,6 @@
   "Open main window": "Deschide fereastra principală",
   "Quit Fresco (until next login)": "Ieșire din Fresco (până la următoarea autentificare)",
   "Show icon in the system tray": "Afișează pictograma în zona de notificare",
-  "RESUMES AT NEXT LOGIN": "SE REIA LA URMĂTOAREA AUTENTIFICARE"
+  "RESUMES AT NEXT LOGIN": "SE REIA LA URMĂTOAREA AUTENTIFICARE",
+  "LOCK SCREEN ONLY": "DOAR ECRANUL DE BLOCARE"
 }

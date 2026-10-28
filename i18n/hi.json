@@ -660,5 +660,6 @@
   "Open main window": "मुख्य विंडो खोलें",
   "Quit Fresco (until next login)": "Fresco बंद करें (अगले लॉगिन तक)",
   "Show icon in the system tray": "सिस्टम ट्रे में आइकन दिखाएँ",
-  "RESUMES AT NEXT LOGIN": "अगले लॉगिन पर फिर शुरू होगा"
+  "RESUMES AT NEXT LOGIN": "अगले लॉगिन पर फिर शुरू होगा",
+  "LOCK SCREEN ONLY": "केवल लॉक स्क्रीन"
 }

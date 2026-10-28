@@ -286,13 +286,19 @@ fn doctor() -> i32 {
         }
     }
 
-    let configured = Config::load()
-        .map(|c| {
-            c.enabled && (c.wallpaper.effective_path().is_some() || !c.wallpaper.paths.is_empty())
-        })
-        .unwrap_or(false);
+    let cfg = Config::load().ok();
+    let configured = cfg.as_ref().is_some_and(|c| {
+        c.enabled && (c.wallpaper.effective_path().is_some() || !c.wallpaper.paths.is_empty())
+    });
     if configured {
         check("Wallpaper configured", true, "", &mut problems);
+    } else if cfg.is_some_and(|c| !c.enabled && c.daemon_wanted()) {
+        check(
+            "Lock screen only (desktop wallpaper off)",
+            true,
+            "",
+            &mut problems,
+        );
     } else {
         warn("Wallpaper configured", "none yet — open Fresco to set one");
     }
@@ -314,6 +320,12 @@ fn status() -> i32 {
         Some(s) => {
             println!("{BOLD}Fresco{RESET}");
             println!("  Backend     {}", backend_label(detect()));
+            if Config::load().is_ok_and(|c| !c.enabled && c.daemon_wanted()) {
+                // Serving the lock screen alone: nothing plays on the desktop.
+                println!("  Wallpaper   off — lock screen only");
+                println!("  Memory      {} MB", s.rss_mb);
+                return 0;
+            }
             println!("  Wallpaper   {}", s.wallpaper.as_deref().unwrap_or("—"));
             if !s.monitors.is_empty() {
                 println!("  Outputs     {}", s.monitors.len());

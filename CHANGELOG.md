@@ -4,6 +4,12 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The tray icon is now a monochrome symbolic icon** that follows the panel's
+  colours, like the other tray icons, instead of the full-colour app icon.
+
 ## [1.1.53] — 2026-10-28
 
 ### Added
@@ -60,9 +66,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and stopped when it unlocks. With the desktop wallpaper off, the lock
   screen's Lyrics and Visualizer widgets do nothing (they are desktop
   overlays); its other widgets work as usual.
-
-- **The tray icon is now a monochrome symbolic icon** that follows the panel's
-  colours, like the other tray icons, instead of the full-colour app icon.
 
 ### Fixed
 - **Closing Fresco no longer drops the live wallpaper back to a still image**

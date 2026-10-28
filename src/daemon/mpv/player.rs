@@ -99,14 +99,15 @@ impl Player {
             ),
             ("demuxer-readahead-secs", "1"),
         ];
-        if low_memory {
-            unsafe { f.set_option(handle, "vd-lavc-threads", "2") };
-        }
         // SAFETY: `handle` is the live, non-null handle just created above and
         // is not destroyed until `Drop`. This invariant holds for every mpv
         // call in this module.
         for (k, v) in opts {
             unsafe { f.set_option(handle, k, v) };
+        }
+        // After the loop: the `low-latency` profile above resets this to 1.
+        if low_memory {
+            unsafe { f.set_option(handle, "vd-lavc-threads", "2") };
         }
 
         // Looping mode depends on playlist vs single file.

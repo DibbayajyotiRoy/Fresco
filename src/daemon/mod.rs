@@ -2133,6 +2133,10 @@ impl Daemon {
     /// One-shot demuxer-cache raise once a ≥4K source is known (its resolution
     /// only becomes readable after the first load). See ROADMAP 1.8.5.
     fn check_cache(&mut self) {
+        // Low-memory / performance mode keeps the small demuxer cap, even at 4K.
+        if self.config.effective_low_memory() {
+            return;
+        }
         for r in &self.renderers {
             if r.cache_raised.get() {
                 continue;

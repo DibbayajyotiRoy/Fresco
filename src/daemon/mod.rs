@@ -1128,7 +1128,8 @@ impl Daemon {
         let blocked = self.user_paused
             || self.battery_paused
             || self.lock.locked
-            || self.config.performance_mode;
+            || self.config.performance_mode
+            || !self.config.enabled;
         if !auto_cycle_due(&self.config.auto_cycle, &mut self.last_cycle, now, blocked) {
             return;
         }
@@ -1299,7 +1300,14 @@ impl Daemon {
         // no X11 roundtrip.
         let kind = dde::window_kind(&self.conn, &self.atoms, screen.root, self.config.dde_mode);
 
-        for monitor in self.monitors.clone() {
+        // Desktop wallpaper off (lock-screen-only run): no renderer, but the
+        // monitor list above still feeds the lock screen's outputs.
+        for monitor in self
+            .monitors
+            .clone()
+            .into_iter()
+            .filter(|_| self.config.enabled)
+        {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
             if !wallpaper.is_configured() {
                 continue; // nothing configured for this monitor
@@ -1544,10 +1552,7 @@ impl Daemon {
         if let Err(e) = self.rebuild() {
             log::warn!("initial renderer build failed: {e:#}");
         }
-        overview::apply(&self.config.wallpaper);
-        cosmic_bg::apply(&self.config);
-        dde_lock::apply(&self.config);
-        kde_desktop::apply(&self.config);
+        sync_desktop_backgrounds(&self.config);
         log::info!("frescod started with {} renderer(s)", self.renderers.len());
         crate::telemetry::heartbeat(
             Some("x11"),
@@ -1561,6 +1566,7 @@ impl Daemon {
         loop {
             while let Ok((req, reply)) = commands.try_recv() {
                 let is_stop = matches!(req, Request::Stop);
+                let is_apply = matches!(req, Request::Apply);
                 let resp = self.handle_request(req);
                 let _ = reply.send(resp);
                 // Deferred from `handle_request(Apply)`: the caller already
@@ -1568,12 +1574,9 @@ impl Daemon {
                 // unblocked the GUI), so the slow full-size overview redecode
                 // happens here instead of before the reply went out.
                 if std::mem::take(&mut self.overview_pending) {
-                    overview::apply(&self.config.wallpaper);
-                    cosmic_bg::apply(&self.config);
-                    dde_lock::apply(&self.config);
-                    kde_desktop::apply(&self.config);
+                    sync_desktop_backgrounds(&self.config);
                 }
-                if is_stop {
+                if exits_after(is_stop, is_apply, &self.config) {
                     self.shutdown();
                     return Ok(());
                 }
@@ -1667,7 +1670,13 @@ impl Daemon {
         match req {
             Request::Apply => {
                 self.config_watch.mark();
+                let was_enabled = self.config.enabled;
                 self.config = Config::load().unwrap_or_else(|_| self.config.clone());
+                if was_enabled && !self.config.enabled {
+                    // Desktop wallpaper switched off, lock screen still on:
+                    // give the desktop back and keep serving the lock.
+                    self.release_desktop();
+                }
                 self.last_cycle = if self.config.auto_cycle.enabled {
                     Some(Instant::now())
                 } else {
@@ -2161,8 +2170,8 @@ impl Daemon {
     /// global wallpaper stands in for "at least one", so an empty RandR answer
     /// at login still counts as short.
     fn expected_renderers(&self) -> usize {
-        if kde_desktop::enabled() {
-            return 0; // plasmashell draws the wallpaper; we create no window
+        if kde_desktop::enabled() || !self.config.enabled {
+            return 0; // plasmashell draws the wallpaper, or the desktop is off
         }
         let wants = Wallpaper::is_configured;
         if self.monitors.is_empty() {
@@ -2277,9 +2286,18 @@ impl Daemon {
 
     fn shutdown(&mut self) {
         self.lock.end_lock(); // drop the engine and any LayerFiles/socket state
+        dde_lock::restore();
+        self.release_desktop();
+        std::fs::remove_file(crate::ipc::socket_path()).ok();
+        log::info!("frescod stopped");
+    }
+
+    /// Stop drawing the desktop wallpaper and put the user's own background
+    /// back — all of `shutdown` except the lock screen and the process, so the
+    /// desktop can be switched off while the daemon stays up for the lock.
+    fn release_desktop(&mut self) {
         overview::restore();
         cosmic_bg::restore();
-        dde_lock::restore();
         kde_desktop::restore();
         // MATE: stop copying Caja's icons (closing the thread's connection
         // undoes the redirect, so Caja renders on screen again), then swap the
@@ -2299,9 +2317,8 @@ impl Daemon {
             dde::restore();
         }
         caja_mirror::restore_key_background(caja_mirror::Desktop::Dde);
+        self.dde_mode = dde::Mode::Inactive;
         self.teardown_renderers();
-        std::fs::remove_file(crate::ipc::socket_path()).ok();
-        log::info!("frescod stopped");
     }
 }
 
@@ -2468,8 +2485,10 @@ fn proc_stats(child_pids: &[u32]) -> (f32, u64) {
 /// state instead of leaking the previous wallpaper's rotation.
 pub(crate) fn schedule_desired_wallpaper(config: &Config) -> Option<Wallpaper> {
     use chrono::Offset as _;
-    if config.schedule_paused {
-        return None; // paused: keep the schedule config, ignore it entirely
+    if config.schedule_paused || !config.enabled {
+        // Paused: keep the schedule config, ignore it entirely. Desktop off:
+        // there is no desktop wallpaper for it to switch.
+        return None;
     }
     let sched = config.schedule.as_ref()?;
     let now = chrono::Local::now();
@@ -2621,6 +2640,27 @@ fn setup_vaapi_env() {
     }
 }
 
+/// Whether a run loop ends after answering a request: a `Stop`, or an `Apply`
+/// that leaves neither the desktop wallpaper nor the lock screen to serve.
+/// Ask *after* handling it — an `Apply` reloads the config.
+fn exits_after(stop: bool, apply: bool, config: &Config) -> bool {
+    stop || (apply && !config.daemon_wanted())
+}
+
+/// Point the desktop's own background settings at a still of the wallpaper
+/// (GNOME overview, cosmic-bg, Plasma) while the desktop wallpaper is on. Off,
+/// they are left as the user's own: turning it off already restored them.
+/// Deepin's lock-screen background belongs to the lock screen, so it follows
+/// `[lockscreen]` either way.
+fn sync_desktop_backgrounds(config: &Config) {
+    if config.enabled {
+        overview::apply(&config.wallpaper);
+        cosmic_bg::apply(config);
+        kde_desktop::apply(config);
+    }
+    dde_lock::apply(config);
+}
+
 pub fn run() -> Result<()> {
     use crate::capability::{detect, Capability};
     // First, before any thread exists: termination signals become a clean
@@ -2638,7 +2678,7 @@ pub fn run() -> Result<()> {
     // exists. Fixes installs where config says autostart=true but the .desktop
     // entry was never written, so the daemon silently failed to start on boot.
     if let Ok(cfg) = Config::load() {
-        if cfg.autostart && cfg.enabled {
+        if cfg.autostart && cfg.daemon_wanted() {
             crate::autostart::enable().ok();
         }
         // Browser bridge: bound at startup only (std TcpListener has no clean
@@ -2651,7 +2691,7 @@ pub fn run() -> Result<()> {
         }
         // System-tray icon: the supervisor follows `tray_icon` from config.toml,
         // so the Settings switch takes effect without a restart.
-        if cfg.enabled {
+        if cfg.daemon_wanted() {
             tray::spawn();
         }
     }
@@ -2697,8 +2737,11 @@ fn run_x11() -> Result<()> {
         // xfdesktop) painting the key colour, with the user's background saved
         // on disk (no-op otherwise, so it needs no desktop check).
         caja_mirror::restore_background();
-        log::info!("wallpaper disabled (enabled=false) — exiting");
-        return Ok(());
+        if !config.daemon_wanted() {
+            log::info!("wallpaper disabled (enabled=false) — exiting");
+            return Ok(());
+        }
+        log::info!("desktop wallpaper off; running for the lock screen only");
     }
     let mut daemon = Daemon::new(config)?;
     daemon.run()
@@ -2708,7 +2751,7 @@ fn run_x11() -> Result<()> {
 /// check the auto-cycle again. When cycling is enabled the timeout is capped so
 /// the cycle fires promptly; otherwise the usual long heartbeat timeout is used.
 fn gnome_static_cycle_timeout(config: &Config, last_cycle: Option<Instant>) -> Duration {
-    if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
+    if !config.enabled || !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
         return HEARTBEAT_RECHECK_INTERVAL;
     }
     let interval = Duration::from_secs(u64::from(config.auto_cycle.interval_min) * 60);
@@ -2738,7 +2781,7 @@ fn gnome_static_auto_cycle(
         &config.auto_cycle,
         last_cycle,
         now,
-        locked || config.performance_mode,
+        locked || config.performance_mode || !config.enabled,
     ) {
         return;
     }
@@ -2767,12 +2810,17 @@ fn run_gnome_static() -> Result<()> {
     if !config.enabled {
         overview::restore();
         cosmic_bg::restore();
-        log::info!("wallpaper disabled (enabled=false) — exiting");
-        return Ok(());
+        if !config.daemon_wanted() {
+            log::info!("wallpaper disabled (enabled=false) — exiting");
+            return Ok(());
+        }
+        log::info!("desktop wallpaper off; running for the lock screen only");
     }
     let commands = control::start_server()?;
-    overview::apply(&config.wallpaper);
-    cosmic_bg::apply(&config);
+    if config.enabled {
+        overview::apply(&config.wallpaper);
+        cosmic_bg::apply(&config);
+    }
     log::info!("frescod started (GNOME Wayland static-frame mode)");
     crate::telemetry::heartbeat(Some("gnome-static"), None, None);
 
@@ -2870,7 +2918,7 @@ fn run_gnome_static() -> Result<()> {
                 cosmic_bg::restore();
             }
         }
-        if is_stop {
+        if exits_after(is_stop, is_apply, &config) {
             break;
         }
     }
@@ -2931,7 +2979,7 @@ fn wayland_auto_cycle(
         &config.auto_cycle,
         last_cycle,
         now,
-        paused || locked || config.performance_mode,
+        paused || locked || config.performance_mode || !config.enabled,
     ) {
         return;
     }
@@ -3007,8 +3055,11 @@ fn run_wayland_layershell() -> Result<()> {
         cosmic_bg::restore();
         dde_lock::restore();
         kde_desktop::restore();
-        log::info!("wallpaper disabled (enabled=false) — exiting");
-        return Ok(());
+        if !config.daemon_wanted() {
+            log::info!("wallpaper disabled (enabled=false) — exiting");
+            return Ok(());
+        }
+        log::info!("desktop wallpaper off; running for the lock screen only");
     }
 
     let commands = control::start_server()?;
@@ -3112,7 +3163,13 @@ fn run_wayland_layershell() -> Result<()> {
     // here, only when something actually changed, means the surfaces below
     // are created last and therefore on top.
     let mut cosmic_reloads = cosmic_bg::ReloadTracker::default();
-    let synced = cosmic_bg::apply(&config);
+    // With the desktop wallpaper off (lock-screen-only run) cosmic-bg keeps
+    // the user's own background; the startup restore above put it back.
+    let synced = if config.enabled {
+        cosmic_bg::apply(&config)
+    } else {
+        cosmic_bg::SyncOutcome::default()
+    };
     if let Some(wait) = cosmic_reloads.note_before_spawn(&synced, Instant::now()) {
         log::info!(
             "cosmic-bg: configuration changed; waiting {} ms for it to redraw before starting the wallpaper",
@@ -3128,7 +3185,7 @@ fn run_wayland_layershell() -> Result<()> {
     // (or hides the icons), so Plasma gets its wallpaper through plasmashell
     // instead (`kde_desktop`) and no output is spawned.
     let plasma = kde_desktop::enabled();
-    for m in monitors.iter().filter(|_| !plasma) {
+    for m in monitors.iter().filter(|_| !plasma && config.enabled) {
         let wallpaper = config.wallpaper_for(&m.connector).clone();
         if wallpaper.effective_path().is_none()
             && wallpaper.paths.is_empty()
@@ -3153,7 +3210,9 @@ fn run_wayland_layershell() -> Result<()> {
     // `dde_lock`'s module doc. No-op on every other compositor. (COSMIC's
     // `cosmic-bg` sync already ran above, before any mpvpaper existed.)
     dde_lock::apply(&config);
-    kde_desktop::apply(&config);
+    if config.enabled {
+        kde_desktop::apply(&config);
+    }
     log::info!(
         "frescod started (Wayland layer-shell / mpvpaper, {} output(s))",
         outputs.len()
@@ -3179,6 +3238,7 @@ fn run_wayland_layershell() -> Result<()> {
         match commands.recv_timeout(tick) {
             Ok((req, reply)) => {
                 let is_stop = matches!(req, Request::Stop);
+                let is_apply = matches!(req, Request::Apply);
                 let resp = match req {
                     Request::Apply => {
                         // Blank every overlay first, against the mpvpaper
@@ -3274,8 +3334,10 @@ fn run_wayland_layershell() -> Result<()> {
                                     (None, false) => {}
                                 }
                             }
-                        } else {
-                            outputs.clear(); // kills every mpvpaper
+                        } else if !lock_rt.locked {
+                            // Kills every mpvpaper. While locked, the
+                            // lock-only one stays; unlock clears it.
+                            outputs.clear();
                         }
                         // Same "reply first, sync cosmic-bg after" trade-off
                         // as the X11/GNOME-static paths would use, but this
@@ -3293,14 +3355,16 @@ fn run_wayland_layershell() -> Result<()> {
                         if config.enabled {
                             let synced = cosmic_bg::apply(&config);
                             cosmic_reloads.note(&synced, Instant::now());
-                            dde_lock::apply(&config);
                             kde_desktop::apply(&config);
                         } else {
                             cosmic_bg::restore();
                             cosmic_reloads.reset();
-                            dde_lock::restore();
                             kde_desktop::restore();
                         }
+                        // The Deepin lock-screen background follows
+                        // `[lockscreen]`, not the desktop wallpaper (it puts
+                        // the user's own back when the lock screen is off).
+                        dde_lock::apply(&config);
                         Response::Ok
                     }
                     Request::Pause => {
@@ -3362,7 +3426,7 @@ fn run_wayland_layershell() -> Result<()> {
                     }
                 };
                 let _ = reply.send(resp);
-                if is_stop {
+                if exits_after(is_stop, is_apply, &config) {
                     break;
                 }
             }
@@ -3393,9 +3457,37 @@ fn run_wayland_layershell() -> Result<()> {
                 // the stacking then happens behind the lock screen too).
                 // Skipped when mpvpaper itself is on the lock screen: the
                 // live video is what's shown, and respawning it would blink.
-                if matches!(lock_rt.kind, HostKind::Cosmic { .. }) && !show_on_lock {
+                // (Not with the desktop wallpaper off: cosmic-bg then keeps the
+                // user's own background, and the lock screen shows that.)
+                if config.enabled
+                    && matches!(lock_rt.kind, HostKind::Cosmic { .. })
+                    && !show_on_lock
+                {
                     let synced = cosmic_bg::refresh_for_lock(&config, cosmic_reloads.frame_stale());
                     cosmic_reloads.note(&synced, Instant::now());
+                }
+                // Lock-screen-only on COSMIC: the live lock screen is the
+                // desktop's own show-on-lock mpvpaper, and with the desktop
+                // wallpaper off none is running — so run one for as long as
+                // the screen is locked (cleared again on unlock, below).
+                if !config.enabled && show_on_lock {
+                    for m in &monitors {
+                        let wp = config.lock_source(Some(&m.connector)).clone();
+                        if !wp.is_configured() {
+                            continue;
+                        }
+                        let ps = config.effective_power_saving(&wp);
+                        let mut o = WlOutput::new(
+                            m.connector.clone(),
+                            wp,
+                            config.scaling,
+                            ps,
+                            config.effective_low_memory(),
+                        );
+                        o.set_show_on_lock(true);
+                        o.respawn(false, false);
+                        outputs.insert(m.connector.clone(), o);
+                    }
                 }
                 if let Some(resolved) = LockRuntime::resolved(&config) {
                     let cleared = widget_engine.clear_for_lock(
@@ -3434,6 +3526,9 @@ fn run_wayland_layershell() -> Result<()> {
                             p.set_brightness(0);
                         }
                     }
+                }
+                if !config.enabled {
+                    outputs.clear(); // the lock-only mpvpaper started above
                 }
             }
         }
@@ -3705,7 +3800,9 @@ fn run_wayland_layershell() -> Result<()> {
         // unlocking naturally resumes unless `user_paused`/`battery_paused`
         // still apply — nothing here has to remember and restore a "previous"
         // pause value by hand.
-        if let Some(w) = fs_watch.as_mut() {
+        // (Nothing to pause with no output: a lock-screen-only run skips the
+        // 4 Hz poll of the compositor.)
+        if let Some(w) = fs_watch.as_mut().filter(|_| !outputs.is_empty()) {
             if now.duration_since(last_fs_poll) >= FS_POLL {
                 last_fs_poll = now;
                 let now_hidden = w.fullscreen_connectors(config.effective_pause_on_covered());
@@ -5243,7 +5340,7 @@ fn widget_clock_cfg(c: &crate::config::Clock) -> widgets::ClockCfg {
 #[cfg(test)]
 mod tests {
     use super::{
-        adopt_pause_flags, auto_cycle_due, decode_display, gnome_static_cycle_timeout,
+        adopt_pause_flags, auto_cycle_due, decode_display, exits_after, gnome_static_cycle_timeout,
         parse_stat_ticks, presentation_confirmed, stall_step, widget_wait, WlOutput, ANIM_TICK,
         AUTO_CYCLE_IDLE_RECHECK, CONFIRM_GRACE, HEARTBEAT_RECHECK_INTERVAL, MIN_WIDGET_WAIT,
         MONITOR_INTERVAL, STALL_STRIKES, TICK,
@@ -5350,6 +5447,46 @@ mod tests {
         );
         let t = gnome_static_cycle_timeout(&c, Some(Instant::now()));
         assert!(t > Duration::from_secs(29 * 60) && t <= Duration::from_secs(30 * 60));
+    }
+
+    /// The desktop wallpaper being off leaves nothing for the cycle to change,
+    /// so the GNOME loop must not wake for it.
+    #[test]
+    fn gnome_static_does_not_wake_for_a_cycle_while_the_desktop_is_off() {
+        let c = Config {
+            enabled: false,
+            auto_cycle: cycle_every(30),
+            ..Config::default()
+        };
+        assert_eq!(
+            gnome_static_cycle_timeout(&c, None),
+            HEARTBEAT_RECHECK_INTERVAL
+        );
+    }
+
+    /// Stop always ends the daemon. An Apply ends it only when the config it
+    /// just loaded wants neither the desktop wallpaper nor the lock screen, so
+    /// a lock-screen-only daemon survives its desktop being switched off.
+    #[test]
+    fn the_daemon_exits_when_neither_the_desktop_nor_the_lock_screen_is_wanted() {
+        let lock = Some(crate::config::LockScreen {
+            enabled: true,
+            ..Default::default()
+        });
+        let cfg = |enabled, lockscreen| Config {
+            enabled,
+            lockscreen,
+            ..Config::default()
+        };
+        assert!(exits_after(true, false, &cfg(true, None)), "Stop");
+        assert!(exits_after(true, false, &cfg(false, lock.clone())), "Stop");
+        assert!(!exits_after(false, true, &cfg(true, None)));
+        assert!(!exits_after(false, true, &cfg(false, lock)), "lock only");
+        assert!(exits_after(false, true, &cfg(false, None)), "both off");
+        assert!(
+            !exits_after(false, false, &cfg(false, None)),
+            "other request"
+        );
     }
 
     #[test]
@@ -6310,6 +6447,16 @@ mod sched_clock_jump_tests {
             }),
             ..Default::default()
         }
+    }
+
+    /// A schedule switches the desktop wallpaper; with that off there is
+    /// nothing for it to switch (and no desktop background to rewrite).
+    #[test]
+    fn the_schedule_is_inert_while_the_desktop_is_off() {
+        let mut cfg = always_day_config("/night.mp4");
+        assert!(super::schedule_desired_wallpaper(&cfg).is_some());
+        cfg.enabled = false;
+        assert!(super::schedule_desired_wallpaper(&cfg).is_none());
     }
 
     /// Resuming a paused schedule: the GUI points `config.wallpaper` at the

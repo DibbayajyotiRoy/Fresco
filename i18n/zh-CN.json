@@ -660,5 +660,6 @@
   "Open main window": "打开主界面",
   "Quit Fresco (until next login)": "关闭程序（下次登录恢复）",
   "Show icon in the system tray": "在系统托盘显示图标",
-  "RESUMES AT NEXT LOGIN": "下次登录时恢复"
+  "RESUMES AT NEXT LOGIN": "下次登录时恢复",
+  "LOCK SCREEN ONLY": "仅锁屏"
 }

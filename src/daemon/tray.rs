@@ -294,23 +294,39 @@ fn apply_exit(cfg: &mut Config, exit: Exit) -> bool {
     matches!(exit, Exit::Stop) && std::mem::replace(&mut cfg.enabled, false)
 }
 
+/// What the daemon is asked once `cfg` is saved. Stopping the wallpaper while
+/// the lock screen is on only switches the desktop off: an `Apply` makes the
+/// daemon restore the desktop and keep serving the lock. Anything else ends it.
+fn exit_request(cfg: &Config, exit: Exit) -> Request {
+    if matches!(exit, Exit::Stop) && cfg.daemon_wanted() {
+        Request::Apply
+    } else {
+        Request::Stop
+    }
+}
+
 /// Restore the desktop's own background and end the daemon (see [`Exit`]).
 fn exit_daemon(exit: Exit) {
     // Disable first, as the GUI does: a daemon that dies mid-stop must not be
     // resurrected with the wallpaper still enabled.
-    match Config::load() {
+    let req = match Config::load() {
         Ok(mut cfg) => {
             if apply_exit(&mut cfg, exit) {
                 if let Err(e) = cfg.save() {
                     log::warn!("tray: failed to disable wallpaper in config: {e:#}");
                 }
             }
+            exit_request(&cfg, exit)
         }
-        Err(e) => log::warn!("tray: could not read the config, 'enabled' left as is: {e:#}"),
-    }
+        Err(e) => {
+            log::warn!("tray: could not read the config, 'enabled' left as is: {e:#}");
+            Request::Stop
+        }
+    };
     // `Stop` runs the daemon's full shutdown, which puts the desktop's own
-    // background back (DDE, GNOME, COSMIC, KDE, MATE, Xfce).
-    if let Err(e) = request(&Request::Stop) {
+    // background back (DDE, GNOME, COSMIC, KDE, MATE, Xfce); so does the
+    // `Apply` that finds the desktop wallpaper off.
+    if let Err(e) = request(&req) {
         log::warn!("tray: stop request failed: {e:#}");
     }
 }
@@ -373,6 +389,23 @@ mod tests {
         // Already off: nothing to save.
         assert!(!apply_exit(&mut cfg, Exit::Stop));
         assert!(!cfg.enabled);
+    }
+
+    /// "Stop wallpaper" must not take the lock screen down with it; "Quit"
+    /// and a stop with nothing else to serve end the daemon.
+    #[test]
+    fn stop_keeps_the_daemon_only_for_the_lock_screen() {
+        let mut cfg = Config::default();
+        assert_eq!(exit_request(&cfg, Exit::Quit), Request::Stop);
+        apply_exit(&mut cfg, Exit::Stop);
+        assert_eq!(exit_request(&cfg, Exit::Stop), Request::Stop);
+
+        cfg.lockscreen = Some(crate::config::LockScreen {
+            enabled: true,
+            ..Default::default()
+        });
+        assert_eq!(exit_request(&cfg, Exit::Stop), Request::Apply);
+        assert_eq!(exit_request(&cfg, Exit::Quit), Request::Stop);
     }
 
     fn label_at(menu: &[MenuItem<FrescoTray>], idx: usize) -> String {

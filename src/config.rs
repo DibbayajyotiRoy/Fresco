@@ -1844,7 +1844,10 @@ pub struct Config {
     /// Restore wallpaper on login (autostart entry present).
     #[serde(default = "default_true")]
     pub autostart: bool,
-    /// False after the user hits Stop — autostart must not resurrect it.
+    /// False after the user hits Stop — autostart must not resurrect it. This
+    /// is the *desktop* wallpaper's switch only: with `[lockscreen].enabled`
+    /// the daemon still runs, with no desktop renderer, for the lock screen
+    /// (see [`Config::daemon_wanted`]).
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
@@ -2260,10 +2263,35 @@ impl Config {
         Ok(())
     }
 
-    /// The widgets to run: none in [`Config::performance_mode`]. `None` stops
-    /// every widget, the now-playing worker and the audio capture.
+    /// Whether the daemon has anything to do: the desktop wallpaper, or the
+    /// lock screen. With only the lock screen on it runs with no desktop
+    /// renderer at all (see [`Config::enabled`]).
+    pub fn daemon_wanted(&self) -> bool {
+        self.enabled || self.lockscreen.as_ref().is_some_and(|l| l.enabled)
+    }
+
+    /// Turn the desktop wallpaper off. Returns whether the daemon must keep
+    /// running (the lock screen is on); otherwise the caller stops it. The
+    /// picked wallpaper is kept while the lock screen can still follow it,
+    /// since `enabled = false` alone already stops it playing.
+    pub fn stop_desktop(&mut self) -> bool {
+        self.enabled = false;
+        let keep = self.daemon_wanted();
+        if !keep {
+            self.wallpaper.path = None;
+            self.wallpaper.paths.clear();
+            self.wallpaper.slideshow = None;
+            self.monitors.clear();
+        }
+        keep
+    }
+
+    /// The widgets to run: none in [`Config::performance_mode`], and none
+    /// while the desktop wallpaper is off (the lock screen's widgets are the
+    /// lock engine's, not these). `None` stops every widget, the now-playing
+    /// worker and the audio capture.
     pub fn effective_widgets(&self) -> Option<&Widgets> {
-        if self.performance_mode {
+        if self.performance_mode || !self.enabled {
             None
         } else {
             self.widgets.as_ref()
@@ -2671,6 +2699,58 @@ mod tests {
         assert!(!cfg.effective_low_memory());
         assert!(!cfg.effective_pause_on_covered());
         assert!(cfg.effective_hover_previews());
+    }
+
+    /// The lock screen alone keeps the daemon wanted when the desktop wallpaper
+    /// is off, and a stopped desktop runs no widgets.
+    #[test]
+    fn the_lock_screen_alone_keeps_the_daemon_wanted() {
+        let lock = |enabled| {
+            Some(LockScreen {
+                enabled,
+                ..LockScreen::default()
+            })
+        };
+        let cfg = |enabled, lockscreen| Config {
+            enabled,
+            lockscreen,
+            widgets: Some(Widgets::default()),
+            ..Config::default()
+        };
+        assert!(cfg(true, None).daemon_wanted());
+        assert!(cfg(true, lock(false)).daemon_wanted());
+        assert!(cfg(false, lock(true)).daemon_wanted());
+        assert!(!cfg(false, lock(false)).daemon_wanted());
+        assert!(!cfg(false, None).daemon_wanted());
+        assert!(cfg(true, None).effective_widgets().is_some());
+        assert!(cfg(false, lock(true)).effective_widgets().is_none());
+    }
+
+    #[test]
+    fn stopping_the_desktop_keeps_the_wallpaper_only_for_the_lock_screen() {
+        let playing = |lockscreen| {
+            let mut c = Config {
+                lockscreen,
+                ..Config::default()
+            };
+            c.wallpaper.path = Some(PathBuf::from("/w/a.mp4"));
+            c.monitors.insert("DP-1".into(), c.wallpaper.clone());
+            c
+        };
+        let lock_on = Some(LockScreen {
+            enabled: true,
+            ..LockScreen::default()
+        });
+
+        let mut with_lock = playing(lock_on);
+        assert!(with_lock.stop_desktop(), "the daemon stays for the lock");
+        assert!(!with_lock.enabled);
+        assert!(with_lock.wallpaper.path.is_some() && !with_lock.monitors.is_empty());
+
+        let mut without = playing(None);
+        assert!(!without.stop_desktop(), "nothing left to run");
+        assert!(!without.enabled);
+        assert!(without.wallpaper.path.is_none() && without.monitors.is_empty());
     }
 
     #[test]

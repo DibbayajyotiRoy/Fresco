@@ -660,5 +660,6 @@
   "Open main window": "Ana pencereyi aç",
   "Quit Fresco (until next login)": "Fresco’dan çık (sonraki oturum açmaya kadar)",
   "Show icon in the system tray": "Simgeyi sistem tepsisinde göster",
-  "RESUMES AT NEXT LOGIN": "SONRAKİ OTURUMDA DEVAM EDER"
+  "RESUMES AT NEXT LOGIN": "SONRAKİ OTURUMDA DEVAM EDER",
+  "LOCK SCREEN ONLY": "YALNIZCA KİLİT EKRANI"
 }

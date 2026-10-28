@@ -18,6 +18,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only overrides your settings while it is on: none of them is rewritten, so
   turning it off brings every widget and setting back exactly as you left it.
 
+- **The lock screen no longer needs the desktop wallpaper.** Fresco's lock
+  screen (wallpaper and widgets) used to work only while the desktop wallpaper
+  was running: stopping the wallpaper, from the app or from the tray icon,
+  ended the background process and the lock screen went with it. With the
+  lock screen switched on, Stop now takes only the desktop wallpaper off and
+  gives you back your own desktop background, while the process keeps running
+  for the lock screen with no wallpaper window, no widgets and next to no CPU.
+  Switching the lock screen on while nothing is running starts it, switching
+  it off while the desktop wallpaper is off ends it, the tray's "Quit" still
+  quits, and the app's status pill reads "LOCK SCREEN ONLY" in that state.
+  Stopping the wallpaper no longer forgets the wallpaper the lock screen
+  follows. On GNOME, Cinnamon, MATE and COSMIC without live lock-screen
+  support the lock screen *is* the desktop background, so with the desktop
+  wallpaper off it keeps showing your own background. On COSMIC with live
+  lock-screen support the lock-screen video is started when the screen locks
+  and stopped when it unlocks.
+
 ### Fixed
 - **Fresco no longer burns a CPU core while your screen is locked.** On a
   locked session the background process woke up about a thousand times a

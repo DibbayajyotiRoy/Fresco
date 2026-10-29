@@ -4,6 +4,12 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **GNOME X11 wallpaper windows no longer declare `_NET_WM_STATE_BELOW`**,
+  which fixes desktop icons disappearing on Zorin/GNOME X11 (issue #116).
+
 ## [1.1.53] — 2026-10-28
 
 ### Added

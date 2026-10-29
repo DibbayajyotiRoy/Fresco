@@ -235,6 +235,25 @@ pub fn is_gnome_session() -> bool {
     .any(|v| is_gnome(Some(v)))
 }
 
+/// Is this session GNOME on X11? GNOME's window manager treats
+/// `_NET_WM_STATE_BELOW` on a DESKTOP-type window as a request to sit below the
+/// desktop icons; removing it keeps the icons visible (issue #116).
+pub fn is_gnome_x11() -> bool {
+    classify_gnome_x11(
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+    )
+}
+
+fn classify_gnome_x11(
+    session_type: Option<&str>,
+    current_desktop: Option<&str>,
+    session_desktop: Option<&str>,
+) -> bool {
+    session_type == Some("x11") && (is_gnome(current_desktop) || is_gnome(session_desktop))
+}
+
 fn is_cinnamon_name(desktop: Option<&str>) -> bool {
     desktop
         .map(|d| d.to_ascii_lowercase().contains("cinnamon"))
@@ -733,5 +752,24 @@ DesktopNames=ubuntu:GNOME\n";
             Capability::WaylandGnomeStatic
         );
         assert_eq!(classify(None, false, None), Capability::X11);
+    }
+
+    #[test]
+    fn gnome_x11_detection() {
+        // X11 + a GNOME desktop name (either var) → true.
+        assert!(classify_gnome_x11(Some("x11"), Some("GNOME"), None));
+        assert!(classify_gnome_x11(Some("x11"), None, Some("ubuntu:GNOME")));
+        assert!(classify_gnome_x11(
+            Some("x11"),
+            Some("pop:GNOME"),
+            Some("gnome")
+        ));
+        // Wayland GNOME is not X11 GNOME.
+        assert!(!classify_gnome_x11(Some("wayland"), Some("GNOME"), None));
+        // X11 non-GNOME is not GNOME X11.
+        assert!(!classify_gnome_x11(Some("x11"), Some("KDE"), None));
+        assert!(!classify_gnome_x11(Some("x11"), Some("X-Cinnamon"), None));
+        // Missing session type is not enough.
+        assert!(!classify_gnome_x11(None, Some("GNOME"), None));
     }
 }

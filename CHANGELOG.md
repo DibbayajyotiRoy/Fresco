@@ -124,6 +124,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   player's "low-latency" profile was resetting it to one. In low-memory or
   Performance mode a 4K video also no longer raises the read-ahead cache to
   64 MiB.
+- **X11 auto-pause no longer confuses the desktop background with a covering
+  app** (issue #117). On Deepin and other desktops, dde-shell's desktop window
+  (and any `_NET_WM_WINDOW_TYPE_DESKTOP` or `_NET_WM_WINDOW_TYPE_DOCK` window)
+  was counted as covering the screen, so "Pause when an app covers the screen"
+  and Performance mode paused the wallpaper even when no app was open. The
+  daemon now ignores those window types and also skips
+  `_NET_WM_STATE_SKIP_PAGER` windows. Maximised windows are still treated as
+  covering, so a maximised browser now pauses the wallpaper without requiring
+  true fullscreen.
 
 ### Notes for testers
 Not yet confirmed on real hardware, and the most useful things to check:

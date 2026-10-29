@@ -7,7 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
-- Relaxed the .deb dependencies for the Deepin store: libgtk-4-1, libadwaita-1-0 and libgtk-4-media-gstreamer are now Recommends instead of Depends, so the package installs on Deepin V20 where those packages are unavailable.
+- **GNOME X11 wallpaper windows no longer declare `_NET_WM_STATE_BELOW`**,
+  which fixes desktop icons disappearing on Zorin/GNOME X11 (issue #116).
+- Relaxed the `.deb` dependencies for the Deepin store: `libgtk-4-1`,
+  `libadwaita-1-0` and `libgtk-4-media-gstreamer` are now `Recommends` instead
+  of `Depends`, so the package installs on Deepin V20 where those packages are
+  unavailable.
 
 ## [1.1.53] — 2026-10-28
 

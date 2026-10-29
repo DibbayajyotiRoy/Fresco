@@ -112,13 +112,11 @@ priority = "optional"
 #   * `gdbus` — every MPRIS query in src/mpris.rs and src/daemon/widgets.rs,
 #     i.e. all of the 1.1.36 lyrics / album-art / track-synced widgets, plus
 #     the DDE background calls in src/daemon/dde.rs.
-# libgtk-4-1 pulls libglib2.0-0, NOT libglib2.0-bin, so a minimal desktop or a
-# container genuinely may not have it — transitive presence is not a guarantee.
-# libgtk-4-media-gstreamer is the same story: GTK's only media backend is its own
-# package, which libgtk-4-1 merely Recommends. A system that skips recommends
-# (deepin's .deb installer does) has none, and every library hover preview then
-# silently shows the still frame (issue #42).
-depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreamer, libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
+# libgtk-4-1, libadwaita-1-0 and libgtk-4-media-gstreamer are Recommends (see
+# below): they are not available on Deepin V20, and the package must still
+# install there. Apt installs Recommends by default, so capable distros still
+# pull them in and every library hover preview keeps its media backend.
+depends = "libmpv2 | libmpv1, libwayland-client0, libwayland-egl1, libegl1, libgl1, ffmpegthumbnailer, libglib2.0-bin"
 # Recommends, not Depends: every one of these powers a feature that degrades to
 # a logged, actionable message rather than breaking the app.
 #   * pulseaudio-utils | pipewire-bin — `parec` / `pw-cat` for the audio
@@ -146,7 +144,11 @@ depends = "libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreame
 #     lyrics and the clock's ص / م suffix on the wallpaper are drawn from a
 #     real face rather than whatever a bare install happens to carry. The
 #     daemon's text stack (src/widgetkit/text.rs) falls back to it by script.
-recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, fonts-noto-core, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1, qml6-module-qtmultimedia"
+#   * libgtk-4-1, libadwaita-1-0 and libgtk-4-media-gstreamer — the GTK4 UI
+#     toolkit and its GStreamer media backend. These were moved from Depends
+#     to Recommends because Deepin V20 does not ship them; apt still installs
+#     Recommends by default on distros that do.
+recommends = "mesa-va-drivers, intel-media-va-driver, fonts-inter, fonts-noto-core, gstreamer1.0-plugins-good, gstreamer1.0-libav, ffmpeg, pulseaudio-utils | pipewire-bin, xdg-utils, pkexec | policykit-1, qml6-module-qtmultimedia, libgtk-4-1 (>= 4.6), libadwaita-1-0 (>= 1.1), libgtk-4-media-gstreamer"
 # Suggests, not Recommends: each of these is needed by exactly one lock-screen
 # host, so installing it unconditionally would be a much stronger nudge than
 # "might be useful" warrants for most machines (docs/plan-lock-screen.md §4.3,

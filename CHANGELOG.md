@@ -4,6 +4,11 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Relaxed the .deb dependencies for the Deepin store: libgtk-4-1, libadwaita-1-0 and libgtk-4-media-gstreamer are now Recommends instead of Depends, so the package installs on Deepin V20 where those packages are unavailable.
+
 ## [1.1.53] — 2026-10-28
 
 ### Added

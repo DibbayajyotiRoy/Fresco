@@ -13,6 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `libadwaita-1-0` and `libgtk-4-media-gstreamer` are now `Recommends` instead
   of `Depends`, so the package installs on Deepin V20 where those packages are
   unavailable.
+- **The remaining modal dialogs no longer stretch or jump when you click
+  outside them** (issue #100). The first fix covered the glass-style modals and
+  the Lock Screen windows; the Advanced settings window and the audio-visualiser
+  consent dialog were still resizable and are now fixed.
 
 ## [1.1.53] — 2026-10-28
 

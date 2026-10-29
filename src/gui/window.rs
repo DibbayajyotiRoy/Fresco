@@ -6325,6 +6325,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
+    dialog.set_resizable(false);
     dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Advanced")));
 
@@ -8539,6 +8540,7 @@ fn show_audio_consent_dialog(
             .as_ref(),
     );
     dialog.set_modal(true);
+    dialog.set_resizable(false);
     dialog.set_title(Some(t!("Let the visualiser listen?")));
     dialog.set_default_size(460, -1);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);

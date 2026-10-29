@@ -9348,6 +9348,7 @@ pub(crate) fn glass_dialog(
     dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
+    dialog.set_resizable(false);
     dialog.set_title(Some(title));
     dialog.set_default_size(width, height);
 

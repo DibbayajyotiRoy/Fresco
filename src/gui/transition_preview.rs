@@ -763,6 +763,7 @@ mod tests {
 
         let window = gtk4::Window::new();
         window.set_default_size(1000, 600);
+        window.set_resizable(false);
         let pane = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         pane.set_hexpand(true);
         pane.set_valign(gtk4::Align::Center);

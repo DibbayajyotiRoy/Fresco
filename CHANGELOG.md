@@ -855,6 +855,8 @@ icons.
   the matching desktop locale automatically.
 
 ### Fixed
+- **Modal secondary windows are now non-resizable, preventing the
+  stretch-and-jump bug when clicking outside them on Deepin/KWin** (issue #100).
 - **A Wayland video/GIF wallpaper that keeps failing to start now says why,
   tells you instead of quietly holding a still frame, and tries again on its
   own.** mpvpaper prints every one of its own errors — and mpv's — to

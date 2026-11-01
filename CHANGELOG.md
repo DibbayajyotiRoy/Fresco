@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.54] — 2026-11-01
+
 ### Fixed
 - **GNOME X11 wallpaper windows no longer declare `_NET_WM_STATE_BELOW`**,
   which fixes desktop icons disappearing on Zorin/GNOME X11 (issue #116).

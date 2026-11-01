@@ -52,9 +52,13 @@ impl Tray for FrescoTray {
     }
 
     fn icon_name(&self) -> String {
-        // Prefer the Fresco app icon when the package is installed; fall back
-        // to a standard symbolic icon that exists on every GTK desktop.
-        if fresco_icon_installed() {
+        // Prefer the monochrome symbolic icon (panels recolour it, so it sits
+        // with the other tray icons), then the colour app icon, then a
+        // standard symbolic icon that exists on every GTK desktop.
+        let symbolic = format!("{}-symbolic", crate::APP_ID);
+        if fresco_icon_installed("symbolic", &symbolic) {
+            symbolic
+        } else if fresco_icon_installed("scalable", crate::APP_ID) {
             crate::APP_ID.into()
         } else {
             "preferences-desktop-wallpaper".into()
@@ -228,18 +232,14 @@ fn start_tray() -> anyhow::Result<ksni::blocking::Handle<FrescoTray>> {
     Ok(builder.assume_sni_available(true).spawn()?)
 }
 
-/// Best-effort check for a packaged Fresco icon.
-fn fresco_icon_installed() -> bool {
+/// Best-effort check for a packaged Fresco icon in hicolor's `subdir`.
+fn fresco_icon_installed(subdir: &str, name: &str) -> bool {
+    let rel = format!("icons/hicolor/{subdir}/apps/{name}.svg");
     let candidates = [
-        PathBuf::from("/usr/share/icons/hicolor/scalable/apps")
-            .join(format!("{}.svg", crate::APP_ID)),
-        PathBuf::from("/usr/local/share/icons/hicolor/scalable/apps")
-            .join(format!("{}.svg", crate::APP_ID)),
+        PathBuf::from("/usr/share").join(&rel),
+        PathBuf::from("/usr/local/share").join(&rel),
         dirs::home_dir()
-            .map(|h| {
-                h.join(".local/share/icons/hicolor/scalable/apps")
-                    .join(format!("{}.svg", crate::APP_ID))
-            })
+            .map(|h| h.join(".local/share").join(&rel))
             .unwrap_or_default(),
     ];
     candidates.iter().any(|p| p.exists())

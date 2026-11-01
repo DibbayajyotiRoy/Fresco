@@ -625,6 +625,27 @@ pub fn transparency_is_stale<C: Connection>(
     current_strategy(conn, atoms, root, config_pref) != Strategy::Transparent
 }
 
+/// Environment-only window-kind decision. `None` means the DDE-specific
+/// strategy path must be evaluated against the live X11 stack.
+fn session_window_kind() -> Option<WindowKind> {
+    // GNOME on X11 (issue #116): a DESKTOP-type window without BELOW keeps
+    // desktop icons visible; no restack needed.
+    if crate::capability::is_gnome_x11() {
+        return Some(WindowKind::GnomeX11);
+    }
+    // MATE always raises: Caja's desktop window covers everything below it,
+    // and there is no transparency service to fall back on. Deciding before
+    // Caja has even mapped (a login race) is fine — the raised kind simply
+    // sits above the root window until Caja arrives.
+    if crate::capability::is_mate() {
+        return Some(WindowKind::DdeRaised);
+    }
+    if !crate::capability::is_deepin_dde() {
+        return Some(WindowKind::Desktop);
+    }
+    None
+}
+
 /// Which flavour of wallpaper window this session must create. Called before
 /// any window exists, because the DDE raise only works when the window was
 /// created declaring `[DESKTOP, NORMAL]`.
@@ -637,15 +658,8 @@ pub fn window_kind<C: Connection>(
     root: Window,
     config_pref: DdeMode,
 ) -> WindowKind {
-    // MATE always raises: Caja's desktop window covers everything below it,
-    // and there is no transparency service to fall back on. Deciding before
-    // Caja has even mapped (a login race) is fine — the raised kind simply
-    // sits above the root window until Caja arrives.
-    if crate::capability::is_mate() {
-        return WindowKind::DdeRaised;
-    }
-    if !crate::capability::is_deepin_dde() {
-        return WindowKind::Desktop;
+    if let Some(kind) = session_window_kind() {
+        return kind;
     }
     current_strategy(conn, atoms, root, config_pref).window_kind()
 }
@@ -1574,6 +1588,47 @@ mod tests {
         assert_eq!(effective_pref(DdeMode::Restack), DdeMode::Restack);
         std::env::remove_var("FRESCO_DDE_MODE");
         assert_eq!(effective_pref(DdeMode::Mirror), DdeMode::Mirror);
+    }
+
+    /// Restores XDG session env vars on drop so parallel tests don't see each
+    /// other's mutations.
+    struct SessionEnvGuard {
+        session_type: Option<String>,
+        current_desktop: Option<String>,
+        session_desktop: Option<String>,
+    }
+
+    impl Drop for SessionEnvGuard {
+        fn drop(&mut self) {
+            set_or_remove("XDG_SESSION_TYPE", self.session_type.as_deref());
+            set_or_remove("XDG_CURRENT_DESKTOP", self.current_desktop.as_deref());
+            set_or_remove("XDG_SESSION_DESKTOP", self.session_desktop.as_deref());
+        }
+    }
+
+    fn set_or_remove(key: &str, value: Option<&str>) {
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn gnome_x11_selects_gnome_x11_window_kind() {
+        let _guard = SessionEnvGuard {
+            session_type: std::env::var("XDG_SESSION_TYPE").ok(),
+            current_desktop: std::env::var("XDG_CURRENT_DESKTOP").ok(),
+            session_desktop: std::env::var("XDG_SESSION_DESKTOP").ok(),
+        };
+        std::env::set_var("XDG_SESSION_TYPE", "x11");
+        std::env::set_var("XDG_CURRENT_DESKTOP", "GNOME");
+        std::env::remove_var("XDG_SESSION_DESKTOP");
+        assert_eq!(session_window_kind(), Some(WindowKind::GnomeX11));
+
+        // Session desktop can also carry the GNOME name.
+        std::env::remove_var("XDG_CURRENT_DESKTOP");
+        std::env::set_var("XDG_SESSION_DESKTOP", "ubuntu:GNOME");
+        assert_eq!(session_window_kind(), Some(WindowKind::GnomeX11));
     }
 
     #[test]

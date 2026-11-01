@@ -78,6 +78,7 @@ pub fn show_lockscreen_window(parent: &adw::ApplicationWindow, state: Rc<RefCell
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(parent));
     dialog.set_modal(true);
+    dialog.set_resizable(false);
     dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Lock Screen")));
 
@@ -1352,6 +1353,7 @@ fn open_preview_window(
     let win = gtk4::Window::new();
     win.set_transient_for(Some(parent));
     win.set_modal(true);
+    win.set_resizable(false);
     win.set_decorated(false);
     win.set_title(Some(t!("Lock screen preview")));
 

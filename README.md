@@ -13,7 +13,7 @@
 [![Publish workflow status](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
 
-[Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Supported environments](#supported-environments) · [Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [FAQ](#faq) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
+[Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Supported environments](#supported-environments) · [Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [FAQ](#faq) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues) · [Support Fresco](#support-the-project)
 
 <img src="./data/screenshots/gallery.png" alt="Fresco's wallpaper library on a dark Linux desktop: a searchable grid of video, image and slideshow wallpapers, with one video marked Active and a status pill showing NVDEC hardware decoding" width="800" />
 
@@ -475,6 +475,14 @@ The thread is keyed by a random ticket generated separately from telemetry and s
 | **Maintainer** | Dibbayajyoti Roy |
 | **Source code** | <https://github.com/DibbayajyotiRoy/fresco> |
 | **Website** | <https://fresco.dibbayajyoti.com> |
+
+## Support the project
+
+Fresco is free, open source, ad-free and needs no account, and it will stay that way. Every feature is available to everyone. If Fresco is part of your desktop and you want to help keep it maintained, a one-off or monthly contribution pays for testing hardware, distro coverage and time spent on releases.
+
+[![Support Fresco on Ko-fi](https://img.shields.io/badge/Ko--fi-Support_Fresco-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/dibbayajyotiroy)
+
+Not in a position to give? Starring the repo, filing a good bug report, or adding a translation helps just as much.
 
 ## Contributing & feedback
 

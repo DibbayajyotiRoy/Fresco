@@ -59,13 +59,18 @@ pub enum WindowKind {
     /// windows and the dock still stack above us. DDE's desktop icons end up
     /// hidden; that is the accepted trade-off of this mode.
     DdeRaised,
+    /// GNOME on X11 only (issue #116). A DESKTOP-type window without
+    /// `_NET_WM_STATE_BELOW` stays at the layer GNOME assigns to desktop
+    /// windows, which keeps desktop-icon windows above it. No explicit restack
+    /// is needed: GNOME places DESKTOP windows correctly at map time.
+    GnomeX11,
 }
 
 /// `_NET_WM_WINDOW_TYPE` value for `kind`. Order is significant: DESKTOP first
 /// (EWMH "most preferable first"), NORMAL second, mirroring dde-shell.
 fn window_type_atoms(kind: WindowKind, atoms: &Atoms) -> Vec<Atom> {
     match kind {
-        WindowKind::Desktop => vec![atoms._NET_WM_WINDOW_TYPE_DESKTOP],
+        WindowKind::Desktop | WindowKind::GnomeX11 => vec![atoms._NET_WM_WINDOW_TYPE_DESKTOP],
         WindowKind::DdeRaised => vec![
             atoms._NET_WM_WINDOW_TYPE_DESKTOP,
             atoms._NET_WM_WINDOW_TYPE_NORMAL,
@@ -405,6 +410,7 @@ pub fn restack<C: Connection>(
     match kind {
         WindowKind::Desktop => lower_wallpaper(conn, atoms, root, window),
         WindowKind::DdeRaised => raise(conn, window),
+        WindowKind::GnomeX11 => Ok(()),
     }
 }
 
@@ -530,6 +536,36 @@ pub(super) mod tests {
                 a._NET_WM_STATE_SKIP_PAGER,
             ]
         );
+    }
+
+    /// GNOME X11 (issue #116): DESKTOP type only and no BELOW state.
+    #[test]
+    fn gnome_x11_kind_declares_desktop_without_below() {
+        let a = atoms();
+        assert_eq!(
+            window_type_atoms(WindowKind::GnomeX11, &a),
+            vec![a._NET_WM_WINDOW_TYPE_DESKTOP]
+        );
+        let states = window_state_atoms(WindowKind::GnomeX11, &a);
+        assert!(!states.contains(&a._NET_WM_STATE_BELOW));
+        assert_eq!(
+            states,
+            vec![
+                a._NET_WM_STATE_STICKY,
+                a._NET_WM_STATE_SKIP_TASKBAR,
+                a._NET_WM_STATE_SKIP_PAGER,
+            ]
+        );
+    }
+
+    /// GNOME X11 (issue #116): restack is a no-op. Needs an X server.
+    #[test]
+    #[ignore]
+    fn gnome_x11_restack_noops() {
+        use x11rb::rust_connection::RustConnection;
+        let (conn, _num) = RustConnection::connect(None).unwrap();
+        let atoms = Atoms::new(&conn).unwrap().reply().unwrap();
+        assert!(restack(&conn, &atoms, 0, 0, WindowKind::GnomeX11).is_ok());
     }
 
     /// Muffin only honours `_NET_RESTACK_WINDOW` from a "pager" (source 2), and

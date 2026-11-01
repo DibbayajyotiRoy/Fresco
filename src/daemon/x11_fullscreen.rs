@@ -2,10 +2,11 @@
 //! Wayland `fullscreen.rs` auto-pause).
 //!
 //! Reads the WM-maintained EWMH state: `_NET_CLIENT_LIST_STACKING` on the root
-//! plus each client's `_NET_WM_STATE`, and reports which monitors are covered
-//! by a viewable fullscreen window (always) or, when `pause_on_covered` is
-//! enabled, by any large non-fullscreen window overlapping at least 90% of the
-//! monitor. Deliberately POLLED on the daemon's 2s cadence, never event-driven
+//! plus each client's `_NET_WM_STATE` and `_NET_WM_WINDOW_TYPE`, and reports
+//! which monitors are covered by a viewable fullscreen or maximized window
+//! (always), or — when `pause_on_covered` is enabled — by any other large
+//! window overlapping at least 90% of the monitor. Deliberately POLLED on the
+//! daemon's 2s cadence, never event-driven
 //! — reacting to X events is how the historical ConfigureNotify storm froze
 //! laptops (see the note in `Daemon::run`).
 //!
@@ -25,9 +26,11 @@ use super::x11win::Atoms;
 /// description of that window (kind + title, for the pause log — so a misfiring
 /// compositor surface is identifiable from the log alone).
 ///
-/// Fullscreen windows always count. When `pause_on_covered` is `true`, any
-/// viewable, non-minimized, non-skip-taskbar window whose geometry overlaps at
-/// least 90% of a monitor also counts.
+/// Fullscreen and maximized windows always count. When `pause_on_covered` is
+/// `true`, any other viewable, non-minimized, non-skip-taskbar window whose
+/// geometry overlaps at least 90% of a monitor also counts. Desktop, dock and
+/// skip-pager windows are ignored so the desktop background itself never
+/// triggers a pause.
 pub fn covered_connectors<C: Connection>(
     conn: &C,
     root: Window,
@@ -76,13 +79,25 @@ pub fn covered_connectors<C: Connection>(
             continue;
         };
         let has = |a| states.contains(&a);
-        if has(atoms._NET_WM_STATE_HIDDEN) || has(atoms._NET_WM_STATE_SKIP_TASKBAR) {
+        if has(atoms._NET_WM_STATE_HIDDEN)
+            || has(atoms._NET_WM_STATE_SKIP_TASKBAR)
+            || has(atoms._NET_WM_STATE_SKIP_PAGER)
+        {
             continue; // minimized, or a panel/desktop-icon window
         }
 
+        let types = window_type(conn, win, atoms).unwrap_or_default();
+        if types.contains(&atoms._NET_WM_WINDOW_TYPE_DESKTOP)
+            || types.contains(&atoms._NET_WM_WINDOW_TYPE_DOCK)
+        {
+            continue; // desktop background or panel
+        }
+
         let is_fullscreen = has(atoms._NET_WM_STATE_FULLSCREEN);
-        // Without the covered switch, only fullscreen windows can pause.
-        if !is_fullscreen && !pause_on_covered {
+        let is_maximized =
+            has(atoms._NET_WM_STATE_MAXIMIZED_VERT) && has(atoms._NET_WM_STATE_MAXIMIZED_HORZ);
+        // Without the covered switch, only fullscreen or maximized windows can pause.
+        if !is_fullscreen && !is_maximized && !pause_on_covered {
             continue;
         }
 
@@ -94,17 +109,23 @@ pub fn covered_connectors<C: Connection>(
 
         // Overlap threshold: 0.9 when covered mode is enabled, 0.5 otherwise.
         // Fullscreen windows match the monitor exactly, so 0.9 is still met.
-        let threshold = if pause_on_covered { 0.9 } else { 0.5 };
+        let fullscreen_threshold = if pause_on_covered { 0.9 } else { 0.5 };
 
         for m in monitors {
-            if is_fullscreen && overlap_at_least(x, y, w, h, m, threshold) {
+            if is_fullscreen && overlap_at_least(x, y, w, h, m, fullscreen_threshold) {
                 covered
                     .entry(m.connector.clone())
                     .or_insert_with(|| format!("fullscreen window ({:?})", title));
-            } else if pause_on_covered && overlap_at_least(x, y, w, h, m, 0.9) {
+            }
+            if (pause_on_covered || is_maximized) && overlap_at_least(x, y, w, h, m, 0.9) {
+                let kind = if is_maximized {
+                    "maximized window"
+                } else {
+                    "covered window"
+                };
                 covered
                     .entry(m.connector.clone())
-                    .or_insert_with(|| format!("covered window ({:?})", title));
+                    .or_insert_with(|| format!("{} ({:?})", kind, title));
             }
         }
     }
@@ -138,6 +159,16 @@ fn window_states<C: Connection>(conn: &C, win: Window, atoms: &Atoms) -> Option<
         .ok()?;
     let states: Vec<u32> = reply.value32()?.collect();
     Some(states)
+}
+
+fn window_type<C: Connection>(conn: &C, win: Window, atoms: &Atoms) -> Option<Vec<u32>> {
+    let reply = conn
+        .get_property(false, win, atoms._NET_WM_WINDOW_TYPE, AtomEnum::ATOM, 0, 8)
+        .ok()?
+        .reply()
+        .ok()?;
+    let types: Vec<u32> = reply.value32()?.collect();
+    Some(types)
 }
 
 fn absolute_geometry<C: Connection>(
@@ -413,6 +444,193 @@ mod tests {
         assert!(covered.is_empty(), "unmapped window counted: {covered:?}");
 
         // Leave the root property empty so nothing lingers for other tests.
+        conn.change_property32(
+            PropMode::REPLACE,
+            screen.root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            &[],
+        )
+        .unwrap();
+        conn.sync().unwrap();
+    }
+
+    /// End-to-end on a real X server: a window whose `_NET_WM_WINDOW_TYPE` is
+    /// `DESKTOP` or `DOCK` must not count as covering, even when it fills the
+    /// whole screen and `pause_on_covered` is enabled. This is the bug that made
+    /// dde-shell's desktop window pause the wallpaper unconditionally on Deepin
+    /// (issue #117).
+    #[test]
+    fn desktop_and_dock_windows_are_ignored() {
+        if std::env::var("FRESCO_EWMH_TEST").ok().as_deref() != Some("1") {
+            eprintln!("skip desktop_and_dock_windows_are_ignored: set FRESCO_EWMH_TEST=1 inside a scratch X server");
+            return;
+        }
+        if std::env::var("DISPLAY").is_err() {
+            eprintln!("skip desktop_and_dock_windows_are_ignored: no DISPLAY");
+            return;
+        }
+        let (conn, screen_num) = match x11rb::connect(None) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("skip: cannot connect to X: {e}");
+                return;
+            }
+        };
+        let screen = conn.setup().roots[screen_num].clone();
+        let atoms = Atoms::new(&conn).unwrap().reply().unwrap();
+        let monitors = [mon(
+            "TEST-1",
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+        )];
+
+        let win = conn.generate_id().unwrap();
+        conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            win,
+            screen.root,
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new(),
+        )
+        .unwrap();
+        conn.map_window(win).unwrap();
+        conn.change_property32(
+            PropMode::REPLACE,
+            screen.root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            &[win],
+        )
+        .unwrap();
+
+        for kind in [
+            atoms._NET_WM_WINDOW_TYPE_DESKTOP,
+            atoms._NET_WM_WINDOW_TYPE_DOCK,
+        ] {
+            conn.change_property32(
+                PropMode::REPLACE,
+                win,
+                atoms._NET_WM_WINDOW_TYPE,
+                AtomEnum::ATOM,
+                &[kind],
+            )
+            .unwrap();
+            conn.sync().unwrap();
+            let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, true);
+            assert!(
+                covered.is_empty(),
+                "{kind:?} window should not count as a cover: {covered:?}"
+            );
+        }
+
+        conn.change_property32(
+            PropMode::REPLACE,
+            screen.root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            &[],
+        )
+        .unwrap();
+        conn.sync().unwrap();
+    }
+
+    /// End-to-end on a real X server: a maximized window should pause the
+    /// wallpaper even when `pause_on_covered` is disabled, because maximized
+    /// windows are treated as covering (issue #117).
+    #[test]
+    fn maximized_window_counts_without_covered_toggle() {
+        if std::env::var("FRESCO_EWMH_TEST").ok().as_deref() != Some("1") {
+            eprintln!("skip maximized_window_counts_without_covered_toggle: set FRESCO_EWMH_TEST=1 inside a scratch X server");
+            return;
+        }
+        if std::env::var("DISPLAY").is_err() {
+            eprintln!("skip maximized_window_counts_without_covered_toggle: no DISPLAY");
+            return;
+        }
+        let (conn, screen_num) = match x11rb::connect(None) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("skip: cannot connect to X: {e}");
+                return;
+            }
+        };
+        let screen = conn.setup().roots[screen_num].clone();
+        let atoms = Atoms::new(&conn).unwrap().reply().unwrap();
+        let monitors = [mon(
+            "TEST-1",
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+        )];
+
+        let win = conn.generate_id().unwrap();
+        conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            win,
+            screen.root,
+            0,
+            0,
+            screen.width_in_pixels,
+            screen.height_in_pixels,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new(),
+        )
+        .unwrap();
+        conn.map_window(win).unwrap();
+        conn.change_property32(
+            PropMode::REPLACE,
+            win,
+            atoms._NET_WM_STATE,
+            AtomEnum::ATOM,
+            &[
+                atoms._NET_WM_STATE_MAXIMIZED_VERT,
+                atoms._NET_WM_STATE_MAXIMIZED_HORZ,
+            ],
+        )
+        .unwrap();
+        conn.change_property32(
+            PropMode::REPLACE,
+            screen.root,
+            atoms._NET_CLIENT_LIST_STACKING,
+            AtomEnum::WINDOW,
+            &[win],
+        )
+        .unwrap();
+        conn.sync().unwrap();
+
+        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, false);
+        assert!(
+            covered.contains_key("TEST-1"),
+            "maximized window not detected without covered toggle: {covered:?}"
+        );
+
+        conn.change_property32(
+            PropMode::REPLACE,
+            win,
+            atoms._NET_WM_STATE,
+            AtomEnum::ATOM,
+            &[],
+        )
+        .unwrap();
+        conn.sync().unwrap();
+        let covered = covered_connectors(&conn, screen.root, &atoms, &monitors, false);
+        assert!(
+            covered.is_empty(),
+            "state cleared but still covered: {covered:?}"
+        );
+
         conn.change_property32(
             PropMode::REPLACE,
             screen.root,

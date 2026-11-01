@@ -178,7 +178,7 @@ jobs:
           set -e
           APP=io.github.dibbayajyotiroy.Fresco
           fail=0
-          files="/usr/share/icons/hicolor/scalable/apps/$APP.svg"
+          files="/usr/share/icons/hicolor/scalable/apps/$APP.svg /usr/share/icons/hicolor/symbolic/apps/$APP-symbolic.svg"
           for size in 48x48 64x64 128x128 256x256 512x512; do
             files="$files /usr/share/icons/hicolor/$size/apps/$APP.png"
           done

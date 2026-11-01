@@ -4,6 +4,22 @@ All notable changes to Fresco are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.1.54] — 2026-11-01
+
+### Fixed
+- **GNOME X11 wallpaper windows no longer declare `_NET_WM_STATE_BELOW`**,
+  which fixes desktop icons disappearing on Zorin/GNOME X11 (issue #116).
+- Relaxed the `.deb` dependencies for the Deepin store: `libgtk-4-1`,
+  `libadwaita-1-0` and `libgtk-4-media-gstreamer` are now `Recommends` instead
+  of `Depends`, so the package installs on Deepin V20 where those packages are
+  unavailable.
+- **The remaining modal dialogs no longer stretch or jump when you click
+  outside them** (issue #100). The first fix covered the glass-style modals and
+  the Lock Screen windows; the Advanced settings window and the audio-visualiser
+  consent dialog were still resizable and are now fixed.
+
 ## [1.1.53] — 2026-10-28
 
 ### Added
@@ -60,6 +76,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and stopped when it unlocks. With the desktop wallpaper off, the lock
   screen's Lyrics and Visualizer widgets do nothing (they are desktop
   overlays); its other widgets work as usual.
+
+- **The tray icon is now a monochrome symbolic icon** that follows the panel's
+  colours, like the other tray icons, instead of the full-colour app icon.
 
 ### Fixed
 - **Closing Fresco no longer drops the live wallpaper back to a still image**
@@ -121,6 +140,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   player's "low-latency" profile was resetting it to one. In low-memory or
   Performance mode a 4K video also no longer raises the read-ahead cache to
   64 MiB.
+- **X11 auto-pause no longer confuses the desktop background with a covering
+  app** (issue #117). On Deepin and other desktops, dde-shell's desktop window
+  (and any `_NET_WM_WINDOW_TYPE_DESKTOP` or `_NET_WM_WINDOW_TYPE_DOCK` window)
+  was counted as covering the screen, so "Pause when an app covers the screen"
+  and Performance mode paused the wallpaper even when no app was open. The
+  daemon now ignores those window types and also skips
+  `_NET_WM_STATE_SKIP_PAGER` windows. Maximised windows are still treated as
+  covering, so a maximised browser now pauses the wallpaper without requiring
+  true fullscreen.
 
 ### Notes for testers
 Not yet confirmed on real hardware, and the most useful things to check:
@@ -852,6 +880,8 @@ icons.
   the matching desktop locale automatically.
 
 ### Fixed
+- **Modal secondary windows are now non-resizable, preventing the
+  stretch-and-jump bug when clicking outside them on Deepin/KWin** (issue #100).
 - **A Wayland video/GIF wallpaper that keeps failing to start now says why,
   tells you instead of quietly holding a still frame, and tries again on its
   own.** mpvpaper prints every one of its own errors — and mpv's — to

@@ -560,6 +560,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "Этот композитор не поддерживает layer-shell, поэтому Fresco показывает статичный кадр.",
   "This folder is empty — move wallpapers into it from any card’s menu": "Эта папка пуста — переместите в неё обои из меню любой карточки",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "Эта установка не может обновиться автоматически. Выполните эту команду в терминале либо скачайте последний выпуск напрямую:",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "Выполните это в терминале, чтобы обновить через AUR-помощник. Или скачайте .pkg.tar.zst со страницы релизов и выполните: sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "Скачайте .rpm со страницы релизов, затем выполните это в терминале из папки, где он лежит:",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "Это слайд-шоу следует за папкой. Добавление файла зафиксирует текущее содержимое в отдельный список и прекратит слежение за папкой.",
   "This slideshow has no images to show. Videos need a playlist.": "В этом слайд-шоу нет изображений для показа. Для видео нужен плейлист.",
   "Tint the lyric with the app accent instead of the colour below.": "Окрашивать текст песни акцентным цветом приложения вместо цвета ниже.",

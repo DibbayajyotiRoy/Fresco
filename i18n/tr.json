@@ -560,6 +560,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "Bu pencere yöneticisi layer-shell desteklemiyor, bu yüzden Fresco sabit bir kare gösteriyor.",
   "This folder is empty — move wallpapers into it from any card’s menu": "Bu klasör boş — herhangi bir kartın menüsünden duvar kâğıdı taşıyabilirsiniz",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "Bu kurulum otomatik olarak güncellenemez. Bir uçbirimde şu komutu çalıştırın veya en son sürümü doğrudan indirin:",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "AUR yardımcınızla güncellemek için bunu bir terminalde çalıştırın. Ya da sürümler sayfasından .pkg.tar.zst dosyasını indirip şunu çalıştırın: sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "Sürümler sayfasından .rpm dosyasını indirin, sonra dosyanın bulunduğu klasörde bunu bir terminalde çalıştırın:",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "Bu slayt gösterisi bir klasörü izliyor. Dosya eklemek, mevcut içeriği seçilmiş sabit bir listeye dönüştürür ve klasörü izlemeyi durdurur.",
   "This slideshow has no images to show. Videos need a playlist.": "Bu slayt gösterisinde gösterilecek görsel yok. Videolar için çalma listesi gerekir.",
   "Tint the lyric with the app accent instead of the colour below.": "Şarkı sözünü aşağıdaki renk yerine uygulamanın vurgu rengiyle boyayın.",

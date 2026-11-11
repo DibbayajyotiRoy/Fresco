@@ -560,6 +560,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "此合成器不支持 layer-shell，因此 Fresco 只显示静止画面。",
   "This folder is empty — move wallpapers into it from any card’s menu": "此分类是空的——可在任意壁纸卡片的菜单中把壁纸移进来",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "此安装方式无法自动更新。请在终端中运行以下命令，或直接下载最新版本：",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "在终端中运行此命令，通过 AUR 助手更新。或从发布页面下载 .pkg.tar.zst，然后运行：sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "请先从发布页面下载 .rpm 文件，然后在存放该文件的目录中于终端运行此命令：",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "该幻灯片跟随一个文件夹。添加文件会把当前内容固定为手动列表，并不再跟随该文件夹。",
   "This slideshow has no images to show. Videos need a playlist.": "此幻灯片没有可显示的图片。视频需要使用播放列表。",
   "Tint the lyric with the app accent instead of the colour below.": "用应用强调色为歌词着色，而不用下方的颜色。",

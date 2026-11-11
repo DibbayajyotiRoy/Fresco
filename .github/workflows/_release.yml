@@ -73,6 +73,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build release
+        env:
+          FRESCO_CHANNEL: deb
         run: cargo build --release --all-features --locked
 
       # Build the libmpv1 variant here (ubuntu-22.04 links libmpv.so.1) and pull
@@ -205,3 +207,346 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
             -d "$payload"
+
+  # ── Red Hat family, Arch, and AUR ───────────────────────────────────────────
+  # Every job below is additive: none of them is needed by build-deb, and
+  # build-deb's own steps (including its Supabase notification) are unchanged.
+  # The verify/attach jobs run only after build-deb has created the release, so
+  # a package that fails its clean-container install is never attached, while
+  # the .deb stays published. Clients are notified by build-deb as before; the
+  # rpm and pkg.tar.zst appear on the release a few minutes later.
+
+  # Fedora (amd64). Builds the rpm against Fedora's libmpv (mpv-libs, libmpv.so.2).
+  rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - name: Install build deps
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            gcc git tar xz meson ninja-build pkgconf-pkg-config \
+            wayland-devel wayland-protocols-devel mesa-libEGL-devel mesa-libGL-devel \
+            mpv-libs-devel gtk4-devel libadwaita-devel libX11-devel libXrandr-devel \
+            ffmpegthumbnailer
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-fedora-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm --locked
+
+      - name: Build release
+        env:
+          FRESCO_CHANNEL: rpm
+        run: cargo build --release --all-features --locked
+
+      - name: Build bundled mpvpaper (libmpv2, Fedora)
+        run: |
+          scripts/build-mpvpaper.sh
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv2
+
+      - name: Package .rpm
+        run: |
+          cargo generate-rpm
+          ls target/generate-rpm/fresco-*.x86_64.rpm
+          rpm -qlp target/generate-rpm/fresco-*.x86_64.rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresco-rpm
+          path: target/generate-rpm/fresco-*.x86_64.rpm
+          if-no-files-found: error
+
+  # Clean Fedora container: nothing from the build above is installed, so the
+  # install proves the rpm's Requires resolve on their own.
+  rpm-verify:
+    needs: [build-deb, rpm]
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fresco-rpm
+          path: rpm
+
+      - name: Install the rpm
+        run: |
+          dnf install -y --setopt=install_weak_deps=False ./rpm/fresco-*.x86_64.rpm
+
+      - name: Key files are in the package
+        run: |
+          set -e
+          pkg=$(ls rpm/fresco-*.x86_64.rpm)
+          for f in /usr/bin/fresco /usr/bin/fresco-bin /usr/bin/frescod \
+                   /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/fresco-update.sh \
+                   /usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop; do
+            rpm -qlp "$pkg" | grep -qx "$f" || { echo "::error::$f missing from the rpm"; exit 1; }
+          done
+
+      - name: ldd -r — no unresolved libraries
+        run: |
+          set -e
+          for bin in /usr/bin/fresco-bin /usr/bin/frescod /usr/lib/fresco/mpvpaper-libmpv2; do
+            echo "== ldd -r $bin =="
+            out="$(ldd -r "$bin")"
+            echo "$out"
+            if echo "$out" | grep -E 'not found|undefined symbol'; then
+              echo "::error::$bin has unresolved shared-library dependencies"
+              exit 1
+            fi
+          done
+
+      - name: frescod runs
+        run: |
+          frescod --version
+          frescod --check || true   # headless: non-zero is expected
+
+      - name: A bundled renderer loads this distro's libmpv
+        run: |
+          rc=0; out=$(/usr/lib/fresco/mpvpaper-libmpv2 --help 2>/dev/null) || rc=$?
+          echo "mpvpaper-libmpv2 --help -> exit $rc"
+          if [ "$rc" -eq 127 ]; then
+            echo "::error::mpvpaper-libmpv2 cannot load libmpv (exit 127)"; exit 1
+          fi
+          case "$out" in *--auto-mode*) ;; *)
+            echo "::error::bundled mpvpaper predates 1.9 (no --auto-mode)"; exit 1 ;;
+          esac
+
+      - name: Attach .rpm to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ inputs.target }}
+          files: rpm/fresco-*.x86_64.rpm
+
+  # Arch (x86_64). The Rust binaries and the Arch-linked mpvpaper are built here;
+  # makepkg only packages them (makepkg -d: the runtime deps are checked by
+  # arch-verify instead, in a clean container). makepkg refuses root, so it runs
+  # as a throwaway "builder" user.
+  arch-build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install build deps
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm --needed base-devel git python zstd rust \
+            meson ninja pkgconf wayland wayland-protocols gtk4 libadwaita mpv \
+            ffmpegthumbnailer libx11 libxrandr mesa libglvnd glib2 xdg-utils polkit
+
+      - uses: actions/checkout@v4
+
+      - name: Build release
+        env:
+          FRESCO_CHANNEL: arch
+        run: cargo build --release --all-features --locked
+
+      - name: Build bundled mpvpaper (libmpv2, Arch)
+        run: |
+          scripts/build-mpvpaper.sh
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv2
+
+      - name: Stage the payload and PKGBUILD
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VER="${TAG#v}"
+          mkdir -p stage/payload
+          # The payload is the rpm's asset list (Cargo.toml), so the rpm and the
+          # Arch package install the same files to the same paths.
+          python3 - <<'PY'
+          import os, shutil, tomllib
+          cfg = tomllib.load(open('Cargo.toml', 'rb'))
+          for a in cfg['package']['metadata']['generate-rpm']['assets']:
+              dst = os.path.join('stage/payload', a['dest'].lstrip('/'))
+              os.makedirs(os.path.dirname(dst), exist_ok=True)
+              shutil.copy2(a['source'], dst)
+              os.chmod(dst, int(a['mode'], 8))
+          PY
+          cp packaging/arch/PKGBUILD stage/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$VER/" stage/PKGBUILD
+          grep -qx "pkgver=$VER" stage/PKGBUILD
+          useradd -m builder
+          cp -a stage /home/builder/fresco-arch
+          chown -R builder:builder /home/builder/fresco-arch
+
+      - name: makepkg (as non-root builder)
+        run: |
+          runuser -u builder -- bash -c 'cd /home/builder/fresco-arch && makepkg -f -d --noconfirm'
+          mkdir -p out
+          cp /home/builder/fresco-arch/fresco-bin-*-1-x86_64.pkg.tar.zst out/
+          ls -l out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresco-arch
+          path: out/fresco-bin-*-1-x86_64.pkg.tar.zst
+          if-no-files-found: error
+
+  # Clean Arch container: pacman resolves the runtime deps from the package's own
+  # Depends line, then pacman -U installs the package, then the smoke checks run.
+  arch-verify:
+    needs: [build-deb, arch-build]
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Bootstrap
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fresco-arch
+          path: arch
+
+      - name: Install the package
+        run: |
+          set -euo pipefail
+          PKG=$(ls arch/fresco-bin-*-1-x86_64.pkg.tar.zst)
+          pacman -Qlp "$PKG"
+          for f in /usr/bin/fresco /usr/bin/fresco-bin /usr/bin/frescod \
+                   /usr/lib/fresco/mpvpaper-libmpv2 /usr/lib/fresco/fresco-update.sh \
+                   /usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop; do
+            pacman -Qlp "$PKG" | grep -q " $f\$" || { echo "::error::$f missing from the package"; exit 1; }
+          done
+          deps=$(pacman -Qip "$PKG" | awk -F': *' '/^Depends On/{print $2}')
+          pacman -S --needed --noconfirm $deps
+          pacman -U --noconfirm "$PKG"
+
+      - name: ldd -r — no unresolved libraries
+        run: |
+          set -e
+          for bin in /usr/bin/fresco-bin /usr/bin/frescod /usr/lib/fresco/mpvpaper-libmpv2; do
+            echo "== ldd -r $bin =="
+            out="$(ldd -r "$bin")"
+            echo "$out"
+            if echo "$out" | grep -E 'not found|undefined symbol'; then
+              echo "::error::$bin has unresolved shared-library dependencies"
+              exit 1
+            fi
+          done
+
+      - name: frescod runs
+        run: |
+          frescod --version
+          frescod --check || true   # headless: non-zero is expected
+
+      - name: A bundled renderer loads this distro's libmpv
+        run: |
+          rc=0; out=$(/usr/lib/fresco/mpvpaper-libmpv2 --help 2>/dev/null) || rc=$?
+          echo "mpvpaper-libmpv2 --help -> exit $rc"
+          if [ "$rc" -eq 127 ]; then
+            echo "::error::mpvpaper-libmpv2 cannot load libmpv (exit 127)"; exit 1
+          fi
+          case "$out" in *--auto-mode*) ;; *)
+            echo "::error::bundled mpvpaper predates 1.9 (no --auto-mode)"; exit 1 ;;
+          esac
+
+      - name: Attach .pkg.tar.zst to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ inputs.target }}
+          files: arch/fresco-bin-*-1-x86_64.pkg.tar.zst
+
+  # Optional AUR publish. Runs after the release exists (build-deb created it),
+  # and does nothing unless the AUR_SSH_PRIVATE_KEY secret is set. continue-on-error:
+  # an AUR problem must never mark the release as failed.
+  aur:
+    needs: build-deb
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump and push the AUR packages
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          # Optional: an exact known_hosts line(s) for aur.archlinux.org. When unset,
+          # the host key comes from ssh-keyscan, restricted to aur.archlinux.org.
+          AUR_KNOWN_HOSTS: ${{ vars.AUR_KNOWN_HOSTS }}
+          # The AUR name "fresco" is held by an unrelated package, so the source
+          # package is opt-in until the name is confirmed to be ours.
+          AUR_PUBLISH_SOURCE_PKG: ${{ vars.AUR_PUBLISH_SOURCE_PKG }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::notice::AUR_SSH_PRIVATE_KEY is not set; skipping the AUR publish."
+            exit 0
+          fi
+          VER="${TAG#v}"
+          SSH_DIR="$RUNNER_TEMP/aur-ssh"
+          install -d -m 700 "$SSH_DIR"
+          KEY="$SSH_DIR/id"
+          KNOWN="$SSH_DIR/known_hosts"
+          ( umask 077; printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$KEY" )
+          if [ -n "${AUR_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$AUR_KNOWN_HOSTS" > "$KNOWN"
+          else
+            ssh-keyscan -T 10 -t ed25519,rsa aur.archlinux.org > "$KNOWN" 2>/dev/null || true
+            [ -s "$KNOWN" ] || { echo "::error::ssh-keyscan returned no keys for aur.archlinux.org"; exit 1; }
+            awk '$1 != "aur.archlinux.org" { bad = 1 } END { exit bad }' "$KNOWN" \
+              || { echo "::error::keyscan output names a host other than aur.archlinux.org"; exit 1; }
+            ssh-keygen -lf "$KNOWN"
+          fi
+          export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN -o StrictHostKeyChecking=yes"
+          git config --global user.name "Fresco release bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Copies packaging/aur/<name>/PKGBUILD + .SRCINFO into the AUR repo with
+          # pkgver, pkgrel=1 and the sha256 rewritten (.SRCINFO has no makepkg here,
+          # so its version and checksum lines are edited the same way).
+          publish() {
+            local name="$1" sha="$2" src="packaging/aur/$1" work old esc
+            work="$(mktemp -d)"
+            git clone -q "ssh://aur@aur.archlinux.org/$name.git" "$work/repo"
+            old="$(sed -n 's/^pkgver=//p' "$src/PKGBUILD")"
+            esc="${old//./\\.}"
+            sed -e "s/^pkgver=.*/pkgver=$VER/" -e "s/^pkgrel=.*/pkgrel=1/" \
+                -e "s/^sha256sums=.*/sha256sums=('$sha')/" "$src/PKGBUILD" > "$work/repo/PKGBUILD"
+            sed -e "s/$esc/$VER/g" -e "s/^\([[:space:]]*\)sha256sums = .*/\1sha256sums = $sha/" \
+                "$src/.SRCINFO" > "$work/repo/.SRCINFO"
+            cd "$work/repo"
+            git add PKGBUILD .SRCINFO
+            if git diff --cached --quiet; then
+              echo "$name: already at $VER"
+            else
+              git commit -q -m "Update to $VER"
+              git push -q origin HEAD:master
+              echo "$name: pushed $VER"
+            fi
+            cd "$GITHUB_WORKSPACE"
+          }
+
+          # fresco-bin: the checksum of the .deb asset build-deb just published,
+          # downloaded back so the hash is of what users actually fetch.
+          DEB="fresco_${VER}-1_amd64.deb"
+          curl -fsSL --retry 5 --retry-delay 5 -o "$RUNNER_TEMP/$DEB" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$DEB"
+          publish fresco-bin "$(sha256sum "$RUNNER_TEMP/$DEB" | cut -d' ' -f1)"
+
+          if [ "${AUR_PUBLISH_SOURCE_PKG:-}" = "true" ]; then
+            curl -fsSL --retry 5 --retry-delay 5 -o "$RUNNER_TEMP/src.tar.gz" \
+              "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$TAG.tar.gz"
+            publish fresco "$(sha256sum "$RUNNER_TEMP/src.tar.gz" | cut -d' ' -f1)"
+          else
+            echo "::notice::AUR 'fresco' not published (AUR_PUBLISH_SOURCE_PKG is not 'true')."
+          fi

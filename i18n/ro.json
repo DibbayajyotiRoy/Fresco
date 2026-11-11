@@ -560,6 +560,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "Acest compozitor nu acceptă layer-shell, așa că Fresco afișează un cadru static.",
   "This folder is empty — move wallpapers into it from any card’s menu": "Acest dosar este gol — mutați imagini de fundal în el din meniul oricărui card",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "Această instalare nu poate fi actualizată automat. Rulați această comandă într-un terminal sau descărcați direct cea mai recentă versiune:",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "Rulați aceasta într-un terminal pentru a actualiza cu asistentul AUR. Sau descărcați .pkg.tar.zst de pe pagina de versiuni și rulați: sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "Descărcați .rpm de pe pagina de versiuni, apoi rulați aceasta într-un terminal din folderul care îl conține:",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "Această succesiune de imagini urmărește un dosar. Adăugarea unui fișier fixează conținutul actual într-o listă aleasă manual și oprește urmărirea dosarului.",
   "This slideshow has no images to show. Videos need a playlist.": "Această succesiune de imagini nu are nicio imagine de afișat. Videoclipurile necesită o listă de redare.",
   "Tint the lyric with the app accent instead of the colour below.": "Colorează versul cu accentul aplicației, nu cu culoarea de mai jos.",

@@ -560,6 +560,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "Este compositor não oferece suporte a layer-shell, então o Fresco mostra um quadro estático.",
   "This folder is empty — move wallpapers into it from any card’s menu": "Esta pasta está vazia — mova papéis de parede para ela pelo menu de qualquer cartão",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "Esta instalação não pode ser atualizada automaticamente. Execute este comando em um terminal ou baixe a versão mais recente diretamente:",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "Execute isto em um terminal para atualizar com seu auxiliar AUR. Ou baixe o .pkg.tar.zst da página de versões e execute: sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "Baixe o .rpm da página de versões e depois execute isto em um terminal na pasta que o contém:",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "Esta apresentação segue uma pasta. Adicionar um arquivo fixa o conteúdo atual em uma lista escolhida manualmente, e ela deixa de seguir a pasta.",
   "This slideshow has no images to show. Videos need a playlist.": "Esta apresentação de slides não tem imagens para mostrar. Vídeos precisam de uma playlist.",
   "Tint the lyric with the app accent instead of the colour below.": "Tinge a letra com a cor de destaque do app em vez da cor abaixo.",

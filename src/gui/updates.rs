@@ -814,12 +814,21 @@ fn show_unsupported_dialog(window: &adw::ApplicationWindow) {
     inner.set_margin_top(8);
     inner.set_margin_bottom(22);
 
-    let oneliner = install_oneliner();
-    let body = gtk4::Label::new(Some(match oneliner {
-        Some(_) => t!(
+    // On Arch and Fedora/RHEL the distro's own package manager owns the install,
+    // so offer its command. install.sh is apt-only and must not be offered there.
+    let hint = crate::update::update_hint_for_this_system();
+    let oneliner = hint.or_else(install_oneliner);
+    let body = gtk4::Label::new(Some(match (hint, oneliner) {
+        (Some(h), _) if h == crate::update::ARCH_HINT => t!(
+            "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst"
+        ),
+        (Some(_), _) => t!(
+            "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:"
+        ),
+        (None, Some(_)) => t!(
             "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:"
         ),
-        None => t!(
+        (None, None) => t!(
             "This install can't be updated automatically. Download the latest release from the releases page and install it:"
         ),
     }));

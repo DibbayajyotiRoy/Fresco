@@ -560,6 +560,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "Trình quản lý hợp thành này không hỗ trợ layer-shell nên Fresco hiển thị một khung hình tĩnh.",
   "This folder is empty — move wallpapers into it from any card’s menu": "Thư mục này đang trống — hãy chuyển hình nền vào đây từ menu của bất kỳ thẻ nào",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "Bản cài đặt này không thể tự động cập nhật. Hãy chạy lệnh sau trong terminal, hoặc tải trực tiếp phiên bản mới nhất:",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "Chạy lệnh này trong terminal để cập nhật bằng trình trợ giúp AUR. Hoặc tải .pkg.tar.zst từ trang phát hành rồi chạy: sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "Tải .rpm từ trang phát hành, rồi chạy lệnh này trong terminal tại thư mục chứa tệp đó:",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "Trình chiếu này đang theo dõi một thư mục. Thêm một tệp sẽ cố định nội dung hiện tại thành danh sách chọn thủ công, và không còn theo dõi thư mục nữa.",
   "This slideshow has no images to show. Videos need a playlist.": "Trình chiếu này không có ảnh nào để hiển thị. Video cần dùng danh sách phát.",
   "Tint the lyric with the app accent instead of the colour below.": "Nhuốm màu lời bài hát bằng màu nhấn của ứng dụng thay vì màu bên dưới.",

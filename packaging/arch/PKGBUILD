@@ -1,0 +1,43 @@
+# Maintainer: Dibbayajyoti Roy <maromaromuje28@gmail.com>
+# Fresco — live wallpapers for Linux, packaged from the prebuilt release files.
+#
+# This PKGBUILD never compiles. The release job (.github/workflows/_release.yml,
+# `arch-build`) builds the Rust binaries and the Arch-linked mpvpaper, lays the
+# files out under $startdir/payload/ (the same asset list as the RPM, read from
+# [package.metadata.generate-rpm] in Cargo.toml), copies this file and LICENSE
+# next to it, sets pkgver to the release version, and runs
+# `makepkg -d` as a non-root user. The output is fresco-bin-<ver>-1-x86_64.pkg.tar.zst.
+#
+# Not the AUR packaging: packaging/aur/fresco-bin/ downloads the .deb and is
+# published to the AUR. This package ships the same name, so do not install both.
+
+pkgname=fresco-bin
+pkgver=1.1.54        # rewritten by the release job to the tag version
+pkgrel=1
+pkgdesc="Live wallpapers for Linux — video, GIF, image, slideshow and playlist wallpapers (prebuilt release)"
+arch=('x86_64')
+url="https://github.com/DibbayajyotiRoy/fresco"
+license=('GPL-3.0-or-later')
+provides=('fresco')
+conflicts=('fresco')
+# glib2 owns /usr/bin/gdbus and /usr/bin/gsettings (MPRIS queries, GNOME static frame).
+depends=('mpv' 'gtk4' 'libadwaita' 'glib2' 'mesa' 'wayland' 'libglvnd' 'ffmpegthumbnailer' 'xdg-utils' 'polkit')
+optdepends=(
+  'intel-media-driver: VA-API hardware decode on Intel GPUs'
+  'gst-plugins-good: hover-to-play previews in the library'
+  'gst-libav: hover-to-play previews in the library'
+  'pipewire: system-audio capture for the audio visualiser widget (pw-cat)'
+  'libpulse: system-audio capture fallback for the audio visualiser (parec)'
+  'ffmpeg: rotated thumbnails and library media metadata (ffprobe)'
+  'xsecurelock: X11 lock screen with the live wallpaper and widgets (fresco lock)'
+  'qt6-multimedia: video playback in the KDE Plasma desktop and lock-screen wallpaper'
+)
+# Prebuilt payload only: nothing to download or verify here.
+source=()
+sha256sums=()
+options=('!strip' '!debug')
+
+package() {
+  # payload/ mirrors the filesystem root: usr/bin, usr/lib/fresco, usr/share/...
+  cp -a --no-preserve=ownership "$startdir/payload/." "$pkgdir/"
+}

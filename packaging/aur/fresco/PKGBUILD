@@ -42,6 +42,9 @@ sha256sums=('SKIP')  # pin per release: curl -L <source-url> | sha256sum
 build() {
   cd "$pkgname-$pkgver"
   export RUSTUP_TOOLCHAIN=stable
+  # Packaging tag baked into the binary for telemetry's `channel` field.
+  # (AUR fresco-bin repackages the .deb, so it reports `deb`, not this.)
+  export FRESCO_CHANNEL=aur-source
   cargo build --release --all-features --locked
 }
 

@@ -67,6 +67,8 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         Some("prev") => Some(crate::gui::switch::run(crate::gui::switch::Step::Prev)),
         #[cfg(feature = "gui")]
         Some("random") => Some(crate::gui::switch::run(crate::gui::switch::Step::Random)),
+        #[cfg(feature = "gui")]
+        Some("pick") => Some(crate::gui::pick::run()),
         Some("-h") | Some("--help") | Some("help") => {
             print_help();
             Some(0)
@@ -95,6 +97,7 @@ fn print_help() {
          fresco next       Switch to the next wallpaper in your library\n  \
          fresco prev       Switch to the previous wallpaper in your library\n  \
          fresco random     Switch to a random wallpaper (never the current one)\n  \
+         fresco pick       Open a small window to choose the wallpaper\n  \
          fresco doctor     Show session, backend, and health diagnostics\n  \
          fresco status     Show the running wallpaper's status\n  \
          fresco logs [N]   Show the last N daemon log lines (default 50)\n  \
@@ -102,6 +105,10 @@ fn print_help() {
          fresco --help     Show this help\n\n\
          Bind `fresco next` / `prev` / `random` to keys:\n  \
          Sway:      bindsym $mod+Right exec fresco next\n\n\
+         Bind `fresco pick` to a key for a quick wallpaper picker:\n  \
+         Sway:      bindsym $mod+w exec fresco pick\n  \
+         Hyprland:  bind = $mainMod, W, exec, fresco pick\n  \
+         GNOME, KDE, COSMIC: add a custom shortcut with the command `fresco pick`\n\n\
          Bind `fresco lock` to a key or an idle daemon:\n  \
          Sway:      bindsym $mod+Escape exec fresco lock\n  \
          hypridle:  lock_cmd = fresco lock\n  \

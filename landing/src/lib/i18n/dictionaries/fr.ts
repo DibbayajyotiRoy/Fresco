@@ -356,6 +356,13 @@ export const fr: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "Tutoriel vidéo",
+    label: "Tutoriel en roumain",
+    by: (a: string) => `par ${a}`,
+    play: (t: string) => `Lire : ${t}`,
+  },
+
   videos: {
     kicker: "En fonctionnement",
     title: "Moins d'une minute chacune. Sans commentaire.",

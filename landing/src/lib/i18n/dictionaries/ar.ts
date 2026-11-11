@@ -355,6 +355,13 @@ export const ar: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "درس بالفيديو",
+    label: "درس باللغة الرومانية",
+    by: (a: string) => `بقلم ${a}`,
+    play: (t: string) => `تشغيل: ${t}`,
+  },
+
   videos: {
     kicker: "شاهدها وهي تعمل",
     title: "أقل من دقيقة لكل مقطع. دون حاجة إلى تعليق صوتي.",

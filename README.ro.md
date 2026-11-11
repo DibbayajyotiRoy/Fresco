@@ -90,6 +90,12 @@ Instalați Fresco, faceți clic pe **Adăugare**, alegeți videoclipul și face�
 
 Imaginea de fundal continuă să ruleze și după ce fereastra se închide.
 
+## Tutoriale video
+
+**[Fresco: Live Wallpaper pe Linux în 5 Minute (Ubuntu/Debian)](https://youtu.be/2d8Kq_AezR4)**, de [78_Maty](https://www.youtube.com/@78_Maty), în limba română.
+
+<a href="https://youtu.be/2d8Kq_AezR4"><img src="https://i.ytimg.com/vi/2d8Kq_AezR4/hqdefault.jpg" alt="Miniatura videoclipului: tutorial Fresco pentru fundal animat, în limba română, de 78_Maty" width="480" /></a>
+
 ## Funcții
 
 - **Orice tip de conținut** — videoclip în buclă (mp4/webm/mkv), GIF animat, imagine statică, succesiune de imagini, listă de redare cu mai multe videoclipuri

@@ -8,6 +8,7 @@ import { Features } from "@/components/features";
 import { Comparison } from "@/components/comparison";
 import { HowItWorks } from "@/components/how-it-works";
 import { VideoShowcase } from "@/components/video-showcase";
+import { TutorialVideo } from "@/components/tutorial-video";
 import { Download } from "@/components/download";
 import { Faq } from "@/components/faq";
 import { ReportIssue } from "@/components/report-issue";
@@ -53,6 +54,7 @@ export default async function Home({
         <HowItWorks dict={dict} />
         <Comparison dict={dict} />
         <VideoShowcase dict={dict} />
+        <TutorialVideo dict={dict} />
         <Download dict={dict} />
         <AtAGlance dict={dict} version={stats.version} />
         <Faq dict={dict} />

@@ -51,7 +51,7 @@ export function LiteYouTube({
   playLabel,
   className,
 }: {
-  video: Video;
+  video: Pick<Video, "id" | "title">;
   /** Already interpolated with the (verbatim, English) YouTube title. */
   playLabel: string;
   className?: string;

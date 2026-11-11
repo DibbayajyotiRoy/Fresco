@@ -363,6 +363,13 @@ export const en = {
     },
   },
 
+  tutorial: {
+    title: "Video tutorial",
+    label: "Romanian-language tutorial",
+    by: (a: string) => `by ${a}`,
+    play: (t: string) => `Play: ${t}`,
+  },
+
   videos: {
     kicker: "Watch it run",
     title: "Under a minute each. No narration required.",

@@ -356,6 +356,13 @@ export const ptBr: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "Tutorial em vídeo",
+    label: "Tutorial em romeno",
+    by: (a: string) => `por ${a}`,
+    play: (t: string) => `Reproduzir: ${t}`,
+  },
+
   videos: {
     kicker: "Veja funcionando",
     title: "Menos de um minuto cada. Sem narração.",

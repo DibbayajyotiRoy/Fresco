@@ -352,6 +352,13 @@ export const ja: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "動画チュートリアル",
+    label: "ルーマニア語のチュートリアル",
+    by: (a: string) => `制作: ${a}`,
+    play: (t: string) => `再生: ${t}`,
+  },
+
   videos: {
     kicker: "動いているところ",
     title: "どれも 1 分未満。ナレーションは不要です。",

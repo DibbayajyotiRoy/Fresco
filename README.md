@@ -83,6 +83,12 @@ Install Fresco, click **Add**, pick your video, and click **Set as wallpaper**. 
 
 The wallpaper keeps playing after the window closes.
 
+## Video tutorials
+
+**[Fresco: Live Wallpaper pe Linux în 5 Minute (Ubuntu/Debian)](https://youtu.be/2d8Kq_AezR4)**, by [78_Maty](https://www.youtube.com/@78_Maty), in Romanian / în limba română.
+
+<a href="https://youtu.be/2d8Kq_AezR4"><img src="https://i.ytimg.com/vi/2d8Kq_AezR4/hqdefault.jpg" alt="Video thumbnail: Fresco live wallpaper tutorial in Romanian by 78_Maty" width="480" /></a>
+
 ## Features
 
 - **Any media** — looping video (mp4/webm/mkv), animated GIF, static image, image slideshow, multi-video playlist

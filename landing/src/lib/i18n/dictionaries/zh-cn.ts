@@ -344,6 +344,13 @@ export const zhCn: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "视频教程",
+    label: "罗马尼亚语教程",
+    by: (a: string) => `作者：${a}`,
+    play: (t: string) => `播放：${t}`,
+  },
+
   videos: {
     kicker: "实际效果",
     title: "每段不到一分钟，无需解说。",

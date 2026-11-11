@@ -357,6 +357,13 @@ export const tr: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "Video eğitim",
+    label: "Rumence eğitim",
+    by: (a: string) => `${a} tarafından`,
+    play: (t: string) => `Oynat: ${t}`,
+  },
+
   videos: {
     kicker: "Çalışırken izleyin",
     title: "Her biri bir dakikadan kısa. Anlatıma gerek yok.",

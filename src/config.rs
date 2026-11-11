@@ -4243,7 +4243,10 @@ visualizer = true
 
     #[test]
     fn low_memory_round_trips_and_defaults_off() {
-        let cfg = Config { low_memory: true, ..Config::default() };
+        let cfg = Config {
+            low_memory: true,
+            ..Config::default()
+        };
         let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
         assert!(back.low_memory);
         let old: Config = toml::from_str("").unwrap();

@@ -1732,21 +1732,17 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     popover_box.append(&performance_hint);
     // Lower RAM, slightly choppier loop seeks. Same live path as the other
     // daemon switches: save, then Apply, and the daemon rebuilds its players.
-    let low_memory_row = switch_row(
-        t!("Low memory mode"),
-        state.borrow().config.low_memory,
-        {
-            let state2 = state.clone();
-            move |active| {
-                let config = {
-                    let mut s = state2.borrow_mut();
-                    s.config.low_memory = active;
-                    s.config.clone()
-                };
-                daemon_ctl::apply_async(&config, |_| {});
-            }
-        },
-    );
+    let low_memory_row = switch_row(t!("Low memory mode"), state.borrow().config.low_memory, {
+        let state2 = state.clone();
+        move |active| {
+            let config = {
+                let mut s = state2.borrow_mut();
+                s.config.low_memory = active;
+                s.config.clone()
+            };
+            daemon_ctl::apply_async(&config, |_| {});
+        }
+    });
     popover_box.append(&low_memory_row);
     let low_memory_hint = gtk4::Label::new(Some(t!(
         "Lowers RAM use at the cost of slightly less smooth loop seeks"

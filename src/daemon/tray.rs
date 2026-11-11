@@ -73,8 +73,7 @@ impl Tray for FrescoTray {
 
     fn icon_pixmap(&self) -> Vec<Icon> {
         // Decoded per call: ksni asks rarely and the source is a 64px PNG.
-        let Ok(img) = image::load_from_memory_with_format(ICON_PNG, image::ImageFormat::Png)
-        else {
+        let Ok(img) = image::load_from_memory_with_format(ICON_PNG, image::ImageFormat::Png) else {
             return Vec::new();
         };
         let img = img

@@ -1,0 +1,50 @@
+#!/bin/sh
+# /usr/bin/fresco: checks for GTK 4 + libadwaita, then runs /usr/bin/fresco-bin.
+# Without these libs ld.so fails before main() with a raw loader error, so the
+# check has to happen here. The real binary sits beside this file so that
+# siblings resolved from current_exe() (frescod, mpvpaper) still resolve.
+
+self="$0"
+if resolved="$(readlink -f -- "$0" 2>/dev/null)" && [ -n "$resolved" ]; then
+    self="$resolved"
+fi
+dir="$(dirname -- "$self")"
+
+# Private-prefix GTK (LD_LIBRARY_PATH) is not in the ld cache: skip the check.
+[ -z "${LD_LIBRARY_PATH:-}" ] || exec "$dir/fresco-bin" "$@"
+
+cache="$(ldconfig -p 2>/dev/null)" || cache=""
+[ -n "$cache" ] || cache="$(/sbin/ldconfig -p 2>/dev/null)" || cache=""
+# No cache listing (ldconfig missing): do not block, just run.
+[ -n "$cache" ] || exec "$dir/fresco-bin" "$@"
+
+missing=""
+for lib in libgtk-4.so.1 libadwaita-1.so.0; do
+    printf '%s\n' "$cache" | grep -qF "$lib " || missing="$missing $lib"
+done
+
+if [ -n "$missing" ]; then
+    zh=0
+    for v in "${LC_ALL:-}" "${LANGUAGE:-}" "${LANG:-}"; do
+        case "$v" in zh*) zh=1 ;; esac
+    done
+    url=https://github.com/DibbayajyotiRoy/Fresco/releases
+    en() {
+        printf '%s\n' \
+            "fresco: Fresco's window needs GTK 4 and libadwaita, which this system does not provide:$missing" \
+            "fresco: Deepin V20 / Debian 10 / UOS 20 are not supported. Use Deepin 23/25, Ubuntu 22.04+ or Debian 12+." \
+            "fresco: On a newer system, 'sudo apt install libgtk-4-1 libadwaita-1-0' fixes this." \
+            "fresco: Releases: $url" >&2
+    }
+    zhmsg() {
+        printf '%s\n' \
+            "fresco: Fresco 窗口需要 GTK 4 和 libadwaita，本系统未提供:$missing" \
+            "fresco: 不支持 Deepin V20 / Debian 10 / UOS 20。请使用 Deepin 23/25、Ubuntu 22.04+ 或 Debian 12+。" \
+            "fresco: 在较新的系统上，执行 'sudo apt install libgtk-4-1 libadwaita-1-0' 即可解决。" \
+            "fresco: 下载地址: $url" >&2
+    }
+    if [ "$zh" = 1 ]; then zhmsg; echo >&2; en; else en; echo >&2; zhmsg; fi
+    exit 1
+fi
+
+exec "$dir/fresco-bin" "$@"

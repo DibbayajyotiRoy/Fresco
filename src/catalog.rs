@@ -80,6 +80,10 @@ pub fn record_install(item_id: &str) {
     if std::env::var("FRESCO_CATALOG_URL").is_ok() {
         return;
     }
+    // Dev builds and CI must not inflate the install count.
+    if crate::telemetry::suppressed() {
+        return;
+    }
     let _ = ureq::post(&format!("{SUPABASE_URL}/rest/v1/rpc/catalog_count_install"))
         .set("apikey", ANON_KEY)
         .set("Authorization", &format!("Bearer {ANON_KEY}"))

@@ -14,6 +14,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rather than the Debian-only installer. The installer script explains the
   right route on Arch and Fedora instead of stopping at a dead end.
 
+### Changed
+- **Telemetry counts real installs only.** Debug builds and CI runs (or any run
+  with `CI`, `GITHUB_ACTIONS` or `FRESCO_NO_TELEMETRY` set) no longer send the
+  install heartbeat, feature events, error reports, or the catalog install
+  count. The `channel` field now reports the packaging a release build was
+  tagged with (`deb`, `rpm`, `arch`, `aur-source`, `aur-bin`, `flatpak`,
+  `tarball`), falling back to runtime detection for untagged builds.
+
 ### Fixed
 - **On Deepin V20 / Debian 10, `fresco` now explains what is missing** instead
   of failing with a raw `libadwaita-1.so.0: cannot open shared object file`

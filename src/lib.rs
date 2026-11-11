@@ -49,6 +49,9 @@ pub mod worldclock;
 /// Application ID used for the desktop file, autostart entry, and GTK app.
 pub const APP_ID: &str = "io.github.dibbayajyotiroy.Fresco";
 pub const APP_NAME: &str = "Fresco";
+/// Ko-fi page for optional donations. Shared by the tray and the main window
+/// menu so the link lives in one place.
+pub const DONATE_URL: &str = "https://ko-fi.com/dibbayajyotiroy";
 /// WM_CLASS of wallpaper windows, so users/extensions can target them.
 pub const WALLPAPER_WM_CLASS: &str = "fresco-wallpaper";
 

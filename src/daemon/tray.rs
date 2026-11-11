@@ -23,9 +23,10 @@ use ksni::blocking::TrayMethods;
 use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
 use ksni::{Icon, Tray};
 
+use super::notifier::open_url;
 use crate::config::Config;
 use crate::ipc::{request, Request, Response};
-use crate::t;
+use crate::{t, DONATE_URL};
 
 /// How often the tray refreshes its pause label from daemon status.
 const STATUS_POLL: Duration = Duration::from_secs(2);
@@ -177,6 +178,12 @@ impl Tray for FrescoTray {
             StandardItem {
                 label: t!("Settings").into(),
                 activate: Box::new(|_: &mut FrescoTray| open_main_window()),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: t!("Support Fresco (Ko-fi)").into(),
+                activate: Box::new(|_: &mut FrescoTray| open_url(DONATE_URL)),
                 ..Default::default()
             }
             .into(),
@@ -392,7 +399,7 @@ mod tests {
             state: State::default(),
         };
         let menu = tray.menu();
-        assert_eq!(menu.len(), 9);
+        assert_eq!(menu.len(), 10);
         assert_eq!(label_at(&menu, 0), "Pause playback");
 
         tray.state.paused = true;
@@ -416,6 +423,7 @@ mod tests {
                 "Performance mode",
                 "Open main window",
                 "Settings",
+                "Support Fresco (Ko-fi)",
                 "Stop wallpaper",
                 "Quit Fresco (until next login)",
             ]

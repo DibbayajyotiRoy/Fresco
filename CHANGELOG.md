@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Optional "Support Fresco on Ko-fi" entry** in the main window menu and
+  the tray menu, opening the Ko-fi page in your browser. Nothing is sent or
+  shown otherwise.
+
 ### Fixed
 - **On Deepin V20 / Debian 10, `fresco` now explains what is missing** instead
   of failing with a raw `libadwaita-1.so.0: cannot open shared object file`

@@ -1988,6 +1988,12 @@ fn build_help_page(
     help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
 
+    // Optional and last among the help rows: a donation link, not a nudge.
+    let donate_btn = menu_item_opening_window(t!("Support Fresco on Ko-fi"), popover, || {
+        open_in_browser(crate::DONATE_URL)
+    });
+    popover_box.append(&donate_btn);
+
     let about_btn = menu_item_opening_window(t!("About"), popover, {
         let win_about = window.clone();
         move || show_about_dialog(&win_about)

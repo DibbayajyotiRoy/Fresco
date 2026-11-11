@@ -654,6 +654,8 @@
   "Window covers screen": "Jendela menutupi layar",
   "Performance mode": "Mode performa",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Menonaktifkan widget, visualizer audio, dan pratinjau saat kursor diarahkan, serta menurunkan kualitas video — untuk gaming dan PC lama",
+  "Low memory mode": "Mode hemat memori",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "Mengurangi pemakaian RAM dengan lompatan loop yang sedikit kurang mulus",
   "Pause playback": "Jeda pemutaran",
   "Resume playback": "Lanjutkan pemutaran",
   "Next wallpaper": "Wallpaper berikutnya",

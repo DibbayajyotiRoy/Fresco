@@ -654,6 +654,8 @@
   "Window covers screen": "Fereastră acoperă ecranul",
   "Performance mode": "Mod performanță",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Dezactivează widgeturile, vizualizatorul audio și previzualizările la trecerea mouse-ului și scade calitatea video — pentru jocuri și PC-uri mai vechi",
+  "Low memory mode": "Mod memorie redusă",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "Reduce consumul de RAM, cu sărituri în buclă ușor mai puțin fluide",
   "Pause playback": "Pauză redare",
   "Resume playback": "Reluare redare",
   "Next wallpaper": "Următoarea imagine de fundal",

@@ -654,6 +654,8 @@
   "Window covers screen": "Ventana que cubre la pantalla",
   "Performance mode": "Modo de rendimiento",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Desactiva los widgets, el visualizador de audio y las vistas previas al pasar el cursor, y reduce la calidad del video — para juegos y PC antiguos",
+  "Low memory mode": "Modo de poca memoria",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "Reduce el uso de RAM a costa de saltos en bucle algo menos fluidos",
   "Pause playback": "Pausar reproducción",
   "Resume playback": "Reanudar reproducción",
   "Next wallpaper": "Siguiente fondo de pantalla",

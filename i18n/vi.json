@@ -654,6 +654,8 @@
   "Window covers screen": "Cửa sổ che phủ màn hình",
   "Performance mode": "Chế độ hiệu năng",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Tắt widget, hiệu ứng hình ảnh âm thanh và xem trước khi di chuột, đồng thời giảm chất lượng video — dành cho chơi game và máy cũ",
+  "Low memory mode": "Chế độ tiết kiệm bộ nhớ",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "Giảm RAM sử dụng, đổi lại việc tua vòng lặp hơi kém mượt",
   "Pause playback": "Tạm dừng phát",
   "Resume playback": "Tiếp tục phát",
   "Next wallpaper": "Hình nền tiếp theo",

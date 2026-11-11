@@ -442,7 +442,7 @@ These numbers exist to decide which distros and desktops get tested before a rel
 
 **Never collected, either way:** personal data, file names, your wallpapers, your IP address, audio, keystrokes, or clipboard contents. The country is resolved from your IP by Cloudflare at the network edge, so only a two-letter code ever reaches this project. (Text you deliberately write and press send on — a feedback comment, or a message to the maintainer below — is a message you chose to send, not collection.)
 
-To send nothing at all, set `telemetry = false` and `telemetry_prompted = false` in `~/.config/fresco/config.toml`.
+To send nothing at all, set `telemetry = false` and `telemetry_prompted = false` in `~/.config/fresco/config.toml`. Debug builds and CI runs (or any run with `CI`, `GITHUB_ACTIONS` or `FRESCO_NO_TELEMETRY` set) never send either.
 
 ### Talk to the maintainer, anonymously
 

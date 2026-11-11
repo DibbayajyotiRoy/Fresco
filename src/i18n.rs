@@ -881,9 +881,12 @@ mod tests {
         let keys = [
             "Pause playback",
             "Resume playback",
+            "Previous wallpaper",
             "Next wallpaper",
             "Random wallpaper",
             "Open main window",
+            "Settings",
+            "Support Fresco (Ko-fi)",
             "Stop wallpaper",
             "Quit Fresco (until next login)",
             "RESUMES AT NEXT LOGIN",
@@ -907,7 +910,10 @@ mod tests {
         for (en, cn) in [
             ("Pause playback", "暂停播放"),
             ("Resume playback", "继续播放"),
+            ("Previous wallpaper", "上一张"),
             ("Next wallpaper", "下一张"),
+            ("Settings", "设置"),
+            ("Support Fresco (Ko-fi)", "支持 Fresco（Ko-fi）"),
             ("Random wallpaper", "随机一张"),
             ("Open main window", "打开主界面"),
             ("Stop wallpaper", "停止壁纸"),

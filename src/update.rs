@@ -46,15 +46,21 @@ impl Origin {
     /// falls back to GitHub rather than failing: being sent to the wrong host
     /// is recoverable, having no update path at all is not.
     pub fn current() -> Origin {
+        Origin::recorded().unwrap_or(Origin::GitHub)
+    }
+
+    /// The origin this install was explicitly recorded with, or `None` when
+    /// nothing was recorded (cargo / tarball / bare-binary installs never run
+    /// `install.sh`, so they have no marker).
+    pub fn recorded() -> Option<Origin> {
         if let Ok(v) = std::env::var("FRESCO_ORIGIN") {
             if let Some(o) = Origin::from_tag(v.trim()) {
-                return o;
+                return Some(o);
             }
         }
         std::fs::read_to_string(Origin::marker_path())
             .ok()
             .and_then(|s| Origin::from_tag(s.trim()))
-            .unwrap_or(Origin::GitHub)
     }
 
     /// The stable identifier written to the marker file and passed to the
@@ -117,6 +123,61 @@ impl Origin {
     }
 }
 
+/// Shown by [`update_hint`] for Arch-family systems.
+pub const ARCH_HINT: &str = "yay -Syu fresco-bin";
+/// Shown by [`update_hint`] for Fedora/RHEL-family systems: the downloaded .rpm.
+pub const RPM_HINT: &str = "sudo dnf install ./fresco-*.x86_64.rpm";
+
+/// Manual-update command for distros whose package manager owns the install,
+/// shown when the in-app updater cannot run. Parses the `ID` and `ID_LIKE`
+/// fields of an os-release file. `None` for everything else, including
+/// openSUSE (no release asset yet) and Debian/Ubuntu, which use `install.sh`.
+pub fn update_hint(os_release: &str) -> Option<&'static str> {
+    let unquote = |v: &str| v.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+    let mut id = String::new();
+    let mut id_like = String::new();
+    for line in os_release.lines() {
+        if let Some(v) = line.strip_prefix("ID=") {
+            id = unquote(v);
+        } else if let Some(v) = line.strip_prefix("ID_LIKE=") {
+            id_like = unquote(v);
+        }
+    }
+    let tokens: Vec<&str> = std::iter::once(id.as_str())
+        .chain(id_like.split_whitespace())
+        .collect();
+    let any = |names: &[&str]| tokens.iter().any(|t| names.contains(t));
+
+    if any(&["arch", "manjaro", "endeavouros", "cachyos", "garuda"]) {
+        Some(ARCH_HINT)
+    } else if any(&[
+        "fedora",
+        "rhel",
+        "centos",
+        "rocky",
+        "almalinux",
+        "nobara",
+        "bazzite",
+    ]) {
+        Some(RPM_HINT)
+    } else {
+        None
+    }
+}
+
+/// [`update_hint`] for the running system, read from `/etc/os-release` or its
+/// `/usr/lib` fallback. `None` under Flatpak: the distro's package manager does
+/// not own that install, so its commands would be wrong there.
+pub fn update_hint_for_this_system() -> Option<&'static str> {
+    if crate::is_flatpak() {
+        return None;
+    }
+    let text = std::fs::read_to_string("/etc/os-release")
+        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+        .unwrap_or_default();
+    update_hint(&text)
+}
+
 /// The version this binary was built as.
 pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -156,8 +217,9 @@ pub enum UpdateOutcome {
     /// (its documented exit 2) — a benign no-op, not a failure.
     AlreadyUpToDate,
     Failed(String),
-    /// The install can't be auto-updated this way (Flatpak sandbox or no
-    /// `apt-get`) — caller should route to a manual-install fallback.
+    /// The install can't be auto-updated this way (Flatpak sandbox, no
+    /// `apt-get`, or no bundled updater script — cargo/tarball/bare binary) —
+    /// caller should route to a manual-install fallback.
     Unsupported,
 }
 
@@ -174,8 +236,10 @@ fn outcome_from_status(status: std::process::ExitStatus) -> UpdateOutcome {
 /// Download + install the latest .deb by running the bundled updater script as
 /// root via pkexec (the desktop's polkit agent prompts once).
 pub fn run_updater_blocking() -> UpdateOutcome {
+    // No script means this install wasn't laid down by the .deb (cargo, tarball,
+    // bare binary): there is nothing to run, so it's a manual-update case.
     let Some(script) = updater_script() else {
-        return UpdateOutcome::Failed("updater script not found".into());
+        return UpdateOutcome::Unsupported;
     };
     // The origin is passed as an ARGUMENT, not an env var: pkexec runs the
     // script as root with a sanitised environment and root's $HOME, so it can
@@ -208,7 +272,7 @@ pub enum Progress {
 /// either the `gui` or `daemon` feature.
 pub fn run_updater_with_progress(on_progress: impl Fn(Progress) + Send + 'static) -> UpdateOutcome {
     let Some(script) = updater_script() else {
-        return UpdateOutcome::Failed("updater script not found".into());
+        return UpdateOutcome::Unsupported; // see run_updater_blocking
     };
     let mut cmd = std::process::Command::new("pkexec");
     cmd.arg(&script);
@@ -363,6 +427,37 @@ mod tests {
         );
     }
 
+    /// The hint parser: realistic os-release samples, quoted and unquoted.
+    #[test]
+    fn update_hint_matches_distro_families() {
+        let arch = "NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n";
+        let manjaro = "ID=manjaro\nID_LIKE=arch\n";
+        let endeavour = "NAME=\"EndeavourOS\"\nID=endeavouros\nID_LIKE=arch\n";
+        let cachy = "ID=cachyos\nID_LIKE=\"arch\"\n";
+        let fedora =
+            "NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=41\nPLATFORM_ID=\"platform:f41\"\n";
+        let rocky = "NAME=\"Rocky Linux\"\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"9.4\"\n";
+        let ubuntu = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
+        let debian = "ID=debian\n";
+        let suse =
+            "NAME=\"openSUSE Tumbleweed\"\nID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n";
+        let alma = "NAME=\"AlmaLinux\"\nID=\"almalinux\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"9.4\"\n";
+
+        for os in [arch, manjaro, endeavour, cachy] {
+            assert_eq!(update_hint(os), Some("yay -Syu fresco-bin"), "{os}");
+        }
+        for os in [fedora, rocky, alma] {
+            assert_eq!(
+                update_hint(os),
+                Some("sudo dnf install ./fresco-*.x86_64.rpm"),
+                "{os}"
+            );
+        }
+        for os in [ubuntu, debian, suse, ""] {
+            assert_eq!(update_hint(os), None, "{os}");
+        }
+    }
+
     #[test]
     fn failed_update_carries_stderr_detail() {
         let stages = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Progress>::new()));
@@ -392,5 +487,34 @@ mod tests {
         assert!(!is_newer("0.0.9", "0.0.9")); // equal is not newer
         assert!(!is_newer("0.0.8", "0.0.9"));
         assert!(!is_newer("not-a-version", "0.0.9")); // unparsable => false, never crashes
+    }
+
+    /// `recorded()` is None with no env/marker (cargo/tarball installs) while
+    /// `current()` still falls back to GitHub; env and marker both register.
+    /// Single test: it mutates process env, which other tests must not race.
+    #[test]
+    fn recorded_vs_current_origin() {
+        let dir = std::env::temp_dir().join(format!("fresco-origin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+        std::env::remove_var("FRESCO_ORIGIN");
+
+        assert_eq!(Origin::recorded(), None);
+        assert_eq!(Origin::current(), Origin::GitHub);
+
+        std::env::set_var("FRESCO_ORIGIN", "gitee");
+        assert_eq!(Origin::recorded(), Some(Origin::Gitee));
+        assert_eq!(Origin::current(), Origin::Gitee);
+
+        std::env::set_var("FRESCO_ORIGIN", "bogus");
+        assert_eq!(Origin::recorded(), None);
+
+        std::env::remove_var("FRESCO_ORIGIN");
+        let marker = Origin::marker_path();
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(&marker, "gitee\n").unwrap();
+        assert_eq!(Origin::recorded(), Some(Origin::Gitee));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

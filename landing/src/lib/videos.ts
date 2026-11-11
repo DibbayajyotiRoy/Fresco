@@ -62,3 +62,17 @@ export const embedUrl = (id: string) =>
   `https://www.youtube-nocookie.com/embed/${id}`;
 
 export const CHANNEL_URL = "https://www.youtube.com/@dibbayajyotiroy7399";
+
+/**
+ * Community tutorial by a third-party creator, in Romanian. Kept out of
+ * VIDEOS on purpose: VIDEOS drives the demo reel and its VideoObject schema,
+ * which describe our own English uploads. The title is the verbatim YouTube
+ * title; the credit and language label are ours and live in the dictionaries.
+ */
+export const TUTORIAL = {
+  id: "2d8Kq_AezR4",
+  title: "Fresco: Live Wallpaper pe Linux în 5 Minute (Ubuntu/Debian)",
+  url: "https://youtu.be/2d8Kq_AezR4",
+  author: "78_Maty",
+  channel: "https://www.youtube.com/@78_Maty",
+} as const;

@@ -1,6 +1,6 @@
 [package]
 name = "fresco"
-version = "1.1.54"
+version = "1.1.55"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Live wallpapers for Linux — video, GIF, image, slideshow, and playlist wallpapers with hardware-accelerated playback"
@@ -165,7 +165,10 @@ decoding keeps CPU usage near zero without degrading quality.
 
 一个好用、稳定的动态壁纸播放与管理软件。支持视频、GIF、图片和幻灯片壁纸，硬件加速播放，壁纸库分类管理。"""
 assets = [
-    ["target/release/fresco", "usr/bin/", "755"],
+    # /usr/bin/fresco is a POSIX sh launcher that checks for GTK 4 + libadwaita
+    # (clear message on Deepin V20 / Debian 10) and execs the real ELF beside it.
+    ["target/release/fresco", "usr/bin/fresco-bin", "755"],
+    ["packaging/debian/fresco-launcher", "usr/bin/fresco", "755"],
     ["target/release/frescod", "usr/bin/", "755"],
     # Bundled Wayland renderer, one build per libmpv soname generation: the
     # "libmpv1" build (ubuntu-22.04 CI) for older LTS bases and the "libmpv2"
@@ -238,3 +241,79 @@ assets = [
 # re-announce our .desktop file on Deepin, after dpkg's triggers finish — see the
 # script and docs/AUDIT.md "Deepin launcher hot refresh".
 maintainer-scripts = "packaging/debian"
+
+# RPM (Fedora, amd64) via `cargo generate-rpm`. Built by the `rpm` job in
+# _release.yml, which runs `cargo build --release --all-features --locked`,
+# builds the Fedora-linked mpvpaper into target/release/mpvpaper-libmpv2, then
+# runs `cargo generate-rpm` (output: target/generate-rpm/fresco-<ver>-1.x86_64.rpm).
+# Assets mirror [package.metadata.deb] except: the Deepin-only bloom icons and
+# the libmpv1 renderer (Fedora ships libmpv.so.2 only). The Arch package
+# (packaging/arch/PKGBUILD) reads this same asset list to build its payload.
+# Package names are Fedora's; see the report for the ones not yet verified.
+[package.metadata.generate-rpm]
+summary = "Live wallpapers for Linux"
+assets = [
+    { source = "target/release/fresco", dest = "/usr/bin/fresco-bin", mode = "755" },
+    { source = "packaging/debian/fresco-launcher", dest = "/usr/bin/fresco", mode = "755" },
+    { source = "target/release/frescod", dest = "/usr/bin/frescod", mode = "755" },
+    { source = "target/release/mpvpaper-libmpv2", dest = "/usr/lib/fresco/mpvpaper-libmpv2", mode = "755" },
+    { source = "scripts/fresco-update.sh", dest = "/usr/lib/fresco/fresco-update.sh", mode = "755" },
+    { source = "data/io.github.dibbayajyotiroy.Fresco.desktop", dest = "/usr/share/applications/io.github.dibbayajyotiroy.Fresco.desktop", mode = "644" },
+    { source = "data/icons/io.github.dibbayajyotiroy.Fresco.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.dibbayajyotiroy.Fresco.svg", mode = "644" },
+    { source = "data/icons/hicolor/symbolic/apps/io.github.dibbayajyotiroy.Fresco-symbolic.svg", dest = "/usr/share/icons/hicolor/symbolic/apps/io.github.dibbayajyotiroy.Fresco-symbolic.svg", mode = "644" },
+    { source = "data/icons/hicolor/48x48/apps/io.github.dibbayajyotiroy.Fresco.png", dest = "/usr/share/icons/hicolor/48x48/apps/io.github.dibbayajyotiroy.Fresco.png", mode = "644" },
+    { source = "data/icons/hicolor/64x64/apps/io.github.dibbayajyotiroy.Fresco.png", dest = "/usr/share/icons/hicolor/64x64/apps/io.github.dibbayajyotiroy.Fresco.png", mode = "644" },
+    { source = "data/icons/hicolor/128x128/apps/io.github.dibbayajyotiroy.Fresco.png", dest = "/usr/share/icons/hicolor/128x128/apps/io.github.dibbayajyotiroy.Fresco.png", mode = "644" },
+    { source = "data/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.dibbayajyotiroy.Fresco.png", mode = "644" },
+    { source = "data/icons/hicolor/512x512/apps/io.github.dibbayajyotiroy.Fresco.png", dest = "/usr/share/icons/hicolor/512x512/apps/io.github.dibbayajyotiroy.Fresco.png", mode = "644" },
+    { source = "data/saver_fresco", dest = "/usr/lib/fresco/saver_fresco", mode = "755" },
+    { source = "data/screensavers/fresco.desktop", dest = "/usr/share/applications/screensavers/fresco.desktop", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/fresco/LICENSE", mode = "644" },
+    # KDE Plasma 6 lock-screen wallpaper plugin: system path plus the
+    # Fresco-owned copy KdeHost::setup() falls back to (see [package.metadata.deb]).
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", dest = "/usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", dest = "/usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", dest = "/usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", dest = "/usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", dest = "/usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", dest = "/usr/share/plasma/wallpapers/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", dest = "/usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/metadata.json", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", dest = "/usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/config/main.xml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", dest = "/usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/main.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", dest = "/usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/VideoLayer.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", dest = "/usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/WindowWatcher.qml", mode = "644" },
+    { source = "packaging/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", dest = "/usr/share/fresco/kde/io.github.dibbayajyotiroy.fresco.lockscreen/contents/ui/config.qml", mode = "644" },
+]
+
+# Hard requirements: the launcher checks libgtk-4.so.1 / libadwaita-1.so.0,
+# frescod dlopens libmpv.so.2 (mpv-libs), and the binaries link the EGL/GL/
+# Wayland client libraries. glib2 owns gdbus and gsettings (see the deb notes).
+[package.metadata.generate-rpm.requires]
+mpv-libs = "*"
+gtk4 = "*"
+libadwaita = "*"
+glib2 = "*"
+mesa-libEGL = "*"
+mesa-libGL = "*"
+libwayland-client = "*"
+libwayland-egl = "*"
+ffmpegthumbnailer = "*"
+
+# Weak deps, mirroring the deb's Recommends. Each degrades to a logged message.
+[package.metadata.generate-rpm.recommends]
+mesa-va-drivers = "*"
+intel-media-driver = "*"
+rsms-inter-fonts = "*"
+google-noto-sans-arabic-fonts = "*"
+google-noto-naskh-arabic-fonts = "*"
+gstreamer1-plugins-good = "*"
+gstreamer1-libav = "*"
+ffmpeg = "*"
+pulseaudio-utils = "*"
+pipewire-utils = "*"
+xdg-utils = "*"
+polkit = "*"
+qt6-qtmultimedia = "*"
+
+[package.metadata.generate-rpm.suggests]
+xsecurelock = "*"

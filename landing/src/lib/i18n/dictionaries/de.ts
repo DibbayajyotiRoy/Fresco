@@ -356,6 +356,13 @@ export const de: Dictionary = {
     },
   },
 
+  tutorial: {
+    title: "Videoanleitung",
+    label: "Anleitung auf Rumänisch",
+    by: (a: string) => `von ${a}`,
+    play: (t: string) => `Abspielen: ${t}`,
+  },
+
   videos: {
     kicker: "In Aktion",
     title: "Jeweils unter einer Minute. Kein Kommentar nötig.",

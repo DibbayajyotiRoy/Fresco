@@ -1730,6 +1730,31 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     performance_hint.set_margin_end(4);
     performance_hint.set_margin_bottom(6);
     popover_box.append(&performance_hint);
+    // Lower RAM, slightly choppier loop seeks. Same live path as the other
+    // daemon switches: save, then Apply, and the daemon rebuilds its players.
+    let low_memory_row = switch_row(t!("Low memory mode"), state.borrow().config.low_memory, {
+        let state2 = state.clone();
+        move |active| {
+            let config = {
+                let mut s = state2.borrow_mut();
+                s.config.low_memory = active;
+                s.config.clone()
+            };
+            daemon_ctl::apply_async(&config, |_| {});
+        }
+    });
+    popover_box.append(&low_memory_row);
+    let low_memory_hint = gtk4::Label::new(Some(t!(
+        "Lowers RAM use at the cost of slightly less smooth loop seeks"
+    )));
+    low_memory_hint.add_css_class("dim");
+    low_memory_hint.set_wrap(true);
+    low_memory_hint.set_max_width_chars(34);
+    low_memory_hint.set_xalign(0.0);
+    low_memory_hint.set_margin_start(4);
+    low_memory_hint.set_margin_end(4);
+    low_memory_hint.set_margin_bottom(6);
+    popover_box.append(&low_memory_hint);
     popover_box.append(&switch_row(
         t!("Restore on login"),
         state.borrow().config.autostart,
@@ -1958,6 +1983,12 @@ fn build_help_page(
     });
     help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
+
+    // Optional and last among the help rows: a donation link, not a nudge.
+    let donate_btn = menu_item_opening_window(t!("Support Fresco on Ko-fi"), popover, || {
+        open_in_browser(crate::DONATE_URL)
+    });
+    popover_box.append(&donate_btn);
 
     let about_btn = menu_item_opening_window(t!("About"), popover, {
         let win_about = window.clone();
@@ -6378,6 +6409,32 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     group.add(&power_row);
 
     page.add(&group);
+
+    // Global default transition: used by any wallpaper whose own transition is
+    // still None (see `Config::effective_transition`). Takes effect on the next
+    // wallpaper change, so unlike power saving there is no respawn to ask for.
+    let transition_group = adw::PreferencesGroup::new();
+    let default_transition_row = adw::ComboRow::new();
+    default_transition_row.set_title(t!("Default transition"));
+    default_transition_row.set_model(Some(&gtk4::StringList::new(&table_labels(
+        &TRANSITIONS_SHOWN,
+    ))));
+    let stored = state.borrow().config.transition.unwrap_or_default();
+    default_transition_row.set_selected(transition_index(stored));
+    default_transition_row.set_subtitle(transition_hint(stored));
+    {
+        let state = state.clone();
+        default_transition_row.connect_selected_notify(move |row| {
+            let chosen = transition_from_index(row.selected());
+            row.set_subtitle(transition_hint(chosen));
+            let mut s = state.borrow_mut();
+            s.config.transition = Some(chosen);
+            s.config.save().ok();
+        });
+    }
+    transition_group.add(&default_transition_row);
+    page.add(&transition_group);
+
     add_schedule_group(&page, state.clone());
     add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());

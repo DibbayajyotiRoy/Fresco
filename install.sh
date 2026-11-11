@@ -35,7 +35,17 @@ printf '%s' "${FRESCO_ORIGIN:-github}" > "$HOME/.config/fresco/install-origin" 2
 
 # 1. Check OS family
 if ! command -v apt-get >/dev/null 2>&1; then
-  fail "Fresco requires a Debian/Ubuntu-based distro (apt-get not found)"
+  # This script only installs .deb packages. Point other distros at the route
+  # that matches their package manager instead of a dead end.
+  OS_FAMILY=$(. /etc/os-release 2>/dev/null; echo " ${ID:-} ${ID_LIKE:-} ") || true
+  case "$OS_FAMILY" in
+    *" arch "*|*" manjaro "*|*" endeavouros "*|*" cachyos "*|*" garuda "*)
+      fail "Arch-based system: Fresco is in the AUR as 'fresco' and 'fresco-bin'. Install one with an AUR helper, e.g. yay -S fresco-bin" ;;
+    *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*|*" nobara "*|*" bazzite "*)
+      fail "Fedora/RHEL-based system: download the .rpm from https://github.com/${REPO}/releases, then run: sudo dnf install ./fresco-*.rpm" ;;
+    *)
+      fail "This installer supports Debian/Ubuntu-based distros (apt-get not found). Download a package for your distro from https://github.com/${REPO}/releases" ;;
+  esac
 fi
 ok "Debian-based distro detected"
 

@@ -12,8 +12,11 @@
 [![GPL-3.0-or-later license](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Publish workflow status](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Support Fresco on Ko-fi](https://img.shields.io/badge/Ko--fi-Support_Fresco-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/dibbayajyotiroy)
 
-[Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Supported environments](#supported-environments) · [Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [FAQ](#faq) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues) · [Support Fresco](#support-the-project)
+[Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Support Fresco ♥](#support-the-project) · [Supported environments](#supported-environments) · [FAQ](#faq)
+
+[Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
 <img src="./data/screenshots/gallery.png" alt="Fresco's wallpaper library on a dark Linux desktop: a searchable grid of video, image and slideshow wallpapers, with one video marked Active and a status pill showing NVDEC hardware decoding" width="800" />
 
@@ -29,7 +32,7 @@ Fresco turns a video, GIF, image, slideshow or playlist into the wallpaper behin
 - **Library:** link a wallpaper folder you already have instead of importing it, and keep it in sync as files come and go. The library draws only what is on screen, so thousands of wallpapers stay quick and light.
 - **Widgets:** time-synced lyrics, clocks (including a world clock), an audio visualiser and album art, drawn into the wallpaper. All off by default.
 - **Control:** the app, a Ctrl+K command palette, and `fresco next` / `fresco prev` / `fresco random` for keyboard shortcuts.
-- **Install:** a `.deb` for Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali and Deepin (one-line script, manual download or the Deepin App Store); build from source on Fedora, Arch and others — see [Installation](#installation).
+- **Install:** a `.deb` for Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali and Deepin (one-line script, manual download or the Deepin App Store); a `.rpm` for Fedora, an Arch package, and build-from-source elsewhere — see [Installation](#installation).
 - **License:** free and open source under [GPL-3.0-or-later](LICENSE), with no ads and no account.
 - **Users:** 3,000+ people in 128 countries. Latest version: 1.1.53.
 
@@ -57,25 +60,18 @@ Open **App Store**, search for **Fresco**, and click **Install**. Fresco is publ
 
 ### Fedora, Arch Linux and other distributions
 
-There is no prebuilt package for these yet, so build from source. You need Rust (via [rustup](https://rustup.rs)) plus the GTK4, libadwaita and libmpv development headers:
+Each release attaches a package for each family, next to the `.deb`, on the [Releases](https://github.com/DibbayajyotiRoy/fresco/releases/latest) page:
 
-```bash
-git clone https://github.com/DibbayajyotiRoy/fresco.git && cd fresco
-cargo build --release --all-features
-```
+| Distribution | Package | Install |
+| --- | --- | --- |
+| Fedora (x86_64) | `fresco-*.x86_64.rpm` | `sudo dnf install ./fresco-*.x86_64.rpm` |
+| Arch Linux, CachyOS, EndeavourOS (x86_64) | `fresco-bin-*-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./fresco-bin-*-1-x86_64.pkg.tar.zst`, or `yay -S fresco-bin` from the AUR |
 
-On Wayland compositors Fresco also needs the `mpvpaper` renderer, which the `.deb` bundles and a source build does not:
+The Fedora and Arch packages include the `mpvpaper` renderer, so Wayland live wallpapers work without a separate install. Updates: a package installed from a release file is updated in-app with the matching package manager (dnf or pacman); a package installed from the AUR is updated with your AUR helper.
 
-```bash
-# Arch Linux, CachyOS, EndeavourOS (AUR)
-yay -S mpvpaper
+Other distributions: build from source with `cargo build --release --all-features`. A source build does not include the `mpvpaper` renderer, which Wayland live wallpapers need. Install it separately (`yay -S mpvpaper` on Arch, or `scripts/build-mpvpaper.sh` against your system libmpv).
 
-# Fedora and anything else: build it against your system libmpv
-scripts/build-mpvpaper.sh
-install -Dm755 target/release/mpvpaper ~/.local/bin/mpvpaper   # must be on PATH
-```
-
-Fresco is not on the AUR or Flathub — the AUR package named `fresco` is an unrelated physics program. Details and troubleshooting are in [docs/INSTALL.md](docs/INSTALL.md).
+Fresco is not on the AUR under the name `fresco` (that name belongs to an unrelated physics program); use `fresco-bin`. Details and troubleshooting are in [docs/INSTALL.md](docs/INSTALL.md).
 
 After installing, open **Fresco** from your app launcher. If something looks wrong, run `fresco doctor`.
 
@@ -89,6 +85,12 @@ Install Fresco, click **Add**, pick your video, and click **Set as wallpaper**. 
 4. Click **Set as wallpaper**, then close the app.
 
 The wallpaper keeps playing after the window closes.
+
+## Video tutorials
+
+**[Fresco: Live Wallpaper pe Linux în 5 Minute (Ubuntu/Debian)](https://youtu.be/2d8Kq_AezR4)**, by [78_Maty](https://www.youtube.com/@78_Maty), in Romanian / în limba română.
+
+<a href="https://youtu.be/2d8Kq_AezR4"><img src="https://i.ytimg.com/vi/2d8Kq_AezR4/hqdefault.jpg" alt="Video thumbnail: Fresco live wallpaper tutorial in Romanian by 78_Maty" width="480" /></a>
 
 ## Features
 
@@ -190,13 +192,13 @@ Install Fresco, open it, click **Add**, pick your video, and click **Set as wall
 
 ### How do I get a live wallpaper on Ubuntu, Linux Mint, Pop!_OS, Fedora or Arch Linux?
 
-Install the Fresco `.deb` on Ubuntu, Linux Mint and Pop!_OS, or build it from source on Fedora and Arch Linux. Commands for each are in [Installation](#installation).
+Install the `.deb` on Ubuntu, Linux Mint and Pop!_OS, the `.rpm` on Fedora, or the Arch package (`fresco-bin`). Commands for each are in [Installation](#installation).
 
 - **Ubuntu:** `.deb`. On the default GNOME desktop, live playback needs an Xorg session (Ubuntu 22.04 and 24.04); KDE Plasma, Xfce and MATE flavours are unaffected — see the Ubuntu answer above.
 - **Linux Mint:** `.deb`. Cinnamon on X11 is supported, and Cinnamon on Wayland from version 6.8.
 - **Pop!_OS:** `.deb`. The COSMIC desktop (Wayland layer-shell) is supported.
-- **Fedora:** build from source. Fedora 43 and newer GNOME is Wayland-only, so it shows a still frame; KDE Plasma and X11 desktops are supported.
-- **Arch Linux:** build from source and install `mpvpaper` from the AUR (`yay -S mpvpaper`).
+- **Fedora:** install the `.rpm` from the release page. Fedora 43 and newer GNOME is Wayland-only, so it shows a still frame; KDE Plasma and X11 desktops are supported.
+- **Arch Linux:** `yay -S fresco-bin`, or the `.pkg.tar.zst` from the release page. The renderer is bundled.
 
 Only the `.deb` path is covered by Fresco's CI.
 
@@ -449,7 +451,7 @@ These numbers exist to decide which distros and desktops get tested before a rel
 
 **Never collected, either way:** personal data, file names, your wallpapers, your IP address, audio, keystrokes, or clipboard contents. The country is resolved from your IP by Cloudflare at the network edge, so only a two-letter code ever reaches this project. (Text you deliberately write and press send on — a feedback comment, or a message to the maintainer below — is a message you chose to send, not collection.)
 
-To send nothing at all, set `telemetry = false` and `telemetry_prompted = false` in `~/.config/fresco/config.toml`.
+To send nothing at all, set `telemetry = false` and `telemetry_prompted = false` in `~/.config/fresco/config.toml`. Debug builds and CI runs (or any run with `CI`, `GITHUB_ACTIONS` or `FRESCO_NO_TELEMETRY` set) never send either.
 
 ### Talk to the maintainer, anonymously
 

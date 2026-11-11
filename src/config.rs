@@ -1862,6 +1862,10 @@ pub struct Config {
     /// Global decode-load reduction; see [`PowerSaving`].
     #[serde(default)]
     pub power_saving: PowerSaving,
+    /// Default transition for any wallpaper change that does not set its own;
+    /// see [`Config::effective_transition`]. Absent = no global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Transition>,
     /// Use tiny mpv buffers and fewer decode threads. For low-RAM machines.
     #[serde(default)]
     pub low_memory: bool,
@@ -2099,6 +2103,7 @@ impl Default for Config {
             pause_on_covered: false,
             scaling: Scaling::default(),
             power_saving: PowerSaving::default(),
+            transition: None,
             low_memory: false,
             performance_mode: false,
             framerate: 0,
@@ -2330,6 +2335,17 @@ impl Config {
         self.monitors.get(connector).unwrap_or(&self.wallpaper)
     }
 
+    /// Transition for a change to `wp`. The per-wallpaper value wins when it is
+    /// not [`Transition::None`] (the field has no "unset", so `None` reads as
+    /// "inherit"); otherwise the global [`Config::transition`]; otherwise none.
+    pub fn effective_transition(&self, wp: &Wallpaper) -> Transition {
+        if wp.transition != Transition::None {
+            wp.transition
+        } else {
+            self.transition.unwrap_or(Transition::None)
+        }
+    }
+
     /// What the lock screen shows: [`LockScreen::wallpaper`] when the user
     /// picked one (the same on every output), otherwise the desktop wallpaper —
     /// the per-monitor override for `connector` when given, else the default.
@@ -2533,6 +2549,36 @@ mod tests {
             toml::from_str("framerate = 30\npower_saving = \"minimum\"").unwrap();
         explicit.migrate();
         assert_eq!(explicit.power_saving, PowerSaving::Minimum);
+    }
+
+    #[test]
+    fn effective_transition_per_wallpaper_beats_global_beats_none() {
+        let mut cfg = Config::default();
+        let mut wp = Wallpaper::default();
+        assert_eq!(cfg.effective_transition(&wp), Transition::None);
+
+        cfg.transition = Some(Transition::Fade);
+        assert_eq!(cfg.effective_transition(&wp), Transition::Fade);
+
+        wp.transition = Transition::Zoom;
+        assert_eq!(cfg.effective_transition(&wp), Transition::Zoom);
+
+        // A global default written as absent stays absent on disk.
+        let text = toml::to_string(&Config::default()).unwrap();
+        let top: toml::Value = toml::from_str(&text).unwrap();
+        assert!(top.get("transition").is_none(), "{text}");
+    }
+
+    #[test]
+    fn global_transition_key_is_optional_and_round_trips() {
+        let old: Config = toml::from_str("").unwrap();
+        assert_eq!(old.transition, None);
+        let top: toml::Value = toml::from_str(&toml::to_string(&old).unwrap()).unwrap();
+        assert!(top.get("transition").is_none());
+        let new: Config = toml::from_str("transition = \"fade\"\n").unwrap();
+        assert_eq!(new.transition, Some(Transition::Fade));
+        let back: Config = toml::from_str(&toml::to_string(&new).unwrap()).unwrap();
+        assert_eq!(back.transition, Some(Transition::Fade));
     }
 
     /// A config that names the effect the old way must keep loading, and must
@@ -4193,5 +4239,17 @@ visualizer = true
         let text = toml::to_string_pretty(&cfg).unwrap();
         assert!(text.contains("[lockscreen"), "got:\n{text}");
         assert_eq!(toml::from_str::<Config>(&text).unwrap(), cfg);
+    }
+
+    #[test]
+    fn low_memory_round_trips_and_defaults_off() {
+        let cfg = Config {
+            low_memory: true,
+            ..Config::default()
+        };
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert!(back.low_memory);
+        let old: Config = toml::from_str("").unwrap();
+        assert!(!old.low_memory);
     }
 }

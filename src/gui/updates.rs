@@ -278,8 +278,12 @@ const UPDATE_CHECK_INTERVAL_S: u64 = 24 * 60 * 60;
 /// Both follow the host this copy was installed from — see [`crate::update::Origin`].
 /// Handing a mainland-China user a github.com link they cannot reach is the
 /// same bug as never offering them an update at all.
-fn install_oneliner() -> &'static str {
-    crate::update::Origin::current().install_command()
+///
+/// `None` when the install origin was never recorded (cargo / tarball / bare
+/// binary): `install.sh` is an apt-only .deb installer, so offering it there
+/// would be wrong. Those installs get the releases page only.
+fn install_oneliner() -> Option<&'static str> {
+    crate::update::Origin::recorded().map(|o| o.install_command())
 }
 
 fn releases_url() -> &'static str {
@@ -810,30 +814,47 @@ fn show_unsupported_dialog(window: &adw::ApplicationWindow) {
     inner.set_margin_top(8);
     inner.set_margin_bottom(22);
 
-    let body = gtk4::Label::new(Some(t!(
-        "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:"
-    )));
+    // On Arch and Fedora/RHEL the distro's own package manager owns the install,
+    // so offer its command. install.sh is apt-only and must not be offered there.
+    let hint = crate::update::update_hint_for_this_system();
+    let oneliner = hint.or_else(install_oneliner);
+    let body = gtk4::Label::new(Some(match (hint, oneliner) {
+        (Some(h), _) if h == crate::update::ARCH_HINT => t!(
+            "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst"
+        ),
+        (Some(_), _) => t!(
+            "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:"
+        ),
+        (None, Some(_)) => t!(
+            "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:"
+        ),
+        (None, None) => t!(
+            "This install can't be updated automatically. Download the latest release from the releases page and install it:"
+        ),
+    }));
     body.set_wrap(true);
     body.set_xalign(0.0);
     inner.append(&body);
 
-    let copy_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    let entry = gtk4::Entry::new();
-    entry.set_text(install_oneliner());
-    entry.set_editable(false);
-    entry.set_hexpand(true);
-    let copy_btn = gtk4::Button::with_label(t!("Copy"));
-    {
-        let entry = entry.clone();
-        copy_btn.connect_clicked(move |_| {
-            if let Some(display) = gtk4::gdk::Display::default() {
-                display.clipboard().set_text(&entry.text());
-            }
-        });
+    if let Some(cmd) = oneliner {
+        let copy_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        let entry = gtk4::Entry::new();
+        entry.set_text(cmd);
+        entry.set_editable(false);
+        entry.set_hexpand(true);
+        let copy_btn = gtk4::Button::with_label(t!("Copy"));
+        {
+            let entry = entry.clone();
+            copy_btn.connect_clicked(move |_| {
+                if let Some(display) = gtk4::gdk::Display::default() {
+                    display.clipboard().set_text(&entry.text());
+                }
+            });
+        }
+        copy_row.append(&entry);
+        copy_row.append(&copy_btn);
+        inner.append(&copy_row);
     }
-    copy_row.append(&entry);
-    copy_row.append(&copy_btn);
-    inner.append(&copy_row);
 
     let releases_link = gtk4::LinkButton::with_label(releases_url(), t!("Open releases page"));
     releases_link.set_halign(gtk4::Align::Start);

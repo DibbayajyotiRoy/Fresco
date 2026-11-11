@@ -212,7 +212,8 @@ jobs:
         # prints "not found" / "undefined symbol". Fail loudly if any appear.
         run: |
           set -e
-          for bin in fresco frescod; do
+          # `fresco` is now a sh launcher (ldd fails on scripts); check the ELF.
+          for bin in fresco-bin frescod; do
             echo "== ldd -r $bin =="
             out="$(ldd -r "$(command -v "$bin")")"
             echo "$out"
@@ -385,3 +386,110 @@ jobs:
             echo "::error::release .deb bundles a pre-1.9 mpvpaper (no --auto-mode in --help) — missing the NVIDIA black-wallpaper fix; check the VERSION pin in scripts/build-mpvpaper.sh"
             exit 1
           fi
+
+  # ── Red Hat family and Arch: build the packages in their own containers ─────
+  # Added beside the apt matrix above (which is unchanged). Each job builds the
+  # same package the release job ships (.rpm / .pkg.tar.zst) and smoke-tests the
+  # built binaries, so a drift in Fedora or Arch packages shows up weekly. These
+  # run without the clean-container install (that runs on every tag in
+  # _release.yml, rpm-verify and arch-verify), so they only check the build, the
+  # file layout, and that the binaries resolve their libraries. Non-blocking
+  # for the first release: continue-on-error until they have a track record.
+
+  fedora-rpm:
+    name: rpm · Fedora (latest)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: fedora:latest
+    steps:
+      - name: Install build deps
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            gcc git tar xz meson ninja-build pkgconf-pkg-config \
+            wayland-devel wayland-protocols-devel mesa-libEGL-devel mesa-libGL-devel \
+            mpv-libs-devel gtk4-devel libadwaita-devel libX11-devel libXrandr-devel \
+            ffmpegthumbnailer
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - name: Build, bundle mpvpaper, and package the rpm
+        run: |
+          cargo install cargo-generate-rpm --locked
+          cargo build --release --all-features --locked
+          scripts/build-mpvpaper.sh
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv2
+          cargo generate-rpm
+          rpm -qlp target/generate-rpm/fresco-*.x86_64.rpm
+
+      - name: ldd -r — no unresolved libraries
+        run: |
+          set -e
+          for bin in target/release/fresco target/release/frescod target/release/mpvpaper-libmpv2; do
+            out="$(ldd -r "$bin")"
+            echo "$out"
+            if echo "$out" | grep -E 'not found|undefined symbol'; then
+              echo "::error::$bin has unresolved shared-library dependencies"; exit 1
+            fi
+          done
+
+      - name: frescod --check
+        run: target/release/frescod --check || true   # headless: non-zero expected
+
+  arch-pkg:
+    name: pkg · Arch (latest)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install build deps
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm --needed base-devel git python zstd rust \
+            meson ninja pkgconf wayland wayland-protocols gtk4 libadwaita mpv \
+            ffmpegthumbnailer libx11 libxrandr mesa libglvnd glib2 xdg-utils polkit
+
+      - uses: actions/checkout@v4
+
+      - name: Build, bundle mpvpaper, and package the pkg.tar.zst
+        run: |
+          set -euo pipefail
+          cargo build --release --all-features --locked
+          scripts/build-mpvpaper.sh
+          mv target/release/mpvpaper target/release/mpvpaper-libmpv2
+          VER="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' Cargo.toml | head -1)"
+          mkdir -p stage/payload
+          python3 - <<'PY'
+          import os, shutil, tomllib
+          cfg = tomllib.load(open('Cargo.toml', 'rb'))
+          for a in cfg['package']['metadata']['generate-rpm']['assets']:
+              dst = os.path.join('stage/payload', a['dest'].lstrip('/'))
+              os.makedirs(os.path.dirname(dst), exist_ok=True)
+              shutil.copy2(a['source'], dst)
+              os.chmod(dst, int(a['mode'], 8))
+          PY
+          cp packaging/arch/PKGBUILD stage/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$VER/" stage/PKGBUILD
+          useradd -m builder
+          cp -a stage /home/builder/fresco-arch
+          chown -R builder:builder /home/builder/fresco-arch
+          runuser -u builder -- bash -c 'cd /home/builder/fresco-arch && makepkg -f -d --noconfirm'
+          pacman -Qlp /home/builder/fresco-arch/fresco-bin-*.pkg.tar.zst | grep -q ' /usr/bin/fresco-bin$'
+
+      - name: ldd -r — no unresolved libraries
+        run: |
+          set -e
+          for bin in target/release/fresco target/release/frescod target/release/mpvpaper-libmpv2; do
+            out="$(ldd -r "$bin")"
+            echo "$out"
+            if echo "$out" | grep -E 'not found|undefined symbol'; then
+              echo "::error::$bin has unresolved shared-library dependencies"; exit 1
+            fi
+          done
+
+      - name: frescod --check
+        run: target/release/frescod --check || true   # headless: non-zero expected

@@ -72,6 +72,12 @@ pub enum Tier {
 /// in Settings takes effect immediately, without plumbing state through every
 /// call site.
 pub fn tier() -> Tier {
+    // Dev builds and CI never send. Every send path in this file keys off
+    // tier() (directly or via `enabled()`), so reporting Unanswered here is the
+    // one gate for all of them.
+    if suppressed() {
+        return Tier::Unanswered;
+    }
     let Ok(c) = Config::load() else {
         return Tier::Unanswered;
     };
@@ -83,6 +89,27 @@ pub fn tier() -> Tier {
     } else {
         Tier::Essential
     }
+}
+
+/// Env vars that, when set to a non-empty value, mean "this is not a real
+/// install": CI runners (GitHub Actions sets the first two itself) and an
+/// explicit opt-out for packagers and testers.
+const SUPPRESSING_ENV: [&str; 3] = ["CI", "GITHUB_ACTIONS", "FRESCO_NO_TELEMETRY"];
+
+/// True for debug builds and CI runs, which must never send anything. Used by
+/// [`tier`], so it covers the heartbeats and [`event`]/[`error`]; the catalog
+/// install counter in `catalog.rs` checks it directly.
+pub fn suppressed() -> bool {
+    suppressed_by(cfg!(debug_assertions), |k| std::env::var(k).ok())
+}
+
+/// The rule behind [`suppressed`], with the environment injected so it is
+/// testable without touching the process env.
+fn suppressed_by(debug_build: bool, env: impl Fn(&str) -> Option<String>) -> bool {
+    debug_build
+        || SUPPRESSING_ENV
+            .iter()
+            .any(|k| env(k).is_some_and(|v| !v.is_empty()))
 }
 
 /// Same project/key as `supabase.rs` — RLS protects the data, not key secrecy.
@@ -410,16 +437,46 @@ fn install_source() -> Option<String> {
     (!tag.is_empty()).then_some(tag)
 }
 
-/// How this copy of Fresco is packaged — detected at runtime, not declared.
+/// Packaging tags a build can bake in with `FRESCO_CHANNEL` at compile time.
+const CHANNELS: [&str; 7] = [
+    "deb",
+    "rpm",
+    "arch",
+    "aur-source",
+    "aur-bin",
+    "flatpak",
+    "tarball",
+];
+
+/// How this copy of Fresco is packaged: the compile-time tag set by the
+/// packaging job (`FRESCO_CHANNEL`), falling back to runtime detection.
 fn install_channel() -> &'static str {
-    if crate::is_flatpak() {
+    channel_for(
+        crate::is_flatpak(),
+        option_env!("FRESCO_CHANNEL"),
+        // The .deb ships the updater script at this fixed path.
+        std::path::Path::new("/usr/lib/fresco/fresco-update.sh").exists(),
+    )
+}
+
+/// Pure channel selection. Runtime Flatpak detection wins, as it always has;
+/// then a known compile-time tag; unknown or empty tags are ignored. Otherwise
+/// the old runtime guess (`deb` if the updater script is there, else `other`).
+fn channel_for(flatpak: bool, compile_tag: Option<&str>, has_deb_updater: bool) -> &'static str {
+    if flatpak {
         return "flatpak";
     }
-    // The .deb ships the updater script at this fixed path; AUR/source builds don't.
-    if std::path::Path::new("/usr/lib/fresco/fresco-update.sh").exists() {
-        return "deb";
+    if let Some(known) = compile_tag
+        .map(str::trim)
+        .and_then(|tag| CHANNELS.iter().copied().find(|c| *c == tag))
+    {
+        return known;
     }
-    "other"
+    if has_deb_updater {
+        "deb"
+    } else {
+        "other"
+    }
 }
 
 /// Human-readable environment block for a bug report.
@@ -522,5 +579,52 @@ mod tests {
         // …but due once the window is zero (i.e. mtime older than min_age).
         assert!(heartbeat_due(&marker, Duration::ZERO));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn env_with(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |k| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn suppressed_by_build_and_env() {
+        // Debug builds are always suppressed, whatever the env says.
+        assert!(suppressed_by(true, env_with(&[])));
+        assert!(!suppressed_by(false, env_with(&[])));
+        // Each suppressing var, set to a non-empty value.
+        for var in SUPPRESSING_ENV {
+            let set = move |k: &str| (k == var).then(|| "1".to_string());
+            assert!(suppressed_by(false, set), "{var} should suppress");
+        }
+        // Empty counts as unset.
+        assert!(!suppressed_by(false, |k: &str| (k == "CI").then(String::new)));
+        // Unrelated vars and near-miss names do not suppress.
+        let unrelated = env_with(&[
+            ("HOME", "/home/x"),
+            ("CIRCLE_CI", "true"),
+            ("FRESCO_TELEMETRY", "1"),
+        ]);
+        assert!(!suppressed_by(false, unrelated));
+    }
+
+    #[test]
+    fn channel_selection_precedence() {
+        // Runtime flatpak wins over any compile tag.
+        assert_eq!(channel_for(true, Some("deb"), true), "flatpak");
+        // A known compile tag wins over the runtime guess.
+        assert_eq!(channel_for(false, Some("rpm"), false), "rpm");
+        assert_eq!(channel_for(false, Some("aur-source"), true), "aur-source");
+        assert_eq!(channel_for(false, Some(" arch "), false), "arch");
+        // Unknown or empty tags are ignored and fall back to runtime detection.
+        assert_eq!(channel_for(false, Some("Deb"), true), "deb");
+        assert_eq!(channel_for(false, Some(""), false), "other");
+        assert_eq!(channel_for(false, Some("snap"), false), "other");
+        // No tag: the old runtime behaviour.
+        assert_eq!(channel_for(false, None, true), "deb");
+        assert_eq!(channel_for(false, None, false), "other");
     }
 }

@@ -636,3 +636,14 @@ mod mpvpaper_tests {
         assert_eq!(at(None).version_label(), "unknown");
     }
 }
+
+#[cfg(test)]
+mod donate_url_tests {
+    #[test]
+    fn donate_url_is_the_kofi_page_over_https() {
+        assert_eq!(super::DONATE_URL, "https://ko-fi.com/dibbayajyotiroy");
+        let rest = super::DONATE_URL.strip_prefix("https://").unwrap();
+        assert_eq!(rest.split('/').next(), Some("ko-fi.com"));
+        assert!(!super::DONATE_URL.contains(char::is_whitespace));
+    }
+}

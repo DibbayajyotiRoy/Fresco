@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
 use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
-use ksni::Tray;
+use ksni::{Icon, Tray};
 
 use crate::config::Config;
 use crate::ipc::{request, Request, Response};
@@ -29,6 +29,11 @@ use crate::t;
 
 /// How often the tray refreshes its pause label from daemon status.
 const STATUS_POLL: Duration = Duration::from_secs(2);
+
+/// App icon for hosts that cannot resolve `icon_name` (swaybar and other
+/// hosts without DBusMenu or theme lookup).
+const ICON_PNG: &[u8] =
+    include_bytes!("../../data/icons/hicolor/64x64/apps/io.github.dibbayajyotiroy.Fresco.png");
 
 /// Runtime state reflected in the tray menu.
 #[derive(Debug, Default)]
@@ -65,6 +70,32 @@ impl Tray for FrescoTray {
         }
     }
 
+    fn icon_pixmap(&self) -> Vec<Icon> {
+        // Decoded per call: ksni asks rarely and the source is a 64px PNG.
+        let Ok(img) = image::load_from_memory_with_format(ICON_PNG, image::ImageFormat::Png)
+        else {
+            return Vec::new();
+        };
+        let img = img
+            .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
+            .to_rgba8();
+        // ARGB32, network byte order.
+        let data = img
+            .pixels()
+            .flat_map(|p| [p[3], p[0], p[1], p[2]])
+            .collect();
+        vec![Icon {
+            width: 32,
+            height: 32,
+            data,
+        }]
+    }
+
+    /// Left click: the conservative action, same as the "Open main window" item.
+    fn activate(&mut self, _x: i32, _y: i32) {
+        open_main_window();
+    }
+
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let paused = self.state.paused;
         vec![
@@ -88,6 +119,16 @@ impl Tray for FrescoTray {
                         }
                         Ok(_) => this.state.paused = !this.state.paused,
                         Err(e) => log::warn!("tray: pause/resume request failed: {e:#}"),
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: t!("Previous wallpaper").into(),
+                activate: Box::new(|_: &mut FrescoTray| {
+                    if let Err(e) = spawn_fresco(&["prev"]) {
+                        log::warn!("tray: failed to launch 'fresco prev': {e:#}");
                     }
                 }),
                 ..Default::default()
@@ -127,11 +168,15 @@ impl Tray for FrescoTray {
             .into(),
             StandardItem {
                 label: t!("Open main window").into(),
-                activate: Box::new(|_: &mut FrescoTray| {
-                    if let Err(e) = spawn_fresco(&[]) {
-                        log::warn!("tray: failed to launch Fresco: {e:#}");
-                    }
-                }),
+                activate: Box::new(|_: &mut FrescoTray| open_main_window()),
+                ..Default::default()
+            }
+            .into(),
+            // No settings page is addressable from the daemon yet, so this
+            // opens the main window like "Open main window".
+            StandardItem {
+                label: t!("Settings").into(),
+                activate: Box::new(|_: &mut FrescoTray| open_main_window()),
                 ..Default::default()
             }
             .into(),
@@ -245,6 +290,12 @@ fn fresco_icon_installed(subdir: &str, name: &str) -> bool {
     candidates.iter().any(|p| p.exists())
 }
 
+fn open_main_window() {
+    if let Err(e) = spawn_fresco(&[]) {
+        log::warn!("tray: failed to launch Fresco: {e:#}");
+    }
+}
+
 /// Launch the `fresco` binary with the given arguments. Prefers the one next
 /// to this `frescod` so a staged/dev daemon never opens a different-version
 /// `fresco` from PATH (same lookup as `frescod_path` in `gui::daemon_ctl`).
@@ -341,7 +392,7 @@ mod tests {
             state: State::default(),
         };
         let menu = tray.menu();
-        assert_eq!(menu.len(), 7);
+        assert_eq!(menu.len(), 9);
         assert_eq!(label_at(&menu, 0), "Pause playback");
 
         tray.state.paused = true;
@@ -359,10 +410,12 @@ mod tests {
             labels,
             vec![
                 "Pause playback",
+                "Previous wallpaper",
                 "Next wallpaper",
                 "Random wallpaper",
                 "Performance mode",
                 "Open main window",
+                "Settings",
                 "Stop wallpaper",
                 "Quit Fresco (until next login)",
             ]
@@ -406,6 +459,20 @@ mod tests {
         });
         assert_eq!(exit_request(&cfg, Exit::Stop), Request::Apply);
         assert_eq!(exit_request(&cfg, Exit::Quit), Request::Stop);
+    }
+
+    #[test]
+    fn icon_pixmap_is_32x32_argb() {
+        let tray = FrescoTray {
+            state: State::default(),
+        };
+        let icons = tray.icon_pixmap();
+        assert_eq!(icons.len(), 1);
+        let i = &icons[0];
+        assert_eq!((i.width, i.height), (32, 32));
+        assert_eq!(i.data.len(), 32 * 32 * 4);
+        // Alpha comes first (ARGB); some pixel must be fully opaque.
+        assert!(i.data.chunks(4).any(|p| p[0] == 0xFF));
     }
 
     fn label_at(menu: &[MenuItem<FrescoTray>], idx: usize) -> String {

@@ -74,7 +74,7 @@ are sent under both answers; the rest is what "accept all" adds.
 | Install id — **always** | `9f3c1e7a-…` | Random, generated on first run, stored in `install-id` next to your config. Never derived from hardware, MAC address, hostname, or username. |
 | Country — **always** | `IN` | See section 5. |
 | App version — **always** | `1.1.37` | Compiled in. |
-| Channel — **always** | `deb` | Detected at runtime from how Fresco is packaged. |
+| Channel — **always** | `deb` | How the build was packaged: `deb`, `rpm`, `arch`, `aur-source`, `aur-bin`, `flatpak`, or `tarball`, set when it is built. `other` for a plain source build. |
 | Distro | `Ubuntu 24.04.1 LTS` | `PRETTY_NAME` from `/etc/os-release`. |
 | Desktop | `COSMIC` | `XDG_CURRENT_DESKTOP`. |
 | Session | `wayland` | `XDG_SESSION_TYPE`. |
@@ -187,6 +187,10 @@ telemetry_prompted = false
 With both set, Fresco is silent: no heartbeat, no country ping, no events, no
 errors. The consent dialog will ask again next launch; set them again, or
 answer it.
+
+Fresco also sends nothing from a development build (one compiled in debug
+mode), or when `CI`, `GITHUB_ACTIONS` or `FRESCO_NO_TELEMETRY` is set to any
+non-empty value. Those installs are not counted.
 
 You can also confirm any of this yourself rather than take this page's word for
 it. Fresco is GPL-3.0 and every line that sends anything is in

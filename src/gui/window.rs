@@ -6407,6 +6407,32 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     group.add(&power_row);
 
     page.add(&group);
+
+    // Global default transition: used by any wallpaper whose own transition is
+    // still None (see `Config::effective_transition`). Takes effect on the next
+    // wallpaper change, so unlike power saving there is no respawn to ask for.
+    let transition_group = adw::PreferencesGroup::new();
+    let default_transition_row = adw::ComboRow::new();
+    default_transition_row.set_title(t!("Default transition"));
+    default_transition_row.set_model(Some(&gtk4::StringList::new(&table_labels(
+        &TRANSITIONS_SHOWN,
+    ))));
+    let stored = state.borrow().config.transition.unwrap_or_default();
+    default_transition_row.set_selected(transition_index(stored));
+    default_transition_row.set_subtitle(transition_hint(stored));
+    {
+        let state = state.clone();
+        default_transition_row.connect_selected_notify(move |row| {
+            let chosen = transition_from_index(row.selected());
+            row.set_subtitle(transition_hint(chosen));
+            let mut s = state.borrow_mut();
+            s.config.transition = Some(chosen);
+            s.config.save().ok();
+        });
+    }
+    transition_group.add(&default_transition_row);
+    page.add(&transition_group);
+
     add_schedule_group(&page, state.clone());
     add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());

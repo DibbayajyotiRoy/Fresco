@@ -1161,6 +1161,7 @@ impl Daemon {
     fn apply_auto_cycle_wallpaper(&mut self) {
         let wp = &self.config.wallpaper;
         let scaling = self.config.scaling;
+        let effect = self.config.effective_transition(wp);
         for r in &mut self.renderers {
             if self.config.monitors.contains_key(&r.window.connector) {
                 continue;
@@ -1171,7 +1172,7 @@ impl Daemon {
             r.player.apply_crop(wp);
             r.anim.set_base(transition::crop_base(wp));
             if let Some(path) = wp.effective_path() {
-                r.anim.start(wp.transition, path.to_path_buf(), &r.player);
+                r.anim.start(effect, path.to_path_buf(), &r.player);
             }
             r.cache_raised.set(false);
         }
@@ -1319,6 +1320,10 @@ impl Daemon {
             .filter(|_| self.config.enabled)
         {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
+            let wallpaper = Wallpaper {
+                transition: self.config.effective_transition(&wallpaper),
+                ..wallpaper
+            };
             if !wallpaper.is_configured() {
                 continue; // nothing configured for this monitor
             }
@@ -2085,7 +2090,7 @@ impl Daemon {
             "schedule: switching default wallpaper to {}",
             path.display()
         );
-        let effect = want.transition;
+        let effect = self.config.effective_transition(&want);
         for r in &mut self.renderers {
             if !self.config.monitors.contains_key(&r.window.connector) {
                 // Rotation, scalers (power-saving), and crop are per-wallpaper
@@ -3017,6 +3022,7 @@ fn wayland_auto_cycle(
         log::info!("auto-cycle: switching wallpaper");
     }
     config.wallpaper = next.clone();
+    let transition = config.effective_transition(&config.wallpaper);
     let paused_for_outputs = false;
     for (connector, o) in outputs.iter_mut() {
         if config.monitors.contains_key(connector) {
@@ -3024,7 +3030,10 @@ fn wayland_auto_cycle(
         }
         let effective_ps = config.effective_power_saving(&config.wallpaper);
         o.apply_wallpaper(
-            config.wallpaper.clone(),
+            Wallpaper {
+                transition,
+                ..config.wallpaper.clone()
+            },
             config.scaling,
             effective_ps,
             config.effective_low_memory(),
@@ -3211,6 +3220,10 @@ fn run_wayland_layershell() -> Result<()> {
     let plasma = kde_desktop::enabled();
     for m in monitors.iter().filter(|_| !plasma && config.enabled) {
         let wallpaper = config.wallpaper_for(&m.connector).clone();
+        let wallpaper = Wallpaper {
+            transition: config.effective_transition(&wallpaper),
+            ..wallpaper
+        };
         if wallpaper.effective_path().is_none()
             && wallpaper.paths.is_empty()
             && wallpaper.kind != Kind::Slideshow
@@ -3316,6 +3329,10 @@ fn run_wayland_layershell() -> Result<()> {
                             // Reconcile config × the current output set.
                             for m in &monitors {
                                 let wp = config.wallpaper_for(&m.connector).clone();
+                                let wp = Wallpaper {
+                                    transition: config.effective_transition(&wp),
+                                    ..wp
+                                };
                                 let has = !plasma
                                     && (wp.effective_path().is_some()
                                         || !wp.paths.is_empty()
@@ -3508,6 +3525,10 @@ fn run_wayland_layershell() -> Result<()> {
                         if !wp.is_configured() {
                             continue;
                         }
+                        let wp = Wallpaper {
+                            transition: config.effective_transition(&wp),
+                            ..wp
+                        };
                         let ps = config.effective_power_saving(&wp);
                         let mut o = WlOutput::new(
                             m.connector.clone(),
@@ -3676,8 +3697,10 @@ fn run_wayland_layershell() -> Result<()> {
                                 pl.apply_crop(&want);
                                 // The new crop is where the transition rests.
                                 o.anim.set_base(transition::crop_base(&want));
-                                o.animating =
-                                    o.anim.start(want.transition, path.clone(), pl).animating();
+                                o.animating = o
+                                    .anim
+                                    .start(config.effective_transition(&want), path.clone(), pl)
+                                    .animating();
                             }
                             o.wallpaper.path = Some(path.clone());
                             o.wallpaper.rotation = want.rotation;

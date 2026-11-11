@@ -603,7 +603,7 @@ fn notify(title: &str, body: &str, action: Option<(&str, Click)>) {
 }
 
 /// Open a URL in the user's default browser.
-fn open_url(url: &str) {
+pub(super) fn open_url(url: &str) {
     if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
         log::warn!("notifier: xdg-open failed: {e}");
     }

@@ -165,7 +165,10 @@ decoding keeps CPU usage near zero without degrading quality.
 
 一个好用、稳定的动态壁纸播放与管理软件。支持视频、GIF、图片和幻灯片壁纸，硬件加速播放，壁纸库分类管理。"""
 assets = [
-    ["target/release/fresco", "usr/bin/", "755"],
+    # /usr/bin/fresco is a POSIX sh launcher that checks for GTK 4 + libadwaita
+    # (clear message on Deepin V20 / Debian 10) and execs the real ELF beside it.
+    ["target/release/fresco", "usr/bin/fresco-bin", "755"],
+    ["packaging/debian/fresco-launcher", "usr/bin/fresco", "755"],
     ["target/release/frescod", "usr/bin/", "755"],
     # Bundled Wayland renderer, one build per libmpv soname generation: the
     # "libmpv1" build (ubuntu-22.04 CI) for older LTS bases and the "libmpv2"

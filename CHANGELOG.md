@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **On Deepin V20 / Debian 10, `fresco` now explains what is missing** instead
+  of failing with a raw `libadwaita-1.so.0: cannot open shared object file`
+  error. The app needs GTK 4 and libadwaita, which those systems do not
+  provide; the message names the library and the releases page. The real
+  binary moved to `/usr/bin/fresco-bin`.
+
 ## [1.1.54] — 2026-11-01
 
 ### Fixed

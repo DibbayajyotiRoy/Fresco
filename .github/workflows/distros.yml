@@ -212,7 +212,8 @@ jobs:
         # prints "not found" / "undefined symbol". Fail loudly if any appear.
         run: |
           set -e
-          for bin in fresco frescod; do
+          # `fresco` is now a sh launcher (ldd fails on scripts); check the ELF.
+          for bin in fresco-bin frescod; do
             echo "== ldd -r $bin =="
             out="$(ldd -r "$(command -v "$bin")")"
             echo "$out"

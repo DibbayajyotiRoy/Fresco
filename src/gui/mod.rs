@@ -7,6 +7,7 @@ mod lazy_grid;
 pub(crate) mod library;
 pub(crate) mod linked;
 mod lockscreen;
+pub mod pick;
 mod preview;
 mod preview_proxy;
 mod status;

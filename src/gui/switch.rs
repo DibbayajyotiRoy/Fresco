@@ -76,11 +76,14 @@ pub fn run(step: Step) -> i32 {
     }
 }
 
-/// `Ok(None)`: the only candidate is already playing, so nothing was touched.
-fn switch(step: Step) -> Result<Option<String>> {
+/// Library entries as the switch pool sees them: health-checked, linked
+/// folders scanned in. Returns the config, the entries, and the pool as
+/// indices into them (display order, broken entries left out). Shared with
+/// `fresco pick`, which lists the same pool.
+pub(crate) fn load_pool() -> Result<(Config, Vec<library::LibraryEntry>, Vec<usize>)> {
     // Never fall back to defaults here: saving them would clobber a config
     // that merely failed to parse.
-    let mut config = Config::load()?;
+    let config = Config::load()?;
     let mut entries = library::load_entries()?;
     let collections = library::load_collections().unwrap_or_default();
     // `broken` is stored from whenever the GUI last ran; the GUI re-checks on
@@ -104,6 +107,30 @@ fn switch(step: Step) -> Result<Option<String>> {
             .filter_map(|id| index.get(id.as_str()).copied())
             .filter(|&i| !entries[i].broken)
             .collect();
+    Ok((config, entries, pool))
+}
+
+/// Make `entries[idx]` the current wallpaper: stamp it used, point the config
+/// at it, and save both. Applying it to the daemon is the caller's job.
+/// Returns the entry's name.
+pub(crate) fn select(
+    config: &mut Config,
+    entries: &mut [library::LibraryEntry],
+    idx: usize,
+) -> Result<String> {
+    let entry = &mut entries[idx];
+    entry.touch();
+    config.wallpaper = entry.to_wallpaper();
+    config.enabled = true;
+    let name = entry.name.clone();
+    config.save()?;
+    library::save_entries(entries).ok();
+    Ok(name)
+}
+
+/// `Ok(None)`: the only candidate is already playing, so nothing was touched.
+fn switch(step: Step) -> Result<Option<String>> {
+    let (mut config, mut entries, pool) = load_pool()?;
     let current = pool
         .iter()
         .position(|&i| window::entry_matches_wallpaper(&entries[i], &config.wallpaper));
@@ -118,13 +145,7 @@ fn switch(step: Step) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    let entry = &mut entries[pool[slot]];
-    entry.touch();
-    config.wallpaper = entry.to_wallpaper();
-    config.enabled = true;
-    let name = entry.name.clone();
-    config.save()?;
-    library::save_entries(&entries).ok();
+    let name = select(&mut config, &mut entries, pool[slot])?;
     daemon_ctl::apply_blocking()?;
     Ok(Some(name))
 }

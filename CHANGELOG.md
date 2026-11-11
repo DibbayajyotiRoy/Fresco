@@ -10,9 +10,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The in-app updater now covers Arch-family and Fedora/RHEL-family
   systems.** It installs the matching release package with `pacman -U` or
   `dnf`/`yum` instead of only `apt`. Manual-update prompts show the right
-  command for your distro (`yay -Syu fresco-bin` or `sudo dnf upgrade fresco`)
+  command for your distro (`yay -Syu fresco-bin` or `sudo dnf install ./fresco-*.x86_64.rpm`)
   rather than the Debian-only installer. The installer script explains the
   right route on Arch and Fedora instead of stopping at a dead end.
+- **Optional "Support Fresco on Ko-fi" entry** in the main window menu and
+  the tray menu, opening the Ko-fi page in your browser. Nothing is sent or
+  shown otherwise.
 
 ### Fixed
 - **On Deepin V20 / Debian 10, `fresco` now explains what is missing** instead

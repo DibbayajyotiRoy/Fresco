@@ -49,6 +49,9 @@ pub mod worldclock;
 /// Application ID used for the desktop file, autostart entry, and GTK app.
 pub const APP_ID: &str = "io.github.dibbayajyotiroy.Fresco";
 pub const APP_NAME: &str = "Fresco";
+/// Ko-fi page for optional donations. Shared by the tray and the main window
+/// menu so the link lives in one place.
+pub const DONATE_URL: &str = "https://ko-fi.com/dibbayajyotiroy";
 /// WM_CLASS of wallpaper windows, so users/extensions can target them.
 pub const WALLPAPER_WM_CLASS: &str = "fresco-wallpaper";
 
@@ -631,5 +634,16 @@ mod mpvpaper_tests {
         assert_eq!(at(Some((1, 7))).version_label(), "1.7–1.8");
         assert_eq!(at(Some((1, 4))).version_label(), "1.4–1.6");
         assert_eq!(at(None).version_label(), "unknown");
+    }
+}
+
+#[cfg(test)]
+mod donate_url_tests {
+    #[test]
+    fn donate_url_is_the_kofi_page_over_https() {
+        assert_eq!(super::DONATE_URL, "https://ko-fi.com/dibbayajyotiroy");
+        let rest = super::DONATE_URL.strip_prefix("https://").unwrap();
+        assert_eq!(rest.split('/').next(), Some("ko-fi.com"));
+        assert!(!super::DONATE_URL.contains(char::is_whitespace));
     }
 }

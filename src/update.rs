@@ -150,7 +150,15 @@ pub fn update_hint(os_release: &str) -> Option<&'static str> {
 
     if any(&["arch", "manjaro", "endeavouros", "cachyos", "garuda"]) {
         Some(ARCH_HINT)
-    } else if any(&["fedora", "rhel", "centos", "rocky", "almalinux", "nobara", "bazzite"]) {
+    } else if any(&[
+        "fedora",
+        "rhel",
+        "centos",
+        "rocky",
+        "almalinux",
+        "nobara",
+        "bazzite",
+    ]) {
         Some(RPM_HINT)
     } else {
         None
@@ -426,18 +434,24 @@ mod tests {
         let manjaro = "ID=manjaro\nID_LIKE=arch\n";
         let endeavour = "NAME=\"EndeavourOS\"\nID=endeavouros\nID_LIKE=arch\n";
         let cachy = "ID=cachyos\nID_LIKE=\"arch\"\n";
-        let fedora = "NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=41\nPLATFORM_ID=\"platform:f41\"\n";
+        let fedora =
+            "NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=41\nPLATFORM_ID=\"platform:f41\"\n";
         let rocky = "NAME=\"Rocky Linux\"\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"9.4\"\n";
         let ubuntu = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
         let debian = "ID=debian\n";
-        let suse = "NAME=\"openSUSE Tumbleweed\"\nID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n";
+        let suse =
+            "NAME=\"openSUSE Tumbleweed\"\nID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n";
         let alma = "NAME=\"AlmaLinux\"\nID=\"almalinux\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"9.4\"\n";
 
         for os in [arch, manjaro, endeavour, cachy] {
             assert_eq!(update_hint(os), Some("yay -Syu fresco-bin"), "{os}");
         }
         for os in [fedora, rocky, alma] {
-            assert_eq!(update_hint(os), Some("sudo dnf install ./fresco-*.x86_64.rpm"), "{os}");
+            assert_eq!(
+                update_hint(os),
+                Some("sudo dnf install ./fresco-*.x86_64.rpm"),
+                "{os}"
+            );
         }
         for os in [ubuntu, debian, suse, ""] {
             assert_eq!(update_hint(os), None, "{os}");

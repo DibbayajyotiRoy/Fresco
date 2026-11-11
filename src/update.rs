@@ -46,15 +46,21 @@ impl Origin {
     /// falls back to GitHub rather than failing: being sent to the wrong host
     /// is recoverable, having no update path at all is not.
     pub fn current() -> Origin {
+        Origin::recorded().unwrap_or(Origin::GitHub)
+    }
+
+    /// The origin this install was explicitly recorded with, or `None` when
+    /// nothing was recorded (cargo / tarball / bare-binary installs never run
+    /// `install.sh`, so they have no marker).
+    pub fn recorded() -> Option<Origin> {
         if let Ok(v) = std::env::var("FRESCO_ORIGIN") {
             if let Some(o) = Origin::from_tag(v.trim()) {
-                return o;
+                return Some(o);
             }
         }
         std::fs::read_to_string(Origin::marker_path())
             .ok()
             .and_then(|s| Origin::from_tag(s.trim()))
-            .unwrap_or(Origin::GitHub)
     }
 
     /// The stable identifier written to the marker file and passed to the
@@ -156,8 +162,9 @@ pub enum UpdateOutcome {
     /// (its documented exit 2) — a benign no-op, not a failure.
     AlreadyUpToDate,
     Failed(String),
-    /// The install can't be auto-updated this way (Flatpak sandbox or no
-    /// `apt-get`) — caller should route to a manual-install fallback.
+    /// The install can't be auto-updated this way (Flatpak sandbox, no
+    /// `apt-get`, or no bundled updater script — cargo/tarball/bare binary) —
+    /// caller should route to a manual-install fallback.
     Unsupported,
 }
 
@@ -174,8 +181,10 @@ fn outcome_from_status(status: std::process::ExitStatus) -> UpdateOutcome {
 /// Download + install the latest .deb by running the bundled updater script as
 /// root via pkexec (the desktop's polkit agent prompts once).
 pub fn run_updater_blocking() -> UpdateOutcome {
+    // No script means this install wasn't laid down by the .deb (cargo, tarball,
+    // bare binary): there is nothing to run, so it's a manual-update case.
     let Some(script) = updater_script() else {
-        return UpdateOutcome::Failed("updater script not found".into());
+        return UpdateOutcome::Unsupported;
     };
     // The origin is passed as an ARGUMENT, not an env var: pkexec runs the
     // script as root with a sanitised environment and root's $HOME, so it can
@@ -208,7 +217,7 @@ pub enum Progress {
 /// either the `gui` or `daemon` feature.
 pub fn run_updater_with_progress(on_progress: impl Fn(Progress) + Send + 'static) -> UpdateOutcome {
     let Some(script) = updater_script() else {
-        return UpdateOutcome::Failed("updater script not found".into());
+        return UpdateOutcome::Unsupported; // see run_updater_blocking
     };
     let mut cmd = std::process::Command::new("pkexec");
     cmd.arg(&script);
@@ -392,5 +401,34 @@ mod tests {
         assert!(!is_newer("0.0.9", "0.0.9")); // equal is not newer
         assert!(!is_newer("0.0.8", "0.0.9"));
         assert!(!is_newer("not-a-version", "0.0.9")); // unparsable => false, never crashes
+    }
+
+    /// `recorded()` is None with no env/marker (cargo/tarball installs) while
+    /// `current()` still falls back to GitHub; env and marker both register.
+    /// Single test: it mutates process env, which other tests must not race.
+    #[test]
+    fn recorded_vs_current_origin() {
+        let dir = std::env::temp_dir().join(format!("fresco-origin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+        std::env::remove_var("FRESCO_ORIGIN");
+
+        assert_eq!(Origin::recorded(), None);
+        assert_eq!(Origin::current(), Origin::GitHub);
+
+        std::env::set_var("FRESCO_ORIGIN", "gitee");
+        assert_eq!(Origin::recorded(), Some(Origin::Gitee));
+        assert_eq!(Origin::current(), Origin::Gitee);
+
+        std::env::set_var("FRESCO_ORIGIN", "bogus");
+        assert_eq!(Origin::recorded(), None);
+
+        std::env::remove_var("FRESCO_ORIGIN");
+        let marker = Origin::marker_path();
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(&marker, "gitee\n").unwrap();
+        assert_eq!(Origin::recorded(), Some(Origin::Gitee));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -558,6 +558,8 @@
   "This compositor has no layer-shell support, so Fresco shows a still frame.": "Compositor ini tidak mendukung layer-shell, jadi Fresco menampilkan gambar statis.",
   "This folder is empty — move wallpapers into it from any card’s menu": "Folder ini kosong — pindahkan wallpaper ke sini melalui menu kartu mana pun",
   "This install can't be updated automatically. Run this command in a terminal, or grab the latest release directly:": "Instalasi ini tidak dapat diperbarui secara otomatis. Jalankan perintah berikut di terminal, atau unduh rilis terbaru secara langsung:",
+  "Run this in a terminal to update with your AUR helper. Or download the .pkg.tar.zst from the releases page and run: sudo pacman -U ./fresco-bin-*.pkg.tar.zst": "Jalankan ini di terminal untuk memperbarui lewat pembantu AUR. Atau unduh .pkg.tar.zst dari halaman rilis lalu jalankan: sudo pacman -U ./fresco-bin-*.pkg.tar.zst",
+  "Download the .rpm from the releases page, then run this in a terminal from the folder that contains it:": "Unduh .rpm dari halaman rilis, lalu jalankan ini di terminal dari folder yang berisi file tersebut:",
   "This slideshow follows a folder. Adding a file freezes today’s contents into a hand-picked list, and it stops following the folder.": "Slideshow ini mengikuti sebuah folder. Menambahkan berkas akan mengunci isi saat ini menjadi daftar pilihan manual, dan slideshow berhenti mengikuti folder tersebut.",
   "This slideshow has no images to show. Videos need a playlist.": "Slideshow ini tidak punya gambar untuk ditampilkan. Video memerlukan daftar putar.",
   "Tint the lyric with the app accent instead of the colour below.": "Beri warna lirik dengan aksen aplikasi, bukan warna di bawah ini.",

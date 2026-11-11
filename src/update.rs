@@ -123,6 +123,53 @@ impl Origin {
     }
 }
 
+/// Manual-update command for distros whose package manager owns the install,
+/// shown when the in-app updater cannot run. Parses the `ID` and `ID_LIKE`
+/// fields of an os-release file. `None` for everything else, including
+/// openSUSE (no release asset yet) and Debian/Ubuntu, which use `install.sh`.
+/// [`update_hint`] for Arch-family systems.
+pub const ARCH_HINT: &str = "yay -Syu fresco-bin";
+/// [`update_hint`] for Fedora/RHEL-family systems: the downloaded .rpm.
+pub const RPM_HINT: &str = "sudo dnf install ./fresco-*.x86_64.rpm";
+
+pub fn update_hint(os_release: &str) -> Option<&'static str> {
+    let unquote = |v: &str| v.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+    let mut id = String::new();
+    let mut id_like = String::new();
+    for line in os_release.lines() {
+        if let Some(v) = line.strip_prefix("ID=") {
+            id = unquote(v);
+        } else if let Some(v) = line.strip_prefix("ID_LIKE=") {
+            id_like = unquote(v);
+        }
+    }
+    let tokens: Vec<&str> = std::iter::once(id.as_str())
+        .chain(id_like.split_whitespace())
+        .collect();
+    let any = |names: &[&str]| tokens.iter().any(|t| names.contains(t));
+
+    if any(&["arch", "manjaro", "endeavouros", "cachyos", "garuda"]) {
+        Some(ARCH_HINT)
+    } else if any(&["fedora", "rhel", "centos", "rocky", "almalinux", "nobara", "bazzite"]) {
+        Some(RPM_HINT)
+    } else {
+        None
+    }
+}
+
+/// [`update_hint`] for the running system, read from `/etc/os-release` or its
+/// `/usr/lib` fallback. `None` under Flatpak: the distro's package manager does
+/// not own that install, so its commands would be wrong there.
+pub fn update_hint_for_this_system() -> Option<&'static str> {
+    if crate::is_flatpak() {
+        return None;
+    }
+    let text = std::fs::read_to_string("/etc/os-release")
+        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+        .unwrap_or_default();
+    update_hint(&text)
+}
+
 /// The version this binary was built as.
 pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -370,6 +417,30 @@ mod tests {
              marked as coming from Gitee: {}",
             Origin::Gitee.install_command()
         );
+    }
+
+    /// The hint parser: realistic os-release samples, quoted and unquoted.
+    #[test]
+    fn update_hint_matches_distro_families() {
+        let arch = "NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n";
+        let manjaro = "ID=manjaro\nID_LIKE=arch\n";
+        let endeavour = "NAME=\"EndeavourOS\"\nID=endeavouros\nID_LIKE=arch\n";
+        let cachy = "ID=cachyos\nID_LIKE=\"arch\"\n";
+        let fedora = "NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=41\nPLATFORM_ID=\"platform:f41\"\n";
+        let rocky = "NAME=\"Rocky Linux\"\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"9.4\"\n";
+        let ubuntu = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
+        let debian = "ID=debian\n";
+        let suse = "NAME=\"openSUSE Tumbleweed\"\nID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n";
+
+        for os in [arch, manjaro, endeavour, cachy] {
+            assert_eq!(update_hint(os), Some("yay -Syu fresco-bin"), "{os}");
+        }
+        for os in [fedora, rocky] {
+            assert_eq!(update_hint(os), Some("sudo dnf install ./fresco-*.x86_64.rpm"), "{os}");
+        }
+        for os in [ubuntu, debian, suse, ""] {
+            assert_eq!(update_hint(os), None, "{os}");
+        }
     }
 
     #[test]

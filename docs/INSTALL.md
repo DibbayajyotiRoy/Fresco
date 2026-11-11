@@ -33,17 +33,36 @@ the next step. Re-running it upgrades an existing install.
 
 Then launch **Fresco** from your application menu (or run `fresco`).
 
-## Other distributions (Fedora, Arch, CachyOS, EndeavourOS)
+## Fedora, Arch, CachyOS and EndeavourOS
 
-Build Fresco from source with `cargo build --release --all-features`. A source
-build does **not** include the `mpvpaper` renderer the `.deb` bundles, and
+Each release attaches packages next to the `.deb`:
+
+```bash
+# Fedora (x86_64)
+sudo dnf install ./fresco-*.x86_64.rpm
+
+# Arch, CachyOS, EndeavourOS (x86_64): release package
+sudo pacman -U ./fresco-bin-*-1-x86_64.pkg.tar.zst
+# or from the AUR
+yay -S fresco-bin
+```
+
+Both packages bundle the `mpvpaper` renderer (built against that distro's
+libmpv), so no separate renderer install is needed.
+
+**Updates.** A package installed from a release file is updated in-app with the
+matching package manager (dnf for `.rpm`, pacman for `.pkg.tar.zst`). A package
+installed from the AUR is updated with your AUR helper.
+
+**Other distributions.** Build from source with `cargo build --release --all-features`.
+A source build does **not** include the `mpvpaper` renderer the packages bundle, and
 Wayland live wallpapers need it. Install it separately:
 
 ```bash
-# Arch / CachyOS / EndeavourOS (AUR)
+# Arch / CachyOS / EndeavourOS (AUR), if you build from source
 yay -S mpvpaper
 
-# Fedora and anything else: build it against your system libmpv
+# Anything else: build it against your system libmpv
 scripts/build-mpvpaper.sh
 install -Dm755 target/release/mpvpaper ~/.local/bin/mpvpaper   # must be on PATH
 ```

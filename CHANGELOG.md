@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **The in-app updater now covers Arch-family and Fedora/RHEL-family
+  systems.** It installs the matching release package with `pacman -U` or
+  `dnf`/`yum` instead of only `apt`. Manual-update prompts show the right
+  command for your distro (`yay -Syu fresco-bin` or `sudo dnf upgrade fresco`)
+  rather than the Debian-only installer. The installer script explains the
+  right route on Arch and Fedora instead of stopping at a dead end.
+
 ### Fixed
 - **On Deepin V20 / Debian 10, `fresco` now explains what is missing** instead
   of failing with a raw `libadwaita-1.so.0: cannot open shared object file`

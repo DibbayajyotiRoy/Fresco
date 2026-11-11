@@ -111,6 +111,10 @@ const TICK: Duration = Duration::from_millis(100);
 const MIN_WIDGET_WAIT: Duration = Duration::from_millis(1);
 
 const LOWER_INTERVAL: Duration = Duration::from_secs(2);
+/// X11 fullscreen/covered poll. Faster than `LOWER_INTERVAL` so resuming after
+/// a maximized/fullscreen window closes isn't a 2s wait. Still polled, never
+/// event-driven (see `x11_fullscreen`).
+const FULLSCREEN_POLL: Duration = Duration::from_millis(250);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 const BATTERY_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the run loops stat config.toml for the two pause switches.
@@ -1608,12 +1612,12 @@ impl Daemon {
                 self.last_battery_check = now;
             }
             self.check_audio(now);
-            if now.duration_since(self.last_fullscreen_check) >= LOWER_INTERVAL {
-                self.check_config();
+            if now.duration_since(self.last_fullscreen_check) >= FULLSCREEN_POLL {
                 self.check_fullscreen();
                 self.last_fullscreen_check = now;
             }
             if now.duration_since(self.last_cache_check) >= LOWER_INTERVAL {
+                self.check_config();
                 self.check_cache();
                 self.check_schedule();
                 self.last_cache_check = now;
@@ -2017,7 +2021,7 @@ impl Daemon {
                 "pause when an app covers the screen = {}",
                 self.config.pause_on_covered
             );
-            // The caller's `check_fullscreen` runs next with the new flag.
+            // `check_fullscreen` picks up the new flag on its next 250ms poll.
             kde_desktop::set_pause_mode(&self.config);
         }
     }

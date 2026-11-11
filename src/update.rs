@@ -123,15 +123,15 @@ impl Origin {
     }
 }
 
+/// Shown by [`update_hint`] for Arch-family systems.
+pub const ARCH_HINT: &str = "yay -Syu fresco-bin";
+/// Shown by [`update_hint`] for Fedora/RHEL-family systems: the downloaded .rpm.
+pub const RPM_HINT: &str = "sudo dnf install ./fresco-*.x86_64.rpm";
+
 /// Manual-update command for distros whose package manager owns the install,
 /// shown when the in-app updater cannot run. Parses the `ID` and `ID_LIKE`
 /// fields of an os-release file. `None` for everything else, including
 /// openSUSE (no release asset yet) and Debian/Ubuntu, which use `install.sh`.
-/// [`update_hint`] for Arch-family systems.
-pub const ARCH_HINT: &str = "yay -Syu fresco-bin";
-/// [`update_hint`] for Fedora/RHEL-family systems: the downloaded .rpm.
-pub const RPM_HINT: &str = "sudo dnf install ./fresco-*.x86_64.rpm";
-
 pub fn update_hint(os_release: &str) -> Option<&'static str> {
     let unquote = |v: &str| v.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
     let mut id = String::new();
@@ -431,11 +431,12 @@ mod tests {
         let ubuntu = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
         let debian = "ID=debian\n";
         let suse = "NAME=\"openSUSE Tumbleweed\"\nID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n";
+        let alma = "NAME=\"AlmaLinux\"\nID=\"almalinux\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"9.4\"\n";
 
         for os in [arch, manjaro, endeavour, cachy] {
             assert_eq!(update_hint(os), Some("yay -Syu fresco-bin"), "{os}");
         }
-        for os in [fedora, rocky] {
+        for os in [fedora, rocky, alma] {
             assert_eq!(update_hint(os), Some("sudo dnf install ./fresco-*.x86_64.rpm"), "{os}");
         }
         for os in [ubuntu, debian, suse, ""] {

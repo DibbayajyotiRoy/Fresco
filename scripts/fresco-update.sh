@@ -101,7 +101,7 @@ esac
 DEB_URL=$(printf '%s' "$RELEASE_JSON" \
   | grep -o "$ASSET_MATCH" \
   | head -1 \
-  | grep -o "$ASSET_URL")
+  | grep -o "$ASSET_URL" || true)
 
 if [ -z "${DEB_URL}" ]; then
   echo "fresco-update: no .${PKG_EXT} found in the latest release" >&2
@@ -126,7 +126,12 @@ case "$PKG_KIND" in
     # rpm's %{VERSION} excludes the release, matching the tag. sort -V is a
     # best-effort ordering (it does not know Debian's ~), which is enough for
     # plain X.Y.Z tags.
-    INSTALLED_VERSION=$(rpm -q --qf '%{VERSION}' fresco 2>/dev/null || true)
+    # Only query when rpm says fresco is installed: `rpm -q` prints "package
+    # fresco is not installed" on stdout, which would otherwise pass as a version.
+    INSTALLED_VERSION=""
+    if rpm -q fresco >/dev/null 2>&1; then
+      INSTALLED_VERSION=$(rpm -q --qf '%{VERSION}' fresco 2>/dev/null || true)
+    fi
     if [ -n "${INSTALLED_VERSION}" ] && [ "$(printf '%s\n%s\n' "${INSTALLED_VERSION}" "${LATEST_VERSION}" | sort -V | tail -n 1)" = "${INSTALLED_VERSION}" ]; then
       echo "fresco-update: already up to date (installed ${INSTALLED_VERSION}, latest ${LATEST_VERSION})"
       exit 2

@@ -4194,4 +4194,13 @@ visualizer = true
         assert!(text.contains("[lockscreen"), "got:\n{text}");
         assert_eq!(toml::from_str::<Config>(&text).unwrap(), cfg);
     }
+
+    #[test]
+    fn low_memory_round_trips_and_defaults_off() {
+        let cfg = Config { low_memory: true, ..Config::default() };
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert!(back.low_memory);
+        let old: Config = toml::from_str("").unwrap();
+        assert!(!old.low_memory);
+    }
 }

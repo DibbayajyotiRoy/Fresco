@@ -654,6 +654,8 @@
   "Window covers screen": "विंडो स्क्रीन को ढक रही है",
   "Performance mode": "परफ़ॉर्मेंस मोड",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "विजेट, ऑडियो विज़ुअलाइज़र और होवर पूर्वावलोकन बंद करता है और वीडियो गुणवत्ता घटाता है — गेमिंग और पुराने पीसी के लिए",
+  "Low memory mode": "कम मेमोरी मोड",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "RAM उपयोग घटाता है, बदले में लूप में कूदना थोड़ा कम सहज होता है",
   "Pause playback": "प्लेबैक रोकें",
   "Resume playback": "प्लेबैक फिर से शुरू करें",
   "Previous wallpaper": "पिछला वॉलपेपर",

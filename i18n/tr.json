@@ -654,6 +654,8 @@
   "Window covers screen": "Pencere ekranı kaplıyor",
   "Performance mode": "Performans modu",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Widget’ları, ses görselleştiriciyi ve üzerine gelince önizlemeleri kapatır, video kalitesini düşürür — oyunlar ve eski bilgisayarlar için",
+  "Low memory mode": "Düşük bellek modu",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "RAM kullanımını azaltır; döngü atlamaları biraz daha az akıcı olur",
   "Pause playback": "Oynatmayı duraklat",
   "Resume playback": "Oynatmayı sürdür",
   "Previous wallpaper": "Önceki duvar kâğıdı",

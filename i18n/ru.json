@@ -654,6 +654,8 @@
   "Window covers screen": "Окно закрывает экран",
   "Performance mode": "Режим производительности",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "Отключает виджеты, аудиовизуализацию и предпросмотр при наведении и снижает качество видео — для игр и старых ПК",
+  "Low memory mode": "Режим экономии памяти",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "Снижает расход ОЗУ ценой немного менее плавных переходов при повторе",
   "Pause playback": "Приостановить воспроизведение",
   "Resume playback": "Продолжить воспроизведение",
   "Previous wallpaper": "Предыдущие обои",

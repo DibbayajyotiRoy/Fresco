@@ -654,6 +654,8 @@
   "Window covers screen": "窗口覆盖屏幕",
   "Performance mode": "性能模式",
   "Turns off widgets, audio visualiser, hover previews and lowers video quality — for gaming and older PCs": "关闭挂件、音频可视化和悬停预览，并降低视频质量——适合游戏和老旧电脑",
+  "Low memory mode": "低内存模式",
+  "Lowers RAM use at the cost of slightly less smooth loop seeks": "降低内存占用，代价是循环跳转略不够流畅",
   "Pause playback": "暂停播放",
   "Resume playback": "继续播放",
   "Previous wallpaper": "上一张",

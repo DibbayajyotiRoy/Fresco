@@ -12,8 +12,11 @@
 [![GPL-3.0-or-later license](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Publish workflow status](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Support Fresco on Ko-fi](https://img.shields.io/badge/Ko--fi-Support_Fresco-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/dibbayajyotiroy)
 
-[Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Supported environments](#supported-environments) · [Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [FAQ](#faq) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues) · [Support Fresco](#support-the-project)
+[Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Support Fresco ♥](#support-the-project) · [Supported environments](#supported-environments) · [FAQ](#faq)
+
+[Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
 <img src="./data/screenshots/gallery.png" alt="Fresco's wallpaper library on a dark Linux desktop: a searchable grid of video, image and slideshow wallpapers, with one video marked Active and a status pill showing NVDEC hardware decoding" width="800" />
 

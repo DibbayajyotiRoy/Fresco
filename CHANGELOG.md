@@ -6,18 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.55] — 2026-11-11
+
 ### Added
+- **A package for every distro family on each release.** Besides the `.deb`,
+  releases now carry a Fedora/RHEL-family `.rpm`
+  (`fresco-<ver>-1.x86_64.rpm`) and an Arch-family `.pkg.tar.zst`
+  (`fresco-bin-<ver>-1-x86_64.pkg.tar.zst`).
 - **The in-app updater now covers Arch-family and Fedora/RHEL-family
   systems.** It installs the matching release package with `pacman -U` or
   `dnf`/`yum` instead of only `apt`. Manual-update prompts show the right
   command for your distro (`yay -Syu fresco-bin` or `sudo dnf install ./fresco-*.x86_64.rpm`)
   rather than the Debian-only installer. The installer script explains the
   right route on Arch and Fedora instead of stopping at a dead end.
-- **Optional "Support Fresco on Ko-fi" entry** in the main window menu and
-  the tray menu, opening the Ko-fi page in your browser. Nothing is sent or
-  shown otherwise.
+- **`fresco pick`: a quick wallpaper picker you can bind to a key.** It opens a
+  small search-and-choose window listing the same wallpapers as
+  `fresco next`/`prev`/`random`; type to filter, Enter applies, Esc closes.
+  Apps cannot grab global shortcuts on Wayland, so bind the command in your
+  desktop or compositor settings (examples for Sway, Hyprland, GNOME, KDE and
+  COSMIC are in `fresco --help`).
+- **Low memory mode switch** on the Behavior page. It shrinks the video
+  buffers for machines with little RAM (the setting already existed in
+  `config.toml`; it was not reachable from the app). The saving is modest:
+  most of Fresco's memory is the video decoder, not the buffers.
+- **A default transition for all wallpapers** (issue #129). Pick one under
+  Advanced > Default transition; a wallpaper that sets its own transition keeps
+  it.
+- **Tray menu: Previous wallpaper and Settings entries**, and a **Support
+  Fresco (Ko-fi)** entry. The main window menu has the same optional Ko-fi
+  entry, opening the Ko-fi page in your browser. Nothing is sent or shown
+  otherwise.
+- The README and the website now link a Romanian video tutorial by 78_Maty.
 
 ### Changed
+- **The wallpaper resumes faster after a fullscreen or maximized window
+  closes on X11.** The check ran every two seconds and now runs every quarter
+  of a second. In a headless test the median wait fell from about 1.1 s to
+  about 0.2 s.
 - **Telemetry counts real installs only.** Debug builds and CI runs (or any run
   with `CI`, `GITHUB_ACTIONS` or `FRESCO_NO_TELEMETRY` set) no longer send the
   install heartbeat, feature events, error reports, or the catalog install
@@ -26,6 +51,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tarball`), falling back to runtime detection for untagged builds.
 
 ### Fixed
+- **The tray icon works in swaybar** (issue #128). A left click now opens the
+  main window (swaybar does not show the menu), and the icon is embedded so it
+  no longer depends on the host finding it in an icon theme.
+- **"Updater script not found" no longer appears** on installs without the
+  bundled updater (cargo, tarball). Update now falls back to the manual
+  instructions instead of failing.
 - **On Deepin V20 / Debian 10, `fresco` now explains what is missing** instead
   of failing with a raw `libadwaita-1.so.0: cannot open shared object file`
   error. The app needs GTK 4 and libadwaita, which those systems do not

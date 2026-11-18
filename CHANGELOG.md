@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

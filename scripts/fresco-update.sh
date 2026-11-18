@@ -196,7 +196,8 @@ case "$PKG_KIND" in
     export DEBIAN_FRONTEND=noninteractive
     echo "STAGE: installing"
     echo "fresco-update: installing…"
-    apt-get install -y "${TMP_PKG}" ;;
+    # Mint's update manager often holds the dpkg lock; wait for it, don't fail.
+    apt-get -o DPkg::Lock::Timeout=120 install -y "${TMP_PKG}" ;;
   rpm)
     echo "STAGE: installing"
     echo "fresco-update: installing…"

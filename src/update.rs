@@ -233,29 +233,6 @@ fn outcome_from_status(status: std::process::ExitStatus) -> UpdateOutcome {
     }
 }
 
-/// Download + install the latest .deb by running the bundled updater script as
-/// root via pkexec (the desktop's polkit agent prompts once).
-pub fn run_updater_blocking() -> UpdateOutcome {
-    // No script means this install wasn't laid down by the .deb (cargo, tarball,
-    // bare binary): there is nothing to run, so it's a manual-update case.
-    let Some(script) = updater_script() else {
-        return UpdateOutcome::Unsupported;
-    };
-    // The origin is passed as an ARGUMENT, not an env var: pkexec runs the
-    // script as root with a sanitised environment and root's $HOME, so it can
-    // neither inherit FRESCO_ORIGIN nor read the marker from the invoking
-    // user's config directory.
-    match std::process::Command::new("pkexec")
-        .arg(&script)
-        .arg("--origin")
-        .arg(Origin::current().tag())
-        .status()
-    {
-        Ok(status) => outcome_from_status(status),
-        Err(e) => UpdateOutcome::Failed(format!("failed to launch pkexec: {e}")),
-    }
-}
-
 /// One live progress event from the updater script.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progress {
@@ -265,19 +242,18 @@ pub enum Progress {
     Percent(u8),
 }
 
-/// Same as [`run_updater_blocking`], but streams the script's `STAGE:` and
-/// `PROGRESS:` stdout lines to `on_progress` as they arrive, so a caller (e.g.
-/// the GUI, on a background thread) can show live progress instead of a silent
-/// blocking call. Runs entirely with std/anyhow so this stays usable from
-/// either the `gui` or `daemon` feature.
+/// Download + install the latest package by running the bundled updater script
+/// as root via pkexec (the desktop's polkit agent prompts once), streaming its
+/// `STAGE:` and `PROGRESS:` stdout lines to `on_progress` as they arrive so the
+/// GUI's install dialog can show live progress. Only the GUI runs this: pkexec
+/// needs the user's own logind session and polkit agent, which the daemon lacks.
 pub fn run_updater_with_progress(on_progress: impl Fn(Progress) + Send + 'static) -> UpdateOutcome {
     let Some(script) = updater_script() else {
-        return UpdateOutcome::Unsupported; // see run_updater_blocking
+        return UpdateOutcome::Unsupported;
     };
     let mut cmd = std::process::Command::new("pkexec");
     cmd.arg(&script);
-    // See run_updater_blocking: pkexec drops the environment, so the host has
-    // to travel as an argument.
+    // pkexec drops the environment, so the host has to travel as an argument.
     cmd.arg("--origin").arg(Origin::current().tag());
     run_command_with_progress(cmd, on_progress)
 }
@@ -350,13 +326,47 @@ struct ReleaseResponse {
     html_url: Option<String>,
 }
 
+/// The release host is refusing requests for now (rate limit), as opposed to
+/// being unreachable. Carried inside the `anyhow::Error` from [`fetch_latest`]
+/// so the GUI can word the failure differently.
+#[derive(Debug)]
+pub struct RateLimited;
+
+impl std::fmt::Display for RateLimited {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("release host is rate-limiting requests")
+    }
+}
+
+impl std::error::Error for RateLimited {}
+
+/// Whether an HTTP status from the release host means "rate limited": GitHub
+/// answers 403 (or 429) once the unauthenticated quota is spent.
+pub fn is_rate_limit_status(code: u16) -> bool {
+    matches!(code, 403 | 429)
+}
+
+/// Whether a release already known to be newer should be offered. A "Later"
+/// dismissal hides that version from the automatic check only; a manual check
+/// (`force`) always shows it.
+pub fn should_offer(latest: &str, skipped: &str, force: bool) -> bool {
+    force || latest != skipped
+}
+
 /// Fetch the latest release from whichever host this copy was installed from
 /// (unauthenticated). See [`Origin`].
 pub fn fetch_latest() -> anyhow::Result<LatestRelease> {
     let origin = Origin::current();
-    let resp = ureq::get(origin.releases_api())
+    let resp = match ureq::get(origin.releases_api())
         .set("Accept", "application/vnd.github+json")
-        .call()?;
+        .call()
+    {
+        Ok(resp) => resp,
+        Err(ureq::Error::Status(code, _)) if is_rate_limit_status(code) => {
+            return Err(RateLimited.into());
+        }
+        Err(e) => return Err(e.into()),
+    };
     let release: ReleaseResponse = resp.into_json()?;
     Ok(LatestRelease {
         version: release.tag_name,
@@ -478,6 +488,29 @@ mod tests {
             stages.lock().unwrap().as_slice(),
             [Progress::Stage("downloading".into()), Progress::Percent(40)]
         );
+    }
+
+    /// "Later" hides a version from the automatic check only: a manual check
+    /// must still show the dismissed release, or it looks like nothing happened.
+    #[test]
+    fn manual_check_bypasses_a_skipped_version() {
+        assert!(should_offer("v1.2.0", "v1.2.0", true));
+        assert!(!should_offer("v1.2.0", "v1.2.0", false));
+        assert!(should_offer("v1.2.0", "v1.1.0", false));
+        assert!(should_offer("v1.2.0", "", false));
+    }
+
+    /// GitHub's unauthenticated quota answers 403/429; anything else is a
+    /// different failure and must not be worded as a rate limit.
+    #[test]
+    fn rate_limit_statuses_are_classified() {
+        assert!(is_rate_limit_status(403));
+        assert!(is_rate_limit_status(429));
+        for code in [200, 404, 500, 502, 503] {
+            assert!(!is_rate_limit_status(code), "{code}");
+        }
+        let err: anyhow::Error = RateLimited.into();
+        assert!(err.downcast_ref::<RateLimited>().is_some());
     }
 
     #[test]

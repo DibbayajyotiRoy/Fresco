@@ -308,14 +308,30 @@ thread_local! {
 /// thread + `async_channel` + `glib::spawn_future_local` pattern so the network
 /// call never blocks the GTK main thread.
 ///
-/// `force` bypasses the 24h throttle (used by the manual "Check for updates"
-/// menu item) and surfaces an explicit toast either way (latest / offline).
-/// The automatic startup check (`force = false`) stays silent on both the
-/// throttle skip and any failure.
+/// `force` bypasses the 24h throttle and any "Later" dismissal (used by the
+/// manual "Check for updates" menu item) and surfaces an explicit toast either
+/// way (latest / offline / rate-limited). The automatic startup check
+/// (`force = false`) stays silent on both the throttle skip and any failure.
 pub(crate) fn check_for_updates(
     window: &adw::ApplicationWindow,
     state: Rc<RefCell<AppState>>,
     force: bool,
+) {
+    run_check(window, state, force, false);
+}
+
+/// The `fresco --update` entry point, which the daemon's "Update now"
+/// notification launches: a forced check that opens the install dialog straight
+/// away when a newer version exists, instead of only raising the banner.
+pub(crate) fn check_and_install(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
+    run_check(window, state, true, true);
+}
+
+fn run_check(
+    window: &adw::ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+    force: bool,
+    install: bool,
 ) {
     if !force {
         let last = state.borrow().config.last_update_check;
@@ -342,21 +358,24 @@ pub(crate) fn check_for_updates(
             return;
         };
 
-        {
-            let mut s = state.borrow_mut();
-            s.config.last_update_check = unix_now();
-            s.config.save().ok();
-        }
-
         let latest = match result {
-            Ok(latest) => latest,
+            Ok(latest) => {
+                // Only a successful check counts toward the 24h throttle: an
+                // offline start must not hide updates for a whole day.
+                let mut s = state.borrow_mut();
+                s.config.last_update_check = unix_now();
+                s.config.save().ok();
+                latest
+            }
             Err(e) => {
                 log::warn!("update check failed: {e:#}");
                 if force {
-                    show_toast(
-                        &state,
-                        t!("Couldn't check for updates — check your connection."),
-                    );
+                    let msg = if e.downcast_ref::<crate::update::RateLimited>().is_some() {
+                        t!("GitHub is rate-limiting update checks. Try again in an hour.")
+                    } else {
+                        t!("Couldn't check for updates — check your connection.")
+                    };
+                    show_toast(&state, msg);
                 }
                 return;
             }
@@ -373,11 +392,16 @@ pub(crate) fn check_for_updates(
             return;
         }
 
-        if state.borrow().config.update_skipped_version == latest.version {
+        let skipped = state.borrow().config.update_skipped_version.clone();
+        if !crate::update::should_offer(&latest.version, &skipped, force) {
             return; // user already dismissed this version with "Later"
         }
 
-        show_update_banner(&window, state, latest);
+        if install {
+            show_install_dialog(&window, latest.version);
+        } else {
+            show_update_banner(&window, state, latest);
+        }
     });
 }
 

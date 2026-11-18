@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Per-wallpaper transition can be set to Default (follow the global
+  transition) or None (#129)
+
+### Changed
+- Switching between an image and a video wallpaper now uses the transition
+  on Wayland (#129)
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

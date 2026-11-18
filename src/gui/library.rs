@@ -47,8 +47,10 @@ pub struct LibraryEntry {
     pub interval_s: Option<u64>,
     /// Effect played when this wallpaper comes up. Was slideshow-only, back
     /// when the daemon's animation machine lived inside `Slideshow`; it now
-    /// applies to every kind, video included. `None` means "never chosen",
-    /// which falls back to the wallpaper-level default.
+    /// applies to every kind, video included. `None` is "Default" (follow the
+    /// global transition); `Some(Transition::None)` is an explicit no-effect.
+    /// Entries saved before entries.json was version-marked stored `Some(None)`
+    /// for "Default"; see [`migrate_transition_defaults`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
     /// Remembered audio + orientation (video/playlist), so setting from the
@@ -659,7 +661,7 @@ impl LibraryEntry {
             volume: self.volume.unwrap_or(50),
             power_saving: self.power_saving,
             // Applies to every kind now, not just the slideshow branch below.
-            transition: self.transition.unwrap_or_default(),
+            transition: self.transition,
             framerate: None, // deprecated; see Config::migrate
             slideshow: if self.kind == Kind::Slideshow {
                 Some(Slideshow {
@@ -667,6 +669,7 @@ impl LibraryEntry {
                     paths: self.paths.clone(),
                     interval_s: self.interval_s.unwrap_or(30),
                     recursive: self.recursive,
+                    // The legacy copy; `Config::migrate` keeps it in step.
                     transition: self.transition.unwrap_or_default(),
                 })
             } else {
@@ -687,7 +690,8 @@ pub struct EditorValues {
     pub mute: bool,
     pub volume: u8,
     pub power_saving: Option<PowerSaving>,
-    pub transition: Transition,
+    /// `None` is "Default"; see [`Wallpaper::transition`].
+    pub transition: Option<Transition>,
     pub interval_s: u64,
 }
 
@@ -710,7 +714,7 @@ pub fn wallpaper_from_editor(entry: &LibraryEntry, values: &EditorValues) -> Wal
     w.transition = values.transition;
     if let Some(ss) = w.slideshow.as_mut() {
         ss.interval_s = values.interval_s;
-        ss.transition = values.transition;
+        ss.transition = values.transition.unwrap_or_default();
     }
     w
 }
@@ -769,7 +773,70 @@ pub fn entry_for_path<'a>(entries: &'a [LibraryEntry], path: &Path) -> Option<&'
         .find(|e| matches!(e.kind, Kind::Video | Kind::Image) && e.path.as_deref() == Some(path))
 }
 
+/// Clear the legacy "inherit" spelling of a transition: `Some(Transition::None)`
+/// meant "Default" before the per-wallpaper picker had a Default row. Returns
+/// whether anything changed.
+pub(crate) fn unset_legacy_none(t: &mut Option<Transition>) -> bool {
+    if *t == Some(Transition::None) {
+        *t = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// One-time upgrade of transitions saved before the per-wallpaper picker grew
+/// a "Default" row. Those files stored `Some(Transition::None)` wherever the
+/// user had never picked an effect; after this release that value means an
+/// explicit "None", so it is cleared here, once.
+///
+/// entries.json is a bare array, so it has no version field to key this on.
+/// A marker file next to it does the job instead: once it exists, the library
+/// has been read under the current meaning and nothing is reinterpreted again.
+/// A fresh install gets the marker on its first load, before it can save any
+/// explicit "None" of its own.
+///
+/// Runs from [`load_entries`] and [`linked::load_tweaks`] (the linked folders'
+/// own choices live in `linked.json`). Failures are logged and the marker is
+/// still written, so a bad write cannot leave the library to be reinterpreted
+/// later.
+pub fn migrate_transition_defaults() {
+    let marker = library_dir().join("transition-default-v2");
+    if marker.exists() {
+        return;
+    }
+    if let Err(e) = migrate_entries_file() {
+        log::warn!("transition migration (entries.json): {e:#}");
+    }
+    if let Err(e) = linked::unset_legacy_transitions() {
+        log::warn!("transition migration (linked.json): {e:#}");
+    }
+    if let Err(e) = fs::create_dir_all(library_dir()).and_then(|_| fs::write(&marker, "")) {
+        log::warn!("transition migration marker: {e}");
+    }
+}
+
+fn migrate_entries_file() -> Result<()> {
+    let path = entries_path();
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let mut entries: Vec<LibraryEntry> =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    let mut changed = false;
+    for e in &mut entries {
+        changed |= unset_legacy_none(&mut e.transition);
+    }
+    if changed {
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, entries_json(&entries)?)?;
+        fs::rename(&tmp, &path)?;
+    }
+    Ok(())
+}
+
 pub fn load_entries() -> Result<Vec<LibraryEntry>> {
+    migrate_transition_defaults();
     let path = entries_path();
     if !path.exists() {
         return Ok(Vec::new());
@@ -2093,7 +2160,7 @@ mod tests {
             mute: false,
             volume: 80,
             power_saving: Some(PowerSaving::Full),
-            transition: Transition::Blur,
+            transition: Some(Transition::Blur),
             interval_s: 15,
         }
     }
@@ -2112,7 +2179,33 @@ mod tests {
         assert_eq!(w.fit, Fit::Contain);
         assert!(!w.mute);
         assert_eq!(w.volume, 80);
-        assert_eq!(w.transition, Transition::Blur);
+        assert_eq!(w.transition, Some(Transition::Blur));
+    }
+
+    /// entries.json from before the Default row: `"transition": "none"` was
+    /// the "never chosen" value. The one-time migration reads it as Default;
+    /// a second pass finds nothing, so a choice made after the upgrade stays.
+    #[test]
+    fn legacy_none_entries_read_as_default() {
+        let mut entries: Vec<LibraryEntry> = serde_json::from_str(
+            r#"[{"id":"1-0","name":"a","kind":"video","path":"/a.mp4","transition":"none"},
+                {"id":"1-1","name":"b","kind":"video","path":"/b.mp4","transition":"zoom"},
+                {"id":"1-2","name":"c","kind":"image","path":"/c.png"}]"#,
+        )
+        .unwrap();
+        assert_eq!(entries[0].transition, Some(Transition::None));
+        let changed: Vec<bool> = entries
+            .iter_mut()
+            .map(|e| unset_legacy_none(&mut e.transition))
+            .collect();
+        assert_eq!(changed, [true, false, false]);
+        assert_eq!(entries[0].transition, None);
+        assert_eq!(entries[1].transition, Some(Transition::Zoom));
+        assert_eq!(entries[2].transition, None);
+
+        let mut explicit = Some(Transition::None);
+        assert!(unset_legacy_none(&mut explicit));
+        assert!(!unset_legacy_none(&mut explicit));
     }
 
     /// A slideshow's nested `Slideshow.interval_s`/`.transition` must follow

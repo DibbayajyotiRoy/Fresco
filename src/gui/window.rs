@@ -5920,10 +5920,10 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     let transition_row = adw::ComboRow::new();
     transition_row.set_title(t!("Transition"));
     transition_row.set_model(Some(&gtk4::StringList::new(&table_labels(
-        &TRANSITIONS_SHOWN,
+        &WALLPAPER_TRANSITIONS_SHOWN,
     ))));
-    transition_row.set_selected(transition_index(Transition::default()));
-    transition_row.set_subtitle(transition_hint(Transition::default()));
+    transition_row.set_selected(wallpaper_transition_index(None));
+    transition_row.set_subtitle(wallpaper_transition_hint(None));
     prefs.add(&transition_row);
 
     let mute_row = adw::ActionRow::new();
@@ -6023,7 +6023,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 _ => Fit::Cover,
             };
             let interval = interval_secs(interval_ref.selected());
-            let transition = transition_from_index(transition_ref.selected());
+            let transition = wallpaper_transition_from_index(transition_ref.selected());
             let power_saving = power_edit_from_index(power_ref.selected());
             // Refuse before the draft is committed: a slideshow with no image
             // would be saved, marked in use, and then show nothing (issue #36).
@@ -6060,7 +6060,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     (None, None) => return,
                 };
                 if let Some(e) = s.entries.get_mut(idx) {
-                    e.transition = Some(transition);
+                    e.transition = transition;
                     if e.kind == Kind::Slideshow {
                         e.interval_s = Some(interval);
                     } else {
@@ -6272,14 +6272,13 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 crop_frame_ref.set_visible(!is_slideshow);
                 edit_actions_ref.set_visible(!is_slideshow);
                 tp_frame_ref.set_visible(is_slideshow);
-                // Fall back to the wallpaper-level value for an entry saved
-                // before entries carried one of their own.
-                let stored = entry.transition.unwrap_or(st.config.wallpaper.transition);
-                transition_ref.set_selected(transition_index(stored));
+                // `None` is "Default": the row follows the global transition.
+                transition_ref.set_selected(wallpaper_transition_index(entry.transition));
                 // Follow the combo (never the raw entry) so a transition the
                 // picker no longer lists can't reach the subtitle or preview.
-                let shown = transition_from_index(transition_ref.selected());
-                transition_ref.set_subtitle(transition_hint(shown));
+                let picked = wallpaper_transition_from_index(transition_ref.selected());
+                transition_ref.set_subtitle(wallpaper_transition_hint(picked));
+                let shown = picked.unwrap_or(st.config.transition.unwrap_or_default());
                 if is_slideshow {
                     interval_ref.set_selected(interval_index(entry.interval_s.unwrap_or(30)));
                     let (a, b) = slideshow_preview_images(entry);
@@ -6320,10 +6319,12 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     // it does — including which one costs GPU — without making them apply it.
     {
         let tp = transition_preview.clone();
+        let state_t = state.clone();
         transition_row.connect_selected_notify(move |row| {
-            let chosen = transition_from_index(row.selected());
-            row.set_subtitle(transition_hint(chosen));
-            tp.set_transition(chosen);
+            let picked = wallpaper_transition_from_index(row.selected());
+            row.set_subtitle(wallpaper_transition_hint(picked));
+            let global = state_t.borrow().config.transition.unwrap_or_default();
+            tp.set_transition(picked.unwrap_or(global));
         });
     }
 
@@ -9978,6 +9979,40 @@ fn transition_hint(t: Transition) -> &'static str {
     }
 }
 
+/// The per-wallpaper picker's rows. "Default" clears the wallpaper's own
+/// transition so it follows the global one (`Config::effective_transition`).
+/// Every other row writes `Some`, and "None" is an explicit no-effect that
+/// still wins over a global default.
+const WALLPAPER_TRANSITIONS_SHOWN: [(Option<Transition>, &str); 6] = [
+    (None, "Default"),
+    (Some(Transition::None), "None"),
+    (Some(Transition::Fade), "Fade through black"),
+    (Some(Transition::KenBurns), "Ken Burns"),
+    (Some(Transition::Zoom), "Zoom"),
+    (Some(Transition::Blur), "Blur"),
+];
+
+/// Per-wallpaper hint: "Default" says where the effect comes from, anything
+/// else describes the effect itself.
+fn wallpaper_transition_hint(t: Option<Transition>) -> &'static str {
+    match t {
+        None => t!("Uses the default transition from Settings."),
+        Some(t) => transition_hint(t),
+    }
+}
+
+/// Per-wallpaper picker row → the value it writes; `None` is Default.
+fn wallpaper_transition_from_index(index: u32) -> Option<Transition> {
+    WALLPAPER_TRANSITIONS_SHOWN
+        .get(index as usize)
+        .and_then(|(t, _)| *t)
+}
+
+/// Stored per-wallpaper value → its picker row.
+fn wallpaper_transition_index(t: Option<Transition>) -> u32 {
+    table_index(&WALLPAPER_TRANSITIONS_SHOWN, t.map(folded_transition))
+}
+
 /// Picker row → the transition it writes.
 fn transition_from_index(index: u32) -> Transition {
     TRANSITIONS_SHOWN
@@ -9993,7 +10028,12 @@ fn transition_from_index(index: u32) -> Transition {
 /// downgrade of a setting the user never touched. Matching on the enum turns
 /// that into a compile error instead.
 fn transition_index(t: Transition) -> u32 {
-    let shown = match t {
+    table_index(&TRANSITIONS_SHOWN, folded_transition(t))
+}
+
+/// The effect a stored value is shown as. Shared by both pickers' indexes.
+fn folded_transition(t: Transition) -> Transition {
+    match t {
         Transition::None => Transition::None,
         // Both are the same dip through black; `Config::migrate` rewrites the
         // stored value, and this covers one read before that lands.
@@ -10004,8 +10044,7 @@ fn transition_index(t: Transition) -> u32 {
         Transition::KenBurns => Transition::KenBurns,
         Transition::Zoom => Transition::Zoom,
         Transition::Blur => Transition::Blur,
-    };
-    table_index(&TRANSITIONS_SHOWN, shown)
+    }
 }
 
 // ─── Feedback prompt + admin notifications (Supabase) ──────────────────────────
@@ -12386,6 +12425,27 @@ mod tests {
         assert_eq!(
             table_labels(&TRANSITIONS_SHOWN).len(),
             TRANSITIONS_SHOWN.len()
+        );
+    }
+
+    /// The per-wallpaper table's leading row is Default (inherit), and "None"
+    /// is its own row, so an explicit no-effect is not folded into Default.
+    #[test]
+    fn wallpaper_transition_table_keeps_default_and_explicit_none_apart() {
+        assert_eq!(wallpaper_transition_index(None), 0);
+        assert_eq!(wallpaper_transition_from_index(0), None);
+        assert_eq!(wallpaper_transition_index(Some(Transition::None)), 1);
+        assert_eq!(wallpaper_transition_from_index(1), Some(Transition::None));
+        for (i, (t, label)) in WALLPAPER_TRANSITIONS_SHOWN.iter().enumerate() {
+            assert_eq!(wallpaper_transition_index(*t), i as u32, "{label}");
+            assert_eq!(wallpaper_transition_from_index(i as u32), *t, "{label}");
+        }
+        // Folds the same way as the global picker.
+        assert_eq!(wallpaper_transition_index(Some(Transition::Crossfade)), 2);
+        assert_eq!(wallpaper_transition_index(Some(Transition::Slide)), 2);
+        assert_eq!(
+            table_labels(&WALLPAPER_TRANSITIONS_SHOWN).len(),
+            WALLPAPER_TRANSITIONS_SHOWN.len()
         );
     }
 

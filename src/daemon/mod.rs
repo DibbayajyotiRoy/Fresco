@@ -1321,7 +1321,7 @@ impl Daemon {
         {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
             let wallpaper = Wallpaper {
-                transition: self.config.effective_transition(&wallpaper),
+                transition: Some(self.config.effective_transition(&wallpaper)),
                 ..wallpaper
             };
             if !wallpaper.is_configured() {
@@ -2431,7 +2431,7 @@ fn build_slideshow(wallpaper: &Wallpaper, player: &PlayerHandle) -> Option<Slide
         last_advance: Instant::now(),
         // The wallpaper-level field is the canonical one; `slideshow.transition`
         // is the legacy copy `Config::migrate` keeps in step with it.
-        transition: wallpaper.transition,
+        transition: wallpaper.transition.unwrap_or_default(),
     })
 }
 
@@ -3031,7 +3031,7 @@ fn wayland_auto_cycle(
         let effective_ps = config.effective_power_saving(&config.wallpaper);
         o.apply_wallpaper(
             Wallpaper {
-                transition,
+                transition: Some(transition),
                 ..config.wallpaper.clone()
             },
             config.scaling,
@@ -3221,7 +3221,7 @@ fn run_wayland_layershell() -> Result<()> {
     for m in monitors.iter().filter(|_| !plasma && config.enabled) {
         let wallpaper = config.wallpaper_for(&m.connector).clone();
         let wallpaper = Wallpaper {
-            transition: config.effective_transition(&wallpaper),
+            transition: Some(config.effective_transition(&wallpaper)),
             ..wallpaper
         };
         if wallpaper.effective_path().is_none()
@@ -3330,7 +3330,7 @@ fn run_wayland_layershell() -> Result<()> {
                             for m in &monitors {
                                 let wp = config.wallpaper_for(&m.connector).clone();
                                 let wp = Wallpaper {
-                                    transition: config.effective_transition(&wp),
+                                    transition: Some(config.effective_transition(&wp)),
                                     ..wp
                                 };
                                 let has = !plasma
@@ -3526,7 +3526,7 @@ fn run_wayland_layershell() -> Result<()> {
                             continue;
                         }
                         let wp = Wallpaper {
-                            transition: config.effective_transition(&wp),
+                            transition: Some(config.effective_transition(&wp)),
                             ..wp
                         };
                         let ps = config.effective_power_saving(&wp);
@@ -4123,6 +4123,18 @@ struct OsdCache {
     mode_h: u32,
 }
 
+/// Whether a change from kind `from` to kind `to` can reuse the running mpv
+/// through `loadfile replace` (with the transition) instead of a respawn.
+///
+/// Image and video take the same mpv options: `build_mpv_opts` sets
+/// `image-display-duration` and `loop-file` for both and reads nothing kind
+/// specific, so one can become the other in place. Playlists and slideshows
+/// drive mpv differently and never switch this way, not even to themselves.
+fn kind_switches_in_place(from: Kind, to: Kind) -> bool {
+    let plain = |k: Kind| matches!(k, Kind::Image | Kind::Video);
+    (plain(from) && plain(to)) || (from == to && to != Kind::Slideshow)
+}
+
 struct WlOutput {
     connector: String,
     wallpaper: Wallpaper,
@@ -4421,9 +4433,8 @@ impl WlOutput {
             && new.mute == self.wallpaper.mute
             && new.volume == self.wallpaper.volume
             && new.crop == self.wallpaper.crop
-            && new.kind == self.wallpaper.kind
-            && new.kind != Kind::Slideshow;
-        let effect = new.transition;
+            && kind_switches_in_place(self.wallpaper.kind, new.kind);
+        let effect = new.transition.unwrap_or_default();
         self.wallpaper = new;
         self.scaling = scaling;
         self.power_saving = power_saving;
@@ -5887,6 +5898,25 @@ mod tests {
         assert_eq!(o.generation, 1);
         o.respawn(true, true);
         assert_eq!(o.generation, 2, "the static-frame path counts too");
+    }
+
+    /// Image and video switch in place; anything involving a playlist or a
+    /// slideshow respawns as before.
+    #[test]
+    fn kind_switch_in_place_covers_image_and_video_only() {
+        use super::kind_switches_in_place as sw;
+        assert!(sw(Kind::Image, Kind::Video));
+        assert!(sw(Kind::Video, Kind::Image));
+        assert!(sw(Kind::Video, Kind::Video));
+        assert!(sw(Kind::Image, Kind::Image));
+        assert!(sw(Kind::Playlist, Kind::Playlist));
+        assert!(!sw(Kind::Video, Kind::Playlist));
+        assert!(!sw(Kind::Image, Kind::Playlist));
+        assert!(!sw(Kind::Playlist, Kind::Video));
+        assert!(!sw(Kind::Image, Kind::Slideshow));
+        assert!(!sw(Kind::Video, Kind::Slideshow));
+        assert!(!sw(Kind::Slideshow, Kind::Image));
+        assert!(!sw(Kind::Slideshow, Kind::Slideshow));
     }
 
     /// The slideshow is now a *caller* of the transition machine rather than

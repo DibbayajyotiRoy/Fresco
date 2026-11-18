@@ -381,8 +381,29 @@ fn tweaks_path() -> PathBuf {
     library::library_dir().join("linked.json")
 }
 
+/// The linked-folder half of [`library::migrate_transition_defaults`]: clears
+/// the legacy `"none"` ("Default") transitions in `linked.json`. A file that
+/// does not parse is left exactly as it is, never replaced with an empty map.
+pub fn unset_legacy_transitions() -> Result<()> {
+    let path = tweaks_path();
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let mut map: TweakMap =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    let mut changed = false;
+    for t in map.values_mut() {
+        changed |= library::unset_legacy_none(&mut t.transition);
+    }
+    if changed {
+        write_tweaks(&map)?;
+    }
+    Ok(())
+}
+
 /// A missing or unreadable file is no tweaks: the files just look untouched.
 pub fn load_tweaks() -> TweakMap {
+    library::migrate_transition_defaults();
     let path = tweaks_path();
     let Ok(text) = fs::read_to_string(&path) else {
         return TweakMap::new();

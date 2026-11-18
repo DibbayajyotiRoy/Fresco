@@ -387,6 +387,8 @@ fn build_ui(app: &adw::Application) {
     let capability = crate::capability::detect();
 
     // Mark broken entries (missing source files) before showing the library.
+    // One-time transition upgrade; only the GUI rewrites these files.
+    library::migrate_transition_defaults();
     let mut entries = load_entries().unwrap_or_default();
     for e in &mut entries {
         e.check_health();

@@ -384,9 +384,8 @@ fn tweaks_path() -> PathBuf {
 /// The linked-folder half of [`library::migrate_transition_defaults`]: clears
 /// the legacy `"none"` ("Default") transitions in `linked.json`. A file that
 /// does not parse is left exactly as it is, never replaced with an empty map.
-pub fn unset_legacy_transitions() -> Result<()> {
-    let path = tweaks_path();
-    let Ok(text) = fs::read_to_string(&path) else {
+pub fn unset_legacy_transitions(path: &Path) -> Result<()> {
+    let Ok(text) = fs::read_to_string(path) else {
         return Ok(());
     };
     let mut map: TweakMap =
@@ -396,22 +395,29 @@ pub fn unset_legacy_transitions() -> Result<()> {
         changed |= library::unset_legacy_none(&mut t.transition);
     }
     if changed {
-        write_tweaks(&map)?;
+        write_tweaks_to(path, &map)?;
     }
     Ok(())
 }
 
 /// A missing or unreadable file is no tweaks: the files just look untouched.
+/// Never writes; until the one-time migration has run, legacy `"none"`
+/// transitions are read as unset.
 pub fn load_tweaks() -> TweakMap {
-    library::migrate_transition_defaults();
     let path = tweaks_path();
     let Ok(text) = fs::read_to_string(&path) else {
         return TweakMap::new();
     };
-    serde_json::from_str(&text).unwrap_or_else(|e| {
+    let mut map: TweakMap = serde_json::from_str(&text).unwrap_or_else(|e| {
         log::warn!("ignoring {}: {e}", path.display());
         TweakMap::new()
-    })
+    });
+    if library::legacy_transitions_pending() {
+        for t in map.values_mut() {
+            library::unset_legacy_none(&mut t.transition);
+        }
+    }
+    map
 }
 
 /// Fold the linked entries of `entries` into `map`; true when `map` changed.
@@ -431,13 +437,16 @@ fn merge_tweaks(map: &mut TweakMap, entries: &[LibraryEntry]) -> bool {
 }
 
 fn write_tweaks(map: &TweakMap) -> Result<()> {
-    let path = tweaks_path();
-    let dir = library::library_dir();
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    write_tweaks_to(&tweaks_path(), map)
+}
+
+fn write_tweaks_to(path: &Path, map: &TweakMap) -> Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, serde_json::to_string_pretty(map)?)
         .with_context(|| format!("writing {}", tmp.display()))?;
-    fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
     Ok(())
 }
 

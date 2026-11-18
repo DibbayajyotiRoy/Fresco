@@ -793,32 +793,40 @@ pub(crate) fn unset_legacy_none(t: &mut Option<Transition>) -> bool {
 /// entries.json is a bare array, so it has no version field to key this on.
 /// A marker file next to it does the job instead: once it exists, the library
 /// has been read under the current meaning and nothing is reinterpreted again.
-/// A fresh install gets the marker on its first load, before it can save any
-/// explicit "None" of its own.
+/// The marker is written only after both files were rewritten (or needed
+/// nothing); on failure it is left absent and the next GUI start retries.
 ///
-/// Runs from [`load_entries`] and [`linked::load_tweaks`] (the linked folders'
-/// own choices live in `linked.json`). Failures are logged and the marker is
-/// still written, so a bad write cannot leave the library to be reinterpreted
-/// later.
+/// Called once from the GUI's startup, never from the readers: the daemon
+/// also reads these files and must not race the GUI rewriting them. Until the
+/// marker exists the readers apply the same conversion in memory
+/// ([`load_entries`], [`linked::load_tweaks`]).
 pub fn migrate_transition_defaults() {
-    let marker = library_dir().join("transition-default-v2");
-    if marker.exists() {
-        return;
-    }
-    if let Err(e) = migrate_entries_file() {
-        log::warn!("transition migration (entries.json): {e:#}");
-    }
-    if let Err(e) = linked::unset_legacy_transitions() {
-        log::warn!("transition migration (linked.json): {e:#}");
-    }
-    if let Err(e) = fs::create_dir_all(library_dir()).and_then(|_| fs::write(&marker, "")) {
-        log::warn!("transition migration marker: {e}");
+    if let Err(e) = migrate_transition_defaults_in(&library_dir()) {
+        log::warn!("transition migration (retrying next start): {e:#}");
     }
 }
 
-fn migrate_entries_file() -> Result<()> {
-    let path = entries_path();
-    let Ok(text) = fs::read_to_string(&path) else {
+fn migrate_transition_defaults_in(dir: &Path) -> Result<()> {
+    let marker = dir.join(TRANSITION_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+    migrate_entries_file(&dir.join("entries.json"))?;
+    linked::unset_legacy_transitions(&dir.join("linked.json"))?;
+    fs::create_dir_all(dir)?;
+    fs::write(&marker, "")?;
+    Ok(())
+}
+
+const TRANSITION_MARKER: &str = "transition-default-v2";
+
+/// True until [`migrate_transition_defaults`] has completed.
+pub(crate) fn legacy_transitions_pending() -> bool {
+    !library_dir().join(TRANSITION_MARKER).exists()
+}
+
+fn migrate_entries_file(path: &Path) -> Result<()> {
+    let Ok(text) = fs::read_to_string(path) else {
         return Ok(());
     };
     let mut entries: Vec<LibraryEntry> =
@@ -830,21 +838,29 @@ fn migrate_entries_file() -> Result<()> {
     if changed {
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, entries_json(&entries)?)?;
-        fs::rename(&tmp, &path)?;
+        fs::rename(&tmp, path)?;
     }
     Ok(())
 }
 
-pub fn load_entries() -> Result<Vec<LibraryEntry>> {
-    migrate_transition_defaults();
-    let path = entries_path();
+/// Side-effect-free read; `legacy` applies the in-memory transition upgrade.
+fn read_entries(path: &Path, legacy: bool) -> Result<Vec<LibraryEntry>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let entries: Vec<LibraryEntry> =
+    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut entries: Vec<LibraryEntry> =
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    if legacy {
+        for e in &mut entries {
+            unset_legacy_none(&mut e.transition);
+        }
+    }
     Ok(entries)
+}
+
+pub fn load_entries() -> Result<Vec<LibraryEntry>> {
+    read_entries(&entries_path(), legacy_transitions_pending())
 }
 
 pub fn save_entries(entries: &[LibraryEntry]) -> Result<()> {
@@ -1751,6 +1767,50 @@ mod tests {
         assert_eq!(found("/elsewhere/other.mp4"), None);
         // A playlist's first item is not "the playing file".
         assert_eq!(found("/lib/a.mp4"), None);
+    }
+
+    /// Readers never write: without the marker they convert in memory only.
+    #[test]
+    fn read_without_marker_converts_in_memory_and_leaves_file() {
+        let dir = std::env::temp_dir().join(format!("fresco-tr-read-{}", make_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("entries.json");
+        let json =
+            r#"[{"id":"1-0","name":"a","kind":"video","path":"/a.mp4","transition":"none"}]"#;
+        fs::write(&path, json).unwrap();
+        assert_eq!(read_entries(&path, true).unwrap()[0].transition, None);
+        assert_eq!(
+            read_entries(&path, false).unwrap()[0].transition,
+            Some(Transition::None)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), json);
+        assert!(!dir.join(TRANSITION_MARKER).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Migration rewrites both files, then writes the marker; a failure
+    /// (unparsable file) leaves no marker so it is retried.
+    #[test]
+    fn migrate_rewrites_files_then_marker_and_retries_on_failure() {
+        let dir = std::env::temp_dir().join(format!("fresco-tr-mig-{}", make_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entries = dir.join("entries.json");
+        let linked = dir.join("linked.json");
+        fs::write(
+            &entries,
+            r#"[{"id":"1-0","name":"a","kind":"video","path":"/a.mp4","transition":"none"}]"#,
+        )
+        .unwrap();
+        fs::write(&linked, r#"{"/x.png":{"transition":"none"}}"#).unwrap();
+        fs::write(&linked, "{ broken").unwrap();
+        assert!(migrate_transition_defaults_in(&dir).is_err());
+        assert!(!dir.join(TRANSITION_MARKER).exists());
+        fs::write(&linked, r#"{"/x.png":{"transition":"none"}}"#).unwrap();
+        migrate_transition_defaults_in(&dir).unwrap();
+        assert!(dir.join(TRANSITION_MARKER).exists());
+        assert_eq!(read_entries(&entries, false).unwrap()[0].transition, None);
+        assert!(!fs::read_to_string(&linked).unwrap().contains("none"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

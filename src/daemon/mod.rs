@@ -3737,6 +3737,7 @@ fn run_wayland_layershell() -> Result<()> {
                             o.wallpaper.rotation = want.rotation;
                             o.wallpaper.power_saving = want.power_saving;
                             o.wallpaper.crop = want.crop;
+                            o.wallpaper.smooth_loop = want.smooth_loop;
                             o.power_saving = config.effective_power_saving(&want);
                         }
                     }

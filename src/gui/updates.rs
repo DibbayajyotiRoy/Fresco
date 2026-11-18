@@ -301,6 +301,9 @@ thread_local! {
     /// True while a release fetch is in flight, so the automatic startup check
     /// and the manual menu action can't race duplicate GitHub calls.
     static CHECK_IN_FLIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set when `fresco --update` arrived while a check was already in flight;
+    /// the in-flight check's result then opens the installer.
+    static INSTALL_REQUESTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Check GitHub Releases for a newer version and, if found, populate the
@@ -340,6 +343,11 @@ fn run_check(
         }
     }
     if CHECK_IN_FLIGHT.get() {
+        // A check is already running (e.g. the startup check) and will report
+        // back. Remember the install request so that result opens the installer.
+        if install {
+            INSTALL_REQUESTED.set(true);
+        }
         return;
     }
     CHECK_IN_FLIGHT.set(true);
@@ -357,6 +365,11 @@ fn run_check(
         let Ok(result) = result else {
             return;
         };
+        // An install request that arrived mid-check is honoured by this result,
+        // with the same forced behaviour (including the failure toast).
+        let pending = INSTALL_REQUESTED.get();
+        INSTALL_REQUESTED.set(false);
+        let (force, install) = crate::update::merge_pending_install(force, install, pending);
 
         let latest = match result {
             Ok(latest) => {

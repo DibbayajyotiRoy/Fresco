@@ -326,6 +326,15 @@ struct ReleaseResponse {
     html_url: Option<String>,
 }
 
+/// Fold an install request that arrived while a check was in flight into that
+/// check's `(force, install)` settings. An install request implies a forced
+/// check, so its result is surfaced (including the failure toast) and the
+/// "Later" dismissal is bypassed like any forced check.
+pub fn merge_pending_install(force: bool, install: bool, pending: bool) -> (bool, bool) {
+    let install = install || pending;
+    (force || install, install)
+}
+
 /// The release host is refusing requests for now (rate limit), as opposed to
 /// being unreachable. Carried inside the `anyhow::Error` from [`fetch_latest`]
 /// so the GUI can word the failure differently.
@@ -502,6 +511,17 @@ mod tests {
 
     /// GitHub's unauthenticated quota answers 403/429; anything else is a
     /// different failure and must not be worded as a rate limit.
+    /// An `--update` that lands mid-check must still open the installer, and
+    /// must surface failures and bypass "Later" like a forced check. Without a
+    /// pending request the in-flight check's own settings are untouched.
+    #[test]
+    fn pending_install_request_forces_the_inflight_result() {
+        assert_eq!(merge_pending_install(false, false, false), (false, false));
+        assert_eq!(merge_pending_install(true, false, false), (true, false));
+        assert_eq!(merge_pending_install(false, false, true), (true, true));
+        assert_eq!(merge_pending_install(false, true, false), (true, true));
+    }
+
     #[test]
     fn rate_limit_statuses_are_classified() {
         assert!(is_rate_limit_status(403));

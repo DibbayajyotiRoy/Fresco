@@ -1,6 +1,6 @@
 import { AUTHOR } from "@/lib/content";
 import { ALTERNATIVES } from "@/lib/alternatives";
-import { GITHUB_URL, RELEASES_URL, LICENSE_URL } from "@/lib/site";
+import { GITHUB_URL, RELEASES_URL, LICENSE_URL, DISCORD_URL } from "@/lib/site";
 import { VIDEOS, embedUrl, posterUrl, watchUrl } from "@/lib/videos";
 import type { Dictionary } from "@/lib/i18n";
 import { LOCALE_META, localePath, type Locale } from "@/lib/i18n/config";
@@ -57,7 +57,7 @@ export function JsonLd({
     author: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
     creator: { "@type": "Person", name: AUTHOR.name, url: AUTHOR.portfolio },
     codeRepository: GITHUB_URL,
-    sameAs: [GITHUB_URL],
+    sameAs: [GITHUB_URL, DISCORD_URL],
     programmingLanguage: ["Rust"],
     keywords: dict.meta.keywords.join(", "),
   };

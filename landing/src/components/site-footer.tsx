@@ -2,7 +2,7 @@ import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
 import { SoundToggle } from "@/components/sound-toggle";
 import { FooterDownloadLink } from "@/components/finale/footer-download-link";
-import { GITHUB_URL, LICENSE_URL } from "@/lib/site";
+import { DISCORD_URL, GITHUB_URL, LICENSE_URL } from "@/lib/site";
 import type { Dictionary } from "@/lib/i18n";
 
 /**
@@ -15,6 +15,7 @@ export function SiteFooter({ dict }: { dict: Dictionary }) {
     { href: GITHUB_URL, label: dict.footer.github },
     { href: LICENSE_URL, label: dict.footer.license },
     { href: `${GITHUB_URL}/issues/new/choose`, label: dict.footer.reportIssue },
+    { href: DISCORD_URL, label: dict.footer.discord },
   ];
 
   return (

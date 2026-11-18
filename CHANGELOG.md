@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- XFCE: the desktop selection box no longer turns into an opaque dark rectangle over the video wallpaper (#123)
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

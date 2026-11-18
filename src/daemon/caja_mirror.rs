@@ -113,6 +113,11 @@
 //! new shape reveals is painted by the server from pixels that are already
 //! there. (Copying straight into the window, as this used to, drew only inside
 //! the *old* shape, and relied on an Expose after the shape grew.)
+//!
+//! Xfce's selection rubber band is painted over the key, so it arrives as a
+//! flat non-key fill. Each window caches its RGB, and [`mask::band_mask`] takes
+//! back any run of one colour longer than an icon, along rows and columns. A
+//! band smaller than an icon in both directions stays visible: that is the limit.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -363,6 +368,11 @@ struct Child {
     /// The mask is derived from these, and they are what lets a small damage
     /// rectangle be refined with the icon around it. Empty for Caja.
     classes: Vec<u8>,
+    /// Xfce only: per pixel of the parent, the RGB last read from Caja's copy
+    /// (three bytes each). The mask is recomputed from all of it, since a
+    /// rubber band is found by a run that can reach past the damage. Empty for
+    /// the others.
+    rgb: Vec<u8>,
 }
 
 impl Child {
@@ -1157,6 +1167,11 @@ impl State {
             } else {
                 Vec::new()
             },
+            rgb: if self.desktop == Desktop::Xfce {
+                KEY.repeat(pixels)
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -1245,6 +1260,9 @@ impl State {
                     for c in &mut self.children {
                         c.mask.iter_mut().for_each(|m| *m = false);
                         c.classes.iter_mut().for_each(|k| *k = mask::CLASS_KEY);
+                        c.rgb
+                            .chunks_exact_mut(3)
+                            .for_each(|p| p.copy_from_slice(&KEY));
                         let _ = self.conn.shape_rectangles(
                             shape::SO::SET,
                             shape::SK::BOUNDING,
@@ -1383,7 +1401,8 @@ impl State {
 /// so dropping that would hide the change from every later read. Caja: a pixel
 /// is visible when it is not exactly the key. Deepin: the pixels are classified
 /// and the mask is refined from the cached classes of the whole icon — see
-/// [`mask`].
+/// [`mask`]. Xfce: the RGB is cached and the mask is recomputed for the whole
+/// window, so a rubber band's flat fill is keyed out — see [`mask::band_mask`].
 fn read_part(
     conn: &RustConnection,
     caja: &Caja,
@@ -1399,6 +1418,8 @@ fn read_part(
     let mut changed = false;
     // Deepin: the box of pixels whose class differs from what was cached.
     let mut classes_changed: Option<(usize, usize, usize, usize)> = None;
+    // Xfce: some pixel's RGB differs from what was cached.
+    let mut rgb_changed = false;
     let mut row = 0u16;
     while row < part.height {
         let h = BAND_ROWS.min(part.height - row);
@@ -1429,11 +1450,20 @@ fn read_part(
             for (dx, px) in line.chunks_exact(4).enumerate() {
                 let i = py * pw + px0 + dx;
                 match desktop {
-                    Desktop::Caja | Desktop::Xfce => {
+                    Desktop::Caja => {
                         if let Some(m) = c.mask.get_mut(i) {
                             let visible = !is_key(px, msb_first, desktop);
                             changed |= *m != visible;
                             *m = visible;
+                        }
+                    }
+                    Desktop::Xfce => {
+                        if let Some(p) = c.rgb.get_mut(3 * i..3 * i + 3) {
+                            let rgb = pixel_rgb(px, msb_first);
+                            if p != rgb {
+                                p.copy_from_slice(&rgb);
+                                rgb_changed = true;
+                            }
                         }
                     }
                     Desktop::Dde => {
@@ -1456,6 +1486,14 @@ fn read_part(
             }
         }
         row += h;
+    }
+    // Xfce: the whole window's mask again, from the cached RGB. Only the damage
+    // was read, but a band's run can run out past it.
+    if desktop == Desktop::Xfce && rgb_changed {
+        let mut fresh = vec![false; pw * ph];
+        mask::band_mask(&c.rgb, pw, ph, KEY, &mut fresh);
+        changed |= fresh != c.mask;
+        c.mask = fresh;
     }
     // A repaint that left every pixel in the same class (most of them) changes
     // nothing about what is visible: no refine, no shape.

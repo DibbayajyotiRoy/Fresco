@@ -269,6 +269,65 @@ pub(super) fn refine_area(
     (keep, out)
 }
 
+/// Xfce: the visible pixels of a `w × h` tightly packed RGB grid, written to
+/// `mask`. Exact key test, as Caja's. Then every run of identical non-key
+/// pixels longer than [`ICON_MAX_SIDE`], along a row or down a column, is a
+/// rubber band's fill (or its border) and is taken back out.
+///
+/// Why runs, not [`classify`]: a band is painted over the key, so its colour is
+/// whatever the selection colour blends to. It is not reliably "dark", and a
+/// blue tint is not a class at all. What a band does have that no icon has is a
+/// flat run far longer than any icon. Icons and labels are at most
+/// `ICON_MAX_SIDE` across, and text never repeats one colour that long.
+///
+/// A flat band with an icon in it is still split only where the icon is: every
+/// band pixel lies on a row or a column that the icon does not cross, and so is
+/// in a full-length run. A band smaller than `ICON_MAX_SIDE` in both directions
+/// is not caught; that is the limit.
+pub(super) fn band_mask(rgb: &[u8], w: usize, h: usize, key: [u8; 3], mask: &mut [bool]) {
+    debug_assert!(rgb.len() == 3 * w * h && mask.len() == w * h);
+    let px = |i: usize| &rgb[3 * i..3 * i + 3];
+    for (m, p) in mask.iter_mut().zip(rgb.chunks_exact(3)) {
+        *m = p != key;
+    }
+    // Runs are read from `rgb`, never from `mask`, so one pass cannot change
+    // what the other sees. Along each row:
+    for row in 0..h {
+        let base = row * w;
+        let mut start = 0;
+        for k in 1..=w {
+            if k == w || px(base + k) != px(base + start) {
+                if k - start > ICON_MAX_SIDE && px(base + start) != key {
+                    mask[base + start..base + k].fill(false);
+                }
+                start = k;
+            }
+        }
+    }
+    // Down each column, in one row-major sweep: `start[x]` is the first row of
+    // the run column `x` is in. Row-major keeps the reads sequential, which
+    // matters: a column-by-column walk over a 1080p window was about twice as
+    // slow.
+    // ponytail: a full-window pass on every Xfce damage event (~6-13 ms at
+    // 1080p on a loaded box). Ceiling: cache per-row and per-column flags and
+    // redo only the touched lines, if a drag shows up in a profile.
+    let mut start = vec![0usize; w];
+    for y in 1..=h {
+        for x in 0..w {
+            if y < h && px(y * w + x) == px((y - 1) * w + x) {
+                continue;
+            }
+            let last = (y - 1) * w + x;
+            if y - start[x] > ICON_MAX_SIDE && px(last) != key {
+                for r in start[x]..y {
+                    mask[r * w + x] = false;
+                }
+            }
+            start[x] = y;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,6 +528,72 @@ mod tests {
         }
         let m = refine_mask(&padded, 50 * 3 + 6, 50, 50, KEY, TOL);
         assert_eq!(m, b.mask());
+    }
+
+    /// The Xfce mask of a [`Bitmap`].
+    fn band(b: &Bitmap) -> Vec<bool> {
+        let mut m = vec![false; b.w * b.h];
+        band_mask(&b.rgb(), b.w, b.h, KEY, &mut m);
+        m
+    }
+
+    const BAND: [u8; 3] = [18, 36, 60];
+
+    #[test]
+    fn a_rubber_band_over_the_key_is_hidden_and_the_icons_in_and_around_it_stay() {
+        let mut b = Bitmap::new(720, 520);
+        b.rect(20, 20, 600, 400, BAND);
+        b.rect(200, 150, 64, 64, ICON); // inside the band
+        b.rect(650, 20, 40, 40, ICON); // outside it
+        let m = band(&b);
+        let visible_in_band = (20..620)
+            .flat_map(|x| (20..420).map(move |y| (x, y)))
+            .filter(|&(x, y)| {
+                m[y * b.w + x] && !((200..264).contains(&x) && (150..214).contains(&y))
+            })
+            .count();
+        assert_eq!(visible_in_band, 0, "no band pixel outside the icon shows");
+        assert!(b.at(&m, 200, 150) && b.at(&m, 263, 213), "icon inside");
+        assert!(b.at(&m, 650, 20) && b.at(&m, 689, 59), "icon outside");
+        assert!(
+            !b.at(&m, 0, 0) && !b.at(&m, 700, 500),
+            "the key stays see-through"
+        );
+    }
+
+    #[test]
+    fn a_tall_thin_band_is_caught_by_its_columns() {
+        // 40 wide: no row run is long enough, but each column is 500 long.
+        let mut b = Bitmap::new(100, 520);
+        b.rect(30, 10, 40, 500, BAND);
+        let m = band(&b);
+        assert!(m.iter().all(|&v| !v), "every band pixel is keyed out");
+    }
+
+    #[test]
+    fn icons_alone_are_exactly_their_own_pixels() {
+        let mut b = Bitmap::new(300, 200);
+        b.rect(10, 10, 128, 128, ICON);
+        b.rect(20, 20, 40, 40, [0, 0, 0]); // a black screen: non-key, kept
+        b.rect(150, 40, 380, 20, [255, 255, 255]); // a wide label, 380 < 385
+        let m = band(&b);
+        let want: Vec<bool> = b.px.iter().map(|&p| p != KEY).collect();
+        assert_eq!(m, want);
+    }
+
+    #[test]
+    fn a_run_of_exactly_the_icon_limit_survives_and_one_more_pixel_does_not() {
+        // Row 0: exactly 384 identical pixels. Row 5: 385. Each column is a
+        // single pixel of this colour, so only the row run is in play.
+        let mut b = Bitmap::new(400, 10);
+        b.rect(0, 0, ICON_MAX_SIDE, 1, BAND);
+        b.rect(0, 5, ICON_MAX_SIDE + 1, 1, BAND);
+        let m = band(&b);
+        assert!(
+            b.at(&m, 0, 0) && b.at(&m, ICON_MAX_SIDE - 1, 0),
+            "384 is an icon"
+        );
+        assert!(!b.at(&m, 0, 5), "385 is a band");
     }
 
     /// A desktop bigger than the refine span, so cutting at its edge is real:

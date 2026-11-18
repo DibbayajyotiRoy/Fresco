@@ -172,9 +172,13 @@ impl PauseConfigWatch {
     }
 }
 
-/// Copy the two pause switches from `fresh` into `cached`, leaving every other
-/// field (a scheduled wallpaper swap lives only in `cached`) alone. Returns
-/// which of them changed: `(pause_on_battery, pause_on_covered)`.
+/// Copy the two pause switches and the auto-cycle settings from `fresh` into
+/// `cached`, leaving every other field (a scheduled wallpaper swap lives only
+/// in `cached`) alone. Returns which pause switches changed:
+/// `(pause_on_battery, pause_on_covered)`. The auto-cycle timer reads
+/// `cached.auto_cycle` every tick, so a new interval, shuffle or source
+/// applies without a video restart; a new interval is measured from the last
+/// switch rather than reset.
 fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     let changed = (
         cached.pause_on_battery != fresh.pause_on_battery,
@@ -182,6 +186,7 @@ fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     );
     cached.pause_on_battery = fresh.pause_on_battery;
     cached.pause_on_covered = fresh.pause_on_covered;
+    cached.auto_cycle = fresh.auto_cycle.clone();
     changed
 }
 /// Audio recovery cadence/backoff (see `AudioHeal`).
@@ -5586,6 +5591,12 @@ mod tests {
         fresh.pause_on_covered = false;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (true, true));
         assert!(cached.pause_on_battery && !cached.pause_on_covered);
+
+        // Auto-cycle settings ride along on the same poll.
+        fresh.auto_cycle.interval_min = 120;
+        fresh.auto_cycle.shuffle = true;
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
+        assert_eq!(cached.auto_cycle, fresh.auto_cycle);
 
         // Already in step: a second look reports nothing.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));

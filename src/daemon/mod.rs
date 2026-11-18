@@ -2867,6 +2867,10 @@ fn run_gnome_static() -> Result<()> {
     // ("blocks on the control channel between commands -> ~0% CPU").
     let mut lock_rt = LockRuntime::new();
     let mut last_cycle: Option<Instant> = None;
+    // The GUI's auto-cycle switches only save config.toml, so adopt them here.
+    // The wait is capped at CONFIG_POLL, so an otherwise idle loop wakes once
+    // every 2 s for one stat.
+    let mut config_watch = PauseConfigWatch::new();
 
     // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
     // never wakes on its own, so a daemon left running for days without an
@@ -2874,11 +2878,14 @@ fn run_gnome_static() -> Result<()> {
     // then gone quiet in the usage numbers. `heartbeat` self-throttles to
     // roughly once a day via its own marker file either way.
     loop {
-        let timeout = gnome_static_cycle_timeout(&config, last_cycle);
+        let timeout = gnome_static_cycle_timeout(&config, last_cycle).min(CONFIG_POLL);
         let (req, reply) = match commands.recv_timeout(timeout) {
             Ok(pair) => pair,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
+                if let Some(fresh) = config_watch.poll() {
+                    adopt_pause_flags(&mut config, &fresh);
+                }
                 lock_rt.poll(now);
                 gnome_static_auto_cycle(&mut config, &mut last_cycle, now, lock_rt.locked);
                 crate::telemetry::heartbeat(Some("gnome-static"), None, None);
@@ -2891,6 +2898,7 @@ fn run_gnome_static() -> Result<()> {
         let is_apply = matches!(req, Request::Apply);
         let resp = match req {
             Request::Apply => {
+                config_watch.mark();
                 config = Config::load().unwrap_or_else(|_| config.clone());
                 lock_rt.on_apply(&config);
                 Response::Ok

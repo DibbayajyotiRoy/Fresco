@@ -5461,6 +5461,41 @@ mod tests {
         assert!(auto_cycle_due(&ac, &mut last, t0 + iv * 2, false));
     }
 
+    /// The GUI's save to config.toml, end to end through the daemon's own
+    /// pieces: parse the file, adopt it, tick the timer, pick the next file.
+    #[cfg(feature = "gui")]
+    #[test]
+    fn gui_saved_folder_cycle_is_adopted_and_walks_the_folder() {
+        let dir = std::env::temp_dir().join(format!("fresco-cycle-e2e-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.png"), b"x").unwrap();
+        std::fs::write(dir.join("b.png"), b"x").unwrap();
+        let toml = format!(
+            "[auto_cycle]\nenabled = true\ninterval_min = 1\n\
+             source = {{ kind = \"folder\", value = {:?} }}\n",
+            dir.to_str().unwrap()
+        );
+        let fresh: Config = toml::from_str(&toml).unwrap();
+        let mut cached = Config::default();
+        adopt_pause_flags(&mut cached, &fresh);
+        assert!(cached.auto_cycle.enabled);
+
+        let t0 = Instant::now();
+        let mut last = None;
+        assert!(!auto_cycle_due(&cached.auto_cycle, &mut last, t0, false));
+        let t1 = t0 + Duration::from_secs(60);
+        assert!(auto_cycle_due(&cached.auto_cycle, &mut last, t1, false));
+
+        let first = super::auto_cycle_next(&cached, &cached.wallpaper).unwrap();
+        assert_eq!(first.effective_path(), Some(dir.join("a.png").as_path()));
+        let second = super::auto_cycle_next(&cached, &first).unwrap();
+        assert_eq!(second.effective_path(), Some(dir.join("b.png").as_path()));
+        let wrapped = super::auto_cycle_next(&cached, &second).unwrap();
+        assert_eq!(wrapped.effective_path(), Some(dir.join("a.png").as_path()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn auto_cycle_pause_or_lock_clears_the_timer_and_resume_waits_a_full_interval() {
         let ac = cycle_every(10);

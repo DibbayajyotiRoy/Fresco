@@ -362,13 +362,14 @@ fn run_check(
     glib::spawn_future_local(async move {
         let result = rx.recv().await;
         CHECK_IN_FLIGHT.set(false);
+        // An install request that arrived mid-check is honoured by this result,
+        // with the same forced behaviour (including the failure toast). Taken
+        // before the early return so a dead channel can't leave it stuck true.
+        let pending = INSTALL_REQUESTED.get();
+        INSTALL_REQUESTED.set(false);
         let Ok(result) = result else {
             return;
         };
-        // An install request that arrived mid-check is honoured by this result,
-        // with the same forced behaviour (including the failure toast).
-        let pending = INSTALL_REQUESTED.get();
-        INSTALL_REQUESTED.set(false);
         let (force, install) = crate::update::merge_pending_install(force, install, pending);
 
         let latest = match result {

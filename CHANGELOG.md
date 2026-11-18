@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

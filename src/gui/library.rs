@@ -51,6 +51,10 @@ pub struct LibraryEntry {
     /// which falls back to the wallpaper-level default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
+    /// Dip to black at the loop point (issue #10). Remembered so a later
+    /// gallery set keeps the choice made in the editor.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smooth_loop: bool,
     /// Remembered audio + orientation (video/playlist), so setting from the
     /// gallery keeps what you chose in the editor. None = sensible default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -136,6 +140,7 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -172,6 +177,7 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -215,6 +221,7 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -251,6 +258,7 @@ impl LibraryEntry {
             error: None,
             interval_s: Some(30),
             transition: Some(Transition::Fade),
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -293,6 +301,7 @@ impl LibraryEntry {
             error: None,
             interval_s: Some(30),
             transition: Some(Transition::Fade),
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -660,6 +669,7 @@ impl LibraryEntry {
             power_saving: self.power_saving,
             // Applies to every kind now, not just the slideshow branch below.
             transition: self.transition.unwrap_or_default(),
+            smooth_loop: self.smooth_loop,
             framerate: None, // deprecated; see Config::migrate
             slideshow: if self.kind == Kind::Slideshow {
                 Some(Slideshow {
@@ -689,6 +699,7 @@ pub struct EditorValues {
     pub power_saving: Option<PowerSaving>,
     pub transition: Transition,
     pub interval_s: u64,
+    pub smooth_loop: bool,
 }
 
 /// Build the [`Wallpaper`] that "Set as wallpaper" should apply: `entry`'s own
@@ -708,6 +719,7 @@ pub fn wallpaper_from_editor(entry: &LibraryEntry, values: &EditorValues) -> Wal
     w.volume = values.volume;
     w.power_saving = values.power_saving;
     w.transition = values.transition;
+    w.smooth_loop = values.smooth_loop;
     if let Some(ss) = w.slideshow.as_mut() {
         ss.interval_s = values.interval_s;
         ss.transition = values.transition;
@@ -2095,6 +2107,7 @@ mod tests {
             power_saving: Some(PowerSaving::Full),
             transition: Transition::Blur,
             interval_s: 15,
+            smooth_loop: false,
         }
     }
 

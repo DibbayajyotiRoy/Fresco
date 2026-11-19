@@ -1734,6 +1734,22 @@ mod tests {
         assert_eq!(e.added, 0);
     }
 
+    /// `original_path` is optional: absent from older files, left out of the
+    /// JSON while unset, and round-trips once a seamless copy records it.
+    #[test]
+    fn original_path_is_optional_and_round_trips() {
+        let old: LibraryEntry =
+            serde_json::from_str(r#"{"id":"1-0","name":"CAR","kind":"video","path":"/v/car.mp4"}"#)
+                .expect("old entry loads");
+        assert_eq!(old.original_path, None);
+
+        let mut e = LibraryEntry::new_video(PathBuf::from("/v/car.mp4"));
+        assert!(!serde_json::to_string(&e).unwrap().contains("original_path"));
+        e.original_path = Some(PathBuf::from("/home/u/car.mp4"));
+        let back: LibraryEntry = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        assert_eq!(back.original_path, Some(PathBuf::from("/home/u/car.mp4")));
+    }
+
     #[test]
     fn metadata_and_favorite_round_trip() {
         let mut e = LibraryEntry::new_video(PathBuf::from("/videos/car.mp4"));

@@ -550,12 +550,14 @@ export const de: Dictionary = {
     tipAfter: ".",
     bug: "Fehler melden",
     feature: "Funktion vorschlagen",
+    discord: "Dem Discord beitreten",
   },
 
   footer: {
     github: "GitHub",
     license: "Lizenz",
     reportIssue: "Problem melden",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "Ton umschalten",
   },

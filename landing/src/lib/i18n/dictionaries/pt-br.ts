@@ -550,12 +550,14 @@ export const ptBr: Dictionary = {
     tipAfter: ".",
     bug: "Relatar um bug",
     feature: "Sugerir um recurso",
+    discord: "Entrar no Discord",
   },
 
   footer: {
     github: "GitHub",
     license: "Licença",
     reportIssue: "Relatar um problema",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "Alternar som",
   },

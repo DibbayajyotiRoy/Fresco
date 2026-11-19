@@ -12,6 +12,7 @@
 [![Giấy phép GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Trạng thái workflow xuất bản](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Sao trên GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Trang web](https://fresco.dibbayajyoti.com) · [Cài đặt](#cài-đặt) · [Môi trường được hỗ trợ](#môi-trường-được-hỗ-trợ) · [So sánh](#so-sánh-fresco-với-wallpaper-engine-hidamari-komorebi-và-mpvpaper) · [FAQ](#câu-hỏi-thường-gặp-faq) · [Widget](#widget-trên-màn-hình-nền-lời-bài-hát-đồng-hồ-hiệu-ứng-hình-ảnh-âm-thanh-và-ảnh-bìa-album) · [Nhật ký thay đổi](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -483,7 +484,7 @@ Cuộc trò chuyện được gắn với một phiếu ngẫu nhiên tạo riê
 
 ## Đóng góp và phản hồi
 
-Rất hoan nghênh báo cáo lỗi, đề xuất tính năng và PR — hãy mở một [issue](https://github.com/DibbayajyotiRoy/fresco/issues), hoặc dùng hộp thoại phản hồi ngay trong ứng dụng. Xem [CONTRIBUTING.md](CONTRIBUTING.md).
+Rất hoan nghênh báo cáo lỗi, đề xuất tính năng và PR — hãy mở một [issue](https://github.com/DibbayajyotiRoy/fresco/issues), hoặc dùng hộp thoại phản hồi ngay trong ứng dụng. Xem [CONTRIBUTING.md](CONTRIBUTING.md). Tham gia [cộng đồng Discord](https://discord.gg/FASUnunRXU) để trò chuyện với những người dùng khác và người bảo trì.
 
 ## Giấy phép
 

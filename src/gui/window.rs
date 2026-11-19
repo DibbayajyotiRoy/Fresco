@@ -1984,6 +1984,12 @@ fn build_help_page(
     help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
 
+    let discord_btn = menu_item_opening_window(t!("Join the Discord community"), popover, || {
+        open_in_browser(crate::DISCORD_URL)
+    });
+    discord_btn.set_tooltip_text(Some(t!("Chat with other Fresco users and the maintainer")));
+    popover_box.append(&discord_btn);
+
     // Optional and last among the help rows: a donation link, not a nudge.
     let donate_btn = menu_item_opening_window(t!("Support Fresco on Ko-fi"), popover, || {
         open_in_browser(crate::DONATE_URL)
@@ -9089,12 +9095,17 @@ fn show_about_dialog(window: &adw::ApplicationWindow) {
     desc.set_justify(gtk4::Justification::Center);
     inner.append(&desc);
 
+    let links = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    links.set_margin_top(4);
+    links.set_halign(gtk4::Align::Center);
     let link = gtk4::LinkButton::with_label(
         "https://github.com/DibbayajyotiRoy/fresco",
         "github.com/DibbayajyotiRoy/fresco",
     );
-    link.set_margin_top(4);
-    inner.append(&link);
+    links.append(&link);
+    let discord = gtk4::LinkButton::with_label(crate::DISCORD_URL, t!("Discord community"));
+    links.append(&discord);
+    inner.append(&links);
 
     content.append(&inner);
     dialog.present();

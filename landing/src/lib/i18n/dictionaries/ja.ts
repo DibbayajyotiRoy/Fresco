@@ -545,12 +545,14 @@ export const ja: Dictionary = {
     tipAfter: " の出力を添えてください。",
     bug: "バグを報告",
     feature: "機能をリクエスト",
+    discord: "Discord に参加",
   },
 
   footer: {
     github: "GitHub",
     license: "ライセンス",
     reportIssue: "問題を報告",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "サウンドを切り替え",
   },

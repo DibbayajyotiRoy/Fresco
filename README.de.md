@@ -12,6 +12,7 @@
 [![Lizenz GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Status des Publish-Workflows](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub-Sterne](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Unterstützte Umgebungen](#unterstützte-umgebungen) · [Vergleich](#fresco-im-vergleich-zu-wallpaper-engine-hidamari-komorebi-und-mpvpaper) · [FAQ](#häufige-fragen-faq) · [Widgets](#desktop-widgets-songtexte-uhren-audiovisualisierung-und-album-cover) · [Änderungsprotokoll](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -490,7 +491,7 @@ Der Verlauf wird über ein zufälliges Ticket zugeordnet, das getrennt von der T
 
 ## Mitwirken und Feedback
 
-Fehlerberichte, Funktionswünsche und PRs sind willkommen – eröffnen Sie ein [Issue](https://github.com/DibbayajyotiRoy/fresco/issues) oder nutzen Sie den Feedback-Dialog in der App. Siehe [CONTRIBUTING.md](CONTRIBUTING.md).
+Fehlerberichte, Funktionswünsche und PRs sind willkommen – eröffnen Sie ein [Issue](https://github.com/DibbayajyotiRoy/fresco/issues) oder nutzen Sie den Feedback-Dialog in der App. Siehe [CONTRIBUTING.md](CONTRIBUTING.md). Chatten Sie mit anderen Nutzern und dem Betreuer in der [Discord-Community](https://discord.gg/FASUnunRXU).
 
 ## Lizenz
 

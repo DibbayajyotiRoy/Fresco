@@ -12,6 +12,7 @@
 [![Licencia GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Estado del flujo de publicación](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Estrellas en GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Sitio web](https://fresco.dibbayajyoti.com) · [Instalación](#instalación) · [Entornos compatibles](#entornos-compatibles) · [Comparativa](#fresco-frente-a-wallpaper-engine-hidamari-komorebi-y-mpvpaper) · [Preguntas frecuentes](#preguntas-frecuentes-faq) · [Widgets](#widgets-de-escritorio-letras-relojes-visualizador-y-portada-del-álbum) · [Registro de cambios](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -487,7 +488,7 @@ La conversación se identifica con un ticket aleatorio que se genera por separad
 
 ## Colaborar y comentarios
 
-Los informes de errores, las solicitudes de funciones y los PR son bienvenidos: abre un [issue](https://github.com/DibbayajyotiRoy/fresco/issues) o usa el cuadro de diálogo de comentarios de la aplicación. Consulta [CONTRIBUTING.md](CONTRIBUTING.md).
+Los informes de errores, las solicitudes de funciones y los PR son bienvenidos: abre un [issue](https://github.com/DibbayajyotiRoy/fresco/issues) o usa el cuadro de diálogo de comentarios de la aplicación. Consulta [CONTRIBUTING.md](CONTRIBUTING.md). Únete a la [comunidad de Discord](https://discord.gg/FASUnunRXU) para chatear con otros usuarios y con el mantenedor.
 
 ## Licencia
 

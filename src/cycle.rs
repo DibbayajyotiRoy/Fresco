@@ -84,7 +84,17 @@ fn next_from_collection(config: &Config, current: &Wallpaper, id: &str) -> Optio
 }
 
 fn next_from_folder(config: &Config, current: &Wallpaper, folder: &Path) -> Option<Wallpaper> {
-    let mut files = media::scan(folder, false, &media::is_supported);
+    // A linked section set to "include subfolders" shows its subfolders too,
+    // so the cycle pool must match. The GUI hands us the link's exact path.
+    let recursive = library::load_collections()
+        .unwrap_or_default()
+        .iter()
+        .any(|c| {
+            c.link
+                .as_ref()
+                .is_some_and(|l| l.recursive && l.path == folder)
+        });
+    let mut files = media::scan(folder, recursive, &media::is_supported);
     files.sort();
     if files.is_empty() {
         return None;
@@ -241,6 +251,61 @@ mod tests {
         assert_eq!(got.effective_path(), Some(dir.join("b.png").as_path()));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn linked_recursive_folder_cycles_subfolders_too() {
+        temp_library(|dir| {
+            let lib = dir.join("fresco/library");
+            std::fs::create_dir_all(&lib).unwrap();
+            let folder = dir.join("pics");
+            std::fs::create_dir_all(folder.join("sub")).unwrap();
+            std::fs::write(folder.join("a.png"), b"x").unwrap();
+            std::fs::write(folder.join("sub/b.png"), b"x").unwrap();
+            std::fs::write(lib.join("entries.json"), "[]").unwrap();
+            std::fs::write(lib.join("view.json"), "{}").unwrap();
+
+            let link = |recursive| {
+                vec![library::Collection {
+                    id: "c1".into(),
+                    name: "Pics".into(),
+                    position: 0,
+                    link: Some(library::Link {
+                        path: folder.clone(),
+                        recursive,
+                        status: Default::default(),
+                    }),
+                }]
+            };
+            let cfg = auto_cycle(CycleSource::Folder(folder.clone()), false);
+
+            // Not recursive: only the top-level file.
+            std::fs::write(
+                lib.join("collections.json"),
+                serde_json::to_string(&link(false)).unwrap(),
+            )
+            .unwrap();
+            let only = next_wallpaper(&cfg, &Wallpaper::default()).unwrap();
+            assert_eq!(only.effective_path(), Some(folder.join("a.png").as_path()));
+            assert_eq!(
+                next_wallpaper(&cfg, &only).unwrap().effective_path(),
+                only.effective_path()
+            );
+
+            // Recursive: both files, in sorted path order.
+            std::fs::write(
+                lib.join("collections.json"),
+                serde_json::to_string(&link(true)).unwrap(),
+            )
+            .unwrap();
+            let first = next_wallpaper(&cfg, &Wallpaper::default()).unwrap();
+            assert_eq!(first.effective_path(), Some(folder.join("a.png").as_path()));
+            let second = next_wallpaper(&cfg, &first).unwrap();
+            assert_eq!(
+                second.effective_path(),
+                Some(folder.join("sub/b.png").as_path())
+            );
+        });
     }
 
     #[test]

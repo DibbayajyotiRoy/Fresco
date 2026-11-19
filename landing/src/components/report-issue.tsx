@@ -1,7 +1,7 @@
-import { Bug, Lightbulb } from "lucide-react";
+import { Bug, Lightbulb, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SplitWords } from "@/components/motion/split-words";
-import { GITHUB_URL } from "@/lib/site";
+import { DISCORD_URL, GITHUB_URL } from "@/lib/site";
 import type { Dictionary } from "@/lib/i18n";
 
 /**
@@ -64,6 +64,12 @@ export function ReportIssue({ dict }: { dict: Dictionary }) {
               >
                 <Lightbulb aria-hidden />
                 {t.feature}
+              </a>
+            </Button>
+            <Button asChild size="lg" variant="secondary" className="font-medium">
+              <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer">
+                <MessageCircle aria-hidden />
+                {t.discord}
               </a>
             </Button>
           </div>

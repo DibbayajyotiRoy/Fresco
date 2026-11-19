@@ -212,7 +212,7 @@
   "Follow accent colour": "跟随强调色",
   "Fresco is free: no ads, no accounts, nothing to sell. These numbers exist for one reason, which is to know which distros and desktops people actually run, so that the one you use keeps working.": "Fresco 完全免费：没有广告，没有账号，也没有任何可卖的东西。收集这些数字只有一个目的，就是了解大家实际使用的发行版和桌面环境，好让你用的那一套一直能正常工作。",
   "Fresco maintainer": "Fresco 维护者",
-  "Fresco re-encodes a copy of this video with its last second faded into its first, so the loop no longer snaps back. The copy takes about as much disk space as the original, and 4K video can take a long time. Your original file is kept, and you can revert at any time. Audio is left out, because wallpapers are muted by default.": "Fresco 会重新编码该视频的一个副本，并把最后一秒淡入到开头，使循环不再跳回起点。副本占用的磁盘空间与原文件相近，4K 视频可能需要很长时间。原始文件会保留，您随时可以恢复。由于壁纸默认静音，因此不包含音频。",
+  "Fresco re-encodes a copy of this video with its last second faded into its first, so the loop no longer snaps back. The copy takes about as much disk space as the original, and 4K video can take a long time. Your original file is kept, and you can revert at any time. If the video has sound, it is kept.": "Fresco 会重新编码该视频的一个副本，并把最后一秒淡入到开头，使循环不再跳回起点。副本占用的磁盘空间与原文件相近，4K 视频可能需要很长时间。原始文件会保留，您随时可以恢复。如果视频带有声音，声音会被保留。",
   "Fresco shows what is in this folder where it is. Nothing is copied or imported: new files appear on their own, and files you delete or move away disappear. Unlinking never deletes anything.": "Fresco 会在原位置显示此文件夹的内容。不会复制或导入任何文件：新文件会自动出现，您删除或移走的文件会随之消失。取消链接绝不会删除任何文件。",
   "Fresco updated to {version}": "Fresco 已更新到 {version}",
   "Fresco {version} is available": "Fresco {version} 已发布",

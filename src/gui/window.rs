@@ -3729,7 +3729,7 @@ fn show_seamless_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     heading.set_wrap(true);
     body.append(&heading);
 
-    let sub = gtk4::Label::new(Some(t!("Fresco re-encodes a copy of this video with its last second faded into its first, so the loop no longer snaps back. The copy takes about as much disk space as the original, and 4K video can take a long time. Your original file is kept, and you can revert at any time. Audio is left out, because wallpapers are muted by default.")));
+    let sub = gtk4::Label::new(Some(t!("Fresco re-encodes a copy of this video with its last second faded into its first, so the loop no longer snaps back. The copy takes about as much disk space as the original, and 4K video can take a long time. Your original file is kept, and you can revert at any time. If the video has sound, it is kept.")));
     sub.add_css_class("dialog-sub");
     sub.set_xalign(0.0);
     sub.set_wrap(true);

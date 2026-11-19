@@ -9,8 +9,8 @@
 //! looping the output jumps from a frame to its neighbour. The output is
 //! `L - D` long.
 //!
-//! Audio is dropped: wallpapers are muted by default, and a crossfaded audio
-//! track would need the same treatment. The copy is written next to the other
+//! An audio track, if the source has one, is kept (AAC) and crossfaded across
+//! the same seam. The copy is written next to the other
 //! generated media under the library's `seamless/` directory, never beside the
 //! user's file, and the original path is kept on the entry so it can be
 //! reverted.
@@ -76,7 +76,13 @@ pub enum Failure {
 /// starts at `len - 2 * xfade` in the main part, so the result is `len - xfade`
 /// long. Refuses clips shorter than `3 * xfade`, where the main part and the
 /// head would overlap themselves.
-pub fn seamless_args(len: f64, xfade: f64, src: &Path, out: &Path) -> Result<Vec<String>, Failure> {
+pub fn seamless_args(
+    len: f64,
+    xfade: f64,
+    has_audio: bool,
+    src: &Path,
+    out: &Path,
+) -> Result<Vec<String>, Failure> {
     assert!(xfade > 0.0, "crossfade must be positive");
     if !len.is_finite() || len <= 0.0 {
         return Err(Failure::NoLength);
@@ -87,27 +93,45 @@ pub fn seamless_args(len: f64, xfade: f64, src: &Path, out: &Path) -> Result<Vec
     }
     let d = format!("{xfade:.3}");
     let offset = format!("{:.3}", len - 2.0 * xfade);
-    let filter = format!(
+    let mut filter = format!(
         "[0:v]split[a][b];\
          [a]trim=start={d},setpts=PTS-STARTPTS[main];\
          [b]trim=end={d},setpts=PTS-STARTPTS[head];\
          [main][head]xfade=transition=fade:duration={d}:offset={offset},format=yuv420p[v]"
     );
+    if has_audio {
+        filter.push_str(&format!(
+            ";[0:a]atrim=start={d},asetpts=PTS-STARTPTS[am];\
+             [1:a]atrim=end={d},asetpts=PTS-STARTPTS[ah];\
+             [am][ah]acrossfade=d={d}[a]"
+        ));
+    }
     let s = |v: &str| v.to_string();
-    Ok(vec![
+    let audio: Vec<String> = if has_audio {
+        ["-map", "[a]", "-c:a", "aac", "-b:a", "160k"].map(s).into()
+    } else {
+        vec![s("-an")]
+    };
+    let mut v = vec![
         s("-nostdin"),
         s("-loglevel"),
         s("error"),
         s("-y"),
         s("-i"),
         src.to_string_lossy().into_owned(),
+    ];
+    if has_audio {
+        // The audio head comes from a second read of the file: ffmpeg 6.1's
+        // `acrossfade` yields nothing when one `asplit` feeds both inputs.
+        v.extend([s("-i"), src.to_string_lossy().into_owned()]);
+    }
+    v.extend([
         s("-progress"),
         s("pipe:1"),
         s("-filter_complex"),
         filter,
         s("-map"),
         s("[v]"),
-        s("-an"),
         s("-c:v"),
         s("libx264"),
         s("-preset"),
@@ -116,8 +140,10 @@ pub fn seamless_args(len: f64, xfade: f64, src: &Path, out: &Path) -> Result<Vec
         s("18"),
         s("-movflags"),
         s("+faststart"),
-        out.to_string_lossy().into_owned(),
-    ])
+    ]);
+    v.extend(audio);
+    v.push(out.to_string_lossy().into_owned());
+    Ok(v)
 }
 
 /// Parse `ffprobe -of csv=p=0 -show_entries format=duration` output.
@@ -137,16 +163,40 @@ pub fn parse_progress(line: &str) -> Option<f64> {
     (us.is_finite() && us >= 0.0).then_some(us / 1_000_000.0)
 }
 
-/// Whether `path` is a seamless copy this module made (inside
-/// [`seamless_dir`]). Revert and removal only ever delete files that pass,
-/// so an original can never be deleted by mistake.
+/// Whether `path` is a seamless copy this module made: a file directly inside
+/// [`seamless_dir`]. Revert and removal only ever delete files that pass, so an
+/// original can never be deleted by mistake. The parent is canonicalised, so
+/// `..` segments and a symlinked directory cannot slip a path through, and a
+/// symlink as the file itself is refused.
 pub fn is_generated(path: &Path) -> bool {
-    path.starts_with(seamless_dir())
+    is_inside(&seamless_dir(), path)
+}
+
+fn is_inside(root: &Path, path: &Path) -> bool {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return false;
+    };
+    let (Ok(parent), Ok(root)) = (parent.canonicalize(), root.canonicalize()) else {
+        return false;
+    };
+    parent == root
+        && std::fs::symlink_metadata(parent.join(name)).is_ok_and(|m| m.file_type().is_file())
 }
 
 // ---------------------------------------------------------------------------
 // I/O: probing and encoding.
 // ---------------------------------------------------------------------------
+
+/// Whether the clip has an audio stream.
+pub fn probe_has_audio(path: &Path) -> bool {
+    Command::new("ffprobe")
+        .stdin(Stdio::null())
+        .args(["-v", "error", "-select_streams", "a", "-show_entries"])
+        .args(["stream=codec_type", "-of", "csv=p=0"])
+        .arg(path)
+        .output()
+        .is_ok_and(|o| o.status.success() && !o.stdout.iter().all(u8::is_ascii_whitespace))
+}
 
 /// The clip's length in seconds, from ffprobe.
 pub fn probe_duration(path: &Path) -> Option<f64> {
@@ -187,7 +237,7 @@ pub fn encode(
     std::fs::create_dir_all(dir).map_err(|e| Failure::Ffmpeg(e.to_string()))?;
     let part = dir.join(format!("{id}.part.mp4"));
     let finished = output_path(dir, src, id);
-    let args = seamless_args(len, CROSSFADE_S, src, &part)?;
+    let args = seamless_args(len, CROSSFADE_S, probe_has_audio(src), src, &part)?;
     let (program, argv) = command_line(nice_available(), &args);
 
     let mut child = Command::new(&program)
@@ -269,13 +319,17 @@ mod tests {
 
     #[test]
     fn seam_offset_is_len_minus_two_crossfades() {
-        let a = seamless_args(6.0, 1.0, Path::new("/in.mp4"), Path::new("/out.mp4")).unwrap();
+        let a =
+            seamless_args(6.0, 1.0, false, Path::new("/in.mp4"), Path::new("/out.mp4")).unwrap();
         let f = fc(&a);
         assert!(f.contains("offset=4.000"), "{f}");
         assert!(f.contains("trim=start=1.000"), "{f}");
         assert!(f.contains("trim=end=1.000"), "{f}");
         assert!(f.contains("duration=1.000"), "{f}");
-        assert!(a.contains(&"-an".to_string()), "audio is dropped");
+        assert!(a.contains(&"-an".to_string()), "no audio stream, no audio");
+        let w = seamless_args(6.0, 1.0, true, Path::new("/in.mp4"), Path::new("/out.mp4")).unwrap();
+        assert!(fc(&w).contains("acrossfade=d=1.000"), "{}", fc(&w));
+        assert!(w.contains(&"aac".to_string()) && !w.contains(&"-an".to_string()));
         assert_eq!(a.last().unwrap(), "/out.mp4");
     }
 
@@ -283,14 +337,17 @@ mod tests {
     fn refuses_clips_shorter_than_three_crossfades() {
         let p = Path::new("/in.mp4");
         assert_eq!(
-            seamless_args(2.9, 1.0, p, p),
+            seamless_args(2.9, 1.0, false, p, p),
             Err(Failure::TooShort {
                 len: 2.9,
                 need: 3.0
             })
         );
-        assert!(seamless_args(3.0, 1.0, p, p).is_ok());
-        assert_eq!(seamless_args(f64::NAN, 1.0, p, p), Err(Failure::NoLength));
+        assert!(seamless_args(3.0, 1.0, false, p, p).is_ok());
+        assert_eq!(
+            seamless_args(f64::NAN, 1.0, false, p, p),
+            Err(Failure::NoLength)
+        );
     }
 
     #[test]
@@ -311,6 +368,29 @@ mod tests {
         assert_eq!(out, Path::new("/lib/seamless/car.123-4.seamless.mp4"));
         assert!(!is_generated(Path::new("/home/u/Videos/car.mp4")));
         assert!(!discard(Path::new("/home/u/Videos/car.mp4")));
+    }
+
+    #[test]
+    fn discard_check_rejects_traversal_and_symlinks() {
+        use std::os::unix::fs::symlink;
+        let base =
+            std::env::temp_dir().join(format!("fresco-seamless-guard-{}", std::process::id()));
+        let root = base.join("seamless");
+        std::fs::create_dir_all(&root).unwrap();
+        let mine = root.join("a.seamless.mp4");
+        let orig = base.join("orig.mp4");
+        std::fs::write(&mine, b"x").unwrap();
+        std::fs::write(&orig, b"x").unwrap();
+        assert!(is_inside(&root, &mine));
+        assert!(!is_inside(&root, &orig));
+        assert!(!is_inside(&root, &root.join("..").join("orig.mp4")));
+        let link = root.join("link.mp4");
+        symlink(&orig, &link).unwrap();
+        assert!(!is_inside(&root, &link), "symlink file refused");
+        let dirlink = base.join("dl");
+        symlink(&base, &dirlink).unwrap();
+        assert!(!is_inside(&root, &dirlink.join("orig.mp4")));
+        std::fs::remove_dir_all(&base).ok();
     }
 
     /// Mean absolute difference of two equal-length gray frames, 0..=255.
@@ -416,6 +496,36 @@ mod tests {
         );
         assert_eq!(r, Err(Failure::Cancelled));
         assert!(!dir.join("cancel").join("e2e-cancel.part.mp4").exists());
+
+        // A source with sound keeps it, crossfaded to the same length.
+        let src_a = dir.join("src_audio.mp4");
+        let made = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc=duration=6:size=160x120:rate=15")
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=6"])
+            .args(["-map", "0:v", "-map", "1:a"])
+            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"])
+            .arg(&src_a)
+            .status()
+            .unwrap();
+        assert!(made.success(), "audio source generated");
+        assert!(probe_has_audio(&src_a) && !probe_has_audio(&src));
+        let out_a = encode(&src_a, &dir.join("out"), "e2e-audio", &cancel, &mut |_| {})
+            .expect("encode with audio");
+        assert!(probe_has_audio(&out_a), "audio stream kept");
+        let alen = Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", "a", "-show_entries"])
+            .args(["stream=duration", "-of", "csv=p=0"])
+            .arg(&out_a)
+            .output()
+            .unwrap();
+        let alen: f64 = String::from_utf8_lossy(&alen.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        let vlen = probe_duration(&out_a).unwrap();
+        eprintln!("audio source -> audio stream {alen:.3}s, container {vlen:.3}s");
+        assert!((alen - (6.0 - CROSSFADE_S)).abs() <= 0.15, "audio {alen}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

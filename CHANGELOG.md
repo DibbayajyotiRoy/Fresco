@@ -9,6 +9,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Discord community link in Help & feedback, About, the website and the README.
 - Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
+- Per-wallpaper transition can be set to Default (follow the global
+  transition) or None (#129)
+
+### Changed
+- Switching between an image and a video wallpaper now uses the transition
+  on Wayland (#129)
 
 ### Fixed
 - Settings windows and dialogs can be resized again on sway and other tiling compositors (#147).

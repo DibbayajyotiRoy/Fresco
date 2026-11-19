@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Wallpaper per workspace on X11 desktops, sway and Hyprland (#124).
 - Discord community link in Help & feedback, About, the website and the README.
 - Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
 - Per-wallpaper transition can be set to Default (follow the global

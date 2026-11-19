@@ -269,6 +269,131 @@ pub(super) fn refine_area(
     (keep, out)
 }
 
+/// Xfce: the visible pixels of a `w × h` tightly packed RGB grid, written to
+/// `mask`. Exact key test, as Caja's. Then every run of identical non-key
+/// pixels longer than [`ICON_MAX_SIDE`], along a row or down a column, is a
+/// rubber band's fill (or its border) and is taken back out.
+///
+/// Why runs, not [`classify`]: a band is painted over the key, so its colour is
+/// whatever the selection colour blends to. It is not reliably "dark", and a
+/// blue tint is not a class at all. What a band does have that no icon has is a
+/// flat run far longer than any icon. Icons and labels are at most
+/// `ICON_MAX_SIDE` across, and text never repeats one colour that long.
+///
+/// A flat band with an icon in it is still split only where the icon is: every
+/// band pixel lies on a row or a column that the icon does not cross, and so is
+/// in a full-length run. A band smaller than `ICON_MAX_SIDE` in both directions
+/// is not caught; that is the limit.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn band_mask(rgb: &[u8], w: usize, h: usize, key: [u8; 3], mask: &mut [bool]) {
+    let mut flags = vec![0u8; w * h];
+    band_update(rgb, w, h, key, &mut flags, mask, Area { x: 0, y: 0, w, h });
+}
+
+/// Bit in a band flag: the pixel lies in a long run of one non-key colour along
+/// its row, and so is band fill.
+const RUN_ROW: u8 = 1;
+/// The same, along its column.
+const RUN_COL: u8 = 2;
+
+/// Recompute, from the RGB grid `rgb` (`w × h`, tightly packed), the band flags
+/// and visible mask of only the rows and columns that cross `dirty`.
+///
+/// `flags` (one byte per pixel, [`RUN_ROW`] / [`RUN_COL`]) and `mask` must be the
+/// state left by the previous call over the same grid. A run can only change if
+/// one of its pixels changed, and every changed pixel lies on a dirty row and a
+/// dirty column, so this is exact whenever `dirty` covers every changed pixel:
+/// rows outside `dirty` keep their row flags, columns outside it keep their
+/// column flags, and the mask of a pixel outside both is unchanged. Returns
+/// whether any mask bit changed.
+///
+/// The row pass reads the full row and the column pass the full column, so a
+/// damage rect of `d` pixels a side costs about `d · (w + h)` reads rather than
+/// `w · h`. The flags are needed because the mask alone does not say whether a
+/// pixel's column run is set: a pixel on a dirty row but an undamaged column
+/// would otherwise lose it.
+// ponytail: the flags are one byte per pixel, the same cost as DDE's classes;
+// that is the price of exact stripe updates.
+pub(super) fn band_update(
+    rgb: &[u8],
+    w: usize,
+    h: usize,
+    key: [u8; 3],
+    flags: &mut [u8],
+    mask: &mut [bool],
+    dirty: Area,
+) -> bool {
+    debug_assert!(rgb.len() == 3 * w * h && flags.len() == w * h && mask.len() == w * h);
+    let (x0, y0) = (dirty.x.min(w), dirty.y.min(h));
+    let (x1, y1) = ((dirty.x + dirty.w).min(w), (dirty.y + dirty.h).min(h));
+    let mut changed = false;
+    for row in y0..y1 {
+        let base = row * w;
+        for f in &mut flags[base..base + w] {
+            *f &= !RUN_ROW;
+        }
+        mark_long_runs(rgb, key, flags, w, |k| base + k, RUN_ROW);
+        for i in base..base + w {
+            changed |= settle(rgb, key, flags, mask, i);
+        }
+    }
+    for col in x0..x1 {
+        for k in 0..h {
+            flags[k * w + col] &= !RUN_COL;
+        }
+        mark_long_runs(rgb, key, flags, h, |k| k * w + col, RUN_COL);
+        for k in 0..h {
+            changed |= settle(rgb, key, flags, mask, k * w + col);
+        }
+    }
+    changed
+}
+
+/// Set `bit` on every pixel of each run of identical non-key pixels longer than
+/// [`ICON_MAX_SIDE`] along one line of `len` pixels; `at(k)` is the index of the
+/// k-th. Runs are read from `rgb` only, never from `flags`.
+///
+/// Why runs, not [`classify`]: a band is painted over the key, so its colour is
+/// whatever the selection colour blends to. It is not reliably "dark", and a
+/// blue tint is not a class at all. What a band does have that no icon has is a
+/// flat run far longer than any icon. Icons and labels are at most
+/// `ICON_MAX_SIDE` across, and text never repeats one colour that long.
+///
+/// A flat band with an icon in it is still split only where the icon is: every
+/// band pixel lies on a row or a column that the icon does not cross, and so is
+/// in a full-length run. A band smaller than `ICON_MAX_SIDE` in both directions
+/// is not caught; that is the limit.
+fn mark_long_runs(
+    rgb: &[u8],
+    key: [u8; 3],
+    flags: &mut [u8],
+    len: usize,
+    at: impl Fn(usize) -> usize,
+    bit: u8,
+) {
+    let px = |i: usize| &rgb[3 * i..3 * i + 3];
+    let mut start = 0;
+    for k in 1..=len {
+        if k == len || px(at(k)) != px(at(start)) {
+            if k - start > ICON_MAX_SIDE && px(at(start)) != key {
+                for j in start..k {
+                    flags[at(j)] |= bit;
+                }
+            }
+            start = k;
+        }
+    }
+}
+
+/// Set pixel `i`'s visible bit from its key test and band flags; true if it
+/// changed.
+fn settle(rgb: &[u8], key: [u8; 3], flags: &[u8], mask: &mut [bool], i: usize) -> bool {
+    let visible = rgb[3 * i..3 * i + 3] != key && flags[i] == 0;
+    let changed = mask[i] != visible;
+    mask[i] = visible;
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,6 +594,175 @@ mod tests {
         }
         let m = refine_mask(&padded, 50 * 3 + 6, 50, 50, KEY, TOL);
         assert_eq!(m, b.mask());
+    }
+
+    /// The Xfce mask of a [`Bitmap`].
+    fn band(b: &Bitmap) -> Vec<bool> {
+        let mut m = vec![false; b.w * b.h];
+        band_mask(&b.rgb(), b.w, b.h, KEY, &mut m);
+        m
+    }
+
+    const BAND: [u8; 3] = [18, 36, 60];
+
+    #[test]
+    fn a_rubber_band_over_the_key_is_hidden_and_the_icons_in_and_around_it_stay() {
+        let mut b = Bitmap::new(720, 520);
+        b.rect(20, 20, 600, 400, BAND);
+        b.rect(200, 150, 64, 64, ICON); // inside the band
+        b.rect(650, 20, 40, 40, ICON); // outside it
+        let m = band(&b);
+        let visible_in_band = (20..620)
+            .flat_map(|x| (20..420).map(move |y| (x, y)))
+            .filter(|&(x, y)| {
+                m[y * b.w + x] && !((200..264).contains(&x) && (150..214).contains(&y))
+            })
+            .count();
+        assert_eq!(visible_in_band, 0, "no band pixel outside the icon shows");
+        assert!(b.at(&m, 200, 150) && b.at(&m, 263, 213), "icon inside");
+        assert!(b.at(&m, 650, 20) && b.at(&m, 689, 59), "icon outside");
+        assert!(
+            !b.at(&m, 0, 0) && !b.at(&m, 700, 500),
+            "the key stays see-through"
+        );
+    }
+
+    #[test]
+    fn a_tall_thin_band_is_caught_by_its_columns() {
+        // 40 wide: no row run is long enough, but each column is 500 long.
+        let mut b = Bitmap::new(100, 520);
+        b.rect(30, 10, 40, 500, BAND);
+        let m = band(&b);
+        assert!(m.iter().all(|&v| !v), "every band pixel is keyed out");
+    }
+
+    #[test]
+    fn icons_alone_are_exactly_their_own_pixels() {
+        let mut b = Bitmap::new(300, 200);
+        b.rect(10, 10, 128, 128, ICON);
+        b.rect(20, 20, 40, 40, [0, 0, 0]); // a black screen: non-key, kept
+        b.rect(150, 40, 380, 20, [255, 255, 255]); // a wide label, 380 < 385
+        let m = band(&b);
+        let want: Vec<bool> = b.px.iter().map(|&p| p != KEY).collect();
+        assert_eq!(m, want);
+    }
+
+    #[test]
+    fn a_run_of_exactly_the_icon_limit_survives_and_one_more_pixel_does_not() {
+        // Row 0: exactly 384 identical pixels. Row 5: 385. Each column is a
+        // single pixel of this colour, so only the row run is in play.
+        let mut b = Bitmap::new(400, 10);
+        b.rect(0, 0, ICON_MAX_SIDE, 1, BAND);
+        b.rect(0, 5, ICON_MAX_SIDE + 1, 1, BAND);
+        let m = band(&b);
+        assert!(
+            b.at(&m, 0, 0) && b.at(&m, ICON_MAX_SIDE - 1, 0),
+            "384 is an icon"
+        );
+        assert!(!b.at(&m, 0, 5), "385 is a band");
+    }
+
+    /// Bring the stripe state up to date after `b` changed from `prev`: the
+    /// changed pixels' bounding box, cut into `tile`-sized damage rects, each
+    /// given to `band_update`. `prev` is then set to `b`.
+    fn stripe_step(
+        b: &Bitmap,
+        prev: &mut Vec<[u8; 3]>,
+        flags: &mut [u8],
+        mask: &mut [bool],
+        tile: usize,
+    ) {
+        let mut bb: Option<(usize, usize, usize, usize)> = None;
+        for (i, (p, q)) in b.px.iter().zip(prev.iter()).enumerate() {
+            if p != q {
+                let (x, y) = (i % b.w, i / b.w);
+                bb = Some(match bb {
+                    None => (x, y, x, y),
+                    Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+                });
+            }
+        }
+        *prev = b.px.clone();
+        let Some((x0, y0, x1, y1)) = bb else { return };
+        let rgb = b.rgb();
+        for ty in (y0..=y1).step_by(tile) {
+            for tx in (x0..=x1).step_by(tile) {
+                let dirty = Area {
+                    x: tx,
+                    y: ty,
+                    w: (tx + tile).min(x1 + 1) - tx,
+                    h: (ty + tile).min(y1 + 1) - ty,
+                };
+                band_update(&rgb, b.w, b.h, KEY, flags, mask, dirty);
+            }
+        }
+    }
+
+    #[test]
+    fn stripe_updates_match_a_full_recompute_as_a_band_is_drawn_grown_and_removed() {
+        let (w, h) = (700, 520);
+        let mut b = Bitmap::new(w, h);
+        let mut prev = b.px.clone();
+        let (mut flags, mut mask) = (vec![0u8; w * h], vec![false; w * h]);
+        // The stripe state must equal a full recompute of the same picture.
+        let check = |b: &Bitmap, flags: &[u8], mask: &[bool]| {
+            let (mut full_f, mut full_m) = (vec![0u8; w * h], vec![false; w * h]);
+            let rgb = b.rgb();
+            band_update(
+                &rgb,
+                w,
+                h,
+                KEY,
+                &mut full_f,
+                &mut full_m,
+                Area { x: 0, y: 0, w, h },
+            );
+            assert!(
+                flags == full_f.as_slice(),
+                "flags differ from a full recompute"
+            );
+            assert!(
+                mask == full_m.as_slice(),
+                "mask differs from a full recompute"
+            );
+        };
+
+        // Drawn: a band with an icon inside and one outside.
+        b.rect(20, 20, 600, 400, BAND);
+        b.rect(200, 150, 64, 64, ICON);
+        b.rect(650, 20, 40, 40, ICON);
+        stripe_step(&b, &mut prev, &mut flags, &mut mask, 64);
+        check(&b, &flags, &mask);
+        assert!(!b.at(&mask, 30, 30), "the band is keyed out");
+        assert!(b.at(&mask, 200, 150) && b.at(&mask, 650, 20));
+
+        // Grown: wider and taller, the icon is drawn over again.
+        b.rect(20, 20, 640, 440, BAND);
+        b.rect(200, 150, 64, 64, ICON);
+        stripe_step(&b, &mut prev, &mut flags, &mut mask, 64);
+        check(&b, &flags, &mask);
+
+        // Cut: a horizontal strip of the band goes back to the key, so the band
+        // is two pieces and the runs in the cut rows are gone.
+        b.rect(20, 300, 640, 140, KEY);
+        stripe_step(&b, &mut prev, &mut flags, &mut mask, 64);
+        check(&b, &flags, &mask);
+
+        // Removed: the rest of the band goes, the icon stays.
+        b.rect(20, 20, 640, 440, KEY);
+        b.rect(200, 150, 64, 64, ICON);
+        stripe_step(&b, &mut prev, &mut flags, &mut mask, 64);
+        check(&b, &flags, &mask);
+        assert!(b.at(&mask, 200, 150) && !b.at(&mask, 30, 30));
+
+        // A tall thin band that only its columns can catch, then removed.
+        b.rect(100, 60, 40, 440, BAND);
+        stripe_step(&b, &mut prev, &mut flags, &mut mask, 64);
+        check(&b, &flags, &mask);
+        assert!(!b.at(&mask, 110, 200));
+        b.rect(100, 60, 40, 440, KEY);
+        stripe_step(&b, &mut prev, &mut flags, &mut mask, 64);
+        check(&b, &flags, &mask);
     }
 
     /// A desktop bigger than the refine span, so cutting at its edge is real:

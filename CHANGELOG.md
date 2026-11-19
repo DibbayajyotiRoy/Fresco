@@ -39,6 +39,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   uneven frame cadence on 144 Hz+ panels and looked like stop-motion at 30/60
   fps. The override is gone, and the decoder thread count is restored to auto
   after the low-latency profile pinned it to 1 (#132).
+- XFCE: the desktop selection box no longer turns into an opaque dark rectangle over the video wallpaper (#123)
 
 ## [1.1.55] — 2026-11-11
 

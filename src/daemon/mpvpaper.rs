@@ -1088,8 +1088,6 @@ fn build_mpv_opts_with_hwdec(
     if w.mute {
         o.push("mute=yes".into());
         o.push("aid=no".into());
-        // No audio clock → smoother looping (matches the X11 Player).
-        o.push("video-sync=display-resample".into());
     } else {
         o.push("mute=no".into());
         o.push(format!("volume={}", w.volume));
@@ -1328,7 +1326,9 @@ mod tests {
             Path::new("/tmp/s.sock"),
         );
         assert!(opts.contains("aid=no"));
-        assert!(opts.contains("video-sync=display-resample"));
+        // Issue #132: display-resample judders at 144 Hz+ with no audio to
+        // resample, so muted wallpapers must keep mpv's default video-sync.
+        assert!(!opts.contains("video-sync"), "{opts}");
         // Full → quality scalers, and NEVER a vf filter (the 1.1.32 bug) nor
         // decoder skipping (does nothing on hwdec).
         assert!(opts.contains("scale=spline36"));
@@ -1346,7 +1346,7 @@ mod tests {
             false,
             Path::new("/tmp/s.sock"),
         );
-        assert!(!opts.contains("video-sync=display-resample"));
+        assert!(!opts.contains("video-sync"), "{opts}");
     }
 
     #[test]

@@ -33,6 +33,27 @@ the next step. Re-running it upgrades an existing install.
 
 Then launch **Fresco** from your application menu (or run `fresco`).
 
+## Deepin V20 / UOS 20
+
+V20 is Debian 10 (buster): glibc 2.28, GTK 3 at most and no libadwaita, so the
+regular `.deb` will not start there. Install **`fresco-legacy_<version>-1_amd64.deb`**
+from the release page instead. It is the same app with its own GTK 4.6, libadwaita
+1.1, pango and glib under `/opt/fresco-legacy`, and it pulls the rest from buster's
+repositories:
+
+```bash
+sudo apt install ./fresco-legacy_*.deb
+```
+
+Notes:
+
+- X11 only. The Wayland renderer is not in this package; V20 runs X11.
+- It installs over `fresco` and the in-app updater keeps it on the legacy asset.
+- The GTK renderer is Cairo (CPU) by default because V20's Mesa is old. To try GL:
+  `GSK_RENDERER=gl fresco`. Backend override: `GDK_BACKEND=x11` is the default.
+- Verified in CI in a clean `debian:buster` container (install, `ldd`, glibc ceiling,
+  `--version`, a short GUI run under Xvfb). It has not been tried on a real V20 desktop.
+
 ## Fedora, Arch, CachyOS and EndeavourOS
 
 Each release attaches packages next to the `.deb`:

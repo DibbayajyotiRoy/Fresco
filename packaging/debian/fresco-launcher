@@ -32,14 +32,14 @@ if [ -n "$missing" ]; then
     en() {
         printf '%s\n' \
             "fresco: Fresco's window needs GTK 4 and libadwaita, which this system does not provide:$missing" \
-            "fresco: Deepin V20 / Debian 10 / UOS 20 are not supported. Use Deepin 23/25, Ubuntu 22.04+ or Debian 12+." \
+            "fresco: On Deepin V20 / Debian 10 / UOS 20, install the fresco-legacy_*.deb from the release page instead (it bundles GTK 4)." \
             "fresco: On a newer system, 'sudo apt install libgtk-4-1 libadwaita-1-0' fixes this." \
             "fresco: Releases: $url" >&2
     }
     zhmsg() {
         printf '%s\n' \
             "fresco: Fresco 窗口需要 GTK 4 和 libadwaita，本系统未提供:$missing" \
-            "fresco: 不支持 Deepin V20 / Debian 10 / UOS 20。请使用 Deepin 23/25、Ubuntu 22.04+ 或 Debian 12+。" \
+            "fresco: Deepin V20 / Debian 10 / UOS 20 请到发布页下载 fresco-legacy_*.deb 安装（已内置 GTK 4）。" \
             "fresco: 在较新的系统上，执行 'sudo apt install libgtk-4-1 libadwaita-1-0' 即可解决。" \
             "fresco: 下载地址: $url" >&2
     }

@@ -14,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transition) or None (#129)
 - **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
 - Make seamless loop: re-encode a video with a crossfade at the loop point (needs ffmpeg) (#10)
+- Deepin V20 / UOS 20 support: a `fresco-legacy` `.deb` with its own GTK 4 and libadwaita. It is built on Debian 10 (glibc 2.28), works on X11, and the in-app updater keeps it on the legacy asset.
 
 ### Changed
 - Switching between an image and a video wallpaper now uses the transition

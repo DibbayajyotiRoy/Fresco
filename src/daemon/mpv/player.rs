@@ -105,10 +105,9 @@ impl Player {
         for (k, v) in opts {
             unsafe { f.set_option(handle, k, v) };
         }
-        // After the loop: the `low-latency` profile above resets this to 1.
-        if low_memory {
-            unsafe { f.set_option(handle, "vd-lavc-threads", "2") };
-        }
+        // After the loop: the `low-latency` profile above pins this to 1.
+        // Restore auto (0) unless low-memory mode caps it.
+        unsafe { f.set_option(handle, "vd-lavc-threads", lavc_threads(low_memory)) };
 
         // Looping mode depends on playlist vs single file.
         let is_playlist =
@@ -128,8 +127,6 @@ impl Player {
             f.set_option(handle, "volume", &wallpaper.volume.to_string());
             if wallpaper.mute {
                 f.set_option(handle, "aid", "no");
-                // No audio clock → smoother looping.
-                f.set_option(handle, "video-sync", "display-resample");
             }
 
             // Visually-correct scaling on every profile (ROADMAP 1.8.2): mpv's
@@ -600,9 +597,26 @@ pub(crate) fn first_audio_track_id(track_list_json: &str) -> Option<i64> {
     })
 }
 
+/// Decoder thread count applied after the `low-latency` profile. The profile
+/// pins `vd-lavc-threads=1`, which starves decode on large/high-refresh
+/// video, so restore auto (0) unless low-memory mode caps it at 2.
+fn lavc_threads(low_memory: bool) -> &'static str {
+    if low_memory {
+        "2"
+    } else {
+        "0"
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::first_audio_track_id;
+    use super::{first_audio_track_id, lavc_threads};
+
+    #[test]
+    fn lavc_threads_auto_unless_low_memory() {
+        assert_eq!(lavc_threads(false), "0");
+        assert_eq!(lavc_threads(true), "2");
+    }
 
     #[test]
     fn finds_first_audio_track() {

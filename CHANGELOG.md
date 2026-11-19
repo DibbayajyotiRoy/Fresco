@@ -27,6 +27,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Installs wait for a busy package manager.** The updater waits up to two
   minutes for the dpkg lock instead of failing at once, which Mint's update
   manager often holds.
+- **Smooth playback on high-refresh monitors (144–300 Hz).** Muted video
+  wallpapers (the default) forced mpv's `display-resample` sync, which shows an
+  uneven frame cadence on 144 Hz+ panels and looked like stop-motion at 30/60
+  fps. The override is gone, and the decoder thread count is restored to auto
+  after the low-latency profile pinned it to 1 (#132).
 
 ## [1.1.55] — 2026-11-11
 

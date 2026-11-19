@@ -3,6 +3,7 @@ export const RELEASES_URL =
   "https://github.com/DibbayajyotiRoy/fresco/releases/latest";
 export const LICENSE_URL =
   "https://github.com/DibbayajyotiRoy/fresco/blob/main/LICENSE";
+export const DISCORD_URL = "https://discord.gg/FASUnunRXU";
 
 export const INSTALL_ONELINER =
   "curl -fsSL https://github.com/DibbayajyotiRoy/fresco/releases/latest/download/install.sh | bash";

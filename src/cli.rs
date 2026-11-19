@@ -88,6 +88,13 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
     }
 }
 
+/// True when the GUI was launched with `--update`: the daemon's "Update now"
+/// notification does this so the install runs in the user's own session, where
+/// pkexec can reach a polkit agent. Only the exact flag counts.
+pub fn update_requested(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--update")
+}
+
 fn print_help() {
     println!(
         "Fresco — live wallpapers for Linux\n\n\
@@ -1386,5 +1393,17 @@ mod version_tests {
             let args = vec!["fresco".to_string(), flag.to_string()];
             assert_eq!(dispatch(&args), Some(0), "{flag}");
         }
+    }
+
+    /// `--update` must reach the GUI (dispatch returns None for any dash flag),
+    /// and be recognised only as the exact flag, never as a substring.
+    #[test]
+    fn update_flag_launches_the_gui_and_parses_exactly() {
+        let args = vec!["fresco".to_string(), "--update".to_string()];
+        assert_eq!(dispatch(&args), None);
+        assert!(update_requested(&args));
+        let args = vec!["fresco".to_string(), "--update-now".to_string()];
+        assert!(!update_requested(&args));
+        assert!(!update_requested(&["fresco".to_string()]));
     }
 }

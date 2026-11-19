@@ -12,6 +12,7 @@
 [![Licență GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Starea fluxului de publicare](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Stele pe GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Site web](https://fresco.dibbayajyoti.com) · [Instalare](#instalare) · [Medii compatibile](#medii-compatibile) · [Comparație](#fresco-vs-wallpaper-engine-hidamari-komorebi-și-mpvpaper) · [Întrebări frecvente](#întrebări-frecvente-faq) · [Widgeturi](#widgeturi-pentru-desktop-versuri-ceasuri-vizualizator-și-copertă-de-album) · [Jurnal de modificări](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -493,7 +494,7 @@ Conversația este identificată printr-un tichet aleatoriu generat separat de te
 
 ## Contribuții și feedback
 
-Rapoartele de bug-uri, cererile de funcții și PR-urile sunt binevenite — deschideți un [issue](https://github.com/DibbayajyotiRoy/fresco/issues) sau folosiți dialogul de feedback din aplicație. Vedeți [CONTRIBUTING.md](CONTRIBUTING.md).
+Rapoartele de bug-uri, cererile de funcții și PR-urile sunt binevenite — deschideți un [issue](https://github.com/DibbayajyotiRoy/fresco/issues) sau folosiți dialogul de feedback din aplicație. Vedeți [CONTRIBUTING.md](CONTRIBUTING.md). Alăturați-vă [comunității de pe Discord](https://discord.gg/FASUnunRXU) ca să discutați cu ceilalți utilizatori și cu întreținătorul.
 
 ## Licență
 

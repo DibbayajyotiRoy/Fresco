@@ -12,6 +12,7 @@
 [![Лицензия GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Статус рабочего процесса публикации](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Звёзды на GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Сайт](https://fresco.dibbayajyoti.com) · [Установка](#установка) · [Поддерживаемые окружения](#поддерживаемые-окружения) · [Сравнение](#сравнение-fresco-с-wallpaper-engine-hidamari-komorebi-и-mpvpaper) · [Вопросы и ответы](#вопросы-и-ответы-faq) · [Виджеты](#виджеты-рабочего-стола-тексты-песен-часы-визуализатор-и-обложка-альбома) · [История изменений](CHANGELOG.md) · [Проблемы](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -482,7 +483,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ## Участие в проекте и обратная связь
 
-Отчёты об ошибках, предложения функций и PR приветствуются — откройте [issue](https://github.com/DibbayajyotiRoy/fresco/issues) или воспользуйтесь диалогом обратной связи в приложении. См. [CONTRIBUTING.md](CONTRIBUTING.md).
+Отчёты об ошибках, предложения функций и PR приветствуются — откройте [issue](https://github.com/DibbayajyotiRoy/fresco/issues) или воспользуйтесь диалогом обратной связи в приложении. См. [CONTRIBUTING.md](CONTRIBUTING.md). Общайтесь с другими пользователями и автором проекта в [сообществе Discord](https://discord.gg/FASUnunRXU).
 
 ## Лицензия
 

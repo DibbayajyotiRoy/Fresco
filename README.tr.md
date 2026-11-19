@@ -12,6 +12,7 @@
 [![GPL-3.0-or-later lisansı](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Yayın iş akışı durumu](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub yıldızları](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Web sitesi](https://fresco.dibbayajyoti.com) · [Kurulum](#kurulum) · [Desteklenen ortamlar](#desteklenen-ortamlar) · [Karşılaştırma](#fresco-wallpaper-engine-hidamari-komorebi-ve-mpvpaper-karşılaştırması) · [SSS](#sık-sorulan-sorular-sss) · [Widget’lar](#masaüstü-widgetları-şarkı-sözleri-saatler-görselleştirici-ve-albüm-kapağı) · [Değişiklik günlüğü](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -483,7 +484,7 @@ Konuşma, telemetriden ayrı üretilen ve farklı bir dosyada saklanan rastgele 
 
 ## Katkı ve geri bildirim
 
-Hata raporları, özellik istekleri ve PR’lar memnuniyetle karşılanır — bir [issue](https://github.com/DibbayajyotiRoy/fresco/issues) açın veya uygulama içi geri bildirim penceresini kullanın. Bkz. [CONTRIBUTING.md](CONTRIBUTING.md).
+Hata raporları, özellik istekleri ve PR’lar memnuniyetle karşılanır — bir [issue](https://github.com/DibbayajyotiRoy/fresco/issues) açın veya uygulama içi geri bildirim penceresini kullanın. Bkz. [CONTRIBUTING.md](CONTRIBUTING.md). Diğer kullanıcılar ve proje sorumlusuyla sohbet etmek için [Discord topluluğuna](https://discord.gg/FASUnunRXU) katılın.
 
 ## Lisans
 

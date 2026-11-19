@@ -2014,6 +2014,12 @@ fn build_help_page(
     help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
 
+    let discord_btn = menu_item_opening_window(t!("Join the Discord community"), popover, || {
+        open_in_browser(crate::DISCORD_URL)
+    });
+    discord_btn.set_tooltip_text(Some(t!("Chat with other Fresco users and the maintainer")));
+    popover_box.append(&discord_btn);
+
     // Optional and last among the help rows: a donation link, not a nudge.
     let donate_btn = menu_item_opening_window(t!("Support Fresco on Ko-fi"), popover, || {
         open_in_browser(crate::DONATE_URL)
@@ -6386,7 +6392,10 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    // Deepin/KWin stretches the window on outside clicks (#100); keep it fixed
+    // there only. Elsewhere it must stay resizable or tiling WMs cut content off.
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
+    dialog.set_default_size(640, 720);
     dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Advanced")));
 
@@ -8627,7 +8636,7 @@ fn show_audio_consent_dialog(
             .as_ref(),
     );
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
     dialog.set_title(Some(t!("Let the visualiser listen?")));
     dialog.set_default_size(460, -1);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -9116,12 +9125,17 @@ fn show_about_dialog(window: &adw::ApplicationWindow) {
     desc.set_justify(gtk4::Justification::Center);
     inner.append(&desc);
 
+    let links = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    links.set_margin_top(4);
+    links.set_halign(gtk4::Align::Center);
     let link = gtk4::LinkButton::with_label(
         "https://github.com/DibbayajyotiRoy/fresco",
         "github.com/DibbayajyotiRoy/fresco",
     );
-    link.set_margin_top(4);
-    inner.append(&link);
+    links.append(&link);
+    let discord = gtk4::LinkButton::with_label(crate::DISCORD_URL, t!("Discord community"));
+    links.append(&discord);
+    inner.append(&links);
 
     content.append(&inner);
     dialog.present();
@@ -9437,7 +9451,7 @@ pub(crate) fn glass_dialog(
     dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
     dialog.set_title(Some(title));
     dialog.set_default_size(width, height);
 

@@ -28,6 +28,7 @@ mod wayland_outputs;
 mod webbridge;
 #[allow(dead_code)]
 pub mod widgets;
+mod workspace;
 mod x11_fullscreen;
 mod x11win;
 
@@ -929,6 +930,10 @@ pub struct Daemon {
     fullscreen_covered: std::collections::HashMap<String, String>,
     last_fullscreen_check: Instant,
     sched: SchedState,
+    /// Workspace wallpaper showing right now (`None` = the default is showing).
+    /// Level-triggered against the focused desktop on every poll; see
+    /// `check_workspace`.
+    workspace_shown: Option<Wallpaper>,
     monitors: Vec<Monitor>,
     started_at: Instant,
     last_heal_check: Instant,
@@ -1015,6 +1020,7 @@ impl Daemon {
             fullscreen_covered: std::collections::HashMap::new(),
             last_fullscreen_check: Instant::now(),
             sched: SchedState::default(),
+            workspace_shown: None,
             monitors: Vec::new(),
             started_at: Instant::now(),
             last_heal_check: Instant::now(),
@@ -1137,6 +1143,7 @@ impl Daemon {
         // leaving it waits a full interval instead of switching at once.
         let blocked = self.user_paused
             || self.battery_paused
+            || self.workspace_shown.is_some()
             || self.lock.locked
             || self.config.performance_mode
             || !self.config.enabled;
@@ -1159,7 +1166,18 @@ impl Daemon {
     /// Apply an auto-cycled wallpaper to the renderers showing the default
     /// (non-per-monitor-override) wallpaper, plus the usual still-frame hosts.
     fn apply_auto_cycle_wallpaper(&mut self) {
-        let wp = &self.config.wallpaper;
+        let wp = self.config.wallpaper.clone();
+        self.show_default_wallpaper(&wp);
+        overview::apply(&wp);
+        cosmic_bg::apply(&self.config);
+        dde_lock::apply(&self.config);
+        kde_desktop::apply(&self.config);
+    }
+
+    /// Media-only switch of every renderer showing the default wallpaper to
+    /// `wp`, keeping transitions. Renderers with a per-monitor override are
+    /// left alone (see `workspace::resolve`).
+    fn show_default_wallpaper(&mut self, wp: &Wallpaper) {
         let scaling = self.config.scaling;
         let effect = self.config.effective_transition(wp);
         for r in &mut self.renderers {
@@ -1176,10 +1194,53 @@ impl Daemon {
             }
             r.cache_raised.set(false);
         }
-        overview::apply(wp);
-        cosmic_bg::apply(&self.config);
-        dde_lock::apply(&self.config);
-        kde_desktop::apply(&self.config);
+    }
+
+    /// Show the wallpaper of the desktop the user is on (issue #124). Runs in
+    /// the 250 ms fullscreen poll and does nothing while `workspaces` is empty.
+    /// Compares against what is showing each poll, so a config reload that
+    /// reverted the renderers is corrected on the next one.
+    fn check_workspace(&mut self) {
+        if self.config.workspaces.is_empty() {
+            return;
+        }
+        let Some(desktop) = self.current_x11_desktop() else {
+            return;
+        };
+        let Some(key) = workspace::x11_key(&desktop) else {
+            return;
+        };
+        let want = self.config.workspaces.get(&key).cloned();
+        if want == self.workspace_shown {
+            return;
+        }
+        let target = want
+            .clone()
+            .unwrap_or_else(|| self.config.wallpaper.clone());
+        log::info!("workspace {key}: switching wallpaper");
+        self.show_default_wallpaper(&target);
+        self.workspace_shown = want;
+    }
+
+    /// `_NET_CURRENT_DESKTOP` of the root window, if the WM publishes it.
+    fn current_x11_desktop(&self) -> Option<Vec<u32>> {
+        use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+        let root = self.screen().root;
+        let reply = self
+            .conn
+            .get_property(
+                false,
+                root,
+                self.atoms._NET_CURRENT_DESKTOP,
+                AtomEnum::CARDINAL,
+                0,
+                1,
+            )
+            .ok()?
+            .reply()
+            .ok()?;
+        let values: Vec<u32> = reply.value32()?.collect();
+        Some(values)
     }
 
     /// Push any widget overlay whose content changed onto the renderer that
@@ -1619,6 +1680,7 @@ impl Daemon {
             self.check_audio(now);
             if now.duration_since(self.last_fullscreen_check) >= FULLSCREEN_POLL {
                 self.check_fullscreen();
+                self.check_workspace();
                 self.last_fullscreen_check = now;
             }
             if now.duration_since(self.last_cache_check) >= LOWER_INTERVAL {
@@ -2079,6 +2141,11 @@ impl Daemon {
     /// no teardown flash and the restack/NVIDIA machinery stays untouched.
     /// Pause state is a separate authority (`reconcile_pause`) and survives.
     fn check_schedule(&mut self) {
+        // A workspace wallpaper outranks the schedule while it is showing; the
+        // schedule resumes (and catches up) once the desktop changes back.
+        if self.workspace_shown.is_some() {
+            return;
+        }
         let Some(want) = self.sched.due(&self.config) else {
             return;
         };
@@ -3144,6 +3211,11 @@ fn run_wayland_layershell() -> Result<()> {
     let mut next_output_probe = Instant::now();
     let mut probed = false;
     let mut sched = SchedState::default();
+    // Per-workspace wallpapers (issue #124). `None` source = not sway/Hyprland;
+    // with no `workspaces` configured nothing is ever queried.
+    let ws_source = workspace::Source::from_env();
+    let mut ws_shown: Option<Wallpaper> = None;
+    let mut last_ws_poll = Instant::now() - workspace::WAYLAND_POLL;
     let mut last_cycle: Option<Instant> = None;
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
@@ -3598,7 +3670,7 @@ fn run_wayland_layershell() -> Result<()> {
             &mut outputs,
             &mut last_cycle,
             now,
-            paused,
+            paused || ws_shown.is_some(),
             lock_rt.locked,
         );
 
@@ -3670,13 +3742,55 @@ fn run_wayland_layershell() -> Result<()> {
             o.advance(now);
         }
 
+        // Per-workspace wallpaper (issue #124): compare what the focused
+        // workspace wants with what is showing, switch media-only on the
+        // outputs without a per-monitor override. Level-triggered, like the
+        // schedule, so a reload that reverted the outputs is corrected here.
+        if let Some(src) = ws_source.as_ref() {
+            if workspace::poll_due(&config.workspaces, last_ws_poll, now) {
+                last_ws_poll = now;
+                if let Some(key) = src.current_key() {
+                    let want = config.workspaces.get(&key).cloned();
+                    if want != ws_shown {
+                        log::info!("workspace {key}: switching wallpaper");
+                        for (connector, o) in outputs.iter_mut() {
+                            let Some(wp) = workspace::resolve(
+                                config.monitors.get(connector),
+                                want.as_ref(),
+                                &config.wallpaper,
+                            ) else {
+                                continue;
+                            };
+                            let wp = wp.clone();
+                            let transition = config.effective_transition(&wp);
+                            let effective_ps = config.effective_power_saving(&wp);
+                            o.apply_wallpaper(
+                                Wallpaper { transition, ..wp },
+                                config.scaling,
+                                effective_ps,
+                                config.effective_low_memory(),
+                                false,
+                            );
+                        }
+                        ws_shown = want;
+                    }
+                }
+            }
+        }
+
         // Battery + per-output supervision on a coarse cadence.
         if now.duration_since(last_supervise) >= SUPERVISE {
             last_supervise = now;
 
             // Scheduled wallpaper swap (ROADMAP 3.3): media-only loadfile on
             // outputs showing the DEFAULT wallpaper — never a respawn.
-            if let Some(want) = sched.due(&config) {
+            // A workspace wallpaper outranks the schedule while it shows.
+            let sched_due = if ws_shown.is_none() {
+                sched.due(&config)
+            } else {
+                None
+            };
+            if let Some(want) = sched_due {
                 if let Some(path) = want.effective_path().map(|p| p.to_path_buf()) {
                     log::info!(
                         "schedule: switching default wallpaper to {}",

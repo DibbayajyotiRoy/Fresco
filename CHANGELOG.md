@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Wallpaper per workspace on X11 desktops, sway and Hyprland (#124).
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

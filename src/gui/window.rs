@@ -6436,6 +6436,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     page.add(&transition_group);
 
     add_schedule_group(&page, state.clone());
+    add_workspace_group(&page, state.clone());
     add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());
     add_clock_group(&page, state.clone());
@@ -6445,6 +6446,168 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     add_disc_group(&page, state);
     dialog.add(&page);
     dialog.present();
+}
+
+/// "Wallpaper per workspace" preferences group (issue #124). One row per
+/// numbered virtual desktop; "Choose…" picks a library entry for it. Only
+/// X11, sway and Hyprland switch by workspace; elsewhere the rows are inert.
+fn add_workspace_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    const DEFAULT_ROWS: usize = 4;
+    const MAX_ROWS: usize = 10;
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title(t!("Wallpaper per workspace"));
+    group.set_description(Some(t!("X11 desktops, sway and Hyprland")));
+
+    // The same library filter the day/night schedule uses.
+    let candidates: Rc<Vec<(usize, String)>> = Rc::new(
+        state
+            .borrow()
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.broken && matches!(e.kind, Kind::Video | Kind::Image))
+            .map(|(i, e)| (i, e.name.clone()))
+            .collect(),
+    );
+
+    // Show at least DEFAULT_ROWS, and every configured number up to MAX_ROWS.
+    let highest = state
+        .borrow()
+        .config
+        .workspaces
+        .keys()
+        .filter_map(|k| k.parse::<usize>().ok())
+        .max()
+        .unwrap_or(0);
+    let shown = Rc::new(std::cell::Cell::new(highest.clamp(DEFAULT_ROWS, MAX_ROWS)));
+    for n in 1..=shown.get() {
+        add_workspace_row(&group, &state, &candidates, n);
+    }
+
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.add_css_class("flat");
+    add_btn.set_tooltip_text(Some(t!("Add a workspace")));
+    add_btn.set_sensitive(shown.get() < MAX_ROWS);
+    {
+        let group = group.clone();
+        let state = state.clone();
+        let candidates = candidates.clone();
+        let shown = shown.clone();
+        let btn = add_btn.clone();
+        add_btn.connect_clicked(move |_| {
+            let n = shown.get() + 1;
+            add_workspace_row(&group, &state, &candidates, n);
+            shown.set(n);
+            btn.set_sensitive(n < MAX_ROWS);
+        });
+    }
+    group.set_header_suffix(Some(&add_btn));
+    page.add(&group);
+}
+
+/// One "Workspace n" row: the wallpaper set for that desktop, "Choose…" to
+/// pick another library entry, and a clear button to drop it.
+fn add_workspace_row(
+    group: &adw::PreferencesGroup,
+    state: &Rc<RefCell<AppState>>,
+    candidates: &Rc<Vec<(usize, String)>>,
+    n: usize,
+) {
+    let key = n.to_string();
+    let row = adw::ActionRow::new();
+    row.set_title(&tf!("Workspace {n}", "n" => key.clone()));
+    let current = state.borrow().config.workspaces.get(&key).and_then(|w| {
+        w.effective_path()?
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+    });
+    row.set_subtitle(current.as_deref().unwrap_or(""));
+
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.add_css_class("boxed-list");
+    if candidates.is_empty() {
+        list.append(&gtk4::Label::new(Some(t!(
+            "No videos or images in your library yet"
+        ))));
+    }
+    for (_, name) in candidates.iter() {
+        let r = adw::ActionRow::new();
+        r.set_title(name);
+        list.append(&r);
+    }
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_child(Some(&list));
+    scroller.set_min_content_width(260);
+    scroller.set_max_content_height(320);
+    scroller.set_propagate_natural_height(true);
+    let pop = gtk4::Popover::new();
+    pop.set_child(Some(&scroller));
+
+    let choose = gtk4::Button::with_label(t!("Choose…"));
+    choose.set_valign(gtk4::Align::Center);
+    pop.set_parent(&choose);
+    {
+        let pop = pop.clone();
+        choose.connect_clicked(move |_| pop.popup());
+    }
+    {
+        let state = state.clone();
+        let key = key.clone();
+        let pop = pop.clone();
+        let row = row.clone();
+        let candidates = candidates.clone();
+        list.connect_row_activated(move |_, lrow| {
+            let Some(&(entry_idx, _)) = candidates.get(lrow.index() as usize) else {
+                return;
+            };
+            let (name, config) = {
+                let mut s = state.borrow_mut();
+                let Some(entry) = s.entries.get_mut(entry_idx) else {
+                    return;
+                };
+                entry.touch();
+                let wallpaper = entry.to_wallpaper();
+                let name = entry.name.clone();
+                s.config.workspaces.insert(key.clone(), wallpaper);
+                s.config.enabled = true;
+                save_entries(&s.entries).ok();
+                s.config.save().ok();
+                (name, s.config.clone())
+            };
+            row.set_subtitle(&name);
+            pop.popdown();
+            // The daemon reloads config and switches on its next desktop poll.
+            daemon_ctl::apply_async(&config, |_| {});
+        });
+    }
+
+    let clear = gtk4::Button::from_icon_name("edit-clear-symbolic");
+    clear.add_css_class("flat");
+    clear.set_valign(gtk4::Align::Center);
+    clear.set_tooltip_text(Some(t!("Remove this workspace's wallpaper")));
+    {
+        let state = state.clone();
+        let key = key.clone();
+        let row = row.clone();
+        clear.connect_clicked(move |_| {
+            let config = {
+                let mut s = state.borrow_mut();
+                if s.config.workspaces.remove(&key).is_none() {
+                    return;
+                }
+                s.config.save().ok();
+                s.config.clone()
+            };
+            row.set_subtitle("");
+            daemon_ctl::apply_async(&config, |_| {});
+        });
+    }
+
+    row.add_suffix(&clear);
+    row.add_suffix(&choose);
+    group.add(&row);
 }
 
 /// "Day & night wallpaper" preferences group (ROADMAP 3.3 GUI). v1 exposes

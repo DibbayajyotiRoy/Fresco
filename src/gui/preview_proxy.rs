@@ -170,7 +170,7 @@ pub fn ffmpeg_args(src: &Path, out: &Path, (w, h): (u32, u32)) -> Vec<String> {
 
 /// The program and arguments to actually spawn: ffmpeg behind `nice -n 19` when
 /// `nice` exists, bare otherwise.
-fn command_line(nice: bool, ffmpeg: &[String]) -> (String, Vec<String>) {
+pub(super) fn command_line(nice: bool, ffmpeg: &[String]) -> (String, Vec<String>) {
     if nice {
         let mut argv = vec!["-n".to_string(), "19".to_string(), "ffmpeg".to_string()];
         argv.extend_from_slice(ffmpeg);
@@ -386,7 +386,7 @@ fn lock() -> MutexGuard<'static, Inner> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn in_path(name: &str) -> bool {
+pub(super) fn in_path(name: &str) -> bool {
     std::env::var_os("PATH")
         .is_some_and(|p| std::env::split_paths(&p).any(|dir| dir.join(name).is_file()))
 }
@@ -406,7 +406,7 @@ fn ffmpeg_available() -> bool {
     })
 }
 
-fn nice_available() -> bool {
+pub(super) fn nice_available() -> bool {
     static FOUND: OnceLock<bool> = OnceLock::new();
     *FOUND.get_or_init(|| in_path("nice"))
 }

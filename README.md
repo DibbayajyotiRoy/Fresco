@@ -243,6 +243,10 @@ bindsym $mod+Return exec fresco random
 
 Yes. Fresco supports per-display wallpapers, and when the same video is used across several monitors, playback is kept in sync.
 
+### Can each virtual desktop (workspace) have its own wallpaper?
+
+Yes, on X11 desktops, sway and Hyprland: set one per numbered workspace under Advanced → Wallpaper per workspace. Limits: the wallpaper follows the focused workspace on all monitors (per-monitor wallpapers still win), the GUI covers numbered workspaces only (named sway or Hyprland workspaces need the `[workspaces]` table in `config.toml`), and other desktops such as GNOME, KDE and COSMIC keep one wallpaper.
+
 ### Does it support GIFs and image slideshows?
 
 Yes — animated GIFs, static images, image slideshows with transitions (fade through black, Ken Burns, zoom and blur), and multi-video playlists, in addition to video files.

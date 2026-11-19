@@ -7,12 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Wallpaper per workspace on X11 desktops, sway and Hyprland (#124).
 - Discord community link in Help & feedback, About, the website and the README.
 - Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
 - Per-wallpaper transition can be set to Default (follow the global
   transition) or None (#129)
 - **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
 - Day/night schedule can pick a random wallpaper from a collection or folder for each part of the day (#130).
+- Make seamless loop: re-encode a video with a crossfade at the loop point (needs ffmpeg) (#10)
 
 ### Changed
 - Switching between an image and a video wallpaper now uses the transition

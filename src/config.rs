@@ -2036,6 +2036,11 @@ pub struct Config {
     /// Per-monitor overrides keyed by RandR connector name (e.g. "HDMI-1").
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub monitors: BTreeMap<String, Wallpaper>,
+    /// Per-workspace (virtual desktop) wallpapers, keyed by workspace id: the
+    /// 1-based X11 desktop number, or the sway / Hyprland workspace name. Empty
+    /// = the feature is off and no workspace is ever queried (issue #124).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub workspaces: BTreeMap<String, Wallpaper>,
     /// Unix epoch (seconds) of the last GitHub Releases check, so the client
     /// self-throttles to roughly once every 24h.
     #[serde(default)]
@@ -2170,6 +2175,7 @@ impl Default for Config {
             onboarding_version: 0,
             seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
             last_update_check: 0,
             update_skipped_version: String::new(),
             tray_icon: true,
@@ -2627,6 +2633,27 @@ mod tests {
         assert_eq!(new.transition, Some(Transition::Fade));
         let back: Config = toml::from_str(&toml::to_string(&new).unwrap()).unwrap();
         assert_eq!(back.transition, Some(Transition::Fade));
+    }
+
+    /// Per-workspace wallpapers are new: a config written before them loads with
+    /// an empty map, the key stays off disk while unused, and entries round-trip.
+    #[test]
+    fn workspace_wallpapers_are_optional_and_round_trip() {
+        let old: Config = toml::from_str("autostart = true").unwrap();
+        assert!(old.workspaces.is_empty());
+        let top: toml::Value = toml::from_str(&toml::to_string(&old).unwrap()).unwrap();
+        assert!(top.get("workspaces").is_none());
+
+        let mut cfg = Config::default();
+        cfg.workspaces.insert(
+            "2".to_string(),
+            Wallpaper {
+                path: Some(std::path::PathBuf::from("/a.mp4")),
+                ..Wallpaper::default()
+            },
+        );
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.workspaces, cfg.workspaces);
     }
 
     /// `smooth_loop` (issue #10) is opt-in: a config written before it existed

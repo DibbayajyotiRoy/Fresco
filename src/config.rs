@@ -1738,6 +1738,10 @@ pub struct Wallpaper {
     /// config version 2 wrote `"none"` for the inherit case; see `Config::migrate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
+    /// Dip to black around the loop point of a video, for files that don't
+    /// loop seamlessly (issue #10). Opt-in; see `transition::LOOP_FADE`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smooth_loop: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
     #[serde(default = "default_true")]
@@ -1790,6 +1794,7 @@ impl Default for Wallpaper {
             fit: Fit::default(),
             rotation: 0,
             transition: None,
+            smooth_loop: false,
             crop: None,
             mute: true,
             volume: default_volume(),
@@ -2607,6 +2612,25 @@ mod tests {
         assert_eq!(new.transition, Some(Transition::Fade));
         let back: Config = toml::from_str(&toml::to_string(&new).unwrap()).unwrap();
         assert_eq!(back.transition, Some(Transition::Fade));
+    }
+
+    /// `smooth_loop` (issue #10) is opt-in: a config written before it existed
+    /// must parse to off, an off value must not be written back, and an on
+    /// value must survive a save.
+    #[test]
+    fn smooth_loop_is_optional_off_by_default_and_round_trips() {
+        let old: Wallpaper = toml::from_str("kind = \"video\"\npath = \"/v.mp4\"\n").unwrap();
+        assert!(!old.smooth_loop);
+        let off = toml::to_string(&old).unwrap();
+        assert!(!off.contains("smooth_loop"), "{off}");
+        let on = Wallpaper {
+            smooth_loop: true,
+            ..old
+        };
+        let text = toml::to_string(&on).unwrap();
+        assert!(text.contains("smooth_loop = true"), "{text}");
+        let back: Wallpaper = toml::from_str(&text).unwrap();
+        assert!(back.smooth_loop);
     }
 
     /// A config that names the effect the old way must keep loading, and must

@@ -6002,6 +6002,22 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     transition_row.set_subtitle(wallpaper_transition_hint(None));
     prefs.add(&transition_row);
 
+    // Smooth loop (issue #10): an opt-in dip to black at the loop point, for a
+    // video that doesn't loop seamlessly. Shown for videos only; see the load
+    // path below.
+    // An ActionRow with a switch, as the Muted row below does: SwitchRow needs
+    // libadwaita 1.4, and the package floor is 1.1.
+    let smooth_row = adw::ActionRow::new();
+    smooth_row.set_title(t!("Smooth loop"));
+    smooth_row.set_subtitle(t!(
+        "Fades through black at the loop point, for videos that don't loop seamlessly"
+    ));
+    let smooth_sw = gtk4::Switch::new();
+    smooth_sw.set_valign(gtk4::Align::Center);
+    smooth_row.add_suffix(&smooth_sw);
+    smooth_row.set_activatable_widget(Some(&smooth_sw));
+    prefs.add(&smooth_row);
+
     let mute_row = adw::ActionRow::new();
     mute_row.set_title(t!("Muted"));
     let mute_sw = gtk4::Switch::new();
@@ -6090,6 +6106,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
         let transition_ref = transition_row.clone();
+        let smooth_ref = smooth_sw.clone();
         let power_ref = power_row.clone();
         set_btn.connect_clicked(move |_| {
             let crop = crop_ref.crop();
@@ -6100,6 +6117,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
             };
             let interval = interval_secs(interval_ref.selected());
             let transition = wallpaper_transition_from_index(transition_ref.selected());
+            let smooth_loop = smooth_ref.is_active();
             let power_saving = power_edit_from_index(power_ref.selected());
             // Refuse before the draft is committed: a slideshow with no image
             // would be saved, marked in use, and then show nothing (issue #36).
@@ -6144,6 +6162,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                         // rebuilds from the entry) keeps what was chosen here.
                         e.mute = Some(mute_ref.is_active());
                         e.volume = Some(vol_ref.value() as u8);
+                        e.smooth_loop = smooth_loop;
                         // Regenerating is an ffmpeg process; only pay for it when
                         // the rotation actually moved, not on every Set.
                         let new_rotation = crop_ref.rotation();
@@ -6182,6 +6201,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     power_saving,
                     transition,
                     interval_s: interval,
+                    smooth_loop,
                 };
                 let name = s
                     .entries
@@ -6263,6 +6283,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
         let transition_ref = transition_row.clone();
+        let smooth_row_ref = smooth_row.clone();
+        let smooth_sw_ref = smooth_sw.clone();
         let mute_row_ref = mute_row.clone();
         let vol_row_ref = vol_row.clone();
         let power_row_ref = power_row.clone();
@@ -6341,6 +6363,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 );
                 let is_slideshow = entry.kind == Kind::Slideshow;
                 interval_ref.set_visible(is_slideshow);
+                smooth_row_ref.set_visible(entry.kind == Kind::Video);
+                smooth_sw_ref.set_active(entry.smooth_loop);
                 // The effect applies to any wallpaper coming up, so the picker
                 // is shown for every kind. Only the looping *demo* needs two
                 // stills, so it stays with slideshows and the crop tool keeps

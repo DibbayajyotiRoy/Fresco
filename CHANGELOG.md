@@ -11,6 +11,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
 - Per-wallpaper transition can be set to Default (follow the global
   transition) or None (#129)
+- **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
 
 ### Changed
 - Switching between an image and a video wallpaper now uses the transition

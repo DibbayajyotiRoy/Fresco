@@ -53,7 +53,7 @@ use lock::state::LockMonitor;
 use monitors::Monitor;
 use mpv::Player;
 use mpvpaper::WaylandPlayer;
-use transition::{Anim, Step, Surface};
+use transition::{loop_span, Anim, Step, Surface};
 use x11win::{Atoms, WallpaperWindow, WindowKind};
 
 /// Resolve the next auto-cycle wallpaper. When the `gui` feature is disabled the
@@ -600,6 +600,9 @@ struct Renderer {
     /// This output's transition. Independent per renderer: two monitors run
     /// their own players and may be mid-transition at different phases.
     anim: Anim,
+    /// Whether this output's wallpaper asked for the smooth loop dip (see
+    /// [`loop_wanted`]). Kept in step with the wallpaper at each switch.
+    smooth_loop: bool,
     /// Last observed playback position — used to detect a cold-boot VO stall
     /// (a video whose position isn't advancing shortly after login).
     last_time_pos: std::cell::Cell<Option<f64>>,
@@ -614,12 +617,17 @@ struct Renderer {
 impl Renderer {
     /// One animation tick for this output. Returns true while animating.
     fn advance(&mut self, now: Instant) -> bool {
-        match self.slideshow.as_mut() {
+        let moving = match self.slideshow.as_mut() {
             Some(s) => advance_slideshow(&self.player, s, &mut self.anim, now),
             // No slideshow: the only thing that can be running is a wallpaper
             // change (a scheduled swap), which steps identically.
             None => self.anim.step(&self.player).animating(),
-        }
+        };
+        let wanted = self.smooth_loop && !self.applied_paused.get();
+        let fading = self.anim.loop_tick(&self.player, now, wanted, || {
+            loop_span(self.player.time_pos(), self.player.duration())
+        });
+        moving || fading
     }
 }
 
@@ -1176,6 +1184,7 @@ impl Daemon {
                 .apply_scalers(scaling, self.config.effective_power_saving(wp), wp.rotation);
             r.player.apply_crop(wp);
             r.anim.set_base(transition::crop_base(wp));
+            r.smooth_loop = loop_wanted(wp);
             if let Some(path) = wp.effective_path() {
                 r.anim.start(effect, path.to_path_buf(), &r.player);
             }
@@ -1557,6 +1566,7 @@ impl Daemon {
             player,
             slideshow,
             anim: Anim::new(transition::crop_base(wallpaper)),
+            smooth_loop: loop_wanted(wallpaper),
             last_time_pos: std::cell::Cell::new(None),
             audio_heal: AudioHeal::new(),
             cache_raised: std::cell::Cell::new(false),
@@ -1678,9 +1688,16 @@ impl Daemon {
             // to come out of the sleep itself. It can only shorten it; see
             // `widget_wait`.
             let base = if animating { ANIM_TICK } else { TICK };
+            // The smooth loop's next sample is due the same way: it wakes the
+            // loop for the dip, and is otherwise far off.
+            let fade = self
+                .renderers
+                .iter()
+                .filter_map(|r| r.anim.loop_deadline())
+                .min();
             std::thread::sleep(widget_wait(
                 base,
-                self.widgets.next_deadline(),
+                min_instant(self.widgets.next_deadline(), fade),
                 Instant::now(),
             ));
         }
@@ -2108,6 +2125,7 @@ impl Daemon {
                 // The new crop is where the transition must come to rest, so
                 // teach the machine about it before it starts easing anywhere.
                 r.anim.set_base(transition::crop_base(&want));
+                r.smooth_loop = loop_wanted(&want);
                 r.anim.start(effect, path.clone(), &r.player);
                 r.cache_raised.set(false); // re-check resolution for the new media
             }
@@ -2361,6 +2379,12 @@ fn mode_after_mirror_gave_up(desktop: caja_mirror::Desktop) -> dde::Mode {
         caja_mirror::Desktop::Xfce => dde::Mode::Inactive,
         caja_mirror::Desktop::Caja | caja_mirror::Desktop::Dde => dde::Mode::Restack,
     }
+}
+
+/// Whether a wallpaper gets the smooth-loop dip: a video that asked for it.
+/// Slideshows and playlists never do; they have no single loop point.
+fn loop_wanted(wp: &Wallpaper) -> bool {
+    wp.smooth_loop && wp.kind == Kind::Video
 }
 
 /// One slideshow's per-tick step: run the animation if one is going, otherwise
@@ -3275,7 +3299,14 @@ fn run_wayland_layershell() -> Result<()> {
         // a locked session with an active clock still wakes on the minute.
         let now0 = Instant::now();
         let lock_deadline = lock_rt.engine.as_ref().and_then(|e| e.next_deadline(now0));
-        let deadline = min_instant(widget_engine.next_deadline(), lock_deadline);
+        let fade = outputs
+            .values()
+            .filter_map(|o| o.anim.loop_deadline())
+            .min();
+        let deadline = min_instant(
+            min_instant(widget_engine.next_deadline(), lock_deadline),
+            fade,
+        );
         let tick = widget_wait(base, deadline, now0);
         match commands.recv_timeout(tick) {
             Ok((req, reply)) => {
@@ -3707,6 +3738,7 @@ fn run_wayland_layershell() -> Result<()> {
                             o.wallpaper.rotation = want.rotation;
                             o.wallpaper.power_saving = want.power_saving;
                             o.wallpaper.crop = want.crop;
+                            o.wallpaper.smooth_loop = want.smooth_loop;
                             o.power_saving = config.effective_power_saving(&want);
                         }
                     }
@@ -4497,10 +4529,15 @@ impl WlOutput {
             self.animating = false;
             return;
         };
-        self.animating = match self.slideshow.as_mut() {
+        let moving = match self.slideshow.as_mut() {
             Some(s) => advance_slideshow(player, s, &mut self.anim, now),
             None => self.anim.step(player).animating(),
         };
+        let wanted = loop_wanted(&self.wallpaper) && !self.applied_paused.get();
+        let fading = self.anim.loop_tick(player, now, wanted, || {
+            loop_span(player.time_pos(), player.duration())
+        });
+        self.animating = moving || fading;
     }
 
     fn set_paused(&self, paused: bool) {

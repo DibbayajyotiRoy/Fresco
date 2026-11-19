@@ -13,6 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Per-wallpaper transition can be set to Default (follow the global
   transition) or None (#129)
 - **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
+- Day/night schedule can pick a random wallpaper from a collection or folder for each part of the day (#130).
 - Make seamless loop: re-encode a video with a crossfade at the loop point (needs ffmpeg) (#10)
 - Deepin V20 / UOS 20 support: a `fresco-legacy` `.deb` with its own GTK 4 and libadwaita. It is built on Debian 10 (glibc 2.28), works on X11, and the in-app updater keeps it on the legacy asset.
 

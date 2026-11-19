@@ -11,6 +11,7 @@
 [![GPL-3.0-or-later 许可证](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![发布流程状态](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub 星标数](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [官网](https://fresco.dibbayajyoti.com) · [安装](#安装) · [支持的环境](#支持的环境) · [对比](#fresco-与-wallpaper-engine-等其他-linux-动态壁纸方案的对比) · [常见问题](#常见问题) · [桌面挂件](#桌面挂件) · [更新日志](CHANGELOG.md) · [问题反馈](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -422,7 +423,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ## 贡献与反馈
 
-欢迎 bug 报告、功能建议和 PR——开一个 [issue](https://github.com/DibbayajyotiRoy/fresco/issues)，或使用应用内的反馈对话框。参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+欢迎 bug 报告、功能建议和 PR——开一个 [issue](https://github.com/DibbayajyotiRoy/fresco/issues)，或使用应用内的反馈对话框。参见 [CONTRIBUTING.md](CONTRIBUTING.md)。 加入 [Discord 社区](https://discord.gg/FASUnunRXU)，与其他用户和维护者交流。
 
 ## 许可证
 

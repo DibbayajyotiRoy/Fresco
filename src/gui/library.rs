@@ -2128,6 +2128,19 @@ mod tests {
         assert_eq!(w.transition, Transition::Blur);
     }
 
+    /// `smooth_loop` (issue #10) must survive both entry->wallpaper paths.
+    #[test]
+    fn smooth_loop_is_copied_to_the_wallpaper() {
+        let mut entry = LibraryEntry::new_video(PathBuf::from("/videos/a.mp4"));
+        entry.smooth_loop = true;
+        assert!(entry.to_wallpaper().smooth_loop);
+        let mut v = editor_values();
+        v.smooth_loop = true;
+        assert!(wallpaper_from_editor(&entry, &v).smooth_loop);
+        v.smooth_loop = false;
+        assert!(!wallpaper_from_editor(&entry, &v).smooth_loop);
+    }
+
     /// A slideshow's nested `Slideshow.interval_s`/`.transition` must follow
     /// the edited values too, not just the wallpaper-level copies — the
     /// daemon reads the nested copy for slideshow playback.

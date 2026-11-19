@@ -37,6 +37,8 @@ const SLIDE_STEPS: u32 = 28;
 pub(super) const LOOP_FADE: f64 = 0.35;
 /// Longest gap between playback-position samples while a smooth loop is
 /// far from its dip. Each sample is an IPC round trip, so this bounds the cost.
+/// How long the position may stand still inside the dip before it is given up on.
+const LOOP_STALL: Duration = Duration::from_secs(1);
 const LOOP_SAMPLE: Duration = Duration::from_millis(500);
 /// Shortest gap between samples, so a window that is almost due cannot spin.
 const LOOP_MIN_SAMPLE: Duration = Duration::from_millis(20);
@@ -166,6 +168,10 @@ pub(super) struct Anim {
     /// means sample on the next tick. This, not a fixed cadence, is what keeps
     /// a video far from its loop point off the 16ms loop.
     loop_next: Option<Instant>,
+    /// Last sampled position and when it first stopped advancing, so a stalled
+    /// player inside the dip window is not polled every frame forever.
+    loop_last_pos: Option<f64>,
+    loop_stalled_since: Option<Instant>,
 }
 
 /// The zoom/pan a wallpaper rests at — its configured crop, or dead centre.
@@ -188,6 +194,8 @@ impl Anim {
             blurred: false,
             loop_gamma: 0,
             loop_next: None,
+            loop_last_pos: None,
+            loop_stalled_since: None,
         }
     }
 
@@ -423,6 +431,8 @@ impl Anim {
         self.blurred = false;
         self.loop_gamma = 0;
         self.loop_next = None;
+        self.loop_last_pos = None;
+        self.loop_stalled_since = None;
     }
 
     /// Put the player back at rest: undimmed, at its crop's zoom/pan, and
@@ -431,6 +441,8 @@ impl Anim {
         surface.gamma(0);
         self.loop_gamma = 0;
         self.loop_next = None;
+        self.loop_last_pos = None;
+        self.loop_stalled_since = None;
         surface.zoom_pan(self.base_zoom, self.base_pan_x, self.base_pan_y);
         if self.blurred {
             surface.blur(0.0);
@@ -465,6 +477,8 @@ impl Anim {
         if !wanted {
             self.loop_set(surface, 0);
             self.loop_next = None;
+            self.loop_last_pos = None;
+            self.loop_stalled_since = None;
             return false;
         }
         if self.loop_next.is_some_and(|t| now < t) {
@@ -475,6 +489,22 @@ impl Anim {
             self.loop_next = Some(now + LOOP_SAMPLE);
             return false;
         };
+        if self.loop_last_pos.is_some_and(|p| (p - pos).abs() < 1e-3) {
+            self.loop_stalled_since.get_or_insert(now);
+        } else {
+            self.loop_stalled_since = None;
+        }
+        self.loop_last_pos = Some(pos);
+        if loop_in_window(pos, dur, self.loop_gamma != 0)
+            && self
+                .loop_stalled_since
+                .is_some_and(|s| now.duration_since(s) > LOOP_STALL)
+        {
+            // Frozen inside the dip: show the picture and poll slowly until it moves.
+            self.loop_set(surface, 0);
+            self.loop_next = Some(now + LOOP_SAMPLE);
+            return false;
+        }
         self.loop_set(surface, loop_gamma(pos, dur, self.loop_gamma != 0));
         if loop_in_window(pos, dur, self.loop_gamma != 0) {
             self.loop_next = None;
@@ -1092,6 +1122,29 @@ mod loop_tests {
         assert!(anim.loop_deadline().is_none());
         anim.loop_tick(&r, now, true, || Some((DUR - LOOP_FADE / 2.0, DUR)));
         assert_eq!(r.gamma(), -50, "forget must not leave a stale gamma");
+    }
+
+    #[test]
+    fn a_stalled_player_in_the_dip_is_restored_and_polled_slowly() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let t0 = Instant::now();
+        let stuck = DUR - LOOP_FADE / 2.0;
+        let mut fast_after_stall = 0;
+        for k in 0..200u64 {
+            let now = t0 + Duration::from_millis(k * 16);
+            let fast = anim.loop_tick(&r, now, true, || Some((stuck, DUR)));
+            if k * 16 > 1100 && fast {
+                fast_after_stall += 1;
+            }
+        }
+        assert_eq!(r.gamma(), 0, "a frozen player must not stay dimmed");
+        assert_eq!(fast_after_stall, 0);
+        assert!(anim.loop_deadline().is_some());
+        // Position moves again: the dip resumes.
+        let now = t0 + Duration::from_secs(10);
+        assert!(anim.loop_tick(&r, now, true, || Some((DUR - 0.1, DUR))));
+        assert!(r.gamma() < 0);
     }
 
     #[test]

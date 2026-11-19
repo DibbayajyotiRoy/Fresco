@@ -6560,6 +6560,25 @@ fn source_row(
     (row, sources)
 }
 
+/// The fixed wallpaper a Day/Night row stands for. Row 0 is the leading "None"
+/// entry (a folder-only slot); any other row is its `candidate`, or the stored
+/// wallpaper when the row points at nothing (one that left the library).
+fn fixed_from_row(
+    selected: u32,
+    candidate: Option<crate::config::Wallpaper>,
+    stored: Option<crate::config::Wallpaper>,
+) -> Option<crate::config::Wallpaper> {
+    match selected {
+        0 => None,
+        _ => candidate.or(stored),
+    }
+}
+
+/// A Day/Night slot needs a fixed wallpaper, a pool, or both.
+fn slot_usable(fixed: &Option<crate::config::Wallpaper>, pool: &Option<CycleSource>) -> bool {
+    fixed.is_some() || pool.is_some()
+}
+
 /// The source a "Wallpapers from" row currently stands for (None = no pool).
 fn selected_source(row: &adw::ComboRow, sources: &[Option<CycleSource>]) -> Option<CycleSource> {
     sources.get(row.selected() as usize).cloned().flatten()
@@ -6691,7 +6710,9 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
         .filter(|(_, e)| !e.broken && matches!(e.kind, Kind::Video | Kind::Image))
         .map(|(i, e)| (i, e.name.clone()))
         .collect();
-    let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
+    // The fixed rows lead with "None": a slot may be a folder only (#130).
+    let mut names: Vec<&str> = vec![t!("None")];
+    names.extend(candidates.iter().map(|(_, n)| n.as_str()));
 
     let enable = adw::ComboRow::new();
     enable.set_title(t!("Schedule"));
@@ -6772,9 +6793,12 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
                 (&day_row, sch.day.as_ref()),
                 (&night_row, sch.night.as_ref()),
             ] {
-                match find(w) {
-                    Some(i) => row.set_selected(i),
-                    None => {
+                match (w, find(w)) {
+                    // A folder-only slot: nothing fixed, so the "None" entry.
+                    (None, _) => row.set_selected(0),
+                    // +1 for the leading "None" entry.
+                    (Some(_), Some(i)) => row.set_selected(i + 1),
+                    (Some(_), None) => {
                         row.set_selected(gtk4::INVALID_LIST_POSITION);
                         row.set_subtitle(t!("No longer in your library — pick another wallpaper"));
                     }
@@ -6863,28 +6887,31 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
                     }
                     // An unselected combo (stored wallpaper left the library)
                     // keeps what is stored rather than being overwritten.
-                    let pick = |row: &adw::ComboRow,
-                                stored: Option<&crate::config::Wallpaper>|
+                    let fixed = |row: &adw::ComboRow,
+                                 stored: Option<&crate::config::Wallpaper>|
                      -> Option<crate::config::Wallpaper> {
-                        candidates
-                            .get(row.selected() as usize)
+                        let sel = row.selected();
+                        let candidate = (sel != 0 && sel != gtk4::INVALID_LIST_POSITION)
+                            .then(|| candidates.get(sel as usize - 1))
+                            .flatten()
                             .and_then(|(i, _)| s.entries.get(*i))
-                            .map(|e| e.to_wallpaper())
-                            .or_else(|| stored.cloned())
+                            .map(|e| e.to_wallpaper());
+                        fixed_from_row(sel, candidate, stored.cloned())
                     };
                     let old = s.config.schedule.as_ref();
-                    let (Some(day), Some(night)) = (
-                        pick(&day_row, old.and_then(|o| o.day.as_ref())),
-                        pick(&night_row, old.and_then(|o| o.night.as_ref())),
-                    ) else {
-                        return;
-                    };
+                    let day = fixed(&day_row, old.and_then(|o| o.day.as_ref()));
+                    let night = fixed(&night_row, old.and_then(|o| o.night.as_ref()));
+                    let day_source = selected_source(&day_pool_row, &day_sources);
+                    let night_source = selected_source(&night_pool_row, &night_sources);
+                    if !slot_usable(&day, &day_source) || !slot_usable(&night, &night_source) {
+                        return; // a slot needs a wallpaper, a pool, or both
+                    }
                     s.config.schedule = Some(crate::config::Schedule {
                         mode: crate::config::ScheduleMode::Daynight,
-                        day: Some(day),
-                        night: Some(night),
-                        day_source: selected_source(&day_pool_row, &day_sources),
-                        night_source: selected_source(&night_pool_row, &night_sources),
+                        day,
+                        night,
+                        day_source,
+                        night_source,
                         day_start: dt,
                         night_start: nt,
                         lat: None,
@@ -6976,7 +7003,10 @@ fn next_switch_subtitle(state: &Rc<RefCell<AppState>>, candidates: &[(usize, Str
         return String::new();
     };
     let name = match (act.source, act.fixed) {
-        (Some(src), _) => source_label(src, &s.collections),
+        (Some(src), _) => {
+            let label = source_label(src, &s.collections);
+            tf!("Random from {name}", "name" => label.as_str())
+        }
         (None, Some(w)) => candidates
             .iter()
             .find(|(i, _)| s.entries[*i].path.as_deref() == w.path.as_deref())
@@ -13329,5 +13359,83 @@ mod tests {
             Some(nested.join("deep").join("c.png"))
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+/// #130: the Day/Night rows can make a folder-only slot.
+#[cfg(test)]
+mod folder_slot_tests {
+    use super::*;
+    use crate::config::Wallpaper;
+    use std::path::PathBuf;
+
+    fn wp(path: &str) -> Wallpaper {
+        Wallpaper {
+            kind: Kind::Image,
+            path: Some(PathBuf::from(path)),
+            ..Default::default()
+        }
+    }
+    fn pool() -> CycleSource {
+        CycleSource::Folder(PathBuf::from("/pics"))
+    }
+
+    #[test]
+    fn row_zero_is_no_fixed_wallpaper_even_with_a_stored_one() {
+        assert_eq!(fixed_from_row(0, Some(wp("/a")), Some(wp("/b"))), None);
+    }
+
+    #[test]
+    fn a_row_pointing_at_nothing_keeps_the_stored_wallpaper() {
+        let stored = Some(wp("/b"));
+        assert_eq!(
+            fixed_from_row(gtk4::INVALID_LIST_POSITION, None, stored.clone()),
+            stored
+        );
+    }
+
+    #[test]
+    fn a_selected_candidate_wins_over_the_stored_one() {
+        assert_eq!(
+            fixed_from_row(2, Some(wp("/a")), Some(wp("/b"))),
+            Some(wp("/a"))
+        );
+    }
+
+    #[test]
+    fn a_slot_needs_a_wallpaper_a_pool_or_both() {
+        assert!(!slot_usable(&None, &None));
+        assert!(slot_usable(&None, &Some(pool())), "folder-only is valid");
+        assert!(slot_usable(&Some(wp("/a")), &None));
+        assert!(slot_usable(&Some(wp("/a")), &Some(pool())));
+    }
+
+    /// The schedule the GUI writes for a folder-only night slot is one the
+    /// engine accepts, and the night hours come from the pool.
+    #[test]
+    fn a_folder_only_night_writes_a_schedule_the_engine_accepts() {
+        let night = fixed_from_row(0, None, None);
+        let night_source = Some(pool());
+        assert!(slot_usable(&night, &night_source));
+        let s = crate::config::Schedule {
+            mode: crate::config::ScheduleMode::Daynight,
+            day: Some(wp("/day.png")),
+            night,
+            day_source: None,
+            night_source,
+            day_start: "07:00".into(),
+            night_start: "19:00".into(),
+            lat: None,
+            lon: None,
+            at: vec![],
+        };
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 7, 3)
+            .unwrap()
+            .and_hms_opt(22, 0, 0)
+            .unwrap();
+        let a = crate::schedule::active(&s, at, 0).unwrap();
+        assert_eq!(a.slot, Some(crate::schedule::Slot::Night));
+        assert!(a.fixed.is_none());
+        assert_eq!(a.source.cloned(), Some(pool()));
     }
 }

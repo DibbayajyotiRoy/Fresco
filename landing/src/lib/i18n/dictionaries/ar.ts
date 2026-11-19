@@ -549,12 +549,14 @@ export const ar: Dictionary = {
     tipAfter: ".",
     bug: "الإبلاغ عن خطأ",
     feature: "طلب ميزة",
+    discord: "انضم إلى Discord",
   },
 
   footer: {
     github: "GitHub",
     license: "الترخيص",
     reportIssue: "الإبلاغ عن مشكلة",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "تبديل الصوت",
   },

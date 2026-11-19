@@ -1729,10 +1729,6 @@ impl Daemon {
                 Response::Ok
             }
             Request::Status => Response::Status(self.status()),
-            Request::Update => {
-                notifier::run_updater_async();
-                Response::Ok
-            }
             Request::Lock => {
                 let geoms = self.output_geoms_all();
                 let ctx = self.lock.ctx(&self.config, &geoms);
@@ -2896,10 +2892,6 @@ fn run_gnome_static() -> Result<()> {
                 let ctx = lock_rt.ctx(&config, &[]);
                 Response::Status(static_status(&config, &lock_rt.status(&ctx, &config)))
             }
-            Request::Update => {
-                notifier::run_updater_async();
-                Response::Ok
-            }
             Request::Stop => Response::Ok,
             // GNOME static-frame mode has no live surface and no `Desktop`
             // target host, so `Request::Lock` and friends are handled purely
@@ -3434,10 +3426,6 @@ fn run_wayland_layershell() -> Result<()> {
                             },
                             lock_rt.status(&ctx, &config),
                         ))
-                    }
-                    Request::Update => {
-                        notifier::run_updater_async();
-                        Response::Ok
                     }
                     Request::Stop => Response::Ok,
                     Request::Lock => {

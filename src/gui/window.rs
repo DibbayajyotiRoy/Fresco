@@ -34,6 +34,12 @@ pub struct FrescoApplication {
 /// instance — build_ui opens the feedback dialog right after presenting.
 static PENDING_FEEDBACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set when launched with `--update` (the daemon's "Update now" notification
+/// does this, since only the GUI's session can run pkexec). build_ui opens the
+/// install dialog once the window is up, and the startup update check is skipped
+/// so it cannot be in flight and swallow this forced check.
+static PENDING_UPDATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl FrescoApplication {
     pub fn new() -> Self {
         let app = adw::Application::new(Some(APP_ID), gio::ApplicationFlags::FLAGS_NONE);
@@ -42,22 +48,29 @@ impl FrescoApplication {
     }
 
     pub fn run(&self, args: &[String]) -> i32 {
-        // `--feedback` is ours, not GLib's: strip it before GApplication sees
-        // it, and route it via the exported "open-feedback" action so it works
-        // whether we become the primary instance or one is already running.
+        // `--feedback` and `--update` are ours, not GLib's: strip them before
+        // GApplication sees them, and route them via exported actions so they
+        // work whether we become the primary instance or one is already running.
         let feedback = args.iter().any(|a| a == "--feedback");
+        let update = crate::cli::update_requested(args);
         let argv: Vec<&str> = args
             .iter()
-            .filter(|a| a.as_str() != "--feedback")
+            .filter(|a| !matches!(a.as_str(), "--feedback" | "--update"))
             .map(String::as_str)
             .collect();
-        if feedback {
-            PENDING_FEEDBACK.store(true, std::sync::atomic::Ordering::Relaxed);
+        if feedback || update {
+            PENDING_FEEDBACK.store(feedback, std::sync::atomic::Ordering::Relaxed);
+            PENDING_UPDATE.store(update, std::sync::atomic::Ordering::Relaxed);
             if self.app.register(None::<&gio::Cancellable>).is_ok() && self.app.is_remote() {
                 // A primary instance exists: raise it and forward the intent
                 // over D-Bus instead of starting a second main loop.
                 self.app.activate();
-                self.app.activate_action("open-feedback", None);
+                if feedback {
+                    self.app.activate_action("open-feedback", None);
+                }
+                if update {
+                    self.app.activate_action("open-update", None);
+                }
                 return 0;
             }
         }
@@ -536,6 +549,23 @@ fn build_ui(app: &adw::Application) {
             show_feedback_dialog(&win_fb, state_fb.clone());
         });
         app.add_action(&open_feedback);
+    }
+    // Deep link for the daemon's "Update now" notification (`fresco --update`):
+    // a forced check that goes straight to the install dialog.
+    {
+        let win_up = window.clone();
+        let state_up = state.clone();
+        let open_update = gio::SimpleAction::new("open-update", None);
+        open_update.connect_activate(move |_, _| {
+            win_up.present();
+            super::updates::check_and_install(&win_up, state_up.clone());
+        });
+        app.add_action(&open_update);
+    }
+    if PENDING_UPDATE.load(std::sync::atomic::Ordering::Relaxed) {
+        let win_up = window.clone();
+        let state_up = state.clone();
+        glib::idle_add_local_once(move || super::updates::check_and_install(&win_up, state_up));
     }
     if !state.borrow().config.telemetry_prompted
         || state.borrow().config.telemetry_consent_version < crate::telemetry::CONSENT_VERSION
@@ -1983,6 +2013,12 @@ fn build_help_page(
     });
     help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
+
+    let discord_btn = menu_item_opening_window(t!("Join the Discord community"), popover, || {
+        open_in_browser(crate::DISCORD_URL)
+    });
+    discord_btn.set_tooltip_text(Some(t!("Chat with other Fresco users and the maintainer")));
+    popover_box.append(&discord_btn);
 
     // Optional and last among the help rows: a donation link, not a nudge.
     let donate_btn = menu_item_opening_window(t!("Support Fresco on Ko-fi"), popover, || {
@@ -6356,7 +6392,10 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    // Deepin/KWin stretches the window on outside clicks (#100); keep it fixed
+    // there only. Elsewhere it must stay resizable or tiling WMs cut content off.
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
+    dialog.set_default_size(640, 720);
     dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Advanced")));
 
@@ -8597,7 +8636,7 @@ fn show_audio_consent_dialog(
             .as_ref(),
     );
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
     dialog.set_title(Some(t!("Let the visualiser listen?")));
     dialog.set_default_size(460, -1);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -9086,12 +9125,17 @@ fn show_about_dialog(window: &adw::ApplicationWindow) {
     desc.set_justify(gtk4::Justification::Center);
     inner.append(&desc);
 
+    let links = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    links.set_margin_top(4);
+    links.set_halign(gtk4::Align::Center);
     let link = gtk4::LinkButton::with_label(
         "https://github.com/DibbayajyotiRoy/fresco",
         "github.com/DibbayajyotiRoy/fresco",
     );
-    link.set_margin_top(4);
-    inner.append(&link);
+    links.append(&link);
+    let discord = gtk4::LinkButton::with_label(crate::DISCORD_URL, t!("Discord community"));
+    links.append(&discord);
+    inner.append(&links);
 
     content.append(&inner);
     dialog.present();
@@ -9407,7 +9451,7 @@ pub(crate) fn glass_dialog(
     dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
     dialog.set_title(Some(title));
     dialog.set_default_size(width, height);
 
@@ -10041,7 +10085,11 @@ fn run_startup_checks(window: &adw::ApplicationWindow, state: Rc<RefCell<AppStat
         show_feedback_dialog(window, state.clone());
     }
     poll_notifications(window, state.clone());
-    super::updates::check_for_updates(window, state, false);
+    // Skipped when launched with `--update`: that path runs its own forced
+    // check, and a startup check still in flight would make it bail out.
+    if !PENDING_UPDATE.load(std::sync::atomic::Ordering::Relaxed) {
+        super::updates::check_for_updates(window, state, false);
+    }
 }
 
 /// Submit a rating, and — when `allow_reply` — open a support thread so the

@@ -6,7 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Discord community link in Help & feedback, About, the website and the README.
+
 ### Fixed
+- Settings windows and dialogs can be resized again on sway and other tiling compositors (#147).
+- **"Check for updates" now works after you clicked "Later".** The manual check
+  used to stay silent when you had dismissed that version; it now shows the
+  update again. Only the automatic startup check respects "Later".
+- **An offline start no longer hides updates for 24 hours.** The daily check
+  is only recorded once it actually reaches the release server.
+- **Rate-limited update checks say so.** When GitHub refuses the check, the
+  message is "GitHub is rate-limiting update checks. Try again in an hour."
+  instead of "check your connection".
+- **"Update now" from a notification opens Fresco's updater.** It used to run
+  the installer from the background daemon, where the password prompt could
+  not appear on some desktops (Linux Mint among them), and the failure only
+  reached the log. It now opens Fresco's update dialog, where progress and
+  errors are visible.
+- **Installs wait for a busy package manager.** The updater waits up to two
+  minutes for the dpkg lock instead of failing at once, which Mint's update
+  manager often holds.
 - **Smooth playback on high-refresh monitors (144–300 Hz).** Muted video
   wallpapers (the default) forced mpv's `display-resample` sync, which shows an
   uneven frame cadence on 144 Hz+ panels and looked like stop-motion at 30/60

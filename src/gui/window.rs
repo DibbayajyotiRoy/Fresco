@@ -7620,7 +7620,15 @@ fn sync_wallpaper_to_schedule(cfg: &mut Config) {
     // A pool slot plays a random file from its source: draw one now so the
     // change shows at once. The daemon's own pick takes over from its next tick.
     let w = match act.source {
-        Some(src) => crate::cycle::random_from(src).or_else(|| act.fixed.cloned()),
+        // Keep the current wallpaper when it already belongs to the pool: this
+        // runs on every valid time-field keystroke and must not re-roll.
+        Some(src) => {
+            let pool = crate::cycle::slot_pool(src);
+            let current = pool.iter().find(|p| p.same_media(&cfg.wallpaper)).cloned();
+            current
+                .or_else(|| crate::cycle::random_from(src))
+                .or_else(|| act.fixed.cloned())
+        }
         None => act.fixed.cloned(),
     };
     if let Some(w) = w {

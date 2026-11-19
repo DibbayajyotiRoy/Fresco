@@ -373,6 +373,9 @@ struct Child {
     /// rubber band is found by a run that can reach past the damage. Empty for
     /// the others.
     rgb: Vec<u8>,
+    /// Xfce only: per pixel, the [`mask::band_update`] run flags that go with
+    /// `rgb`. Empty for the others.
+    flags: Vec<u8>,
 }
 
 impl Child {
@@ -1172,6 +1175,11 @@ impl State {
             } else {
                 Vec::new()
             },
+            flags: if self.desktop == Desktop::Xfce {
+                vec![0; pixels]
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -1263,6 +1271,7 @@ impl State {
                         c.rgb
                             .chunks_exact_mut(3)
                             .for_each(|p| p.copy_from_slice(&KEY));
+                        c.flags.iter_mut().for_each(|f| *f = 0);
                         let _ = self.conn.shape_rectangles(
                             shape::SO::SET,
                             shape::SK::BOUNDING,
@@ -1418,8 +1427,8 @@ fn read_part(
     let mut changed = false;
     // Deepin: the box of pixels whose class differs from what was cached.
     let mut classes_changed: Option<(usize, usize, usize, usize)> = None;
-    // Xfce: some pixel's RGB differs from what was cached.
-    let mut rgb_changed = false;
+    // Xfce: the box of pixels whose RGB differs from what was cached.
+    let mut rgb_changed: Option<(usize, usize, usize, usize)> = None;
     let mut row = 0u16;
     while row < part.height {
         let h = BAND_ROWS.min(part.height - row);
@@ -1462,7 +1471,13 @@ fn read_part(
                             let rgb = pixel_rgb(px, msb_first);
                             if p != rgb {
                                 p.copy_from_slice(&rgb);
-                                rgb_changed = true;
+                                let (x, y) = (px0 + dx, py);
+                                rgb_changed = Some(match rgb_changed {
+                                    None => (x, y, x, y),
+                                    Some((x0, y0, x1, y1)) => {
+                                        (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+                                    }
+                                });
                             }
                         }
                     }
@@ -1487,13 +1502,16 @@ fn read_part(
         }
         row += h;
     }
-    // Xfce: the whole window's mask again, from the cached RGB. Only the damage
-    // was read, but a band's run can run out past it.
-    if desktop == Desktop::Xfce && rgb_changed {
-        let mut fresh = vec![false; pw * ph];
-        mask::band_mask(&c.rgb, pw, ph, KEY, &mut fresh);
-        changed |= fresh != c.mask;
-        c.mask = fresh;
+    // Xfce: the rows and columns through the changed pixels, from the cached
+    // RGB. A band's run can run out past the damage, so these are full lines.
+    if let (Desktop::Xfce, Some((x0, y0, x1, y1))) = (desktop, rgb_changed) {
+        let dirty = mask::Area {
+            x: x0,
+            y: y0,
+            w: x1 - x0 + 1,
+            h: y1 - y0 + 1,
+        };
+        changed |= mask::band_update(&c.rgb, pw, ph, KEY, &mut c.flags, &mut c.mask, dirty);
     }
     // A repaint that left every pixel in the same class (most of them) changes
     // nothing about what is visible: no refine, no shape.

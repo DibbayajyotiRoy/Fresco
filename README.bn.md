@@ -12,6 +12,7 @@
 [![GPL-3.0-or-later লাইসেন্স](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Publish ওয়ার্কফ্লোর অবস্থা](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub স্টার](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [ওয়েবসাইট](https://fresco.dibbayajyoti.com) · [ইনস্টলেশন](#ইনস্টলেশন) · [সমর্থিত ডেস্কটপ পরিবেশ](#সমর্থিত-ডেস্কটপ-পরিবেশ) · [তুলনা](#fresco-বনাম-wallpaper-engine-hidamari-komorebi-ও-mpvpaper) · [সচরাচর জিজ্ঞাসিত প্রশ্ন](#সচরাচর-জিজ্ঞাসিত-প্রশ্ন-faq) · [উইজেট](#ডেস্কটপ-উইজেট-লিরিক্স-ঘড়ি-ভিজুয়ালাইজার-ও-অ্যালবাম-আর্ট) · [চেঞ্জলগ](CHANGELOG.md) · [ইস্যু](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -423,7 +424,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ## অবদান ও মতামত
 
-বাগ রিপোর্ট, ফিচারের অনুরোধ ও PR স্বাগত — একটি [ইস্যু](https://github.com/DibbayajyotiRoy/fresco/issues) খুলুন, অথবা অ্যাপের ভেতরের ফিডব্যাক ডায়ালগ ব্যবহার করুন। দেখুন [CONTRIBUTING.md](CONTRIBUTING.md)।
+বাগ রিপোর্ট, ফিচারের অনুরোধ ও PR স্বাগত — একটি [ইস্যু](https://github.com/DibbayajyotiRoy/fresco/issues) খুলুন, অথবা অ্যাপের ভেতরের ফিডব্যাক ডায়ালগ ব্যবহার করুন। দেখুন [CONTRIBUTING.md](CONTRIBUTING.md)। অন্যান্য ব্যবহারকারী ও মেইনটেইনারের সাথে আলাপ করতে [Discord কমিউনিটিতে](https://discord.gg/FASUnunRXU) যোগ দিন।
 
 ## লাইসেন্স
 

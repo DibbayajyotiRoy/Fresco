@@ -348,7 +348,8 @@ fn handle_message(text: &str, seen: &mut Seen) {
 /// What clicking the notification's action button does.
 enum Click {
     OpenUrl(String),
-    /// Run the bundled updater script (download + install the latest .deb) via pkexec.
+    /// Open the GUI's updater (`fresco --update`). Not run here: the daemon has no
+    /// session for pkexec's polkit prompt.
     Update,
     /// Launch the Fresco GUI (the feedback dialog lives in its menu).
     OpenApp,
@@ -518,8 +519,8 @@ fn launch_gui(args: &[&str]) {
 }
 
 /// Decide what to do with one notification. An `update` row is semver-gated; on a
-/// normal (apt/.deb) install it offers an "Update now" button that runs the
-/// updater script under the hood, while a Flatpak install (read-only, can't
+/// normal (apt/.deb) install it offers an "Update now" button that opens the GUI's
+/// updater (`fresco --update`), while a Flatpak install (read-only, can't
 /// apt-install) just links to the release page. An `info` row is a plain
 /// announcement that opens its url if it has one.
 fn handle(n: &Notification) {
@@ -589,7 +590,7 @@ fn notify(title: &str, body: &str, action: Option<(&str, Click)>) {
                         if invoked == "act" {
                             match click {
                                 Click::OpenUrl(url) => open_url(&url),
-                                Click::Update => run_updater(),
+                                Click::Update => launch_gui(&["--update"]),
                                 Click::OpenApp => open_app(),
                                 Click::OpenSupport => launch_gui(&[]),
                             }
@@ -607,46 +608,6 @@ pub(super) fn open_url(url: &str) {
     if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
         log::warn!("notifier: xdg-open failed: {e}");
     }
-}
-
-/// Download + install the latest .deb by running the bundled updater script as
-/// root via pkexec (the desktop's polkit agent prompts once). On success, prompt
-/// the user to restart so the new binary takes over.
-fn run_updater() {
-    let Some(script) = crate::update::updater_script() else {
-        log::warn!("notifier: updater script not found; opening releases page");
-        open_url(releases_url());
-        return;
-    };
-    log::info!(
-        "notifier: launching updater via pkexec: {}",
-        script.display()
-    );
-    match crate::update::run_updater_blocking() {
-        crate::update::UpdateOutcome::Success => {
-            notify(
-                t!("Fresco updated"),
-                t!("The latest version was installed. Restart Fresco to apply it."),
-                None,
-            );
-        }
-        crate::update::UpdateOutcome::AlreadyUpToDate => {
-            log::info!("notifier: already on the latest version; nothing to install");
-        }
-        crate::update::UpdateOutcome::Unsupported => {
-            log::warn!("notifier: unsupported install for auto-update; opening releases page");
-            open_url(releases_url());
-        }
-        crate::update::UpdateOutcome::Failed(e) => log::warn!("notifier: {e}"),
-    }
-}
-
-/// Fire-and-forget entry point for `Request::Update`: runs the updater on a
-/// background thread and reports success/failure via the same desktop
-/// notification path as the Supabase-pushed "Update now" action, without
-/// blocking the daemon's main loop.
-pub(crate) fn run_updater_async() {
-    std::thread::spawn(run_updater);
 }
 
 /// Persistent set of notification ids already shown. Lives in the daemon's state

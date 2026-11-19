@@ -558,12 +558,14 @@ export const en = {
     tipAfter: ".",
     bug: "Report a bug",
     feature: "Request a feature",
+    discord: "Join the Discord",
   },
 
   footer: {
     github: "GitHub",
     license: "License",
     reportIssue: "Report an issue",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "Toggle sound",
   },

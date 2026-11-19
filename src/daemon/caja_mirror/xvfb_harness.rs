@@ -611,7 +611,9 @@ fn xfce_mirror_per_monitor_end_to_end() {
             .unwrap();
         (win, canvas)
     };
-    let paint = |win: Window, canvas: Pixmap, w: u16, h: u16, icons: &Icons| {
+    // `bands` are drawn over the key and under the icons; the mirror must key
+    // them out, so they are not in the expected picture.
+    let paint = |win: Window, canvas: Pixmap, w: u16, h: u16, icons: &Icons, bands: &Icons| {
         let gc = conn.generate_id().unwrap();
         conn.create_gc(gc, canvas, &CreateGCAux::new().foreground(pixel(KEY)))
             .unwrap();
@@ -623,7 +625,7 @@ fn xfce_mirror_per_monitor_end_to_end() {
         };
         conn.poly_fill_rectangle(canvas, gc, &[rect(0, 0, w, h)])
             .unwrap();
-        for &(x, y, iw, ih, c) in icons {
+        for &(x, y, iw, ih, c) in bands.iter().chain(icons) {
             conn.change_gc(gc, &ChangeGCAux::new().foreground(pixel(c)))
                 .unwrap();
             conn.poly_fill_rectangle(canvas, gc, &[rect(x, y, iw, ih)])
@@ -635,22 +637,27 @@ fn xfce_mirror_per_monitor_end_to_end() {
     };
 
     let (w, h) = (PANE as u16, H as u16);
+    // An icon-sized patch that must stay visible, and a 600×400 selection
+    // rubber band in a bluish tint (not dark, so only the run rule finds it).
     let left: Icons = vec![
         (40, 40, 64, 64, [200, 120, 40]),
         (57, 60, 30, 24, [0, 0, 0]),
+        (100, 150, 64, 64, [30, 60, 200]),
     ];
+    let left_band: Icons = vec![(20, 300, 600, 400, [18, 36, 60])];
     let right: Icons = vec![
         (100, 200, 80, 80, [60, 90, 220]),
         (120, 220, 20, 20, [20, 20, 20]),
     ];
+    let none: Icons = Vec::new();
     let (a, a_canvas) = make(0, 0, w, h, desktop_type);
     let (mut b, mut b_canvas) = make(PANE as i16, 0, w, h, desktop_type);
     // xfdesktop's own dialog: same class, not a desktop window, solid red.
     let (dialog, dialog_canvas) = make(300, 300, 200, 100, dialog_type);
-    paint(a, a_canvas, w, h, &left);
-    paint(b, b_canvas, w, h, &right);
+    paint(a, a_canvas, w, h, &left, &left_band);
+    paint(b, b_canvas, w, h, &right, &none);
     let red: Icons = vec![(0, 0, 200, 100, [255, 0, 0])];
-    paint(dialog, dialog_canvas, 200, 100, &red);
+    paint(dialog, dialog_canvas, 200, 100, &red, &none);
     for win in [a, b, dialog] {
         conn.map_window(win).unwrap();
     }
@@ -748,7 +755,8 @@ fn xfce_mirror_per_monitor_end_to_end() {
     conn.flush().unwrap();
 
     // 1. Each monitor's icons land on its own wallpaper window, and the dialog
-    //    (red, over the left pane) is not copied.
+    //    (red, over the left pane) is not copied. The rubber band over the left
+    //    pane is keyed out (magenta), while the icon-sized patch beside it stays.
     wait_for_picture("both monitors", [Some(&left), Some(&right)]);
 
     // 2. The right monitor's desktop window goes away: its icons go with it,
@@ -762,7 +770,7 @@ fn xfce_mirror_per_monitor_end_to_end() {
     //    when the stack moves).
     let right2: Icons = vec![(300, 100, 100, 100, [10, 200, 90])];
     (b, b_canvas) = make(PANE as i16, 0, w, h, desktop_type);
-    paint(b, b_canvas, w, h, &right2);
+    paint(b, b_canvas, w, h, &right2, &none);
     conn.map_window(b).unwrap();
     // Under the wallpaper windows, as xfwm4's lower layer keeps it.
     conn.configure_window(

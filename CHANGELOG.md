@@ -9,6 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Discord community link in Help & feedback, About, the website and the README.
 
+### Fixed
+- Settings windows and dialogs can be resized again on sway and other tiling compositors (#147).
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

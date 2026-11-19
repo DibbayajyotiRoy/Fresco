@@ -13,6 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Per-wallpaper transition can be set to Default (follow the global
   transition) or None (#129)
 - **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
+- Make seamless loop: re-encode a video with a crossfade at the loop point (needs ffmpeg) (#10)
 
 ### Changed
 - Switching between an image and a video wallpaper now uses the transition

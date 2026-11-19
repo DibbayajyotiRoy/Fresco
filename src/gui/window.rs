@@ -13,7 +13,7 @@ use super::window_state;
 use super::{
     daemon_ctl, import_queue,
     library::{self, load_entries, save_entries, LibraryEntry},
-    linked, status,
+    linked, seamless, status,
 };
 use crate::{
     autostart,
@@ -3585,6 +3585,42 @@ fn show_card_menu(
         menu.append(&items);
     }
 
+    // Video-only: a crossfaded copy so the loop point blends (issue #10). Once
+    // a copy is in place the entry offers to revert instead.
+    if !from_linked_folder {
+        let (is_video, has_original) = state
+            .borrow()
+            .entries
+            .get(idx)
+            .map(|e| (matches!(e.kind, Kind::Video), e.original_path.is_some()))
+            .unwrap_or((false, false));
+        if has_original {
+            let revert = item(t!("Revert to original"));
+            let s = state.clone();
+            let p = pop.clone();
+            revert.connect_clicked(move |_| {
+                p.popdown();
+                revert_seamless(&s, idx);
+            });
+            menu.append(&revert);
+        } else if is_video && seamless::available() {
+            let make = item(t!("Make seamless loop…"));
+            let s = state.clone();
+            let p = pop.clone();
+            let parent = parent.clone();
+            make.connect_clicked(move |_| {
+                p.popdown();
+                if let Some(window) = parent
+                    .root()
+                    .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok())
+                {
+                    show_seamless_dialog(&window, s.clone(), idx);
+                }
+            });
+            menu.append(&make);
+        }
+    }
+
     // Keyboard/touch-reachable twin of the hover arrows, under the same rule.
     if reorderable {
         let id = state.borrow().entries.get(idx).map(|e| e.id.clone());
@@ -3660,6 +3696,232 @@ fn show_card_menu(
     pop.set_child(Some(&menu));
     pop.connect_closed(|p| p.unparent());
     pop.popup();
+}
+
+// ─── Make seamless loop (issue #10) ───────────────────────────────────────────
+
+/// Delete the seamless copy an entry owns, if it has one. Only the generated
+/// copy: the user's original is never touched.
+fn discard_seamless_copy(entry: &LibraryEntry) {
+    if entry.original_path.is_some() {
+        if let Some(copy) = &entry.path {
+            seamless::discard(copy);
+        }
+    }
+}
+
+/// Confirm, then make a crossfaded copy of the video at `idx`. The original
+/// stays on disk; the copy is what the entry plays from then on.
+fn show_seamless_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, idx: usize) {
+    let Some(id) = state.borrow().entries.get(idx).map(|e| e.id.clone()) else {
+        return;
+    };
+    let (dialog, content) = glass_dialog(window, t!("Make seamless loop"), 440, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    body.set_margin_top(4);
+    body.set_margin_bottom(16);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+
+    let heading = gtk4::Label::new(Some(t!("Make this loop seamless?")));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_wrap(true);
+    body.append(&heading);
+
+    let sub = gtk4::Label::new(Some(t!("Fresco re-encodes a copy of this video with its last second faded into its first, so the loop no longer snaps back. The copy takes about as much disk space as the original, and 4K video can take a long time. Your original file is kept, and you can revert at any time. If the video has sound, it is kept.")));
+    sub.add_css_class("dialog-sub");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    body.append(&sub);
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    actions.set_margin_top(8);
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    actions.append(&cancel);
+    let confirm = gtk4::Button::with_label(t!("Make seamless"));
+    confirm.add_css_class("suggested-action");
+    {
+        let d = dialog.clone();
+        let parent = window.clone();
+        confirm.connect_clicked(move |_| {
+            d.close();
+            start_seamless(&parent, state.clone(), id.clone());
+        });
+    }
+    actions.append(&confirm);
+    body.append(&actions);
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// Run the encode for entry `id` in the background, behind a progress dialog
+/// whose Cancel (or closing it) kills ffmpeg.
+fn start_seamless(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, id: String) {
+    let Some(src) = state
+        .borrow()
+        .entries
+        .iter()
+        .find(|e| e.id == id)
+        .and_then(|e| e.path.clone())
+    else {
+        return;
+    };
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (dialog, content) = glass_dialog(window, t!("Make seamless loop"), 440, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_top(4);
+    body.set_margin_bottom(16);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+
+    let label = gtk4::Label::new(Some(t!("Making a seamless loop…")));
+    label.add_css_class("dialog-sub");
+    label.set_xalign(0.0);
+    label.set_wrap(true);
+    body.append(&label);
+
+    let bar = gtk4::ProgressBar::new();
+    bar.set_show_text(true);
+    body.append(&bar);
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    let cancel_btn = gtk4::Button::with_label(t!("Cancel"));
+    {
+        let c = cancel.clone();
+        let d = dialog.clone();
+        cancel_btn.connect_clicked(move |_| {
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+            d.close();
+        });
+    }
+    actions.append(&cancel_btn);
+    body.append(&actions);
+    content.append(&body);
+    {
+        // Closing the dialog by any route cancels the encode. A finished job
+        // ignores the flag.
+        let c = cancel.clone();
+        dialog.connect_close_request(move |_| {
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+            glib::Propagation::Proceed
+        });
+    }
+    dialog.present();
+
+    let rx = seamless::spawn(src.clone(), id.clone(), cancel);
+    glib::spawn_future_local(async move {
+        while let Ok(event) = rx.recv().await {
+            match event {
+                seamless::Event::Progress(f) => bar.set_fraction(f64::from(f)),
+                seamless::Event::Done(result) => {
+                    dialog.close();
+                    finish_seamless(&state, &id, &src, result);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// Swap the entry over to the finished copy (or report why there is none).
+/// If the entry was on screen, the copy is re-applied so the desktop follows.
+fn finish_seamless(
+    state: &Rc<RefCell<AppState>>,
+    id: &str,
+    src: &std::path::Path,
+    result: Result<PathBuf, seamless::Failure>,
+) {
+    let msg = match result {
+        Ok(copy) => {
+            let swapped = {
+                let mut s = state.borrow_mut();
+                let on_disk = Config::load().unwrap_or_else(|_| s.config.clone());
+                match s
+                    .entries
+                    .iter()
+                    .position(|e| e.id == id && e.path.as_deref() == Some(src))
+                {
+                    Some(idx) => {
+                        let e = &mut s.entries[idx];
+                        let was_playing = entry_is_playing(e, &on_disk);
+                        e.original_path = Some(src.to_path_buf());
+                        e.path = Some(copy);
+                        e.check_health();
+                        save_entries(&s.entries).ok();
+                        Some((idx, was_playing))
+                    }
+                    // Entry removed or re-pointed while encoding: drop the copy.
+                    None => {
+                        seamless::discard(&copy);
+                        None
+                    }
+                }
+            };
+            let Some((idx, was_playing)) = swapped else {
+                return;
+            };
+            if was_playing {
+                apply_entry_by_idx(state.clone(), idx);
+            }
+            t!("Seamless loop ready").to_string()
+        }
+        Err(seamless::Failure::Cancelled) => t!("Seamless loop cancelled").to_string(),
+        Err(seamless::Failure::NoLength) => {
+            t!("Could not read this video's length, so no seamless loop was made.").to_string()
+        }
+        Err(seamless::Failure::TooShort { len, need }) => tf!(
+            "This video is {seconds} s long; a seamless loop needs at least {min} s.",
+            "seconds" => format!("{len:.1}"),
+            "min" => format!("{need:.0}")
+        ),
+        Err(seamless::Failure::Ffmpeg(why)) => {
+            tf!("Seamless loop failed: {reason}", "reason" => why)
+        }
+    };
+    show_toast(state, &msg);
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Go back to the video the entry had before the seamless copy: delete the
+/// copy and point the entry at the original again.
+fn revert_seamless(state: &Rc<RefCell<AppState>>, idx: usize) {
+    let (was_playing, copy) = {
+        let mut s = state.borrow_mut();
+        let on_disk = Config::load().unwrap_or_else(|_| s.config.clone());
+        let Some(e) = s.entries.get_mut(idx) else {
+            return;
+        };
+        let Some(original) = e.original_path.take() else {
+            return;
+        };
+        let was_playing = entry_is_playing(e, &on_disk);
+        let copy = e.path.replace(original);
+        e.check_health();
+        save_entries(&s.entries).ok();
+        (was_playing, copy)
+    };
+    if let Some(copy) = copy {
+        seamless::discard(&copy);
+    }
+    if was_playing {
+        apply_entry_by_idx(state.clone(), idx);
+    }
+    show_toast(state, t!("Reverted to the original video"));
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
 }
 
 /// Toggle an entry's favorite flag, persist, and refresh (the Favorites
@@ -3895,6 +4157,7 @@ fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
         if let Some(thumb) = &entry.thumbnail {
             std::fs::remove_file(thumb).ok();
         }
+        discard_seamless_copy(&entry);
         super::preview_proxy::remove_for(&entry.id);
         save_entries(&s.entries).ok();
     }
@@ -4013,6 +4276,7 @@ fn remove_entries_by_ids(state: Rc<RefCell<AppState>>, ids: &std::collections::H
             if let Some(thumb) = &e.thumbnail {
                 std::fs::remove_file(thumb).ok();
             }
+            discard_seamless_copy(e);
             super::preview_proxy::remove_for(&e.id);
         }
         save_entries(&s.entries).ok();
@@ -5638,6 +5902,7 @@ fn unlink_folder(state: &Rc<RefCell<AppState>>, id: &str) {
             if let Some(thumb) = &e.thumbnail {
                 std::fs::remove_file(thumb).ok();
             }
+            discard_seamless_copy(e);
             super::preview_proxy::remove_for(&e.id);
         }
         library::save_collections(&s.collections).ok();

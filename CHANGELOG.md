@@ -6,45 +6,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.56] — 2026-11-19
+
 ### Added
-- Wallpaper per workspace on X11 desktops, sway and Hyprland (#124).
-- Discord community link in Help & feedback, About, the website and the README.
-- Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
-- Per-wallpaper transition can be set to Default (follow the global
-  transition) or None (#129)
-- **Smooth loop**: an optional fade through black at the loop point for videos that don't loop seamlessly (#10). Turn it on per wallpaper in the editor.
-- Day/night schedule can pick a random wallpaper from a collection or folder for each part of the day (#130).
-- Make seamless loop: re-encode a video with a crossfade at the loop point (needs ffmpeg) (#10)
-- Deepin V20 / UOS 20 support: a `fresco-legacy` `.deb` with its own GTK 4 and libadwaita. It is built on Debian 10 (glibc 2.28), works on X11, and the in-app updater keeps it on the legacy asset.
+- **Change wallpaper automatically.** Pick how often the wallpaper changes
+  (1 minute to 1 day), whether to shuffle, and which collection or linked
+  folder to draw from, in Advanced. Turn it on or off from Behavior. Each video
+  stays up for the whole interval, however short the clip is.
+- **A wallpaper per workspace** on X11 desktops, sway and Hyprland (#124). Set
+  one for each virtual desktop in Advanced; switching workspaces switches the
+  wallpaper, with its transition.
+- **Day/night schedule with folders** (#130). Each part of the day can pick a
+  random wallpaper from a collection or folder instead of one fixed wallpaper,
+  and keeps it until the next part of the day.
+- **Smooth loop** (#10). An optional fade through black at the loop point for
+  videos that don't loop seamlessly. Turn it on per wallpaper in the editor.
+- **Make seamless loop** (#10). A card-menu action that re-encodes a copy of a
+  video with a crossfade at the loop point, sound included, so it loops without
+  a jump. Needs ffmpeg; the original is kept and "Revert to original" undoes it.
+- **Per-wallpaper transition "Default"** (#129). A wallpaper can follow the
+  global transition, or set "None" to override it.
+- **Deepin V20 and UOS 20 support.** A new `fresco-legacy` `.deb` built on
+  Debian 10 (glibc 2.28) with its own GTK 4 and libadwaita, for systems that
+  ship neither. The in-app updater keeps it on the legacy package.
+- **Discord community.** A "Join the Discord community" link in Help &
+  feedback, About, the website and the README.
 
 ### Changed
-- Switching between an image and a video wallpaper now uses the transition
-  on Wayland (#129)
+- **Switching between an image and a video uses the transition on Wayland**
+  (#129), instead of cutting straight to the new wallpaper.
 
 ### Fixed
-- Settings windows and dialogs can be resized again on sway and other tiling compositors (#147).
-- **"Check for updates" now works after you clicked "Later".** The manual check
-  used to stay silent when you had dismissed that version; it now shows the
-  update again. Only the automatic startup check respects "Later".
-- **An offline start no longer hides updates for 24 hours.** The daily check
-  is only recorded once it actually reaches the release server.
-- **Rate-limited update checks say so.** When GitHub refuses the check, the
-  message is "GitHub is rate-limiting update checks. Try again in an hour."
-  instead of "check your connection".
-- **"Update now" from a notification opens Fresco's updater.** It used to run
-  the installer from the background daemon, where the password prompt could
-  not appear on some desktops (Linux Mint among them), and the failure only
-  reached the log. It now opens Fresco's update dialog, where progress and
-  errors are visible.
-- **Installs wait for a busy package manager.** The updater waits up to two
-  minutes for the dpkg lock instead of failing at once, which Mint's update
-  manager often holds.
-- **Smooth playback on high-refresh monitors (144–300 Hz).** Muted video
-  wallpapers (the default) forced mpv's `display-resample` sync, which shows an
+- **Smooth playback on high-refresh monitors (144–300 Hz)** (#132). Muted video
+  wallpapers (the default) forced mpv's `display-resample` sync, which gives an
   uneven frame cadence on 144 Hz+ panels and looked like stop-motion at 30/60
-  fps. The override is gone, and the decoder thread count is restored to auto
-  after the low-latency profile pinned it to 1 (#132).
-- XFCE: the desktop selection box no longer turns into an opaque dark rectangle over the video wallpaper (#123)
+  fps. The override is gone, and the decoder thread count is back to auto.
+- **Settings windows and dialogs can be resized on sway** and other tiling
+  compositors (#147).
+- **XFCE: the desktop selection box stays see-through** over the video
+  wallpaper instead of turning into an opaque dark rectangle (#123).
+- **The in-app updater works on Linux Mint.**
+  - "Update now" from a notification now opens Fresco's update dialog. It used
+    to run the installer from the background daemon, where the password prompt
+    could not appear on some desktops, and the failure only reached the log.
+  - "Check for updates" works again after you clicked "Later" on that version.
+  - Installs wait up to two minutes for a busy package manager instead of
+    failing, since Mint's update manager often holds the lock.
+  - An offline start no longer hides updates for 24 hours, and a rate-limited
+    check now says so instead of blaming your connection.
 
 ## [1.1.55] — 2026-11-11
 

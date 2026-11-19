@@ -12,6 +12,7 @@
 [![Lisensi GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![Status workflow publikasi](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Bintang GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Situs web](https://fresco.dibbayajyoti.com) · [Instalasi](#instalasi) · [Lingkungan desktop yang didukung](#lingkungan-desktop-yang-didukung) · [Perbandingan](#perbandingan-fresco-dengan-wallpaper-engine-hidamari-komorebi-dan-mpvpaper) · [FAQ](#pertanyaan-yang-sering-diajukan-faq) · [Widget](#widget-desktop-lirik-jam-visualizer-dan-sampul-album) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -484,7 +485,7 @@ Utas itu dikunci dengan tiket acak yang dibuat terpisah dari telemetri dan disim
 
 ## Kontribusi dan masukan
 
-Laporan bug, permintaan fitur, dan PR sangat diterima — buka [issue](https://github.com/DibbayajyotiRoy/fresco/issues), atau gunakan dialog masukan di dalam aplikasi. Lihat [CONTRIBUTING.md](CONTRIBUTING.md).
+Laporan bug, permintaan fitur, dan PR sangat diterima — buka [issue](https://github.com/DibbayajyotiRoy/fresco/issues), atau gunakan dialog masukan di dalam aplikasi. Lihat [CONTRIBUTING.md](CONTRIBUTING.md). Bergabunglah dengan [komunitas Discord](https://discord.gg/FASUnunRXU) untuk mengobrol dengan pengguna lain dan maintainer.
 
 ## Lisensi
 

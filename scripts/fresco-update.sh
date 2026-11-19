@@ -3,7 +3,9 @@
 # Releases (or the Gitee mirror) and install it.
 #
 # The package manager picks the asset and the install command:
-#   apt-get          -> fresco-*.deb              (apt-get install)
+#   apt-get          -> fresco_*.deb              (apt-get install)
+#                       fresco-legacy_*.deb if fresco-legacy is installed
+#                       (Deepin V20 / UOS 20: bundled GTK 4, see packaging/legacy)
 #   pacman           -> fresco-*-x86_64.pkg.tar.zst (pacman -U)
 #   dnf5 / dnf / yum -> fresco-*.x86_64.rpm       (dnf install)
 #   zypper           -> not supported yet: no openSUSE asset is published
@@ -50,6 +52,13 @@ esac
 if command -v apt-get >/dev/null 2>&1; then
   PKG_KIND="deb"
   PKG_EXT="deb"
+  # fresco-legacy is the same files built against a bundled GTK 4 for systems
+  # without one. Its installs must stay on the legacy asset: the normal .deb
+  # depends on the system's GTK 4 and libadwaita, which V20 does not have.
+  DEB_PKG=fresco
+  if dpkg-query -W -f='${Status}' fresco-legacy 2>/dev/null | grep -qx 'install ok installed'; then
+    DEB_PKG=fresco-legacy
+  fi
 elif command -v pacman >/dev/null 2>&1; then
   # The AUR source package `fresco` is owned by its AUR helper. Never pacman -U
   # over it; leave that install to the helper (manual-update UI instead).
@@ -89,7 +98,11 @@ LATEST_TAG=$(printf '%s' "$RELEASE_JSON" \
   | sed 's/.*"\([^"]*\)"$/\1/')
 case "$PKG_KIND" in
   deb)
-    ASSET_MATCH='"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"'
+    # Anchored on the package name: the release carries both fresco_ and
+    # fresco-legacy_ debs, and "first .deb" would send one to the other.
+    ASSET_FILE='fresco_[^"/]*_amd64\.deb'
+    [ "$DEB_PKG" = fresco-legacy ] && ASSET_FILE='fresco-legacy_[^"/]*_amd64\.deb'
+    ASSET_MATCH='"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*/'"$ASSET_FILE"'"'
     ASSET_URL='https\?://[^"]*\.deb' ;;
   rpm)
     ASSET_MATCH='"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*/fresco-[^"/]*\.x86_64\.rpm"'
@@ -117,7 +130,7 @@ case "$PKG_KIND" in
   deb)
     # Use dpkg's own version-comparison logic rather than hand-rolling semver
     # parsing in bash. To dpkg a raw hyphen means "revision", which sorts ABOVE.
-    INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' fresco 2>/dev/null || true)
+    INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$DEB_PKG" 2>/dev/null || true)
     if [ -n "${INSTALLED_VERSION}" ] && dpkg --compare-versions "${INSTALLED_VERSION}" ge "${LATEST_VERSION}"; then
       echo "fresco-update: already up to date (installed ${INSTALLED_VERSION}, latest ${LATEST_VERSION})"
       exit 2
@@ -196,7 +209,8 @@ case "$PKG_KIND" in
     export DEBIAN_FRONTEND=noninteractive
     echo "STAGE: installing"
     echo "fresco-update: installing…"
-    apt-get install -y "${TMP_PKG}" ;;
+    # Mint's update manager often holds the dpkg lock; wait for it, don't fail.
+    apt-get -o DPkg::Lock::Timeout=120 install -y "${TMP_PKG}" ;;
   rpm)
     echo "STAGE: installing"
     echo "fresco-update: installing…"

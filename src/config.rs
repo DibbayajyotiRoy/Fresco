@@ -467,6 +467,13 @@ pub struct Schedule {
     pub day: Option<Wallpaper>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub night: Option<Wallpaper>,
+    /// daynight/solar (#130): optional pool per slot. While the slot is active
+    /// the daemon shows a random file from it, kept until the slot changes;
+    /// `day`/`night` are the fallback when the pool is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day_source: Option<CycleSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub night_source: Option<CycleSource>,
     /// daynight: manual switch times, "HH:MM" 24h local.
     #[serde(default = "default_day_start")]
     pub day_start: String,
@@ -1732,8 +1739,16 @@ pub struct Wallpaper {
     /// a transition is a property of the *change*, and every wallpaper kind now
     /// gets one. Must stay above `crop`: TOML forbids a bare value after a
     /// sub-table, and `crop`/`slideshow` both serialise as tables.
-    #[serde(default)]
-    pub transition: Transition,
+    ///
+    /// `None` is "Default": inherit [`Config::transition`]. `Some(Transition::None)`
+    /// is an explicit "no effect" for this wallpaper. Configs written before
+    /// config version 2 wrote `"none"` for the inherit case; see `Config::migrate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Transition>,
+    /// Dip to black around the loop point of a video, for files that don't
+    /// loop seamlessly (issue #10). Opt-in; see `transition::LOOP_FADE`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smooth_loop: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
     #[serde(default = "default_true")]
@@ -1763,6 +1778,14 @@ impl Wallpaper {
             .or_else(|| self.paths.first().map(|p| p.as_path()))
     }
 
+    /// Same kind and the same media (file, or playlist items): what the
+    /// pickers call "already playing".
+    pub fn same_media(&self, other: &Wallpaper) -> bool {
+        self.kind == other.kind
+            && self.effective_path() == other.effective_path()
+            && self.paths == other.paths
+    }
+
     /// Whether anything is set to play: a media file, or a slideshow (which
     /// has no single path). The daemon builds a renderer only for these.
     pub fn is_configured(&self) -> bool {
@@ -1785,7 +1808,8 @@ impl Default for Wallpaper {
             shuffle: false,
             fit: Fit::default(),
             rotation: 0,
-            transition: Transition::default(),
+            transition: None,
+            smooth_loop: false,
             crop: None,
             mute: true,
             volume: default_volume(),
@@ -2012,6 +2036,11 @@ pub struct Config {
     /// Per-monitor overrides keyed by RandR connector name (e.g. "HDMI-1").
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub monitors: BTreeMap<String, Wallpaper>,
+    /// Per-workspace (virtual desktop) wallpapers, keyed by workspace id: the
+    /// 1-based X11 desktop number, or the sway / Hyprland workspace name. Empty
+    /// = the feature is off and no workspace is ever queried (issue #124).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub workspaces: BTreeMap<String, Wallpaper>,
     /// Unix epoch (seconds) of the last GitHub Releases check, so the client
     /// self-throttles to roughly once every 24h.
     #[serde(default)]
@@ -2051,6 +2080,10 @@ pub struct Config {
     pub lockscreen: Option<LockScreen>,
 }
 
+/// Config schema version written by this release. Version 1 is everything
+/// before per-wallpaper "Default" existed (absent `version` reads as 1).
+const CONFIG_VERSION: u32 = 2;
+
 fn default_version() -> u32 {
     1
 }
@@ -2069,20 +2102,32 @@ fn default_version() -> u32 {
 ///   about which of the two identical effects is running. The dip gets
 ///   marginally longer; nothing else about it changes.
 ///
+/// * Before config version 2, `transition = "none"` meant "inherit" (there was
+///   no other way to say it). `legacy` turns that into unset, so the inherit
+///   case keeps meaning inherit and an explicit `"none"` from now on means
+///   "no effect here".
+///
 /// The slideshow's own copy is kept in step rather than cleared, so a config
 /// saved by this version still reads correctly on a daemon that only knows
 /// about `slideshow.transition`.
-fn migrate_wallpaper(w: &mut Wallpaper) {
-    if w.transition == Transition::default() {
-        if let Some(ss) = w.slideshow.as_ref() {
-            w.transition = ss.transition;
+fn migrate_wallpaper(w: &mut Wallpaper, legacy: bool) {
+    if legacy && w.transition == Some(Transition::None) {
+        w.transition = None;
+    }
+    if w.transition.is_none() {
+        if let Some(ss) = w
+            .slideshow
+            .as_ref()
+            .filter(|ss| ss.transition != Transition::None)
+        {
+            w.transition = Some(ss.transition);
         }
     }
-    if w.transition == Transition::Crossfade {
-        w.transition = Transition::Fade;
+    if w.transition == Some(Transition::Crossfade) {
+        w.transition = Some(Transition::Fade);
     }
     if let Some(ss) = w.slideshow.as_mut() {
-        ss.transition = w.transition;
+        ss.transition = w.transition.unwrap_or_default();
     }
 }
 
@@ -2096,7 +2141,7 @@ fn power_saving_from_legacy_framerate(fps: u16) -> Option<PowerSaving> {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            version: 1,
+            version: CONFIG_VERSION,
             autostart: true,
             enabled: true,
             pause_on_battery: false,
@@ -2130,6 +2175,7 @@ impl Default for Config {
             onboarding_version: 0,
             seen_notifications: Vec::new(),
             monitors: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
             last_update_check: 0,
             update_skipped_version: String::new(),
             tray_icon: true,
@@ -2225,24 +2271,28 @@ impl Config {
         // and fold `crossfade` onto the fade it always actually was, wherever
         // a Wallpaper can appear — the default, per-monitor overrides, the
         // browser bridge's wallpaper, and both halves of a schedule.
-        migrate_wallpaper(&mut self.wallpaper);
+        // Pre-version-2 files also spelled "inherit" as `"none"`; see
+        // `migrate_wallpaper`.
+        let legacy = self.version < CONFIG_VERSION;
+        migrate_wallpaper(&mut self.wallpaper, legacy);
         for w in self.monitors.values_mut() {
-            migrate_wallpaper(w);
+            migrate_wallpaper(w, legacy);
         }
         if let Some(w) = self.browser_wallpaper.as_mut() {
-            migrate_wallpaper(w);
+            migrate_wallpaper(w, legacy);
         }
         if let Some(w) = self.lockscreen.as_mut().and_then(|l| l.wallpaper.as_mut()) {
-            migrate_wallpaper(w);
+            migrate_wallpaper(w, legacy);
         }
         if let Some(sched) = self.schedule.as_mut() {
             for w in [sched.day.as_mut(), sched.night.as_mut()]
                 .into_iter()
                 .flatten()
             {
-                migrate_wallpaper(w);
+                migrate_wallpaper(w, legacy);
             }
         }
+        self.version = CONFIG_VERSION;
         // `widgets` needs nothing here: it has never shipped under another
         // name, so no released config can contain a deprecated spelling of it.
         // `lockscreen` has no deprecated *key*, but 1.1.46's `blur` was a
@@ -2335,15 +2385,11 @@ impl Config {
         self.monitors.get(connector).unwrap_or(&self.wallpaper)
     }
 
-    /// Transition for a change to `wp`. The per-wallpaper value wins when it is
-    /// not [`Transition::None`] (the field has no "unset", so `None` reads as
-    /// "inherit"); otherwise the global [`Config::transition`]; otherwise none.
+    /// Transition for a change to `wp`: the per-wallpaper value if it has one
+    /// (`Some`, even `Some(Transition::None)`), otherwise the global
+    /// [`Config::transition`], otherwise none.
     pub fn effective_transition(&self, wp: &Wallpaper) -> Transition {
-        if wp.transition != Transition::None {
-            wp.transition
-        } else {
-            self.transition.unwrap_or(Transition::None)
-        }
+        wp.transition.or(self.transition).unwrap_or_default()
     }
 
     /// What the lock screen shows: [`LockScreen::wallpaper`] when the user
@@ -2431,7 +2477,11 @@ mod tests {
 
     #[test]
     fn defaults_from_empty_toml() {
-        let cfg: Config = toml::from_str("").unwrap();
+        // An empty file has no `version`, so it reads as legacy (1); loading
+        // migrates it to the current version, which is what the default is.
+        let mut cfg: Config = toml::from_str("").unwrap();
+        assert_eq!(cfg.version, 1);
+        cfg.migrate();
         assert_eq!(cfg, Config::default());
         assert!(cfg.autostart);
         assert!(cfg.enabled);
@@ -2560,8 +2610,12 @@ mod tests {
         cfg.transition = Some(Transition::Fade);
         assert_eq!(cfg.effective_transition(&wp), Transition::Fade);
 
-        wp.transition = Transition::Zoom;
+        wp.transition = Some(Transition::Zoom);
         assert_eq!(cfg.effective_transition(&wp), Transition::Zoom);
+
+        // An explicit "None" on the wallpaper overrides the global default.
+        wp.transition = Some(Transition::None);
+        assert_eq!(cfg.effective_transition(&wp), Transition::None);
 
         // A global default written as absent stays absent on disk.
         let text = toml::to_string(&Config::default()).unwrap();
@@ -2581,6 +2635,46 @@ mod tests {
         assert_eq!(back.transition, Some(Transition::Fade));
     }
 
+    /// Per-workspace wallpapers are new: a config written before them loads with
+    /// an empty map, the key stays off disk while unused, and entries round-trip.
+    #[test]
+    fn workspace_wallpapers_are_optional_and_round_trip() {
+        let old: Config = toml::from_str("autostart = true").unwrap();
+        assert!(old.workspaces.is_empty());
+        let top: toml::Value = toml::from_str(&toml::to_string(&old).unwrap()).unwrap();
+        assert!(top.get("workspaces").is_none());
+
+        let mut cfg = Config::default();
+        cfg.workspaces.insert(
+            "2".to_string(),
+            Wallpaper {
+                path: Some(std::path::PathBuf::from("/a.mp4")),
+                ..Wallpaper::default()
+            },
+        );
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.workspaces, cfg.workspaces);
+    }
+
+    /// `smooth_loop` (issue #10) is opt-in: a config written before it existed
+    /// must parse to off, an off value must not be written back, and an on
+    /// value must survive a save.
+    #[test]
+    fn smooth_loop_is_optional_off_by_default_and_round_trips() {
+        let old: Wallpaper = toml::from_str("kind = \"video\"\npath = \"/v.mp4\"\n").unwrap();
+        assert!(!old.smooth_loop);
+        let off = toml::to_string(&old).unwrap();
+        assert!(!off.contains("smooth_loop"), "{off}");
+        let on = Wallpaper {
+            smooth_loop: true,
+            ..old
+        };
+        let text = toml::to_string(&on).unwrap();
+        assert!(text.contains("smooth_loop = true"), "{text}");
+        let back: Wallpaper = toml::from_str(&text).unwrap();
+        assert!(back.smooth_loop);
+    }
+
     /// A config that names the effect the old way must keep loading, and must
     /// land on a value the picker can actually show.
     #[test]
@@ -2590,7 +2684,7 @@ mod tests {
         )
         .unwrap();
         cfg.migrate();
-        assert_eq!(cfg.wallpaper.transition, Transition::KenBurns);
+        assert_eq!(cfg.wallpaper.transition, Some(Transition::KenBurns));
         // The slideshow's copy stays in step so an older daemon still reads it.
         assert_eq!(
             cfg.wallpaper.slideshow.as_ref().unwrap().transition,
@@ -2603,7 +2697,69 @@ mod tests {
         )
         .unwrap();
         explicit.migrate();
-        assert_eq!(explicit.wallpaper.transition, Transition::Zoom);
+        assert_eq!(explicit.wallpaper.transition, Some(Transition::Zoom));
+    }
+
+    /// Before config version 2 the stored `"none"` meant "inherit", at every
+    /// place a Wallpaper lives. An upgrade must turn each one into unset, or
+    /// the per-wallpaper "Default" would start silently overriding the global
+    /// transition for everyone.
+    #[test]
+    fn version_one_none_becomes_default_everywhere() {
+        let mut cfg: Config = toml::from_str(
+            "[wallpaper]\ntransition = \"none\"\n\
+             [monitors.\"HDMI-1\"]\ntransition = \"none\"\n\
+             [browser_wallpaper]\ntransition = \"none\"\n\
+             [schedule.day]\ntransition = \"none\"\n\
+             [schedule.night]\ntransition = \"zoom\"\n\
+             [lockscreen]\n[lockscreen.wallpaper]\ntransition = \"none\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.version, 1, "a file with no version key is version 1");
+        cfg.migrate();
+        assert_eq!(cfg.version, 2);
+        assert_eq!(cfg.wallpaper.transition, None);
+        assert_eq!(cfg.monitors["HDMI-1"].transition, None);
+        assert_eq!(cfg.browser_wallpaper.as_ref().unwrap().transition, None);
+        let sched = cfg.schedule.as_ref().unwrap();
+        assert_eq!(sched.day.as_ref().unwrap().transition, None);
+        assert_eq!(
+            sched.night.as_ref().unwrap().transition,
+            Some(Transition::Zoom)
+        );
+        let ls = cfg.lockscreen.as_ref().unwrap().wallpaper.as_ref().unwrap();
+        assert_eq!(ls.transition, None);
+        assert_eq!(cfg.effective_transition(&cfg.wallpaper), Transition::None);
+    }
+
+    /// The old "inherit" also fell through to a slideshow's own legacy
+    /// transition; that must keep working after the "none" -> unset change.
+    #[test]
+    fn version_one_none_still_lifts_the_slideshow_transition() {
+        let mut cfg: Config = toml::from_str(
+            "[wallpaper]\ntransition = \"none\"\n[wallpaper.slideshow]\nfolder = \"/pics\"\ntransition = \"zoom\"",
+        )
+        .unwrap();
+        cfg.migrate();
+        assert_eq!(cfg.wallpaper.transition, Some(Transition::Zoom));
+    }
+
+    /// From version 2 on, "none" is a real choice and survives a load, and the
+    /// unset value is not written at all.
+    #[test]
+    fn version_two_explicit_none_is_kept() {
+        let mut cfg: Config =
+            toml::from_str("version = 2\n[wallpaper]\ntransition = \"none\"\n").unwrap();
+        cfg.migrate();
+        assert_eq!(cfg.wallpaper.transition, Some(Transition::None));
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.wallpaper.transition, Some(Transition::None), "{text}");
+
+        let fresh = Config::default();
+        assert_eq!(fresh.version, 2);
+        let text = toml::to_string_pretty(&fresh).unwrap();
+        assert!(!text.contains("transition"), "{text}");
     }
 
     /// `recursive` is new: configs written before it must stay flat, and a flat
@@ -2635,13 +2791,13 @@ mod tests {
         let raw: Config = toml::from_str("[wallpaper]\ntransition = \"crossfade\"").unwrap();
         assert_eq!(
             raw.wallpaper.transition,
-            Transition::Crossfade,
+            Some(Transition::Crossfade),
             "the key must keep deserialising, migration is a separate step"
         );
 
         let mut cfg = raw;
         cfg.migrate();
-        assert_eq!(cfg.wallpaper.transition, Transition::Fade);
+        assert_eq!(cfg.wallpaper.transition, Some(Transition::Fade));
 
         // Everywhere a Wallpaper can hide, not just the default one.
         let mut nested: Config = toml::from_str(
@@ -2649,14 +2805,20 @@ mod tests {
         )
         .unwrap();
         nested.migrate();
-        assert_eq!(nested.monitors["HDMI-1"].transition, Transition::Fade);
+        assert_eq!(nested.monitors["HDMI-1"].transition, Some(Transition::Fade));
         assert_eq!(
             nested.browser_wallpaper.as_ref().unwrap().transition,
-            Transition::Fade
+            Some(Transition::Fade)
         );
         let sched = nested.schedule.as_ref().unwrap();
-        assert_eq!(sched.day.as_ref().unwrap().transition, Transition::Fade);
-        assert_eq!(sched.night.as_ref().unwrap().transition, Transition::Fade);
+        assert_eq!(
+            sched.day.as_ref().unwrap().transition,
+            Some(Transition::Fade)
+        );
+        assert_eq!(
+            sched.night.as_ref().unwrap().transition,
+            Some(Transition::Fade)
+        );
     }
 
     /// Every variant must survive a TOML round trip — the picker writes them,
@@ -2673,10 +2835,14 @@ mod tests {
             Transition::Blur,
         ] {
             let mut cfg = Config::default();
-            cfg.wallpaper.transition = t;
+            cfg.wallpaper.transition = Some(t);
             let text = toml::to_string_pretty(&cfg).unwrap();
             let back: Config = toml::from_str(&text).unwrap();
-            assert_eq!(back.wallpaper.transition, t, "{t:?} did not round trip");
+            assert_eq!(
+                back.wallpaper.transition,
+                Some(t),
+                "{t:?} did not round trip"
+            );
         }
     }
 
@@ -3919,7 +4085,7 @@ tz = "Europe/London"
         cfg.migrate();
         let w = cfg.lockscreen.unwrap().wallpaper.unwrap();
         assert_eq!(w.path.as_deref(), Some(std::path::Path::new("/a.png")));
-        assert_eq!(w.transition, Transition::Fade);
+        assert_eq!(w.transition, Some(Transition::Fade));
     }
 
     #[test]

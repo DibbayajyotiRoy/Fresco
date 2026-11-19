@@ -7,11 +7,14 @@
 //! `frescod` when it is not running.
 
 use std::hash::BuildHasher;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
 use super::{daemon_ctl, library, linked, window};
-use crate::config::Config;
+use crate::config::{Config, CycleSource};
+use crate::cycle;
+use crate::ipc::{Request, Response};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -128,8 +131,66 @@ pub(crate) fn select(
     Ok(name)
 }
 
+/// The pool of the day/night slot that is active now, when the schedule is live
+/// and that slot draws from one (#130). Then the keys step through it instead.
+fn scheduled_source(config: &Config) -> Option<CycleSource> {
+    use chrono::Offset as _;
+    if config.schedule_paused || !config.enabled {
+        return None;
+    }
+    let sched = config.schedule.as_ref()?;
+    let now = chrono::Local::now();
+    let off = now.offset().fix().local_minus_utc() / 60;
+    crate::schedule::active(sched, now.naive_local(), off)?
+        .source
+        .cloned()
+}
+
+/// What the desktop shows now. The scheduler's pick is never written back to
+/// config.toml, so a running daemon is asked; otherwise the saved wallpaper.
+fn playing_path(config: &Config) -> Option<PathBuf> {
+    if crate::ipc::daemon_alive() {
+        if let Ok(Response::Status(s)) = crate::ipc::request(&Request::Status) {
+            return s.wallpaper_path;
+        }
+    }
+    config.wallpaper.effective_path().map(Path::to_path_buf)
+}
+
+/// Step through the scheduled slot's pool, applying the file as the library
+/// switch does. The daemon's manual-Apply hold keeps it until the next boundary.
+fn switch_within(step: Step, mut config: Config, source: &CycleSource) -> Result<Option<String>> {
+    let pool = cycle::slot_pool(source);
+    let playing = playing_path(&config);
+    let current = pool
+        .iter()
+        .position(|w| w.effective_path() == playing.as_deref());
+    let rand = std::collections::hash_map::RandomState::new().hash_one(0u8) as usize;
+    let Some(slot) = pick(pool.len(), current, step, rand) else {
+        bail!("the scheduled wallpaper source has no images or videos to switch between");
+    };
+    if current == Some(slot) && config.enabled && crate::ipc::daemon_alive() {
+        return Ok(None);
+    }
+    let next = pool[slot].clone();
+    let name = next
+        .effective_path()
+        .and_then(|p| p.file_stem())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    config.wallpaper = next;
+    config.enabled = true;
+    config.save()?;
+    daemon_ctl::apply_blocking()?;
+    Ok(Some(name))
+}
+
 /// `Ok(None)`: the only candidate is already playing, so nothing was touched.
 fn switch(step: Step) -> Result<Option<String>> {
+    let config = Config::load()?;
+    if let Some(source) = scheduled_source(&config) {
+        return switch_within(step, config, &source);
+    }
     let (mut config, mut entries, pool) = load_pool()?;
     let current = pool
         .iter()

@@ -10,13 +10,32 @@
 
 use chrono::{NaiveDateTime, NaiveTime, Timelike};
 
-use crate::config::{Schedule, ScheduleMode, Wallpaper};
+use std::path::Path;
 
-/// The wallpaper the schedule wants on screen at `now` (local wall time).
-/// `utc_offset_minutes` is only used by solar mode to convert sunrise/sunset
-/// (computed in UTC) into local time. Returns None when the schedule is
-/// unusable (no wallpapers configured, unparsable times, missing coords).
-pub fn desired(s: &Schedule, now: NaiveDateTime, utc_offset_minutes: i32) -> Option<&Wallpaper> {
+use crate::config::{CycleSource, Schedule, ScheduleMode, Wallpaper};
+
+/// Which half of a day/night (or solar) schedule is active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Day,
+    Night,
+}
+
+/// What the schedule shows at some instant: the slot's fixed wallpaper, its
+/// pool, or both (the fixed one is the fallback when the pool is empty).
+#[derive(Clone, Copy, Debug)]
+pub struct Active<'a> {
+    /// None for `times` slots, which have no pool.
+    pub slot: Option<Slot>,
+    pub fixed: Option<&'a Wallpaper>,
+    pub source: Option<&'a CycleSource>,
+}
+
+/// The slot active at `now` (local wall time). `utc_offset_minutes` is only
+/// used by solar mode to convert sunrise/sunset (computed in UTC) into local
+/// time. None when the schedule is unusable (no wallpaper or pool configured,
+/// unparsable times, missing coords).
+pub fn active(s: &Schedule, now: NaiveDateTime, utc_offset_minutes: i32) -> Option<Active<'_>> {
     let slots = slot_times(s, now, utc_offset_minutes)?;
     // The latest slot at or before now wins; before the first slot of the day,
     // wrap to the LAST slot (it has been active since yesterday).
@@ -28,6 +47,81 @@ pub fn desired(s: &Schedule, now: NaiveDateTime, utc_offset_minutes: i32) -> Opt
         }
     }
     Some(winner.1)
+}
+
+/// The fixed wallpaper of the active slot. None when that slot is pool-only or
+/// the schedule is unusable. The daemon uses [`active`] so it can draw from the
+/// pool; this is the GUI's view of the fixed choice.
+pub fn desired(s: &Schedule, now: NaiveDateTime, utc_offset_minutes: i32) -> Option<&Wallpaper> {
+    active(s, now, utc_offset_minutes)?.fixed
+}
+
+/// Sticky random pick from a day/night slot's pool (#130). The same file is
+/// returned until the active slot changes, the pick is cleared (schedule off or
+/// no pool), or the file disappears, so the 2 s tick never re-rolls. Lives in
+/// the daemon. A daemon restart re-picks, which is acceptable.
+#[derive(Default)]
+pub struct SlotPick {
+    key: Option<(Slot, CycleSource)>,
+    pick: Option<Wallpaper>,
+}
+
+impl SlotPick {
+    pub const fn new() -> Self {
+        SlotPick {
+            key: None,
+            pick: None,
+        }
+    }
+
+    /// Forget the pick (schedule off, or the active slot has no pool).
+    pub fn clear(&mut self) {
+        *self = Self::new();
+    }
+
+    /// The wallpaper to show for `slot` drawing from `source`. `pool` lists the
+    /// candidates and is only called when a new pick is needed; `rand` chooses
+    /// among them. `current` is the configured wallpaper: on the first pick
+    /// after the schedule was switched on, a member of the pool is kept, so
+    /// turning the schedule on does not re-roll what the user just set. None
+    /// when the pool is empty.
+    pub fn resolve(
+        &mut self,
+        slot: Slot,
+        source: &CycleSource,
+        pool: impl FnOnce() -> Vec<Wallpaper>,
+        rand: usize,
+        current: Option<&Wallpaper>,
+    ) -> Option<Wallpaper> {
+        let same = self
+            .key
+            .as_ref()
+            .is_some_and(|(s, src)| *s == slot && src == source);
+        if same {
+            if let Some(w) = self
+                .pick
+                .as_ref()
+                .filter(|w| w.effective_path().is_some_and(Path::exists))
+            {
+                return Some(w.clone());
+            }
+        }
+        let first = self.key.is_none();
+        let files = pool();
+        let adopted = first
+            .then(|| {
+                current
+                    .filter(|c| files.iter().any(|f| f.same_media(c)))
+                    .cloned()
+            })
+            .flatten();
+        self.key = Some((slot, source.clone()));
+        // ponytail: an empty pool is re-listed on every tick. Cheap next to the
+        // 2 s tick; a folder watcher would be the upgrade if it ever matters.
+        self.pick =
+            adopted.or_else(|| (!files.is_empty()).then(|| files[rand % files.len()].clone()));
+        self.pick.clone()
+    }
 }
 
 /// Seconds until the next slot boundary after `now` — lets the daemon log or
@@ -53,17 +147,17 @@ pub fn next_change_secs(s: &Schedule, now: NaiveDateTime, utc_offset_minutes: i3
 }
 
 /// The next slot change after `now`: when it happens (local wall time,
-/// minute precision) and the wallpaper that takes over then. Drives the
+/// minute precision) and the slot that takes over then. Drives the
 /// "Next switch at …" hint in Advanced; None when the schedule is unusable.
 pub fn next_switch(
     s: &Schedule,
     now: NaiveDateTime,
     utc_offset_minutes: i32,
-) -> Option<(NaiveTime, &Wallpaper)> {
+) -> Option<(NaiveTime, Active<'_>)> {
     let secs = next_change_secs(s, now, utc_offset_minutes)?;
     let at = now.checked_add_signed(chrono::Duration::seconds(secs as i64))?;
-    let w = desired(s, at, utc_offset_minutes)?;
-    Some((at.time(), w))
+    let a = active(s, at, utc_offset_minutes)?;
+    Some((at.time(), a))
 }
 
 /// "Next switch at 17:16: name" — pure so the wording is testable.
@@ -86,32 +180,34 @@ pub fn library_position<'a>(
     paths.into_iter().position(|p| p == Some(target))
 }
 
-/// Resolve the schedule into (start-time, wallpaper) slots for `now`'s date.
+/// Resolve the schedule into (start-time, active slot) pairs for `now`'s date.
 fn slot_times(
     s: &Schedule,
     now: NaiveDateTime,
     utc_offset_minutes: i32,
-) -> Option<Vec<(NaiveTime, &Wallpaper)>> {
-    let mut slots: Vec<(NaiveTime, &Wallpaper)> = match s.mode {
-        ScheduleMode::Daynight => {
-            let day = s.day.as_ref()?;
-            let night = s.night.as_ref()?;
-            vec![
-                (parse_hhmm(&s.day_start)?, day),
-                (parse_hhmm(&s.night_start)?, night),
-            ]
-        }
+) -> Option<Vec<(NaiveTime, Active<'_>)>> {
+    let mut slots: Vec<(NaiveTime, Active<'_>)> = match s.mode {
+        ScheduleMode::Daynight => vec![
+            (parse_hhmm(&s.day_start)?, part(s, Slot::Day)?),
+            (parse_hhmm(&s.night_start)?, part(s, Slot::Night)?),
+        ],
         ScheduleMode::Times => {
             if s.at.is_empty() {
                 return None;
             }
             s.at.iter()
-                .map(|slot| parse_hhmm(&slot.time).map(|t| (t, &slot.wallpaper)))
+                .map(|slot| {
+                    let a = Active {
+                        slot: None,
+                        fixed: Some(&slot.wallpaper),
+                        source: None,
+                    };
+                    parse_hhmm(&slot.time).map(|t| (t, a))
+                })
                 .collect::<Option<Vec<_>>>()?
         }
         ScheduleMode::Solar => {
-            let day = s.day.as_ref()?;
-            let night = s.night.as_ref()?;
+            let (day, night) = (part(s, Slot::Day)?, part(s, Slot::Night)?);
             let (rise_utc_h, set_utc_h) = sunrise_sunset_utc(s.lat?, s.lon?, now.date())?;
             let off = f64::from(utc_offset_minutes) / 60.0;
             vec![
@@ -122,6 +218,20 @@ fn slot_times(
     };
     slots.sort_by_key(|(t, _)| *t);
     Some(slots)
+}
+
+/// One half of a day/night schedule. None when it has neither a wallpaper nor
+/// a pool, which makes the whole schedule unusable.
+fn part(s: &Schedule, slot: Slot) -> Option<Active<'_>> {
+    let (fixed, source) = match slot {
+        Slot::Day => (s.day.as_ref(), s.day_source.as_ref()),
+        Slot::Night => (s.night.as_ref(), s.night_source.as_ref()),
+    };
+    (fixed.is_some() || source.is_some()).then_some(Active {
+        slot: Some(slot),
+        fixed,
+        source,
+    })
 }
 
 /// "HH:MM" (24h) → NaiveTime.
@@ -199,6 +309,8 @@ mod tests {
             night_start: "19:00".into(),
             lat: None,
             lon: None,
+            day_source: None,
+            night_source: None,
             at: vec![],
         }
     }
@@ -292,6 +404,8 @@ mod tests {
             night_start: default_start("19:00"),
             lat: None,
             lon: None,
+            day_source: None,
+            night_source: None,
         };
         assert_eq!(
             path_of(desired(&s, at((2026, 7, 3), (11, 59)), 0)),
@@ -380,6 +494,8 @@ mod tests {
             mode: ScheduleMode::Solar,
             lat: Some(51.4769),
             lon: Some(0.0),
+            day_source: None,
+            night_source: None,
             ..daynight()
         };
         // Greenwich June solstice, BST (+60): sunrise ≈ 04:43, sunset ≈ 21:21 local.
@@ -407,6 +523,8 @@ mod tests {
             mode: ScheduleMode::Solar,
             lat: Some(78.0), // Svalbard
             lon: Some(15.0),
+            day_source: None,
+            night_source: None,
             ..daynight()
         };
         assert!(desired(&s, at((2026, 12, 21), (12, 0)), 60).is_none());
@@ -435,7 +553,7 @@ mod tests {
         assert_eq!(next_change_secs(&s, at_s(17, 15, 0), 0), Some(60));
         let (t, w) = next_switch(&s, at_s(17, 15, 0), 0).unwrap();
         assert_eq!(t.format("%H:%M").to_string(), "17:16");
-        assert_eq!(path_of(Some(w)), "/night.mp4");
+        assert_eq!(path_of(w.fixed), "/night.mp4");
     }
 
     #[test]
@@ -503,5 +621,207 @@ mod tests {
             next_switch_hint(t, "海屿你"),
             "Next switch at 17:16: 海屿你"
         );
+    }
+}
+
+/// #130: day/night slots that draw from a pool.
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+    use crate::config::Kind;
+    use chrono::NaiveDate;
+    use std::path::PathBuf;
+
+    fn at(h: u32, m: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2026, 7, 3)
+            .unwrap()
+            .and_hms_opt(h, m, 0)
+            .unwrap()
+    }
+    fn fixed(path: &str) -> Wallpaper {
+        Wallpaper {
+            kind: Kind::Video,
+            path: Some(PathBuf::from(path)),
+            ..Default::default()
+        }
+    }
+    fn daynight() -> Schedule {
+        Schedule {
+            mode: ScheduleMode::Daynight,
+            day: Some(fixed("/day.mp4")),
+            night: Some(fixed("/night.mp4")),
+            day_source: None,
+            night_source: None,
+            day_start: "07:00".into(),
+            night_start: "19:00".into(),
+            lat: None,
+            lon: None,
+            at: vec![],
+        }
+    }
+    fn folder(tag: &str, names: &[&str]) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("fresco-pool-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for n in names {
+            std::fs::write(d.join(n), b"x").unwrap();
+        }
+        d
+    }
+    /// What `cycle::slot_pool` would list for `d`: sorted, one wallpaper per file.
+    fn listed(d: &Path) -> Vec<Wallpaper> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(d)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        files.sort();
+        files
+            .into_iter()
+            .map(|p| Wallpaper {
+                kind: Kind::Image,
+                path: Some(p),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn old_config_without_pools_parses_and_writes_no_pool_keys() {
+        let s: Schedule = toml::from_str(
+            "mode = \"daynight\"\n[day]\npath = \"/d.mp4\"\n[night]\npath = \"/n.mp4\"\n",
+        )
+        .unwrap();
+        assert!(s.day_source.is_none() && s.night_source.is_none());
+        assert!(!toml::to_string(&s).unwrap().contains("source"));
+    }
+
+    #[test]
+    fn pool_source_parses_from_config() {
+        let s: Schedule = toml::from_str(
+            "mode = \"daynight\"\n[day]\npath = \"/d.mp4\"\n\
+             [night]\npath = \"/n.mp4\"\n\
+             [night_source]\nkind = \"folder\"\nvalue = \"/pics\"\n",
+        )
+        .unwrap();
+        assert_eq!(s.day_source, None);
+        assert_eq!(
+            s.night_source,
+            Some(CycleSource::Folder(PathBuf::from("/pics")))
+        );
+    }
+
+    #[test]
+    fn a_pool_alone_makes_a_slot_valid() {
+        let src = CycleSource::Folder(PathBuf::from("/pics"));
+        let s = Schedule {
+            day: None,
+            day_source: Some(src.clone()),
+            ..daynight()
+        };
+        let a = active(&s, at(12, 0), 0).expect("pool-only day slot is usable");
+        assert_eq!(a.slot, Some(Slot::Day));
+        assert!(a.fixed.is_none());
+        assert_eq!(a.source.cloned(), Some(src));
+        assert!(desired(&s, at(12, 0), 0).is_none());
+        assert!(next_change_secs(&s, at(12, 0), 0).is_some());
+        // The night slot is still the fixed wallpaper.
+        let night = active(&s, at(20, 0), 0).unwrap();
+        assert_eq!(
+            night.fixed.unwrap().effective_path(),
+            Some(Path::new("/night.mp4"))
+        );
+        assert!(night.source.is_none());
+    }
+
+    #[test]
+    fn a_slot_with_neither_wallpaper_nor_pool_is_unusable() {
+        let s = Schedule {
+            day: None,
+            ..daynight()
+        };
+        assert!(active(&s, at(12, 0), 0).is_none());
+    }
+
+    #[test]
+    fn sticky_pick_holds_until_the_slot_changes() {
+        let d = folder("sticky", &["a.png", "b.png", "c.png", "d.png"]);
+        let src = CycleSource::Folder(d.clone());
+        let mut p = SlotPick::new();
+        let first = p.resolve(Slot::Day, &src, || listed(&d), 1, None).unwrap();
+        for r in [0, 2, 3, 7] {
+            assert_eq!(
+                p.resolve(Slot::Day, &src, || listed(&d), r, None),
+                Some(first.clone())
+            );
+        }
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn re_picks_when_the_slot_changes_and_when_the_file_vanishes() {
+        let d = folder("reroll", &["a.png", "b.png", "c.png", "d.png"]);
+        let src = CycleSource::Folder(d.clone());
+        let mut p = SlotPick::new();
+        let day = p.resolve(Slot::Day, &src, || listed(&d), 0, None).unwrap();
+        let night = p
+            .resolve(Slot::Night, &src, || listed(&d), 2, None)
+            .unwrap();
+        assert_eq!(night.effective_path(), Some(d.join("c.png").as_path()));
+        // Back to day with a different roll: a new pick is made.
+        let day2 = p.resolve(Slot::Day, &src, || listed(&d), 3, None).unwrap();
+        assert_eq!(day2.effective_path(), Some(d.join("d.png").as_path()));
+        assert_ne!(day, day2);
+        // The picked file is deleted: re-roll instead of returning a dead path.
+        std::fs::remove_file(d.join("d.png")).unwrap();
+        let again = p.resolve(Slot::Day, &src, || listed(&d), 0, None).unwrap();
+        assert!(again.effective_path().unwrap().exists());
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn empty_pool_gives_no_pick_and_later_files_are_picked_up() {
+        let d = folder("empty", &[]);
+        let src = CycleSource::Folder(d.clone());
+        let mut p = SlotPick::new();
+        assert!(p.resolve(Slot::Day, &src, || listed(&d), 5, None).is_none());
+        std::fs::write(d.join("a.png"), b"x").unwrap();
+        assert_eq!(
+            p.resolve(Slot::Day, &src, || listed(&d), 5, None)
+                .unwrap()
+                .effective_path(),
+            Some(d.join("a.png").as_path())
+        );
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn first_pick_keeps_the_configured_member_of_the_pool() {
+        let d = folder("adopt", &["a.png", "b.png"]);
+        let src = CycleSource::Folder(d.clone());
+        let current = listed(&d).remove(1); // b.png, already set by the user
+        let mut p = SlotPick::new();
+        // Any roll would pick a.png; the schedule was just switched on.
+        let got = p
+            .resolve(Slot::Day, &src, || listed(&d), 0, Some(&current))
+            .unwrap();
+        assert_eq!(got.effective_path(), Some(d.join("b.png").as_path()));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn clear_forgets_the_pick() {
+        let d = folder("clear", &["a.png", "b.png"]);
+        let src = CycleSource::Folder(d.clone());
+        let mut p = SlotPick::new();
+        p.resolve(Slot::Day, &src, || listed(&d), 0, None);
+        p.clear();
+        // After a clear the first pick again adopts the configured wallpaper.
+        let current = listed(&d).remove(1);
+        let got = p
+            .resolve(Slot::Day, &src, || listed(&d), 0, Some(&current))
+            .unwrap();
+        assert_eq!(got.effective_path(), Some(d.join("b.png").as_path()));
+        std::fs::remove_dir_all(&d).ok();
     }
 }

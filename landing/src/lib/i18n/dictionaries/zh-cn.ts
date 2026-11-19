@@ -537,12 +537,14 @@ export const zhCn: Dictionary = {
     tipAfter: " 的输出。",
     bug: "报告 Bug",
     feature: "提出功能建议",
+    discord: "加入 Discord",
   },
 
   footer: {
     github: "GitHub",
     license: "许可协议",
     reportIssue: "报告问题",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "开关音效",
   },

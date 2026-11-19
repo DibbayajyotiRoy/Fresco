@@ -1,0 +1,23 @@
+#!/bin/sh
+# /usr/bin/fresco on the fresco-legacy package (Deepin V20 / UOS 20 / Debian 10).
+#
+# GTK 4.6, libadwaita 1.1 and their glib/pango/harfbuzz are in /opt/fresco-legacy/lib.
+# The binaries carry that directory as RUNPATH, so LD_LIBRARY_PATH is not set
+# here: child processes (gsettings, gdbus, mpvpaper) keep the system libraries.
+#
+# Overrides, read from the environment before this script runs:
+#   GDK_BACKEND  default x11. This GTK is built without the Wayland backend.
+#   GSK_RENDERER default cairo. Old Mesa on V20 is not trusted for GL, and the
+#                settings UI is light enough for the CPU renderer. Set
+#                GSK_RENDERER=gl to try the GL renderer.
+dir="$(dirname -- "$(readlink -f -- "$0")")"
+
+: "${GDK_BACKEND:=x11}"
+: "${GSK_RENDERER:=cairo}"
+export GDK_BACKEND GSK_RENDERER
+
+# Bundled GTK schemas (org.gtk.gtk4.Settings.*) live under /opt/fresco-legacy/share.
+XDG_DATA_DIRS="/opt/fresco-legacy/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_DATA_DIRS
+
+exec "$dir/fresco-bin" "$@"

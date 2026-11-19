@@ -30,6 +30,7 @@ x11rb::atom_manager! {
         _NET_WM_STATE_MAXIMIZED_VERT,
         _NET_WM_STATE_MAXIMIZED_HORZ,
         _NET_CLIENT_LIST_STACKING,
+        _NET_CURRENT_DESKTOP,
         _NET_RESTACK_WINDOW,
         _NET_WM_NAME,
         UTF8_STRING,
@@ -202,8 +203,8 @@ impl WallpaperWindow {
 
         // Wait until the window is actually viewable before the caller embeds mpv
         // in it. On a cold boot the X server + WM are slow to process the map; if
-        // mpv brings up its display-synced video output (vo=gpu, video-sync=
-        // display-resample) on a not-yet-viewable window, it stalls on the first
+        // mpv brings up its display-synced video output (vo=gpu, display-timed
+        // presentation) on a not-yet-viewable window, it stalls on the first
         // frame and stays frozen until the next rebuild — the "wallpaper is static
         // after reboot until I reselect it" bug. Bounded poll: returns immediately
         // once mapped (the warm / reselect case) and never blocks startup for long.
@@ -483,6 +484,7 @@ pub(super) mod tests {
             _NET_WM_STATE_MAXIMIZED_VERT: 17,
             _NET_WM_STATE_MAXIMIZED_HORZ: 18,
             _NET_CLIENT_LIST_STACKING: 11,
+            _NET_CURRENT_DESKTOP: 20,
             _NET_RESTACK_WINDOW: 16,
             _NET_WM_NAME: 12,
             UTF8_STRING: 13,

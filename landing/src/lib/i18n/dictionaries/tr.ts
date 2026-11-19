@@ -551,12 +551,14 @@ export const tr: Dictionary = {
     tipAfter: ".",
     bug: "Hata bildir",
     feature: "Özellik iste",
+    discord: "Discord’a katıl",
   },
 
   footer: {
     github: "GitHub",
     license: "Lisans",
     reportIssue: "Sorun bildir",
+    discord: "Discord",
     tagline: "Rust + GTK4 + mpv",
     sound: "Sesi aç/kapat",
   },

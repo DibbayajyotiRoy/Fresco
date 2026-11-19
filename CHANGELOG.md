@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Make seamless loop: re-encode a video with a crossfade at the loop point (needs ffmpeg) (#10)
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

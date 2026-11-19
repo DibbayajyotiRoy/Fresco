@@ -10,6 +10,7 @@ mod lockscreen;
 pub mod pick;
 mod preview;
 mod preview_proxy;
+mod seamless;
 mod status;
 pub mod switch;
 mod theme;

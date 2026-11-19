@@ -114,6 +114,11 @@ pub struct LibraryEntry {
     /// timestamp.
     #[serde(default)]
     pub added: u64,
+    /// The video this entry was before "Make seamless loop" re-encoded it;
+    /// `path` is then the generated copy under the library's `seamless/`
+    /// directory. Kept so the change can be reverted. `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<PathBuf>,
 }
 
 impl LibraryEntry {
@@ -150,6 +155,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -186,6 +192,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -229,6 +236,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -265,6 +273,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -307,6 +316,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 

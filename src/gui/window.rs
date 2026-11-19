@@ -18,9 +18,9 @@ use super::{
 use crate::{
     autostart,
     config::{
-        Accent, Clock, ClockThemeCfg, Config, Disc, Fit, GradientMode, Kind, LyricAnchor,
-        LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition, Visualizer,
-        VisualizerStyleCfg, WidgetTheme, Widgets, WorldClock, WorldZone,
+        Accent, Clock, ClockThemeCfg, Config, CycleSource, Disc, Fit, GradientMode, Kind,
+        LyricAnchor, LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition,
+        Visualizer, VisualizerStyleCfg, WidgetTheme, Widgets, WorldClock, WorldZone,
     },
     t, tf, APP_ID,
 };
@@ -275,6 +275,9 @@ thread_local! {
     /// The Performance mode switch in the menu, so an external change to
     /// config.toml can move it. Set once by `build_behavior_page`.
     static PERFORMANCE_SWITCH: RefCell<Option<gtk4::Switch>> = const { RefCell::new(None) };
+    /// Same for the "Change wallpaper automatically" switch, which the
+    /// Advanced dialog also flips.
+    static AUTO_CYCLE_SWITCH: RefCell<Option<gtk4::Switch>> = const { RefCell::new(None) };
 }
 
 /// Keep `state.config` in step with config.toml while the window is open:
@@ -306,7 +309,7 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
         let Ok(disk) = Config::load() else {
             return;
         };
-        let (moved, refresh, performance, previews) = {
+        let (moved, refresh, performance, previews, auto_cycle) = {
             // Held elsewhere (a handler mid-edit): the next change event retries.
             let Ok(mut s) = state.try_borrow_mut() else {
                 return;
@@ -316,6 +319,7 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
                 s.refresh.clone(),
                 s.config.performance_mode,
                 s.config.effective_hover_previews(),
+                s.config.auto_cycle.enabled,
             )
         };
         // The tray (or a hand edit) can flip performance mode: the hover-preview
@@ -324,6 +328,11 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
         PERFORMANCE_SWITCH.with(|sw| {
             if let Some(sw) = sw.borrow().as_ref() {
                 sw.set_active(performance); // the handler skips an unchanged value
+            }
+        });
+        AUTO_CYCLE_SWITCH.with(|sw| {
+            if let Some(sw) = sw.borrow().as_ref() {
+                sw.set_active(auto_cycle);
             }
         });
         if moved {
@@ -1785,6 +1794,35 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     low_memory_hint.set_margin_end(4);
     low_memory_hint.set_margin_bottom(6);
     popover_box.append(&low_memory_hint);
+    // Only saves: the daemon adopts `auto_cycle` on its next config poll (see
+    // `adopt_pause_flags`), so no Apply and no video restart.
+    let auto_cycle_row = switch_row(
+        t!("Change wallpaper automatically"),
+        state.borrow().config.auto_cycle.enabled,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                if s.config.auto_cycle.enabled != active {
+                    s.config.auto_cycle.enabled = active;
+                    s.config.save().ok();
+                }
+            }
+        },
+    );
+    AUTO_CYCLE_SWITCH.with(|sw| {
+        *sw.borrow_mut() = auto_cycle_row.last_child().and_downcast::<gtk4::Switch>();
+    });
+    popover_box.append(&auto_cycle_row);
+    let auto_cycle_hint = gtk4::Label::new(Some(t!("Interval and source are in Advanced")));
+    auto_cycle_hint.add_css_class("dim");
+    auto_cycle_hint.set_wrap(true);
+    auto_cycle_hint.set_max_width_chars(34);
+    auto_cycle_hint.set_xalign(0.0);
+    auto_cycle_hint.set_margin_start(4);
+    auto_cycle_hint.set_margin_end(4);
+    auto_cycle_hint.set_margin_bottom(6);
+    popover_box.append(&auto_cycle_hint);
     popover_box.append(&switch_row(
         t!("Restore on login"),
         state.borrow().config.autostart,
@@ -6475,6 +6513,7 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     page.add(&transition_group);
 
     add_schedule_group(&page, state.clone());
+    add_auto_cycle_group(&page, state.clone());
     add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());
     add_clock_group(&page, state.clone());
@@ -6484,6 +6523,150 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     add_disc_group(&page, state);
     dialog.add(&page);
     dialog.present();
+}
+
+/// "Change every" presets, in minutes. A saved interval that is not one of
+/// these is still listed (see `add_auto_cycle_group`), so opening the dialog
+/// never rewrites it.
+const CYCLE_PRESET_MINUTES: [u32; 8] = [1, 10, 30, 60, 120, 240, 360, 1440];
+
+fn cycle_interval_label(minutes: u32) -> String {
+    match minutes {
+        1 => t!("1 minute").to_string(),
+        10 => t!("10 minutes").to_string(),
+        30 => t!("30 minutes").to_string(),
+        60 => t!("1 hour").to_string(),
+        120 => t!("2 hours").to_string(),
+        240 => t!("4 hours").to_string(),
+        360 => t!("6 hours").to_string(),
+        1440 => t!("1 day").to_string(),
+        n => tf!("{count} minutes", "count" => n.to_string()),
+    }
+}
+
+/// The auto-cycle source a collection maps to. A linked folder cycles its
+/// files straight from disk: `Collection` only searches imported entries.
+fn cycle_source_for(c: &library::Collection) -> CycleSource {
+    match &c.link {
+        Some(link) => CycleSource::Folder(link.path.clone()),
+        None => CycleSource::Collection(c.id.clone()),
+    }
+}
+
+/// A preferences row with a title and a switch at the end.
+fn toggle_row(title: &str, active: bool, on_toggle: impl Fn(bool) + 'static) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(title);
+    let sw = gtk4::Switch::new();
+    sw.set_active(active);
+    sw.set_valign(gtk4::Align::Center);
+    sw.connect_active_notify(move |sw| on_toggle(sw.is_active()));
+    row.add_suffix(&sw);
+    row.set_activatable_widget(Some(&sw));
+    row
+}
+
+/// "Change wallpaper automatically" in Advanced: the on/off switch (shared
+/// with the Behavior menu), the interval, shuffle, and which pool to draw from.
+/// Every change only saves; the daemon picks it up within a couple of seconds.
+fn add_auto_cycle_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let group = adw::PreferencesGroup::new();
+    group.set_title(t!("Change wallpaper automatically"));
+
+    let (cycle, mut collections) = {
+        let s = state.borrow();
+        (s.config.auto_cycle.clone(), s.collections.clone())
+    };
+    collections.sort_by_key(|c| c.position);
+
+    // `adw::SwitchRow` needs libadwaita 1.4; this app targets 1.1, so these
+    // are plain action rows with a switch suffix.
+    group.add(&toggle_row(t!("Enabled"), cycle.enabled, {
+        let state = state.clone();
+        move |on| {
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.enabled = on;
+            s.config.save().ok();
+        }
+    }));
+
+    let mut minutes = CYCLE_PRESET_MINUTES.to_vec();
+    if !minutes.contains(&cycle.interval_min) {
+        minutes.push(cycle.interval_min);
+        minutes.sort_unstable();
+    }
+    let labels: Vec<String> = minutes.iter().map(|&m| cycle_interval_label(m)).collect();
+    let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let every = adw::ComboRow::new();
+    every.set_title(t!("Change every"));
+    every.set_model(Some(&gtk4::StringList::new(&label_refs)));
+    every.set_selected(
+        minutes
+            .iter()
+            .position(|&m| m == cycle.interval_min)
+            .unwrap_or(0) as u32,
+    );
+    {
+        let state = state.clone();
+        every.connect_selected_notify(move |row| {
+            let Some(&m) = minutes.get(row.selected() as usize) else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.interval_min = m;
+            s.config.save().ok();
+        });
+    }
+    group.add(&every);
+
+    group.add(&toggle_row(t!("Shuffle"), cycle.shuffle, {
+        let state = state.clone();
+        move |on| {
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.shuffle = on;
+            s.config.save().ok();
+        }
+    }));
+
+    let mut sources = vec![CycleSource::Library];
+    let mut names = vec![t!("Whole library").to_string()];
+    for c in &collections {
+        sources.push(cycle_source_for(c));
+        names.push(c.name.clone());
+    }
+    // A saved source that matches nothing (a deleted collection, a folder no
+    // longer linked) keeps its own entry, so the row never claims "Whole
+    // library" for it.
+    let selected = match sources.iter().position(|s| *s == cycle.source) {
+        Some(i) => i,
+        None => {
+            names.push(match &cycle.source {
+                CycleSource::Folder(p) => p.display().to_string(),
+                _ => t!("Unavailable collection").to_string(),
+            });
+            sources.push(cycle.source.clone());
+            sources.len() - 1
+        }
+    };
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let source = adw::ComboRow::new();
+    source.set_title(t!("Wallpapers from"));
+    source.set_model(Some(&gtk4::StringList::new(&name_refs)));
+    source.set_selected(selected as u32);
+    {
+        let state = state.clone();
+        source.connect_selected_notify(move |row| {
+            let Some(src) = sources.get(row.selected() as usize) else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.source = src.clone();
+            s.config.save().ok();
+        });
+    }
+    group.add(&source);
+
+    page.add(&group);
 }
 
 /// "Day & night wallpaper" preferences group (ROADMAP 3.3 GUI). v1 exposes

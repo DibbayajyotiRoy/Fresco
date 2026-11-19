@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - Discord community link in Help & feedback, About, the website and the README.
+- Change wallpaper automatically: pick how often (1 minute to 1 day), shuffle, and which collection or linked folder, in Advanced; on/off in Behavior.
 
 ### Fixed
 - Settings windows and dialogs can be resized again on sway and other tiling compositors (#147).

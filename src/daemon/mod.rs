@@ -172,9 +172,13 @@ impl PauseConfigWatch {
     }
 }
 
-/// Copy the two pause switches from `fresh` into `cached`, leaving every other
-/// field (a scheduled wallpaper swap lives only in `cached`) alone. Returns
-/// which of them changed: `(pause_on_battery, pause_on_covered)`.
+/// Copy the two pause switches and the auto-cycle settings from `fresh` into
+/// `cached`, leaving every other field (a scheduled wallpaper swap lives only
+/// in `cached`) alone. Returns which pause switches changed:
+/// `(pause_on_battery, pause_on_covered)`. The auto-cycle timer reads
+/// `cached.auto_cycle` every tick, so a new interval, shuffle or source
+/// applies without a video restart; a new interval is measured from the last
+/// switch rather than reset.
 fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     let changed = (
         cached.pause_on_battery != fresh.pause_on_battery,
@@ -182,6 +186,7 @@ fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     );
     cached.pause_on_battery = fresh.pause_on_battery;
     cached.pause_on_covered = fresh.pause_on_covered;
+    cached.auto_cycle = fresh.auto_cycle.clone();
     changed
 }
 /// Audio recovery cadence/backoff (see `AudioHeal`).
@@ -2858,6 +2863,10 @@ fn run_gnome_static() -> Result<()> {
     // ("blocks on the control channel between commands -> ~0% CPU").
     let mut lock_rt = LockRuntime::new();
     let mut last_cycle: Option<Instant> = None;
+    // The GUI's auto-cycle switches only save config.toml, so adopt them here.
+    // The wait is capped at CONFIG_POLL, so an otherwise idle loop wakes once
+    // every 2 s for one stat.
+    let mut config_watch = PauseConfigWatch::new();
 
     // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
     // never wakes on its own, so a daemon left running for days without an
@@ -2865,11 +2874,14 @@ fn run_gnome_static() -> Result<()> {
     // then gone quiet in the usage numbers. `heartbeat` self-throttles to
     // roughly once a day via its own marker file either way.
     loop {
-        let timeout = gnome_static_cycle_timeout(&config, last_cycle);
+        let timeout = gnome_static_cycle_timeout(&config, last_cycle).min(CONFIG_POLL);
         let (req, reply) = match commands.recv_timeout(timeout) {
             Ok(pair) => pair,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
+                if let Some(fresh) = config_watch.poll() {
+                    adopt_pause_flags(&mut config, &fresh);
+                }
                 lock_rt.poll(now);
                 gnome_static_auto_cycle(&mut config, &mut last_cycle, now, lock_rt.locked);
                 crate::telemetry::heartbeat(Some("gnome-static"), None, None);
@@ -2882,6 +2894,7 @@ fn run_gnome_static() -> Result<()> {
         let is_apply = matches!(req, Request::Apply);
         let resp = match req {
             Request::Apply => {
+                config_watch.mark();
                 config = Config::load().unwrap_or_else(|_| config.clone());
                 lock_rt.on_apply(&config);
                 Response::Ok
@@ -5436,6 +5449,41 @@ mod tests {
         assert!(auto_cycle_due(&ac, &mut last, t0 + iv * 2, false));
     }
 
+    /// The GUI's save to config.toml, end to end through the daemon's own
+    /// pieces: parse the file, adopt it, tick the timer, pick the next file.
+    #[cfg(feature = "gui")]
+    #[test]
+    fn gui_saved_folder_cycle_is_adopted_and_walks_the_folder() {
+        let dir = std::env::temp_dir().join(format!("fresco-cycle-e2e-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.png"), b"x").unwrap();
+        std::fs::write(dir.join("b.png"), b"x").unwrap();
+        let toml = format!(
+            "[auto_cycle]\nenabled = true\ninterval_min = 1\n\
+             source = {{ kind = \"folder\", value = {:?} }}\n",
+            dir.to_str().unwrap()
+        );
+        let fresh: Config = toml::from_str(&toml).unwrap();
+        let mut cached = Config::default();
+        adopt_pause_flags(&mut cached, &fresh);
+        assert!(cached.auto_cycle.enabled);
+
+        let t0 = Instant::now();
+        let mut last = None;
+        assert!(!auto_cycle_due(&cached.auto_cycle, &mut last, t0, false));
+        let t1 = t0 + Duration::from_secs(60);
+        assert!(auto_cycle_due(&cached.auto_cycle, &mut last, t1, false));
+
+        let first = super::auto_cycle_next(&cached, &cached.wallpaper).unwrap();
+        assert_eq!(first.effective_path(), Some(dir.join("a.png").as_path()));
+        let second = super::auto_cycle_next(&cached, &first).unwrap();
+        assert_eq!(second.effective_path(), Some(dir.join("b.png").as_path()));
+        let wrapped = super::auto_cycle_next(&cached, &second).unwrap();
+        assert_eq!(wrapped.effective_path(), Some(dir.join("a.png").as_path()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn auto_cycle_pause_or_lock_clears_the_timer_and_resume_waits_a_full_interval() {
         let ac = cycle_every(10);
@@ -5574,6 +5622,12 @@ mod tests {
         fresh.pause_on_covered = false;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (true, true));
         assert!(cached.pause_on_battery && !cached.pause_on_covered);
+
+        // Auto-cycle settings ride along on the same poll.
+        fresh.auto_cycle.interval_min = 120;
+        fresh.auto_cycle.shuffle = true;
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
+        assert_eq!(cached.auto_cycle, fresh.auto_cycle);
 
         // Already in step: a second look reports nothing.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));

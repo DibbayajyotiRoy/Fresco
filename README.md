@@ -121,6 +121,7 @@ The wallpaper keeps playing after the window closes.
 | Xfce (X11) | ✅ | Desktop icons stay visible over the wallpaper, and you can click, select and drag them |
 | MATE (X11) | ✅ | Desktop icons stay visible and clickable over the wallpaper |
 | Deepin 25 (DDE, X11) | ✅ | Automatic DDE adaptation — community-verified on Deepin 25 Community build1 |
+| Deepin V20 / UOS 20 (X11) | ✅ | Use the `fresco-legacy_*.deb` from the release page. It bundles its own GTK 4 and libadwaita, which V20 does not ship. Not verified on a real V20 machine yet; see [docs/INSTALL.md](docs/INSTALL.md#deepin-v20--uos-20) |
 | COSMIC (Wayland) | ✅ | layer-shell |
 | Hyprland | ✅ | layer-shell |
 | Sway | ✅ | layer-shell |

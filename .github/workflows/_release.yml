@@ -550,3 +550,76 @@ jobs:
           else
             echo "::notice::AUR 'fresco' not published (AUR_PUBLISH_SOURCE_PKG is not 'true')."
           fi
+
+  # ── Deepin V20 / UOS 20 / Debian 10 (fresco-legacy) ────────────────────────
+  # V20 has glibc 2.28, no GTK 4 and no libadwaita, so the main .deb (built on
+  # ubuntu-22.04) cannot run there. This job builds the same app in debian:buster
+  # with its own GTK 4.6 and libadwaita 1.1 (packaging/legacy/build.sh) and
+  # attaches fresco-legacy_*.deb as an extra asset. Nothing above depends on it.
+  build-legacy:
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:buster
+    steps:
+      - uses: actions/checkout@v4
+
+      # The GTK stack is the slow part (~30 min): keyed on the pins and the
+      # recipe. Path is the prefix build.sh installs into.
+      - uses: actions/cache@v4
+        with:
+          path: /opt/fresco-legacy
+          key: fresco-legacy-stack-${{ hashFiles('packaging/legacy/versions.env', 'packaging/legacy/build.sh') }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            /cache/rustup
+            /cache/cargo
+            /cache/dl
+          key: fresco-legacy-toolchain-${{ hashFiles('packaging/legacy/build.sh', 'Cargo.lock') }}
+
+      - name: Build fresco-legacy .deb
+        env:
+          JOBS: 4
+        run: bash packaging/legacy/build.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/legacy-out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresco-legacy-deb
+          path: legacy-out/fresco-legacy_*.deb
+          if-no-files-found: error
+
+  # Clean buster container: apt installs the package with its Depends, then
+  # ldd, the GLIBC ceiling, --version and a short GUI run under Xvfb.
+  legacy-verify:
+    needs: build-legacy
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:buster
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fresco-legacy-deb
+          path: legacy
+
+      - name: Install and verify
+        run: bash packaging/legacy/verify.sh "$(ls legacy/fresco-legacy_*.deb)"
+
+  # Runs after build-deb has created the release (same reason as rpm-verify).
+  attach-legacy:
+    needs: [build-deb, legacy-verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fresco-legacy-deb
+          path: legacy
+
+      - name: Attach fresco-legacy .deb to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ inputs.target }}
+          files: legacy/fresco-legacy_*.deb

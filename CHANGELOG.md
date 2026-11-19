@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Deepin V20 / UOS 20 support: a `fresco-legacy` `.deb` with its own GTK 4 and libadwaita. It is built on Debian 10 (glibc 2.28), works on X11, and the in-app updater keeps it on the legacy asset.
+
 ## [1.1.55] — 2026-11-11
 
 ### Added

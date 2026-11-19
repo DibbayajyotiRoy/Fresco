@@ -52,6 +52,8 @@ pub const APP_NAME: &str = "Fresco";
 /// Ko-fi page for optional donations. Shared by the tray and the main window
 /// menu so the link lives in one place.
 pub const DONATE_URL: &str = "https://ko-fi.com/dibbayajyotiroy";
+/// Community chat (Discord invite) shown in Help & feedback and About.
+pub const DISCORD_URL: &str = "https://discord.gg/FASUnunRXU";
 /// WM_CLASS of wallpaper windows, so users/extensions can target them.
 pub const WALLPAPER_WM_CLASS: &str = "fresco-wallpaper";
 
@@ -645,5 +647,13 @@ mod donate_url_tests {
         let rest = super::DONATE_URL.strip_prefix("https://").unwrap();
         assert_eq!(rest.split('/').next(), Some("ko-fi.com"));
         assert!(!super::DONATE_URL.contains(char::is_whitespace));
+    }
+
+    #[test]
+    fn discord_url_is_the_invite_over_https() {
+        assert_eq!(super::DISCORD_URL, "https://discord.gg/FASUnunRXU");
+        let rest = super::DISCORD_URL.strip_prefix("https://").unwrap();
+        assert_eq!(rest.split('/').next(), Some("discord.gg"));
+        assert!(!super::DISCORD_URL.contains(char::is_whitespace));
     }
 }

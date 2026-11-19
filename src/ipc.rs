@@ -18,8 +18,6 @@ pub enum Request {
     Pause,
     Resume,
     Status,
-    /// Download and install the latest release in the background (fire-and-forget).
-    Update,
     /// Lock the session right now, through this desktop's own lock host (see
     /// `daemon::lock::hosts`) — `loginctl lock-session`, swaylock-plugin,
     /// xsecurelock, or whatever else that host already trusts. Fresco never
@@ -511,10 +509,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Request::Status).unwrap(),
             r#"{"cmd":"status"}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&Request::Update).unwrap(),
-            r#"{"cmd":"update"}"#
         );
     }
 

@@ -24,6 +24,7 @@
 //! process dies with the filter). There is no fourth way out.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::config::{Transition, Wallpaper};
 
@@ -31,6 +32,16 @@ use crate::config::{Transition, Wallpaper};
 const FADE_STEPS: u32 = 22;
 const CROSSFADE_STEPS: u32 = 12;
 const SLIDE_STEPS: u32 = 28;
+/// Smooth loop: how long the dip to black lasts, centred on the loop point
+/// (half before the wrap, half after). Issue #10.
+pub(super) const LOOP_FADE: f64 = 0.35;
+/// Longest gap between playback-position samples while a smooth loop is
+/// far from its dip. Each sample is an IPC round trip, so this bounds the cost.
+/// How long the position may stand still inside the dip before it is given up on.
+const LOOP_STALL: Duration = Duration::from_secs(1);
+const LOOP_SAMPLE: Duration = Duration::from_millis(500);
+/// Shortest gap between samples, so a window that is almost due cannot spin.
+const LOOP_MIN_SAMPLE: Duration = Duration::from_millis(20);
 /// Ken Burns zoom travel (mpv `video-zoom` log2 units) over one interval.
 const KEN_BURNS_ZOOM: f64 = 0.16;
 /// Subtle scale "punch" layered onto slide/fade for cinematic depth (~4%).
@@ -149,6 +160,18 @@ pub(super) struct Anim {
     /// a filter-chain reinit, and doing that on every slideshow advance would
     /// buy a frame hitch for nothing.
     blurred: bool,
+    /// Smooth-loop gamma this machine last put on the player; `0` is neutral.
+    /// Non-zero is the only way a loop dip can be on the VO, so `settle` and
+    /// `forget` zero it with everything else.
+    loop_gamma: i32,
+    /// Earliest moment the smooth loop next needs a playback sample; `None`
+    /// means sample on the next tick. This, not a fixed cadence, is what keeps
+    /// a video far from its loop point off the 16ms loop.
+    loop_next: Option<Instant>,
+    /// Last sampled position and when it first stopped advancing, so a stalled
+    /// player inside the dip window is not polled every frame forever.
+    loop_last_pos: Option<f64>,
+    loop_stalled_since: Option<Instant>,
 }
 
 /// The zoom/pan a wallpaper rests at — its configured crop, or dead centre.
@@ -169,6 +192,10 @@ impl Anim {
             base_pan_y: base.2,
             next: None,
             blurred: false,
+            loop_gamma: 0,
+            loop_next: None,
+            loop_last_pos: None,
+            loop_stalled_since: None,
         }
     }
 
@@ -402,16 +429,102 @@ impl Anim {
         self.phase = Phase::Hold;
         self.next = None;
         self.blurred = false;
+        self.loop_gamma = 0;
+        self.loop_next = None;
+        self.loop_last_pos = None;
+        self.loop_stalled_since = None;
     }
 
     /// Put the player back at rest: undimmed, at its crop's zoom/pan, and
     /// unblurred. The one way out — see the module docs.
     fn settle<S: Surface>(&mut self, surface: &S) {
         surface.gamma(0);
+        self.loop_gamma = 0;
+        self.loop_next = None;
+        self.loop_last_pos = None;
+        self.loop_stalled_since = None;
         surface.zoom_pan(self.base_zoom, self.base_pan_x, self.base_pan_y);
         if self.blurred {
             surface.blur(0.0);
             self.blurred = false;
+        }
+    }
+
+    /// Smooth loop: dip the video to black around its loop point, for files
+    /// that don't loop seamlessly. Called once per loop tick.
+    ///
+    /// `wanted` is false when the wallpaper doesn't ask for it or the player is
+    /// paused; that puts the dip away at once, so a pause or a settings change
+    /// never leaves the desktop dimmed. `sample` yields `(position, duration)`
+    /// and is only called when the machine is due to look, so a video far from
+    /// its loop point costs one IPC read per [`LOOP_SAMPLE`] rather than one per
+    /// tick.
+    ///
+    /// Returns true while inside the dip, where the caller must tick at
+    /// `ANIM_TICK`. While a transition runs it owns gamma and this does nothing:
+    /// the transition's own settle clears any dip it left.
+    pub(super) fn loop_tick<S: Surface>(
+        &mut self,
+        surface: &S,
+        now: Instant,
+        wanted: bool,
+        sample: impl FnOnce() -> Option<(f64, f64)>,
+    ) -> bool {
+        if self.running() {
+            self.loop_next = None;
+            return false;
+        }
+        if !wanted {
+            self.loop_set(surface, 0);
+            self.loop_next = None;
+            self.loop_last_pos = None;
+            self.loop_stalled_since = None;
+            return false;
+        }
+        if self.loop_next.is_some_and(|t| now < t) {
+            return false;
+        }
+        let Some((pos, dur)) = sample() else {
+            self.loop_set(surface, 0);
+            self.loop_next = Some(now + LOOP_SAMPLE);
+            return false;
+        };
+        if self.loop_last_pos.is_some_and(|p| (p - pos).abs() < 1e-3) {
+            self.loop_stalled_since.get_or_insert(now);
+        } else {
+            self.loop_stalled_since = None;
+        }
+        self.loop_last_pos = Some(pos);
+        if loop_in_window(pos, dur, self.loop_gamma != 0)
+            && self
+                .loop_stalled_since
+                .is_some_and(|s| now.duration_since(s) > LOOP_STALL)
+        {
+            // Frozen inside the dip: show the picture and poll slowly until it moves.
+            self.loop_set(surface, 0);
+            self.loop_next = Some(now + LOOP_SAMPLE);
+            return false;
+        }
+        self.loop_set(surface, loop_gamma(pos, dur, self.loop_gamma != 0));
+        if loop_in_window(pos, dur, self.loop_gamma != 0) {
+            self.loop_next = None;
+            return true;
+        }
+        let until = Duration::from_secs_f64((dur - LOOP_FADE - pos).max(0.0));
+        self.loop_next = Some(now + until.clamp(LOOP_MIN_SAMPLE, LOOP_SAMPLE));
+        false
+    }
+
+    /// When the smooth loop next needs a tick, for the run loop's sleep. `None`
+    /// when it needs none, or when it is inside the dip and ticks every frame.
+    pub(super) fn loop_deadline(&self) -> Option<Instant> {
+        self.loop_next
+    }
+
+    fn loop_set<S: Surface>(&mut self, surface: &S, gamma: i32) {
+        if gamma != self.loop_gamma {
+            surface.gamma(gamma);
+            self.loop_gamma = gamma;
         }
     }
 
@@ -438,6 +551,41 @@ impl Anim {
             surface.blur(sigma);
             self.blurred = true;
         }
+    }
+}
+
+/// Gamma for a smooth loop at playback position `pos` of a `dur`-second file.
+///
+/// `dimmed` says whether the dip is already on the player. Going down is
+/// always allowed; coming back up after the wrap is only allowed when we were
+/// dimmed, so a video that starts stalled at position 0 is not left black.
+/// Result is in `-100..=0`.
+pub(super) fn loop_gamma(pos: f64, dur: f64, dimmed: bool) -> i32 {
+    let fade_start = dur - LOOP_FADE;
+    let g = if pos >= fade_start {
+        -100.0 * ((pos - fade_start) / LOOP_FADE)
+    } else if pos < LOOP_FADE && dimmed {
+        -100.0 * (1.0 - pos / LOOP_FADE)
+    } else {
+        0.0
+    };
+    g.round().clamp(-100.0, 0.0) as i32
+}
+
+/// Whether `pos` is inside the dip, where the loop must tick every frame.
+fn loop_in_window(pos: f64, dur: f64, dimmed: bool) -> bool {
+    pos >= dur - LOOP_FADE || (pos < LOOP_FADE && dimmed)
+}
+
+/// The `(position, duration)` a smooth loop can use, or `None` when the file
+/// is too short to dip twice without the two halves overlapping, or when the
+/// player has not reported one yet.
+pub(super) fn loop_span(pos: Option<f64>, dur: Option<f64>) -> Option<(f64, f64)> {
+    match (pos, dur) {
+        (Some(p), Some(d)) if p.is_finite() && d.is_finite() && d > 2.0 * LOOP_FADE + 1.0 => {
+            Some((p, d))
+        }
+        _ => None,
     }
 }
 
@@ -842,5 +990,169 @@ mod tests {
                 "the ease must be symmetric at {t}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod loop_tests {
+    use super::*;
+
+    const BASE: (f64, f64, f64) = (0.0, 0.0, 0.0);
+    const DUR: f64 = 5.0;
+    /// Mid-clip position of a file whose duration is `DUR`.
+    const MID: f64 = 2.0;
+
+    #[test]
+    fn gamma_curve_before_mid_out_wrap_mid_in_and_after() {
+        // Well before the window: neutral.
+        assert_eq!(loop_gamma(MID, DUR, false), 0);
+        // Start of the dip, halfway down, and at the wrap.
+        assert_eq!(loop_gamma(DUR - LOOP_FADE, DUR, false), 0);
+        assert_eq!(loop_gamma(DUR - LOOP_FADE / 2.0, DUR, false), -50);
+        assert_eq!(loop_gamma(DUR, DUR, false), -100);
+        // Just after the wrap, climbing back while still dimmed.
+        assert_eq!(loop_gamma(LOOP_FADE / 2.0, DUR, true), -50);
+        // Past the dip: neutral again, whether or not we were dimmed.
+        assert_eq!(loop_gamma(LOOP_FADE + 0.1, DUR, true), 0);
+        // A fresh start is not dipped (a stalled file at 0 must not go black).
+        assert_eq!(loop_gamma(0.0, DUR, false), 0);
+    }
+
+    #[test]
+    fn short_or_unknown_media_is_not_eligible() {
+        assert!(loop_span(Some(1.0), Some(DUR)).is_some());
+        assert!(loop_span(Some(1.0), Some(2.0 * LOOP_FADE + 1.0)).is_none());
+        assert!(loop_span(Some(1.0), None).is_none());
+        assert!(loop_span(None, Some(DUR)).is_none());
+    }
+
+    /// Feed the machine a real-time playback of a `DUR`-second clip, one
+    /// sample per 16ms tick, and check the dip goes down and comes back.
+    #[test]
+    fn a_full_loop_dips_and_returns_to_neutral() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let t0 = Instant::now();
+        let mut darkest = 0;
+        let mut fast_ticks = 0;
+        let ticks = 3 * 62 * 5;
+        for k in 0..ticks {
+            let t = k as f64 * 0.016;
+            let pos = t % DUR;
+            let now = t0 + Duration::from_secs_f64(t);
+            if anim.loop_tick(&r, now, true, || Some((pos, DUR))) {
+                fast_ticks += 1;
+            }
+            darkest = darkest.min(r.gamma());
+        }
+        assert_eq!(darkest, -100, "the wrap must reach true black");
+        assert!(fast_ticks > 0 && fast_ticks < ticks / 2);
+        // Stop mid-clip: the last thing we did is a neutral frame.
+        anim.loop_tick(&r, t0 + Duration::from_secs(100), true, || Some((MID, DUR)));
+        assert_eq!(r.gamma(), 0);
+    }
+
+    /// Far from the window the machine must not ask for a sample every tick.
+    #[test]
+    fn far_from_the_dip_it_samples_only_when_due() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let t0 = Instant::now();
+        let mut samples = 0;
+        for k in 0..100 {
+            let now = t0 + Duration::from_millis(k * 16);
+            anim.loop_tick(&r, now, true, || {
+                samples += 1;
+                Some((MID, DUR))
+            });
+        }
+        // 1.6s at 500ms cadence: a handful of reads, never 100.
+        assert!(samples <= 4, "sampled {samples} times");
+        assert!(anim.loop_deadline().is_some());
+    }
+
+    #[test]
+    fn turning_it_off_mid_dip_restores_neutral() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let now = Instant::now();
+        anim.loop_tick(&r, now, true, || Some((DUR - LOOP_FADE / 2.0, DUR)));
+        assert_eq!(r.gamma(), -50);
+        assert!(!anim.loop_tick(&r, now, false, || panic!("must not sample")));
+        assert_eq!(r.gamma(), 0);
+        assert!(anim.loop_deadline().is_none());
+    }
+
+    #[test]
+    fn pausing_mid_dip_restores_neutral() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let now = Instant::now();
+        anim.loop_tick(&r, now, true, || Some((DUR, DUR)));
+        assert_eq!(r.gamma(), -100);
+        // `wanted` is false while paused.
+        anim.loop_tick(&r, now, false, || None);
+        assert_eq!(r.gamma(), 0);
+    }
+
+    #[test]
+    fn a_wallpaper_change_mid_dip_leaves_no_dim_behind() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let now = Instant::now();
+        anim.loop_tick(&r, now, true, || Some((DUR, DUR)));
+        assert_eq!(r.gamma(), -100);
+        // A plain cut (Transition::None) settles the player and must clear it.
+        anim.start(Transition::None, PathBuf::from("/tmp/other.mp4"), &r);
+        assert_eq!(r.gamma(), 0);
+        assert!(anim.loop_deadline().is_none());
+        // The machine forgot its dip, so the next wanted tick samples rather
+        // than assuming the old gamma is still on the player.
+        assert!(!anim.loop_tick(&r, now, true, || Some((MID, DUR))));
+        assert_eq!(r.gamma(), 0);
+    }
+
+    #[test]
+    fn forget_drops_the_dip_with_the_player() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let now = Instant::now();
+        anim.loop_tick(&r, now, true, || Some((DUR, DUR)));
+        anim.forget();
+        assert!(anim.loop_deadline().is_none());
+        anim.loop_tick(&r, now, true, || Some((DUR - LOOP_FADE / 2.0, DUR)));
+        assert_eq!(r.gamma(), -50, "forget must not leave a stale gamma");
+    }
+
+    #[test]
+    fn a_stalled_player_in_the_dip_is_restored_and_polled_slowly() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        let t0 = Instant::now();
+        let stuck = DUR - LOOP_FADE / 2.0;
+        let mut fast_after_stall = 0;
+        for k in 0..200u64 {
+            let now = t0 + Duration::from_millis(k * 16);
+            let fast = anim.loop_tick(&r, now, true, || Some((stuck, DUR)));
+            if k * 16 > 1100 && fast {
+                fast_after_stall += 1;
+            }
+        }
+        assert_eq!(r.gamma(), 0, "a frozen player must not stay dimmed");
+        assert_eq!(fast_after_stall, 0);
+        assert!(anim.loop_deadline().is_some());
+        // Position moves again: the dip resumes.
+        let now = t0 + Duration::from_secs(10);
+        assert!(anim.loop_tick(&r, now, true, || Some((DUR - 0.1, DUR))));
+        assert!(r.gamma() < 0);
+    }
+
+    #[test]
+    fn a_running_transition_owns_gamma() {
+        let r = Recorder::default();
+        let mut anim = Anim::new(BASE);
+        anim.start(Transition::Fade, PathBuf::from("/tmp/other.mp4"), &r);
+        assert!(!anim.loop_tick(&r, Instant::now(), true, || panic!("must not sample")));
+        assert!(anim.loop_deadline().is_none());
     }
 }

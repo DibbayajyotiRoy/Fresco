@@ -12,6 +12,7 @@
 [![Licence GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![État du workflow de publication](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![Étoiles GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Site web](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Environnements pris en charge](#environnements-pris-en-charge) · [Comparatif](#fresco-face-à-wallpaper-engine-hidamari-komorebi-et-mpvpaper) · [FAQ](#questions-fréquentes-faq) · [Widgets](#widgets-de-bureau-paroles-horloges-visualiseur-et-pochette-dalbum) · [Journal des modifications](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -490,7 +491,7 @@ Le fil est identifié par un ticket aléatoire généré séparément de la tél
 
 ## Contribuer et donner son avis
 
-Les rapports de bogues, les demandes de fonctionnalités et les PR sont les bienvenus – ouvrez une [issue](https://github.com/DibbayajyotiRoy/fresco/issues) ou utilisez la boîte de dialogue de retour dans l’application. Voir [CONTRIBUTING.md](CONTRIBUTING.md).
+Les rapports de bogues, les demandes de fonctionnalités et les PR sont les bienvenus – ouvrez une [issue](https://github.com/DibbayajyotiRoy/fresco/issues) ou utilisez la boîte de dialogue de retour dans l’application. Voir [CONTRIBUTING.md](CONTRIBUTING.md). Rejoignez la [communauté Discord](https://discord.gg/FASUnunRXU) pour discuter avec les autres utilisateurs et le mainteneur.
 
 ## Licence
 

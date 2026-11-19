@@ -28,6 +28,7 @@ mod wayland_outputs;
 mod webbridge;
 #[allow(dead_code)]
 pub mod widgets;
+mod workspace;
 mod x11_fullscreen;
 mod x11win;
 
@@ -53,7 +54,7 @@ use lock::state::LockMonitor;
 use monitors::Monitor;
 use mpv::Player;
 use mpvpaper::WaylandPlayer;
-use transition::{Anim, Step, Surface};
+use transition::{loop_span, Anim, Step, Surface};
 use x11win::{Atoms, WallpaperWindow, WindowKind};
 
 /// Resolve the next auto-cycle wallpaper. When the `gui` feature is disabled the
@@ -172,9 +173,13 @@ impl PauseConfigWatch {
     }
 }
 
-/// Copy the two pause switches from `fresh` into `cached`, leaving every other
-/// field (a scheduled wallpaper swap lives only in `cached`) alone. Returns
-/// which of them changed: `(pause_on_battery, pause_on_covered)`.
+/// Copy the two pause switches and the auto-cycle settings from `fresh` into
+/// `cached`, leaving every other field (a scheduled wallpaper swap lives only
+/// in `cached`) alone. Returns which pause switches changed:
+/// `(pause_on_battery, pause_on_covered)`. The auto-cycle timer reads
+/// `cached.auto_cycle` every tick, so a new interval, shuffle or source
+/// applies without a video restart; a new interval is measured from the last
+/// switch rather than reset.
 fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     let changed = (
         cached.pause_on_battery != fresh.pause_on_battery,
@@ -182,6 +187,7 @@ fn adopt_pause_flags(cached: &mut Config, fresh: &Config) -> (bool, bool) {
     );
     cached.pause_on_battery = fresh.pause_on_battery;
     cached.pause_on_covered = fresh.pause_on_covered;
+    cached.auto_cycle = fresh.auto_cycle.clone();
     changed
 }
 /// Audio recovery cadence/backoff (see `AudioHeal`).
@@ -595,6 +601,9 @@ struct Renderer {
     /// This output's transition. Independent per renderer: two monitors run
     /// their own players and may be mid-transition at different phases.
     anim: Anim,
+    /// Whether this output's wallpaper asked for the smooth loop dip (see
+    /// [`loop_wanted`]). Kept in step with the wallpaper at each switch.
+    smooth_loop: bool,
     /// Last observed playback position — used to detect a cold-boot VO stall
     /// (a video whose position isn't advancing shortly after login).
     last_time_pos: std::cell::Cell<Option<f64>>,
@@ -609,12 +618,17 @@ struct Renderer {
 impl Renderer {
     /// One animation tick for this output. Returns true while animating.
     fn advance(&mut self, now: Instant) -> bool {
-        match self.slideshow.as_mut() {
+        let moving = match self.slideshow.as_mut() {
             Some(s) => advance_slideshow(&self.player, s, &mut self.anim, now),
             // No slideshow: the only thing that can be running is a wallpaper
             // change (a scheduled swap), which steps identically.
             None => self.anim.step(&self.player).animating(),
-        }
+        };
+        let wanted = self.smooth_loop && !self.applied_paused.get();
+        let fading = self.anim.loop_tick(&self.player, now, wanted, || {
+            loop_span(self.player.time_pos(), self.player.duration())
+        });
+        moving || fading
     }
 }
 
@@ -929,6 +943,10 @@ pub struct Daemon {
     fullscreen_covered: std::collections::HashMap<String, String>,
     last_fullscreen_check: Instant,
     sched: SchedState,
+    /// Workspace wallpaper showing right now (`None` = the default is showing).
+    /// Level-triggered against the focused desktop on every poll; see
+    /// `check_workspace`.
+    workspace_shown: Option<Wallpaper>,
     monitors: Vec<Monitor>,
     started_at: Instant,
     last_heal_check: Instant,
@@ -1015,6 +1033,7 @@ impl Daemon {
             fullscreen_covered: std::collections::HashMap::new(),
             last_fullscreen_check: Instant::now(),
             sched: SchedState::default(),
+            workspace_shown: None,
             monitors: Vec::new(),
             started_at: Instant::now(),
             last_heal_check: Instant::now(),
@@ -1137,6 +1156,7 @@ impl Daemon {
         // leaving it waits a full interval instead of switching at once.
         let blocked = self.user_paused
             || self.battery_paused
+            || self.workspace_shown.is_some()
             || self.lock.locked
             || self.config.performance_mode
             || !self.config.enabled;
@@ -1159,7 +1179,18 @@ impl Daemon {
     /// Apply an auto-cycled wallpaper to the renderers showing the default
     /// (non-per-monitor-override) wallpaper, plus the usual still-frame hosts.
     fn apply_auto_cycle_wallpaper(&mut self) {
-        let wp = &self.config.wallpaper;
+        let wp = self.config.wallpaper.clone();
+        self.show_default_wallpaper(&wp);
+        overview::apply(&wp);
+        cosmic_bg::apply(&self.config);
+        dde_lock::apply(&self.config);
+        kde_desktop::apply(&self.config);
+    }
+
+    /// Media-only switch of every renderer showing the default wallpaper to
+    /// `wp`, keeping transitions. Renderers with a per-monitor override are
+    /// left alone (see `workspace::resolve`).
+    fn show_default_wallpaper(&mut self, wp: &Wallpaper) {
         let scaling = self.config.scaling;
         let effect = self.config.effective_transition(wp);
         for r in &mut self.renderers {
@@ -1171,15 +1202,47 @@ impl Daemon {
                 .apply_scalers(scaling, self.config.effective_power_saving(wp), wp.rotation);
             r.player.apply_crop(wp);
             r.anim.set_base(transition::crop_base(wp));
+            r.smooth_loop = loop_wanted(wp);
             if let Some(path) = wp.effective_path() {
                 r.anim.start(effect, path.to_path_buf(), &r.player);
             }
             r.cache_raised.set(false);
         }
-        overview::apply(wp);
-        cosmic_bg::apply(&self.config);
-        dde_lock::apply(&self.config);
-        kde_desktop::apply(&self.config);
+    }
+
+    /// Show the wallpaper of the desktop the user is on (issue #124). Runs in
+    /// the 250 ms fullscreen poll and does nothing while `workspaces` is empty.
+    /// Compares against what is showing each poll, so a config reload that
+    /// reverted the renderers is corrected on the next one.
+    fn check_workspace(&mut self) {
+        if self.config.workspaces.is_empty() {
+            return;
+        }
+        let Some(desktop) = self.current_x11_desktop() else {
+            return;
+        };
+        let Some(key) = workspace::x11_key(&desktop) else {
+            return;
+        };
+        let want = self.config.workspaces.get(&key).cloned();
+        if want == self.workspace_shown {
+            return;
+        }
+        let target = want
+            .clone()
+            .unwrap_or_else(|| self.config.wallpaper.clone());
+        log::info!("workspace {key}: switching wallpaper");
+        self.show_default_wallpaper(&target);
+        self.workspace_shown = want;
+    }
+
+    /// `_NET_CURRENT_DESKTOP` of the root window, if the WM publishes it.
+    fn current_x11_desktop(&self) -> Option<Vec<u32>> {
+        workspace::read_current_desktop(
+            &self.conn,
+            self.screen().root,
+            self.atoms._NET_CURRENT_DESKTOP,
+        )
     }
 
     /// Push any widget overlay whose content changed onto the renderer that
@@ -1321,7 +1384,7 @@ impl Daemon {
         {
             let wallpaper = self.config.wallpaper_for(&monitor.connector).clone();
             let wallpaper = Wallpaper {
-                transition: self.config.effective_transition(&wallpaper),
+                transition: Some(self.config.effective_transition(&wallpaper)),
                 ..wallpaper
             };
             if !wallpaper.is_configured() {
@@ -1552,6 +1615,7 @@ impl Daemon {
             player,
             slideshow,
             anim: Anim::new(transition::crop_base(wallpaper)),
+            smooth_loop: loop_wanted(wallpaper),
             last_time_pos: std::cell::Cell::new(None),
             audio_heal: AudioHeal::new(),
             cache_raised: std::cell::Cell::new(false),
@@ -1619,6 +1683,7 @@ impl Daemon {
             self.check_audio(now);
             if now.duration_since(self.last_fullscreen_check) >= FULLSCREEN_POLL {
                 self.check_fullscreen();
+                self.check_workspace();
                 self.last_fullscreen_check = now;
             }
             if now.duration_since(self.last_cache_check) >= LOWER_INTERVAL {
@@ -1673,9 +1738,16 @@ impl Daemon {
             // to come out of the sleep itself. It can only shorten it; see
             // `widget_wait`.
             let base = if animating { ANIM_TICK } else { TICK };
+            // The smooth loop's next sample is due the same way: it wakes the
+            // loop for the dip, and is otherwise far off.
+            let fade = self
+                .renderers
+                .iter()
+                .filter_map(|r| r.anim.loop_deadline())
+                .min();
             std::thread::sleep(widget_wait(
                 base,
-                self.widgets.next_deadline(),
+                min_instant(self.widgets.next_deadline(), fade),
                 Instant::now(),
             ));
         }
@@ -1729,10 +1801,6 @@ impl Daemon {
                 Response::Ok
             }
             Request::Status => Response::Status(self.status()),
-            Request::Update => {
-                notifier::run_updater_async();
-                Response::Ok
-            }
             Request::Lock => {
                 let geoms = self.output_geoms_all();
                 let ctx = self.lock.ctx(&self.config, &geoms);
@@ -2079,6 +2147,11 @@ impl Daemon {
     /// no teardown flash and the restack/NVIDIA machinery stays untouched.
     /// Pause state is a separate authority (`reconcile_pause`) and survives.
     fn check_schedule(&mut self) {
+        // A workspace wallpaper outranks the schedule while it is showing; the
+        // schedule resumes (and catches up) once the desktop changes back.
+        if self.workspace_shown.is_some() {
+            return;
+        }
         let Some(want) = self.sched.due(&self.config) else {
             return;
         };
@@ -2107,6 +2180,7 @@ impl Daemon {
                 // The new crop is where the transition must come to rest, so
                 // teach the machine about it before it starts easing anywhere.
                 r.anim.set_base(transition::crop_base(&want));
+                r.smooth_loop = loop_wanted(&want);
                 r.anim.start(effect, path.clone(), &r.player);
                 r.cache_raised.set(false); // re-check resolution for the new media
             }
@@ -2362,6 +2436,12 @@ fn mode_after_mirror_gave_up(desktop: caja_mirror::Desktop) -> dde::Mode {
     }
 }
 
+/// Whether a wallpaper gets the smooth-loop dip: a video that asked for it.
+/// Slideshows and playlists never do; they have no single loop point.
+fn loop_wanted(wp: &Wallpaper) -> bool {
+    wp.smooth_loop && wp.kind == Kind::Video
+}
+
 /// One slideshow's per-tick step: run the animation if one is going, otherwise
 /// decide whether the dwell is up and hand the next image to [`Anim`]. Both
 /// backends call this with their own `PlayerHandle`, so the engine is written
@@ -2431,7 +2511,7 @@ fn build_slideshow(wallpaper: &Wallpaper, player: &PlayerHandle) -> Option<Slide
         last_advance: Instant::now(),
         // The wallpaper-level field is the canonical one; `slideshow.transition`
         // is the legacy copy `Config::migrate` keeps in step with it.
-        transition: wallpaper.transition,
+        transition: wallpaper.transition.unwrap_or_default(),
     })
 }
 
@@ -2862,6 +2942,10 @@ fn run_gnome_static() -> Result<()> {
     // ("blocks on the control channel between commands -> ~0% CPU").
     let mut lock_rt = LockRuntime::new();
     let mut last_cycle: Option<Instant> = None;
+    // The GUI's auto-cycle switches only save config.toml, so adopt them here.
+    // The wait is capped at CONFIG_POLL, so an otherwise idle loop wakes once
+    // every 2 s for one stat.
+    let mut config_watch = PauseConfigWatch::new();
 
     // `recv_timeout` rather than a plain blocking `recv`: this mode otherwise
     // never wakes on its own, so a daemon left running for days without an
@@ -2869,11 +2953,14 @@ fn run_gnome_static() -> Result<()> {
     // then gone quiet in the usage numbers. `heartbeat` self-throttles to
     // roughly once a day via its own marker file either way.
     loop {
-        let timeout = gnome_static_cycle_timeout(&config, last_cycle);
+        let timeout = gnome_static_cycle_timeout(&config, last_cycle).min(CONFIG_POLL);
         let (req, reply) = match commands.recv_timeout(timeout) {
             Ok(pair) => pair,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
+                if let Some(fresh) = config_watch.poll() {
+                    adopt_pause_flags(&mut config, &fresh);
+                }
                 lock_rt.poll(now);
                 gnome_static_auto_cycle(&mut config, &mut last_cycle, now, lock_rt.locked);
                 crate::telemetry::heartbeat(Some("gnome-static"), None, None);
@@ -2886,6 +2973,7 @@ fn run_gnome_static() -> Result<()> {
         let is_apply = matches!(req, Request::Apply);
         let resp = match req {
             Request::Apply => {
+                config_watch.mark();
                 config = Config::load().unwrap_or_else(|_| config.clone());
                 lock_rt.on_apply(&config);
                 Response::Ok
@@ -2895,10 +2983,6 @@ fn run_gnome_static() -> Result<()> {
             Request::Status => {
                 let ctx = lock_rt.ctx(&config, &[]);
                 Response::Status(static_status(&config, &lock_rt.status(&ctx, &config)))
-            }
-            Request::Update => {
-                notifier::run_updater_async();
-                Response::Ok
             }
             Request::Stop => Response::Ok,
             // GNOME static-frame mode has no live surface and no `Desktop`
@@ -3031,7 +3115,7 @@ fn wayland_auto_cycle(
         let effective_ps = config.effective_power_saving(&config.wallpaper);
         o.apply_wallpaper(
             Wallpaper {
-                transition,
+                transition: Some(transition),
                 ..config.wallpaper.clone()
             },
             config.scaling,
@@ -3144,6 +3228,11 @@ fn run_wayland_layershell() -> Result<()> {
     let mut next_output_probe = Instant::now();
     let mut probed = false;
     let mut sched = SchedState::default();
+    // Per-workspace wallpapers (issue #124). `None` source = not sway/Hyprland;
+    // with no `workspaces` configured nothing is ever queried.
+    let ws_source = workspace::Source::from_env();
+    let mut ws_shown: Option<Wallpaper> = None;
+    let mut last_ws_poll = Instant::now() - workspace::WAYLAND_POLL;
     let mut last_cycle: Option<Instant> = None;
 
     // Pause the wallpaper on any output that has a fullscreen window. Available on
@@ -3221,7 +3310,7 @@ fn run_wayland_layershell() -> Result<()> {
     for m in monitors.iter().filter(|_| !plasma && config.enabled) {
         let wallpaper = config.wallpaper_for(&m.connector).clone();
         let wallpaper = Wallpaper {
-            transition: config.effective_transition(&wallpaper),
+            transition: Some(config.effective_transition(&wallpaper)),
             ..wallpaper
         };
         if wallpaper.effective_path().is_none()
@@ -3270,7 +3359,14 @@ fn run_wayland_layershell() -> Result<()> {
         // a locked session with an active clock still wakes on the minute.
         let now0 = Instant::now();
         let lock_deadline = lock_rt.engine.as_ref().and_then(|e| e.next_deadline(now0));
-        let deadline = min_instant(widget_engine.next_deadline(), lock_deadline);
+        let fade = outputs
+            .values()
+            .filter_map(|o| o.anim.loop_deadline())
+            .min();
+        let deadline = min_instant(
+            min_instant(widget_engine.next_deadline(), lock_deadline),
+            fade,
+        );
         let tick = widget_wait(base, deadline, now0);
         match commands.recv_timeout(tick) {
             Ok((req, reply)) => {
@@ -3330,7 +3426,7 @@ fn run_wayland_layershell() -> Result<()> {
                             for m in &monitors {
                                 let wp = config.wallpaper_for(&m.connector).clone();
                                 let wp = Wallpaper {
-                                    transition: config.effective_transition(&wp),
+                                    transition: Some(config.effective_transition(&wp)),
                                     ..wp
                                 };
                                 let has = !plasma
@@ -3435,10 +3531,6 @@ fn run_wayland_layershell() -> Result<()> {
                             lock_rt.status(&ctx, &config),
                         ))
                     }
-                    Request::Update => {
-                        notifier::run_updater_async();
-                        Response::Ok
-                    }
                     Request::Stop => Response::Ok,
                     Request::Lock => {
                         let geoms = wayland_all_output_geoms(&monitors);
@@ -3526,7 +3618,7 @@ fn run_wayland_layershell() -> Result<()> {
                             continue;
                         }
                         let wp = Wallpaper {
-                            transition: config.effective_transition(&wp),
+                            transition: Some(config.effective_transition(&wp)),
                             ..wp
                         };
                         let ps = config.effective_power_saving(&wp);
@@ -3598,7 +3690,7 @@ fn run_wayland_layershell() -> Result<()> {
             &mut outputs,
             &mut last_cycle,
             now,
-            paused,
+            paused || ws_shown.is_some(),
             lock_rt.locked,
         );
 
@@ -3670,13 +3762,58 @@ fn run_wayland_layershell() -> Result<()> {
             o.advance(now);
         }
 
+        // Per-workspace wallpaper (issue #124): compare what the focused
+        // workspace wants with what is showing, switch media-only on the
+        // outputs without a per-monitor override. Level-triggered, like the
+        // schedule, so a reload that reverted the outputs is corrected here.
+        if let Some(src) = ws_source.as_ref() {
+            if workspace::poll_due(&config.workspaces, last_ws_poll, now) {
+                last_ws_poll = now;
+                if let Some(key) = src.current_key() {
+                    let want = config.workspaces.get(&key).cloned();
+                    if want != ws_shown {
+                        log::info!("workspace {key}: switching wallpaper");
+                        for (connector, o) in outputs.iter_mut() {
+                            let Some(wp) = workspace::resolve(
+                                config.monitors.get(connector),
+                                want.as_ref(),
+                                &config.wallpaper,
+                            ) else {
+                                continue;
+                            };
+                            let wp = wp.clone();
+                            let transition = config.effective_transition(&wp);
+                            let effective_ps = config.effective_power_saving(&wp);
+                            o.apply_wallpaper(
+                                Wallpaper {
+                                    transition: Some(transition),
+                                    ..wp
+                                },
+                                config.scaling,
+                                effective_ps,
+                                config.effective_low_memory(),
+                                false,
+                            );
+                        }
+                        ws_shown = want;
+                    }
+                }
+            }
+        }
+
         // Battery + per-output supervision on a coarse cadence.
         if now.duration_since(last_supervise) >= SUPERVISE {
             last_supervise = now;
 
             // Scheduled wallpaper swap (ROADMAP 3.3): media-only loadfile on
             // outputs showing the DEFAULT wallpaper — never a respawn.
-            if let Some(want) = sched.due(&config) {
+            // A workspace wallpaper outranks the schedule while it shows.
+            let sched_due = if ws_shown.is_none() {
+                sched.due(&config)
+            } else {
+                None
+            };
+            if let Some(want) = sched_due {
                 if let Some(path) = want.effective_path().map(|p| p.to_path_buf()) {
                     log::info!(
                         "schedule: switching default wallpaper to {}",
@@ -3706,6 +3843,7 @@ fn run_wayland_layershell() -> Result<()> {
                             o.wallpaper.rotation = want.rotation;
                             o.wallpaper.power_saving = want.power_saving;
                             o.wallpaper.crop = want.crop;
+                            o.wallpaper.smooth_loop = want.smooth_loop;
                             o.power_saving = config.effective_power_saving(&want);
                         }
                     }
@@ -4123,6 +4261,18 @@ struct OsdCache {
     mode_h: u32,
 }
 
+/// Whether a change from kind `from` to kind `to` can reuse the running mpv
+/// through `loadfile replace` (with the transition) instead of a respawn.
+///
+/// Image and video take the same mpv options: `build_mpv_opts` sets
+/// `image-display-duration` and `loop-file` for both and reads nothing kind
+/// specific, so one can become the other in place. Playlists and slideshows
+/// drive mpv differently and never switch this way, not even to themselves.
+fn kind_switches_in_place(from: Kind, to: Kind) -> bool {
+    let plain = |k: Kind| matches!(k, Kind::Image | Kind::Video);
+    (plain(from) && plain(to)) || (from == to && to != Kind::Slideshow)
+}
+
 struct WlOutput {
     connector: String,
     wallpaper: Wallpaper,
@@ -4421,9 +4571,8 @@ impl WlOutput {
             && new.mute == self.wallpaper.mute
             && new.volume == self.wallpaper.volume
             && new.crop == self.wallpaper.crop
-            && new.kind == self.wallpaper.kind
-            && new.kind != Kind::Slideshow;
-        let effect = new.transition;
+            && kind_switches_in_place(self.wallpaper.kind, new.kind);
+        let effect = new.transition.unwrap_or_default();
         self.wallpaper = new;
         self.scaling = scaling;
         self.power_saving = power_saving;
@@ -4485,10 +4634,15 @@ impl WlOutput {
             self.animating = false;
             return;
         };
-        self.animating = match self.slideshow.as_mut() {
+        let moving = match self.slideshow.as_mut() {
             Some(s) => advance_slideshow(player, s, &mut self.anim, now),
             None => self.anim.step(player).animating(),
         };
+        let wanted = loop_wanted(&self.wallpaper) && !self.applied_paused.get();
+        let fading = self.anim.loop_tick(player, now, wanted, || {
+            loop_span(player.time_pos(), player.duration())
+        });
+        self.animating = moving || fading;
     }
 
     fn set_paused(&self, paused: bool) {
@@ -5448,6 +5602,41 @@ mod tests {
         assert!(auto_cycle_due(&ac, &mut last, t0 + iv * 2, false));
     }
 
+    /// The GUI's save to config.toml, end to end through the daemon's own
+    /// pieces: parse the file, adopt it, tick the timer, pick the next file.
+    #[cfg(feature = "gui")]
+    #[test]
+    fn gui_saved_folder_cycle_is_adopted_and_walks_the_folder() {
+        let dir = std::env::temp_dir().join(format!("fresco-cycle-e2e-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.png"), b"x").unwrap();
+        std::fs::write(dir.join("b.png"), b"x").unwrap();
+        let toml = format!(
+            "[auto_cycle]\nenabled = true\ninterval_min = 1\n\
+             source = {{ kind = \"folder\", value = {:?} }}\n",
+            dir.to_str().unwrap()
+        );
+        let fresh: Config = toml::from_str(&toml).unwrap();
+        let mut cached = Config::default();
+        adopt_pause_flags(&mut cached, &fresh);
+        assert!(cached.auto_cycle.enabled);
+
+        let t0 = Instant::now();
+        let mut last = None;
+        assert!(!auto_cycle_due(&cached.auto_cycle, &mut last, t0, false));
+        let t1 = t0 + Duration::from_secs(60);
+        assert!(auto_cycle_due(&cached.auto_cycle, &mut last, t1, false));
+
+        let first = super::auto_cycle_next(&cached, &cached.wallpaper).unwrap();
+        assert_eq!(first.effective_path(), Some(dir.join("a.png").as_path()));
+        let second = super::auto_cycle_next(&cached, &first).unwrap();
+        assert_eq!(second.effective_path(), Some(dir.join("b.png").as_path()));
+        let wrapped = super::auto_cycle_next(&cached, &second).unwrap();
+        assert_eq!(wrapped.effective_path(), Some(dir.join("a.png").as_path()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn auto_cycle_pause_or_lock_clears_the_timer_and_resume_waits_a_full_interval() {
         let ac = cycle_every(10);
@@ -5586,6 +5775,12 @@ mod tests {
         fresh.pause_on_covered = false;
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (true, true));
         assert!(cached.pause_on_battery && !cached.pause_on_covered);
+
+        // Auto-cycle settings ride along on the same poll.
+        fresh.auto_cycle.interval_min = 120;
+        fresh.auto_cycle.shuffle = true;
+        assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
+        assert_eq!(cached.auto_cycle, fresh.auto_cycle);
 
         // Already in step: a second look reports nothing.
         assert_eq!(adopt_pause_flags(&mut cached, &fresh), (false, false));
@@ -5887,6 +6082,25 @@ mod tests {
         assert_eq!(o.generation, 1);
         o.respawn(true, true);
         assert_eq!(o.generation, 2, "the static-frame path counts too");
+    }
+
+    /// Image and video switch in place; anything involving a playlist or a
+    /// slideshow respawns as before.
+    #[test]
+    fn kind_switch_in_place_covers_image_and_video_only() {
+        use super::kind_switches_in_place as sw;
+        assert!(sw(Kind::Image, Kind::Video));
+        assert!(sw(Kind::Video, Kind::Image));
+        assert!(sw(Kind::Video, Kind::Video));
+        assert!(sw(Kind::Image, Kind::Image));
+        assert!(sw(Kind::Playlist, Kind::Playlist));
+        assert!(!sw(Kind::Video, Kind::Playlist));
+        assert!(!sw(Kind::Image, Kind::Playlist));
+        assert!(!sw(Kind::Playlist, Kind::Video));
+        assert!(!sw(Kind::Image, Kind::Slideshow));
+        assert!(!sw(Kind::Video, Kind::Slideshow));
+        assert!(!sw(Kind::Slideshow, Kind::Image));
+        assert!(!sw(Kind::Slideshow, Kind::Slideshow));
     }
 
     /// The slideshow is now a *caller* of the transition machine rather than

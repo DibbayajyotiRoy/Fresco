@@ -13,10 +13,11 @@
 [![Publish workflow status](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![GitHub stars](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
 [![Support Fresco on Ko-fi](https://img.shields.io/badge/Ko--fi-Support_Fresco-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/dibbayajyotiroy)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [Website](https://fresco.dibbayajyoti.com) · [Installation](#installation) · [Support Fresco ♥](#support-the-project) · [Supported environments](#supported-environments) · [FAQ](#faq)
 
-[Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
+[Comparison](#fresco-vs-wallpaper-engine-hidamari-komorebi-and-mpvpaper) · [Widgets](#desktop-widgets-lyrics-clocks-visualiser-and-album-art) · [Changelog](CHANGELOG.md) · [Discord](https://discord.gg/FASUnunRXU) · [Issues](https://github.com/DibbayajyotiRoy/fresco/issues)
 
 <img src="./data/screenshots/gallery.png" alt="Fresco's wallpaper library on a dark Linux desktop: a searchable grid of video, image and slideshow wallpapers, with one video marked Active and a status pill showing NVDEC hardware decoding" width="800" />
 
@@ -242,6 +243,10 @@ bindsym $mod+Return exec fresco random
 ### Can I use a different wallpaper on each monitor?
 
 Yes. Fresco supports per-display wallpapers, and when the same video is used across several monitors, playback is kept in sync.
+
+### Can each virtual desktop (workspace) have its own wallpaper?
+
+Yes, on X11 desktops, sway and Hyprland: set one per numbered workspace under Advanced → Wallpaper per workspace. Limits: the wallpaper follows the focused workspace on all monitors (per-monitor wallpapers still win), the GUI covers numbered workspaces only (named sway or Hyprland workspaces need the `[workspaces]` table in `config.toml`), and other desktops such as GNOME, KDE and COSMIC keep one wallpaper.
 
 ### Does it support GIFs and image slideshows?
 
@@ -489,7 +494,7 @@ Not in a position to give? Starring the repo, filing a good bug report, or addin
 
 ## Contributing & feedback
 
-Bug reports, feature requests, and PRs are welcome — open an [issue](https://github.com/DibbayajyotiRoy/fresco/issues), or use the in-app feedback dialog. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports, feature requests, and PRs are welcome — open an [issue](https://github.com/DibbayajyotiRoy/fresco/issues), or use the in-app feedback dialog. See [CONTRIBUTING.md](CONTRIBUTING.md). Questions and chat are welcome in the [Discord community](https://discord.gg/FASUnunRXU).
 
 ## License
 

@@ -13,14 +13,14 @@ use super::window_state;
 use super::{
     daemon_ctl, import_queue,
     library::{self, load_entries, save_entries, LibraryEntry},
-    linked, status,
+    linked, seamless, status,
 };
 use crate::{
     autostart,
     config::{
-        Accent, Clock, ClockThemeCfg, Config, Disc, Fit, GradientMode, Kind, LyricAnchor,
-        LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition, Visualizer,
-        VisualizerStyleCfg, WidgetTheme, Widgets, WorldClock, WorldZone,
+        Accent, Clock, ClockThemeCfg, Config, CycleSource, Disc, Fit, GradientMode, Kind,
+        LyricAnchor, LyricStylePreset, Lyrics, PowerSaving, Scaling, ThemeMode, Transition,
+        Visualizer, VisualizerStyleCfg, WidgetTheme, Widgets, WorldClock, WorldZone,
     },
     t, tf, APP_ID,
 };
@@ -34,6 +34,12 @@ pub struct FrescoApplication {
 /// instance — build_ui opens the feedback dialog right after presenting.
 static PENDING_FEEDBACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set when launched with `--update` (the daemon's "Update now" notification
+/// does this, since only the GUI's session can run pkexec). build_ui opens the
+/// install dialog once the window is up, and the startup update check is skipped
+/// so it cannot be in flight and swallow this forced check.
+static PENDING_UPDATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl FrescoApplication {
     pub fn new() -> Self {
         let app = adw::Application::new(Some(APP_ID), gio::ApplicationFlags::FLAGS_NONE);
@@ -42,22 +48,29 @@ impl FrescoApplication {
     }
 
     pub fn run(&self, args: &[String]) -> i32 {
-        // `--feedback` is ours, not GLib's: strip it before GApplication sees
-        // it, and route it via the exported "open-feedback" action so it works
-        // whether we become the primary instance or one is already running.
+        // `--feedback` and `--update` are ours, not GLib's: strip them before
+        // GApplication sees them, and route them via exported actions so they
+        // work whether we become the primary instance or one is already running.
         let feedback = args.iter().any(|a| a == "--feedback");
+        let update = crate::cli::update_requested(args);
         let argv: Vec<&str> = args
             .iter()
-            .filter(|a| a.as_str() != "--feedback")
+            .filter(|a| !matches!(a.as_str(), "--feedback" | "--update"))
             .map(String::as_str)
             .collect();
-        if feedback {
-            PENDING_FEEDBACK.store(true, std::sync::atomic::Ordering::Relaxed);
+        if feedback || update {
+            PENDING_FEEDBACK.store(feedback, std::sync::atomic::Ordering::Relaxed);
+            PENDING_UPDATE.store(update, std::sync::atomic::Ordering::Relaxed);
             if self.app.register(None::<&gio::Cancellable>).is_ok() && self.app.is_remote() {
                 // A primary instance exists: raise it and forward the intent
                 // over D-Bus instead of starting a second main loop.
                 self.app.activate();
-                self.app.activate_action("open-feedback", None);
+                if feedback {
+                    self.app.activate_action("open-feedback", None);
+                }
+                if update {
+                    self.app.activate_action("open-update", None);
+                }
                 return 0;
             }
         }
@@ -262,6 +275,9 @@ thread_local! {
     /// The Performance mode switch in the menu, so an external change to
     /// config.toml can move it. Set once by `build_behavior_page`.
     static PERFORMANCE_SWITCH: RefCell<Option<gtk4::Switch>> = const { RefCell::new(None) };
+    /// Same for the "Change wallpaper automatically" switch, which the
+    /// Advanced dialog also flips.
+    static AUTO_CYCLE_SWITCH: RefCell<Option<gtk4::Switch>> = const { RefCell::new(None) };
 }
 
 /// Keep `state.config` in step with config.toml while the window is open:
@@ -293,7 +309,7 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
         let Ok(disk) = Config::load() else {
             return;
         };
-        let (moved, refresh, performance, previews) = {
+        let (moved, refresh, performance, previews, auto_cycle) = {
             // Held elsewhere (a handler mid-edit): the next change event retries.
             let Ok(mut s) = state.try_borrow_mut() else {
                 return;
@@ -303,6 +319,7 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
                 s.refresh.clone(),
                 s.config.performance_mode,
                 s.config.effective_hover_previews(),
+                s.config.auto_cycle.enabled,
             )
         };
         // The tray (or a hand edit) can flip performance mode: the hover-preview
@@ -311,6 +328,11 @@ fn watch_external_config(app: &adw::Application, state: &Rc<RefCell<AppState>>) 
         PERFORMANCE_SWITCH.with(|sw| {
             if let Some(sw) = sw.borrow().as_ref() {
                 sw.set_active(performance); // the handler skips an unchanged value
+            }
+        });
+        AUTO_CYCLE_SWITCH.with(|sw| {
+            if let Some(sw) = sw.borrow().as_ref() {
+                sw.set_active(auto_cycle);
             }
         });
         if moved {
@@ -387,6 +409,8 @@ fn build_ui(app: &adw::Application) {
     let capability = crate::capability::detect();
 
     // Mark broken entries (missing source files) before showing the library.
+    // One-time transition upgrade; only the GUI rewrites these files.
+    library::migrate_transition_defaults();
     let mut entries = load_entries().unwrap_or_default();
     for e in &mut entries {
         e.check_health();
@@ -536,6 +560,23 @@ fn build_ui(app: &adw::Application) {
             show_feedback_dialog(&win_fb, state_fb.clone());
         });
         app.add_action(&open_feedback);
+    }
+    // Deep link for the daemon's "Update now" notification (`fresco --update`):
+    // a forced check that goes straight to the install dialog.
+    {
+        let win_up = window.clone();
+        let state_up = state.clone();
+        let open_update = gio::SimpleAction::new("open-update", None);
+        open_update.connect_activate(move |_, _| {
+            win_up.present();
+            super::updates::check_and_install(&win_up, state_up.clone());
+        });
+        app.add_action(&open_update);
+    }
+    if PENDING_UPDATE.load(std::sync::atomic::Ordering::Relaxed) {
+        let win_up = window.clone();
+        let state_up = state.clone();
+        glib::idle_add_local_once(move || super::updates::check_and_install(&win_up, state_up));
     }
     if !state.borrow().config.telemetry_prompted
         || state.borrow().config.telemetry_consent_version < crate::telemetry::CONSENT_VERSION
@@ -1755,6 +1796,35 @@ fn build_behavior_page(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     low_memory_hint.set_margin_end(4);
     low_memory_hint.set_margin_bottom(6);
     popover_box.append(&low_memory_hint);
+    // Only saves: the daemon adopts `auto_cycle` on its next config poll (see
+    // `adopt_pause_flags`), so no Apply and no video restart.
+    let auto_cycle_row = switch_row(
+        t!("Change wallpaper automatically"),
+        state.borrow().config.auto_cycle.enabled,
+        {
+            let state2 = state.clone();
+            move |active| {
+                let mut s = state2.borrow_mut();
+                if s.config.auto_cycle.enabled != active {
+                    s.config.auto_cycle.enabled = active;
+                    s.config.save().ok();
+                }
+            }
+        },
+    );
+    AUTO_CYCLE_SWITCH.with(|sw| {
+        *sw.borrow_mut() = auto_cycle_row.last_child().and_downcast::<gtk4::Switch>();
+    });
+    popover_box.append(&auto_cycle_row);
+    let auto_cycle_hint = gtk4::Label::new(Some(t!("Interval and source are in Advanced")));
+    auto_cycle_hint.add_css_class("dim");
+    auto_cycle_hint.set_wrap(true);
+    auto_cycle_hint.set_max_width_chars(34);
+    auto_cycle_hint.set_xalign(0.0);
+    auto_cycle_hint.set_margin_start(4);
+    auto_cycle_hint.set_margin_end(4);
+    auto_cycle_hint.set_margin_bottom(6);
+    popover_box.append(&auto_cycle_hint);
     popover_box.append(&switch_row(
         t!("Restore on login"),
         state.borrow().config.autostart,
@@ -1983,6 +2053,12 @@ fn build_help_page(
     });
     help_btn.set_tooltip_text(Some(t!("Opens the Fresco issue tracker in your browser")));
     popover_box.append(&help_btn);
+
+    let discord_btn = menu_item_opening_window(t!("Join the Discord community"), popover, || {
+        open_in_browser(crate::DISCORD_URL)
+    });
+    discord_btn.set_tooltip_text(Some(t!("Chat with other Fresco users and the maintainer")));
+    popover_box.append(&discord_btn);
 
     // Optional and last among the help rows: a donation link, not a nudge.
     let donate_btn = menu_item_opening_window(t!("Support Fresco on Ko-fi"), popover, || {
@@ -3509,6 +3585,42 @@ fn show_card_menu(
         menu.append(&items);
     }
 
+    // Video-only: a crossfaded copy so the loop point blends (issue #10). Once
+    // a copy is in place the entry offers to revert instead.
+    if !from_linked_folder {
+        let (is_video, has_original) = state
+            .borrow()
+            .entries
+            .get(idx)
+            .map(|e| (matches!(e.kind, Kind::Video), e.original_path.is_some()))
+            .unwrap_or((false, false));
+        if has_original {
+            let revert = item(t!("Revert to original"));
+            let s = state.clone();
+            let p = pop.clone();
+            revert.connect_clicked(move |_| {
+                p.popdown();
+                revert_seamless(&s, idx);
+            });
+            menu.append(&revert);
+        } else if is_video && seamless::available() {
+            let make = item(t!("Make seamless loop…"));
+            let s = state.clone();
+            let p = pop.clone();
+            let parent = parent.clone();
+            make.connect_clicked(move |_| {
+                p.popdown();
+                if let Some(window) = parent
+                    .root()
+                    .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok())
+                {
+                    show_seamless_dialog(&window, s.clone(), idx);
+                }
+            });
+            menu.append(&make);
+        }
+    }
+
     // Keyboard/touch-reachable twin of the hover arrows, under the same rule.
     if reorderable {
         let id = state.borrow().entries.get(idx).map(|e| e.id.clone());
@@ -3584,6 +3696,232 @@ fn show_card_menu(
     pop.set_child(Some(&menu));
     pop.connect_closed(|p| p.unparent());
     pop.popup();
+}
+
+// ─── Make seamless loop (issue #10) ───────────────────────────────────────────
+
+/// Delete the seamless copy an entry owns, if it has one. Only the generated
+/// copy: the user's original is never touched.
+fn discard_seamless_copy(entry: &LibraryEntry) {
+    if entry.original_path.is_some() {
+        if let Some(copy) = &entry.path {
+            seamless::discard(copy);
+        }
+    }
+}
+
+/// Confirm, then make a crossfaded copy of the video at `idx`. The original
+/// stays on disk; the copy is what the entry plays from then on.
+fn show_seamless_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, idx: usize) {
+    let Some(id) = state.borrow().entries.get(idx).map(|e| e.id.clone()) else {
+        return;
+    };
+    let (dialog, content) = glass_dialog(window, t!("Make seamless loop"), 440, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    body.set_margin_top(4);
+    body.set_margin_bottom(16);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+
+    let heading = gtk4::Label::new(Some(t!("Make this loop seamless?")));
+    heading.add_css_class("dialog-heading");
+    heading.set_xalign(0.0);
+    heading.set_wrap(true);
+    body.append(&heading);
+
+    let sub = gtk4::Label::new(Some(t!("Fresco re-encodes a copy of this video with its last second faded into its first, so the loop no longer snaps back. The copy takes about as much disk space as the original, and 4K video can take a long time. Your original file is kept, and you can revert at any time. If the video has sound, it is kept.")));
+    sub.add_css_class("dialog-sub");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    body.append(&sub);
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    actions.set_margin_top(8);
+    let cancel = gtk4::Button::with_label(t!("Cancel"));
+    {
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+    }
+    actions.append(&cancel);
+    let confirm = gtk4::Button::with_label(t!("Make seamless"));
+    confirm.add_css_class("suggested-action");
+    {
+        let d = dialog.clone();
+        let parent = window.clone();
+        confirm.connect_clicked(move |_| {
+            d.close();
+            start_seamless(&parent, state.clone(), id.clone());
+        });
+    }
+    actions.append(&confirm);
+    body.append(&actions);
+
+    content.append(&body);
+    dialog.present();
+}
+
+/// Run the encode for entry `id` in the background, behind a progress dialog
+/// whose Cancel (or closing it) kills ffmpeg.
+fn start_seamless(window: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>, id: String) {
+    let Some(src) = state
+        .borrow()
+        .entries
+        .iter()
+        .find(|e| e.id == id)
+        .and_then(|e| e.path.clone())
+    else {
+        return;
+    };
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (dialog, content) = glass_dialog(window, t!("Make seamless loop"), 440, -1);
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+    body.set_margin_top(4);
+    body.set_margin_bottom(16);
+    body.set_margin_start(20);
+    body.set_margin_end(20);
+
+    let label = gtk4::Label::new(Some(t!("Making a seamless loop…")));
+    label.add_css_class("dialog-sub");
+    label.set_xalign(0.0);
+    label.set_wrap(true);
+    body.append(&label);
+
+    let bar = gtk4::ProgressBar::new();
+    bar.set_show_text(true);
+    body.append(&bar);
+
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    let cancel_btn = gtk4::Button::with_label(t!("Cancel"));
+    {
+        let c = cancel.clone();
+        let d = dialog.clone();
+        cancel_btn.connect_clicked(move |_| {
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+            d.close();
+        });
+    }
+    actions.append(&cancel_btn);
+    body.append(&actions);
+    content.append(&body);
+    {
+        // Closing the dialog by any route cancels the encode. A finished job
+        // ignores the flag.
+        let c = cancel.clone();
+        dialog.connect_close_request(move |_| {
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+            glib::Propagation::Proceed
+        });
+    }
+    dialog.present();
+
+    let rx = seamless::spawn(src.clone(), id.clone(), cancel);
+    glib::spawn_future_local(async move {
+        while let Ok(event) = rx.recv().await {
+            match event {
+                seamless::Event::Progress(f) => bar.set_fraction(f64::from(f)),
+                seamless::Event::Done(result) => {
+                    dialog.close();
+                    finish_seamless(&state, &id, &src, result);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// Swap the entry over to the finished copy (or report why there is none).
+/// If the entry was on screen, the copy is re-applied so the desktop follows.
+fn finish_seamless(
+    state: &Rc<RefCell<AppState>>,
+    id: &str,
+    src: &std::path::Path,
+    result: Result<PathBuf, seamless::Failure>,
+) {
+    let msg = match result {
+        Ok(copy) => {
+            let swapped = {
+                let mut s = state.borrow_mut();
+                let on_disk = Config::load().unwrap_or_else(|_| s.config.clone());
+                match s
+                    .entries
+                    .iter()
+                    .position(|e| e.id == id && e.path.as_deref() == Some(src))
+                {
+                    Some(idx) => {
+                        let e = &mut s.entries[idx];
+                        let was_playing = entry_is_playing(e, &on_disk);
+                        e.original_path = Some(src.to_path_buf());
+                        e.path = Some(copy);
+                        e.check_health();
+                        save_entries(&s.entries).ok();
+                        Some((idx, was_playing))
+                    }
+                    // Entry removed or re-pointed while encoding: drop the copy.
+                    None => {
+                        seamless::discard(&copy);
+                        None
+                    }
+                }
+            };
+            let Some((idx, was_playing)) = swapped else {
+                return;
+            };
+            if was_playing {
+                apply_entry_by_idx(state.clone(), idx);
+            }
+            t!("Seamless loop ready").to_string()
+        }
+        Err(seamless::Failure::Cancelled) => t!("Seamless loop cancelled").to_string(),
+        Err(seamless::Failure::NoLength) => {
+            t!("Could not read this video's length, so no seamless loop was made.").to_string()
+        }
+        Err(seamless::Failure::TooShort { len, need }) => tf!(
+            "This video is {seconds} s long; a seamless loop needs at least {min} s.",
+            "seconds" => format!("{len:.1}"),
+            "min" => format!("{need:.0}")
+        ),
+        Err(seamless::Failure::Ffmpeg(why)) => {
+            tf!("Seamless loop failed: {reason}", "reason" => why)
+        }
+    };
+    show_toast(state, &msg);
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
+}
+
+/// Go back to the video the entry had before the seamless copy: delete the
+/// copy and point the entry at the original again.
+fn revert_seamless(state: &Rc<RefCell<AppState>>, idx: usize) {
+    let (was_playing, copy) = {
+        let mut s = state.borrow_mut();
+        let on_disk = Config::load().unwrap_or_else(|_| s.config.clone());
+        let Some(e) = s.entries.get_mut(idx) else {
+            return;
+        };
+        let Some(original) = e.original_path.take() else {
+            return;
+        };
+        let was_playing = entry_is_playing(e, &on_disk);
+        let copy = e.path.replace(original);
+        e.check_health();
+        save_entries(&s.entries).ok();
+        (was_playing, copy)
+    };
+    if let Some(copy) = copy {
+        seamless::discard(&copy);
+    }
+    if was_playing {
+        apply_entry_by_idx(state.clone(), idx);
+    }
+    show_toast(state, t!("Reverted to the original video"));
+    let refresh = state.borrow().refresh.clone();
+    if let Some(r) = refresh {
+        r();
+    }
 }
 
 /// Toggle an entry's favorite flag, persist, and refresh (the Favorites
@@ -3819,6 +4157,7 @@ fn remove_entry_by_idx(state: Rc<RefCell<AppState>>, idx: usize) {
         if let Some(thumb) = &entry.thumbnail {
             std::fs::remove_file(thumb).ok();
         }
+        discard_seamless_copy(&entry);
         super::preview_proxy::remove_for(&entry.id);
         save_entries(&s.entries).ok();
     }
@@ -3937,6 +4276,7 @@ fn remove_entries_by_ids(state: Rc<RefCell<AppState>>, ids: &std::collections::H
             if let Some(thumb) = &e.thumbnail {
                 std::fs::remove_file(thumb).ok();
             }
+            discard_seamless_copy(e);
             super::preview_proxy::remove_for(&e.id);
         }
         save_entries(&s.entries).ok();
@@ -5562,6 +5902,7 @@ fn unlink_folder(state: &Rc<RefCell<AppState>>, id: &str) {
             if let Some(thumb) = &e.thumbnail {
                 std::fs::remove_file(thumb).ok();
             }
+            discard_seamless_copy(e);
             super::preview_proxy::remove_for(&e.id);
         }
         library::save_collections(&s.collections).ok();
@@ -5920,11 +6261,27 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     let transition_row = adw::ComboRow::new();
     transition_row.set_title(t!("Transition"));
     transition_row.set_model(Some(&gtk4::StringList::new(&table_labels(
-        &TRANSITIONS_SHOWN,
+        &WALLPAPER_TRANSITIONS_SHOWN,
     ))));
-    transition_row.set_selected(transition_index(Transition::default()));
-    transition_row.set_subtitle(transition_hint(Transition::default()));
+    transition_row.set_selected(wallpaper_transition_index(None));
+    transition_row.set_subtitle(wallpaper_transition_hint(None));
     prefs.add(&transition_row);
+
+    // Smooth loop (issue #10): an opt-in dip to black at the loop point, for a
+    // video that doesn't loop seamlessly. Shown for videos only; see the load
+    // path below.
+    // An ActionRow with a switch, as the Muted row below does: SwitchRow needs
+    // libadwaita 1.4, and the package floor is 1.1.
+    let smooth_row = adw::ActionRow::new();
+    smooth_row.set_title(t!("Smooth loop"));
+    smooth_row.set_subtitle(t!(
+        "Fades through black at the loop point, for videos that don't loop seamlessly"
+    ));
+    let smooth_sw = gtk4::Switch::new();
+    smooth_sw.set_valign(gtk4::Align::Center);
+    smooth_row.add_suffix(&smooth_sw);
+    smooth_row.set_activatable_widget(Some(&smooth_sw));
+    prefs.add(&smooth_row);
 
     let mute_row = adw::ActionRow::new();
     mute_row.set_title(t!("Muted"));
@@ -6014,6 +6371,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
         let transition_ref = transition_row.clone();
+        let smooth_ref = smooth_sw.clone();
         let power_ref = power_row.clone();
         set_btn.connect_clicked(move |_| {
             let crop = crop_ref.crop();
@@ -6023,7 +6381,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 _ => Fit::Cover,
             };
             let interval = interval_secs(interval_ref.selected());
-            let transition = transition_from_index(transition_ref.selected());
+            let transition = wallpaper_transition_from_index(transition_ref.selected());
+            let smooth_loop = smooth_ref.is_active();
             let power_saving = power_edit_from_index(power_ref.selected());
             // Refuse before the draft is committed: a slideshow with no image
             // would be saved, marked in use, and then show nothing (issue #36).
@@ -6060,7 +6419,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     (None, None) => return,
                 };
                 if let Some(e) = s.entries.get_mut(idx) {
-                    e.transition = Some(transition);
+                    e.transition = transition;
                     if e.kind == Kind::Slideshow {
                         e.interval_s = Some(interval);
                     } else {
@@ -6068,6 +6427,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                         // rebuilds from the entry) keeps what was chosen here.
                         e.mute = Some(mute_ref.is_active());
                         e.volume = Some(vol_ref.value() as u8);
+                        e.smooth_loop = smooth_loop;
                         // Regenerating is an ffmpeg process; only pay for it when
                         // the rotation actually moved, not on every Set.
                         let new_rotation = crop_ref.rotation();
@@ -6106,6 +6466,7 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                     power_saving,
                     transition,
                     interval_s: interval,
+                    smooth_loop,
                 };
                 let name = s
                     .entries
@@ -6187,6 +6548,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
         let vol_ref = vol_scale.clone();
         let interval_ref = interval_row.clone();
         let transition_ref = transition_row.clone();
+        let smooth_row_ref = smooth_row.clone();
+        let smooth_sw_ref = smooth_sw.clone();
         let mute_row_ref = mute_row.clone();
         let vol_row_ref = vol_row.clone();
         let power_row_ref = power_row.clone();
@@ -6265,6 +6628,8 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 );
                 let is_slideshow = entry.kind == Kind::Slideshow;
                 interval_ref.set_visible(is_slideshow);
+                smooth_row_ref.set_visible(entry.kind == Kind::Video);
+                smooth_sw_ref.set_active(entry.smooth_loop);
                 // The effect applies to any wallpaper coming up, so the picker
                 // is shown for every kind. Only the looping *demo* needs two
                 // stills, so it stays with slideshows and the crop tool keeps
@@ -6272,14 +6637,13 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
                 crop_frame_ref.set_visible(!is_slideshow);
                 edit_actions_ref.set_visible(!is_slideshow);
                 tp_frame_ref.set_visible(is_slideshow);
-                // Fall back to the wallpaper-level value for an entry saved
-                // before entries carried one of their own.
-                let stored = entry.transition.unwrap_or(st.config.wallpaper.transition);
-                transition_ref.set_selected(transition_index(stored));
+                // `None` is "Default": the row follows the global transition.
+                transition_ref.set_selected(wallpaper_transition_index(entry.transition));
                 // Follow the combo (never the raw entry) so a transition the
                 // picker no longer lists can't reach the subtitle or preview.
-                let shown = transition_from_index(transition_ref.selected());
-                transition_ref.set_subtitle(transition_hint(shown));
+                let picked = wallpaper_transition_from_index(transition_ref.selected());
+                transition_ref.set_subtitle(wallpaper_transition_hint(picked));
+                let shown = picked.unwrap_or(st.config.transition.unwrap_or_default());
                 if is_slideshow {
                     interval_ref.set_selected(interval_index(entry.interval_s.unwrap_or(30)));
                     let (a, b) = slideshow_preview_images(entry);
@@ -6320,10 +6684,12 @@ fn build_editor_view(state: Rc<RefCell<AppState>>, stack: &gtk4::Stack) -> gtk4:
     // it does — including which one costs GPU — without making them apply it.
     {
         let tp = transition_preview.clone();
+        let state_t = state.clone();
         transition_row.connect_selected_notify(move |row| {
-            let chosen = transition_from_index(row.selected());
-            row.set_subtitle(transition_hint(chosen));
-            tp.set_transition(chosen);
+            let picked = wallpaper_transition_from_index(row.selected());
+            row.set_subtitle(wallpaper_transition_hint(picked));
+            let global = state_t.borrow().config.transition.unwrap_or_default();
+            tp.set_transition(picked.unwrap_or(global));
         });
     }
 
@@ -6356,7 +6722,10 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     let dialog = adw::PreferencesWindow::new();
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    // Deepin/KWin stretches the window on outside clicks (#100); keep it fixed
+    // there only. Elsewhere it must stay resizable or tiling WMs cut content off.
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
+    dialog.set_default_size(640, 720);
     dialog.add_css_class("tight-shadow");
     dialog.set_title(Some(t!("Advanced")));
 
@@ -6436,6 +6805,8 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     page.add(&transition_group);
 
     add_schedule_group(&page, state.clone());
+    add_workspace_group(&page, state.clone());
+    add_auto_cycle_group(&page, state.clone());
     add_widget_appearance_group(&page, state.clone());
     add_lyrics_group(&page, state.clone());
     add_clock_group(&page, state.clone());
@@ -6445,6 +6816,312 @@ fn show_advanced_dialog(window: &adw::ApplicationWindow, state: Rc<RefCell<AppSt
     add_disc_group(&page, state);
     dialog.add(&page);
     dialog.present();
+}
+
+/// "Wallpaper per workspace" preferences group (issue #124). One row per
+/// numbered virtual desktop; "Choose…" picks a library entry for it. Only
+/// X11, sway and Hyprland switch by workspace; elsewhere the rows are inert.
+fn add_workspace_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    const DEFAULT_ROWS: usize = 4;
+    const MAX_ROWS: usize = 10;
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title(t!("Wallpaper per workspace"));
+    group.set_description(Some(t!("X11 desktops, sway and Hyprland")));
+
+    // The same library filter the day/night schedule uses.
+    let candidates: Rc<Vec<(usize, String)>> = Rc::new(
+        state
+            .borrow()
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.broken && matches!(e.kind, Kind::Video | Kind::Image))
+            .map(|(i, e)| (i, e.name.clone()))
+            .collect(),
+    );
+
+    // Show at least DEFAULT_ROWS, and every configured number up to MAX_ROWS.
+    let highest = state
+        .borrow()
+        .config
+        .workspaces
+        .keys()
+        .filter_map(|k| k.parse::<usize>().ok())
+        .max()
+        .unwrap_or(0);
+    let shown = Rc::new(std::cell::Cell::new(highest.clamp(DEFAULT_ROWS, MAX_ROWS)));
+    for n in 1..=shown.get() {
+        add_workspace_row(&group, &state, &candidates, n);
+    }
+
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.add_css_class("flat");
+    add_btn.set_tooltip_text(Some(t!("Add a workspace")));
+    add_btn.set_sensitive(shown.get() < MAX_ROWS);
+    {
+        let group = group.clone();
+        let state = state.clone();
+        let candidates = candidates.clone();
+        let shown = shown.clone();
+        let btn = add_btn.clone();
+        add_btn.connect_clicked(move |_| {
+            let n = shown.get() + 1;
+            add_workspace_row(&group, &state, &candidates, n);
+            shown.set(n);
+            btn.set_sensitive(n < MAX_ROWS);
+        });
+    }
+    group.set_header_suffix(Some(&add_btn));
+    page.add(&group);
+}
+
+/// One "Workspace n" row: the wallpaper set for that desktop, "Choose…" to
+/// pick another library entry, and a clear button to drop it.
+fn add_workspace_row(
+    group: &adw::PreferencesGroup,
+    state: &Rc<RefCell<AppState>>,
+    candidates: &Rc<Vec<(usize, String)>>,
+    n: usize,
+) {
+    let key = n.to_string();
+    let row = adw::ActionRow::new();
+    row.set_title(&tf!("Workspace {n}", "n" => key.clone()));
+    let current = state.borrow().config.workspaces.get(&key).and_then(|w| {
+        w.effective_path()?
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+    });
+    row.set_subtitle(current.as_deref().unwrap_or(""));
+
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.add_css_class("boxed-list");
+    if candidates.is_empty() {
+        list.append(&gtk4::Label::new(Some(t!(
+            "No videos or images in your library yet"
+        ))));
+    }
+    for (_, name) in candidates.iter() {
+        let r = adw::ActionRow::new();
+        r.set_title(name);
+        list.append(&r);
+    }
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_child(Some(&list));
+    scroller.set_min_content_width(260);
+    scroller.set_max_content_height(320);
+    scroller.set_propagate_natural_height(true);
+    let pop = gtk4::Popover::new();
+    pop.set_child(Some(&scroller));
+
+    let choose = gtk4::Button::with_label(t!("Choose…"));
+    choose.set_valign(gtk4::Align::Center);
+    pop.set_parent(&choose);
+    {
+        let pop = pop.clone();
+        choose.connect_clicked(move |_| pop.popup());
+    }
+    {
+        let state = state.clone();
+        let key = key.clone();
+        let pop = pop.clone();
+        let row = row.clone();
+        let candidates = candidates.clone();
+        list.connect_row_activated(move |_, lrow| {
+            let Some(&(entry_idx, _)) = candidates.get(lrow.index() as usize) else {
+                return;
+            };
+            let (name, config) = {
+                let mut s = state.borrow_mut();
+                let Some(entry) = s.entries.get_mut(entry_idx) else {
+                    return;
+                };
+                entry.touch();
+                let wallpaper = entry.to_wallpaper();
+                let name = entry.name.clone();
+                s.config.workspaces.insert(key.clone(), wallpaper);
+                s.config.enabled = true;
+                save_entries(&s.entries).ok();
+                s.config.save().ok();
+                (name, s.config.clone())
+            };
+            row.set_subtitle(&name);
+            pop.popdown();
+            // The daemon reloads config and switches on its next desktop poll.
+            daemon_ctl::apply_async(&config, |_| {});
+        });
+    }
+
+    let clear = gtk4::Button::from_icon_name("edit-clear-symbolic");
+    clear.add_css_class("flat");
+    clear.set_valign(gtk4::Align::Center);
+    clear.set_tooltip_text(Some(t!("Remove this workspace's wallpaper")));
+    {
+        let state = state.clone();
+        let key = key.clone();
+        let row = row.clone();
+        clear.connect_clicked(move |_| {
+            let config = {
+                let mut s = state.borrow_mut();
+                if s.config.workspaces.remove(&key).is_none() {
+                    return;
+                }
+                s.config.save().ok();
+                s.config.clone()
+            };
+            row.set_subtitle("");
+            daemon_ctl::apply_async(&config, |_| {});
+        });
+    }
+
+    row.add_suffix(&clear);
+    row.add_suffix(&choose);
+    group.add(&row);
+}
+
+/// "Change every" presets, in minutes. A saved interval that is not one of
+/// these is still listed (see `add_auto_cycle_group`), so opening the dialog
+/// never rewrites it.
+const CYCLE_PRESET_MINUTES: [u32; 8] = [1, 10, 30, 60, 120, 240, 360, 1440];
+
+fn cycle_interval_label(minutes: u32) -> String {
+    match minutes {
+        1 => t!("1 minute").to_string(),
+        10 => t!("10 minutes").to_string(),
+        30 => t!("30 minutes").to_string(),
+        60 => t!("1 hour").to_string(),
+        120 => t!("2 hours").to_string(),
+        240 => t!("4 hours").to_string(),
+        360 => t!("6 hours").to_string(),
+        1440 => t!("1 day").to_string(),
+        n => tf!("{count} minutes", "count" => n.to_string()),
+    }
+}
+
+/// The auto-cycle source a collection maps to. A linked folder cycles its
+/// files straight from disk: `Collection` only searches imported entries.
+fn cycle_source_for(c: &library::Collection) -> CycleSource {
+    match &c.link {
+        Some(link) => CycleSource::Folder(link.path.clone()),
+        None => CycleSource::Collection(c.id.clone()),
+    }
+}
+
+/// A preferences row with a title and a switch at the end.
+fn toggle_row(title: &str, active: bool, on_toggle: impl Fn(bool) + 'static) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(title);
+    let sw = gtk4::Switch::new();
+    sw.set_active(active);
+    sw.set_valign(gtk4::Align::Center);
+    sw.connect_active_notify(move |sw| on_toggle(sw.is_active()));
+    row.add_suffix(&sw);
+    row.set_activatable_widget(Some(&sw));
+    row
+}
+
+/// "Change wallpaper automatically" in Advanced: the on/off switch (shared
+/// with the Behavior menu), the interval, shuffle, and which pool to draw from.
+/// Every change only saves; the daemon picks it up within a couple of seconds.
+fn add_auto_cycle_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>) {
+    let group = adw::PreferencesGroup::new();
+    group.set_title(t!("Change wallpaper automatically"));
+
+    let (cycle, mut collections) = {
+        let s = state.borrow();
+        (s.config.auto_cycle.clone(), s.collections.clone())
+    };
+    collections.sort_by_key(|c| c.position);
+
+    // `adw::SwitchRow` needs libadwaita 1.4; this app targets 1.1, so these
+    // are plain action rows with a switch suffix.
+    group.add(&toggle_row(t!("Enabled"), cycle.enabled, {
+        let state = state.clone();
+        move |on| {
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.enabled = on;
+            s.config.save().ok();
+        }
+    }));
+
+    let mut minutes = CYCLE_PRESET_MINUTES.to_vec();
+    if !minutes.contains(&cycle.interval_min) {
+        minutes.push(cycle.interval_min);
+        minutes.sort_unstable();
+    }
+    let labels: Vec<String> = minutes.iter().map(|&m| cycle_interval_label(m)).collect();
+    let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let every = adw::ComboRow::new();
+    every.set_title(t!("Change every"));
+    every.set_model(Some(&gtk4::StringList::new(&label_refs)));
+    every.set_selected(
+        minutes
+            .iter()
+            .position(|&m| m == cycle.interval_min)
+            .unwrap_or(0) as u32,
+    );
+    {
+        let state = state.clone();
+        every.connect_selected_notify(move |row| {
+            let Some(&m) = minutes.get(row.selected() as usize) else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.interval_min = m;
+            s.config.save().ok();
+        });
+    }
+    group.add(&every);
+
+    group.add(&toggle_row(t!("Shuffle"), cycle.shuffle, {
+        let state = state.clone();
+        move |on| {
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.shuffle = on;
+            s.config.save().ok();
+        }
+    }));
+
+    let mut sources = vec![CycleSource::Library];
+    let mut names = vec![t!("Whole library").to_string()];
+    for c in &collections {
+        sources.push(cycle_source_for(c));
+        names.push(c.name.clone());
+    }
+    // A saved source that matches nothing (a deleted collection, a folder no
+    // longer linked) keeps its own entry, so the row never claims "Whole
+    // library" for it.
+    let selected = match sources.iter().position(|s| *s == cycle.source) {
+        Some(i) => i,
+        None => {
+            names.push(match &cycle.source {
+                CycleSource::Folder(p) => p.display().to_string(),
+                _ => t!("Unavailable collection").to_string(),
+            });
+            sources.push(cycle.source.clone());
+            sources.len() - 1
+        }
+    };
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let source = adw::ComboRow::new();
+    source.set_title(t!("Wallpapers from"));
+    source.set_model(Some(&gtk4::StringList::new(&name_refs)));
+    source.set_selected(selected as u32);
+    {
+        let state = state.clone();
+        source.connect_selected_notify(move |row| {
+            let Some(src) = sources.get(row.selected() as usize) else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            s.config.auto_cycle.source = src.clone();
+            s.config.save().ok();
+        });
+    }
+    group.add(&source);
+
+    page.add(&group);
 }
 
 /// "Day & night wallpaper" preferences group (ROADMAP 3.3 GUI). v1 exposes
@@ -8597,7 +9274,7 @@ fn show_audio_consent_dialog(
             .as_ref(),
     );
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
     dialog.set_title(Some(t!("Let the visualiser listen?")));
     dialog.set_default_size(460, -1);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -9086,12 +9763,17 @@ fn show_about_dialog(window: &adw::ApplicationWindow) {
     desc.set_justify(gtk4::Justification::Center);
     inner.append(&desc);
 
+    let links = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    links.set_margin_top(4);
+    links.set_halign(gtk4::Align::Center);
     let link = gtk4::LinkButton::with_label(
         "https://github.com/DibbayajyotiRoy/fresco",
         "github.com/DibbayajyotiRoy/fresco",
     );
-    link.set_margin_top(4);
-    inner.append(&link);
+    links.append(&link);
+    let discord = gtk4::LinkButton::with_label(crate::DISCORD_URL, t!("Discord community"));
+    links.append(&discord);
+    inner.append(&links);
 
     content.append(&inner);
     dialog.present();
@@ -9407,7 +10089,7 @@ pub(crate) fn glass_dialog(
     dialog.add_css_class("glass");
     dialog.set_transient_for(Some(window));
     dialog.set_modal(true);
-    dialog.set_resizable(false);
+    dialog.set_resizable(!crate::capability::is_deepin_dde());
     dialog.set_title(Some(title));
     dialog.set_default_size(width, height);
 
@@ -9978,6 +10660,40 @@ fn transition_hint(t: Transition) -> &'static str {
     }
 }
 
+/// The per-wallpaper picker's rows. "Default" clears the wallpaper's own
+/// transition so it follows the global one (`Config::effective_transition`).
+/// Every other row writes `Some`, and "None" is an explicit no-effect that
+/// still wins over a global default.
+const WALLPAPER_TRANSITIONS_SHOWN: [(Option<Transition>, &str); 6] = [
+    (None, "Default"),
+    (Some(Transition::None), "None"),
+    (Some(Transition::Fade), "Fade through black"),
+    (Some(Transition::KenBurns), "Ken Burns"),
+    (Some(Transition::Zoom), "Zoom"),
+    (Some(Transition::Blur), "Blur"),
+];
+
+/// Per-wallpaper hint: "Default" says where the effect comes from, anything
+/// else describes the effect itself.
+fn wallpaper_transition_hint(t: Option<Transition>) -> &'static str {
+    match t {
+        None => t!("Uses the default transition from Settings."),
+        Some(t) => transition_hint(t),
+    }
+}
+
+/// Per-wallpaper picker row → the value it writes; `None` is Default.
+fn wallpaper_transition_from_index(index: u32) -> Option<Transition> {
+    WALLPAPER_TRANSITIONS_SHOWN
+        .get(index as usize)
+        .and_then(|(t, _)| *t)
+}
+
+/// Stored per-wallpaper value → its picker row.
+fn wallpaper_transition_index(t: Option<Transition>) -> u32 {
+    table_index(&WALLPAPER_TRANSITIONS_SHOWN, t.map(folded_transition))
+}
+
 /// Picker row → the transition it writes.
 fn transition_from_index(index: u32) -> Transition {
     TRANSITIONS_SHOWN
@@ -9993,7 +10709,12 @@ fn transition_from_index(index: u32) -> Transition {
 /// downgrade of a setting the user never touched. Matching on the enum turns
 /// that into a compile error instead.
 fn transition_index(t: Transition) -> u32 {
-    let shown = match t {
+    table_index(&TRANSITIONS_SHOWN, folded_transition(t))
+}
+
+/// The effect a stored value is shown as. Shared by both pickers' indexes.
+fn folded_transition(t: Transition) -> Transition {
+    match t {
         Transition::None => Transition::None,
         // Both are the same dip through black; `Config::migrate` rewrites the
         // stored value, and this covers one read before that lands.
@@ -10004,8 +10725,7 @@ fn transition_index(t: Transition) -> u32 {
         Transition::KenBurns => Transition::KenBurns,
         Transition::Zoom => Transition::Zoom,
         Transition::Blur => Transition::Blur,
-    };
-    table_index(&TRANSITIONS_SHOWN, shown)
+    }
 }
 
 // ─── Feedback prompt + admin notifications (Supabase) ──────────────────────────
@@ -10041,7 +10761,11 @@ fn run_startup_checks(window: &adw::ApplicationWindow, state: Rc<RefCell<AppStat
         show_feedback_dialog(window, state.clone());
     }
     poll_notifications(window, state.clone());
-    super::updates::check_for_updates(window, state, false);
+    // Skipped when launched with `--update`: that path runs its own forced
+    // check, and a startup check still in flight would make it bail out.
+    if !PENDING_UPDATE.load(std::sync::atomic::Ordering::Relaxed) {
+        super::updates::check_for_updates(window, state, false);
+    }
 }
 
 /// Submit a rating, and — when `allow_reply` — open a support thread so the
@@ -12386,6 +13110,27 @@ mod tests {
         assert_eq!(
             table_labels(&TRANSITIONS_SHOWN).len(),
             TRANSITIONS_SHOWN.len()
+        );
+    }
+
+    /// The per-wallpaper table's leading row is Default (inherit), and "None"
+    /// is its own row, so an explicit no-effect is not folded into Default.
+    #[test]
+    fn wallpaper_transition_table_keeps_default_and_explicit_none_apart() {
+        assert_eq!(wallpaper_transition_index(None), 0);
+        assert_eq!(wallpaper_transition_from_index(0), None);
+        assert_eq!(wallpaper_transition_index(Some(Transition::None)), 1);
+        assert_eq!(wallpaper_transition_from_index(1), Some(Transition::None));
+        for (i, (t, label)) in WALLPAPER_TRANSITIONS_SHOWN.iter().enumerate() {
+            assert_eq!(wallpaper_transition_index(*t), i as u32, "{label}");
+            assert_eq!(wallpaper_transition_from_index(i as u32), *t, "{label}");
+        }
+        // Folds the same way as the global picker.
+        assert_eq!(wallpaper_transition_index(Some(Transition::Crossfade)), 2);
+        assert_eq!(wallpaper_transition_index(Some(Transition::Slide)), 2);
+        assert_eq!(
+            table_labels(&WALLPAPER_TRANSITIONS_SHOWN).len(),
+            WALLPAPER_TRANSITIONS_SHOWN.len()
         );
     }
 

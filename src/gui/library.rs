@@ -47,10 +47,16 @@ pub struct LibraryEntry {
     pub interval_s: Option<u64>,
     /// Effect played when this wallpaper comes up. Was slideshow-only, back
     /// when the daemon's animation machine lived inside `Slideshow`; it now
-    /// applies to every kind, video included. `None` means "never chosen",
-    /// which falls back to the wallpaper-level default.
+    /// applies to every kind, video included. `None` is "Default" (follow the
+    /// global transition); `Some(Transition::None)` is an explicit no-effect.
+    /// Entries saved before entries.json was version-marked stored `Some(None)`
+    /// for "Default"; see [`migrate_transition_defaults`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
+    /// Dip to black at the loop point (issue #10). Remembered so a later
+    /// gallery set keeps the choice made in the editor.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smooth_loop: bool,
     /// Remembered audio + orientation (video/playlist), so setting from the
     /// gallery keeps what you chose in the editor. None = sensible default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,6 +120,11 @@ pub struct LibraryEntry {
     /// timestamp.
     #[serde(default)]
     pub added: u64,
+    /// The video this entry was before "Make seamless loop" re-encoded it;
+    /// `path` is then the generated copy under the library's `seamless/`
+    /// directory. Kept so the change can be reverted. `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<PathBuf>,
 }
 
 impl LibraryEntry {
@@ -136,6 +147,7 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -150,6 +162,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -172,6 +185,7 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -186,6 +200,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -215,6 +230,7 @@ impl LibraryEntry {
             error: None,
             interval_s: None,
             transition: None,
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -229,6 +245,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -251,6 +268,7 @@ impl LibraryEntry {
             error: None,
             interval_s: Some(30),
             transition: Some(Transition::Fade),
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -265,6 +283,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -293,6 +312,7 @@ impl LibraryEntry {
             error: None,
             interval_s: Some(30),
             transition: Some(Transition::Fade),
+            smooth_loop: false,
             mute: None,
             volume: None,
             rotation: None,
@@ -307,6 +327,7 @@ impl LibraryEntry {
             collection: None,
             order: 0,
             added: now_secs(),
+            original_path: None,
         }
     }
 
@@ -659,7 +680,8 @@ impl LibraryEntry {
             volume: self.volume.unwrap_or(50),
             power_saving: self.power_saving,
             // Applies to every kind now, not just the slideshow branch below.
-            transition: self.transition.unwrap_or_default(),
+            transition: self.transition,
+            smooth_loop: self.smooth_loop,
             framerate: None, // deprecated; see Config::migrate
             slideshow: if self.kind == Kind::Slideshow {
                 Some(Slideshow {
@@ -667,6 +689,7 @@ impl LibraryEntry {
                     paths: self.paths.clone(),
                     interval_s: self.interval_s.unwrap_or(30),
                     recursive: self.recursive,
+                    // The legacy copy; `Config::migrate` keeps it in step.
                     transition: self.transition.unwrap_or_default(),
                 })
             } else {
@@ -687,8 +710,10 @@ pub struct EditorValues {
     pub mute: bool,
     pub volume: u8,
     pub power_saving: Option<PowerSaving>,
-    pub transition: Transition,
+    /// `None` is "Default"; see [`Wallpaper::transition`].
+    pub transition: Option<Transition>,
     pub interval_s: u64,
+    pub smooth_loop: bool,
 }
 
 /// Build the [`Wallpaper`] that "Set as wallpaper" should apply: `entry`'s own
@@ -708,9 +733,10 @@ pub fn wallpaper_from_editor(entry: &LibraryEntry, values: &EditorValues) -> Wal
     w.volume = values.volume;
     w.power_saving = values.power_saving;
     w.transition = values.transition;
+    w.smooth_loop = values.smooth_loop;
     if let Some(ss) = w.slideshow.as_mut() {
         ss.interval_s = values.interval_s;
-        ss.transition = values.transition;
+        ss.transition = values.transition.unwrap_or_default();
     }
     w
 }
@@ -769,15 +795,94 @@ pub fn entry_for_path<'a>(entries: &'a [LibraryEntry], path: &Path) -> Option<&'
         .find(|e| matches!(e.kind, Kind::Video | Kind::Image) && e.path.as_deref() == Some(path))
 }
 
-pub fn load_entries() -> Result<Vec<LibraryEntry>> {
-    let path = entries_path();
+/// Clear the legacy "inherit" spelling of a transition: `Some(Transition::None)`
+/// meant "Default" before the per-wallpaper picker had a Default row. Returns
+/// whether anything changed.
+pub(crate) fn unset_legacy_none(t: &mut Option<Transition>) -> bool {
+    if *t == Some(Transition::None) {
+        *t = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// One-time upgrade of transitions saved before the per-wallpaper picker grew
+/// a "Default" row. Those files stored `Some(Transition::None)` wherever the
+/// user had never picked an effect; after this release that value means an
+/// explicit "None", so it is cleared here, once.
+///
+/// entries.json is a bare array, so it has no version field to key this on.
+/// A marker file next to it does the job instead: once it exists, the library
+/// has been read under the current meaning and nothing is reinterpreted again.
+/// The marker is written only after both files were rewritten (or needed
+/// nothing); on failure it is left absent and the next GUI start retries.
+///
+/// Called once from the GUI's startup, never from the readers: the daemon
+/// also reads these files and must not race the GUI rewriting them. Until the
+/// marker exists the readers apply the same conversion in memory
+/// ([`load_entries`], [`linked::load_tweaks`]).
+pub fn migrate_transition_defaults() {
+    if let Err(e) = migrate_transition_defaults_in(&library_dir()) {
+        log::warn!("transition migration (retrying next start): {e:#}");
+    }
+}
+
+fn migrate_transition_defaults_in(dir: &Path) -> Result<()> {
+    let marker = dir.join(TRANSITION_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+    migrate_entries_file(&dir.join("entries.json"))?;
+    linked::unset_legacy_transitions(&dir.join("linked.json"))?;
+    fs::create_dir_all(dir)?;
+    fs::write(&marker, "")?;
+    Ok(())
+}
+
+const TRANSITION_MARKER: &str = "transition-default-v2";
+
+/// True until [`migrate_transition_defaults`] has completed.
+pub(crate) fn legacy_transitions_pending() -> bool {
+    !library_dir().join(TRANSITION_MARKER).exists()
+}
+
+fn migrate_entries_file(path: &Path) -> Result<()> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Ok(());
+    };
+    let mut entries: Vec<LibraryEntry> =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    let mut changed = false;
+    for e in &mut entries {
+        changed |= unset_legacy_none(&mut e.transition);
+    }
+    if changed {
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, entries_json(&entries)?)?;
+        fs::rename(&tmp, path)?;
+    }
+    Ok(())
+}
+
+/// Side-effect-free read; `legacy` applies the in-memory transition upgrade.
+fn read_entries(path: &Path, legacy: bool) -> Result<Vec<LibraryEntry>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let entries: Vec<LibraryEntry> =
+    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut entries: Vec<LibraryEntry> =
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    if legacy {
+        for e in &mut entries {
+            unset_legacy_none(&mut e.transition);
+        }
+    }
     Ok(entries)
+}
+
+pub fn load_entries() -> Result<Vec<LibraryEntry>> {
+    read_entries(&entries_path(), legacy_transitions_pending())
 }
 
 pub fn save_entries(entries: &[LibraryEntry]) -> Result<()> {
@@ -1686,6 +1791,50 @@ mod tests {
         assert_eq!(found("/lib/a.mp4"), None);
     }
 
+    /// Readers never write: without the marker they convert in memory only.
+    #[test]
+    fn read_without_marker_converts_in_memory_and_leaves_file() {
+        let dir = std::env::temp_dir().join(format!("fresco-tr-read-{}", make_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("entries.json");
+        let json =
+            r#"[{"id":"1-0","name":"a","kind":"video","path":"/a.mp4","transition":"none"}]"#;
+        fs::write(&path, json).unwrap();
+        assert_eq!(read_entries(&path, true).unwrap()[0].transition, None);
+        assert_eq!(
+            read_entries(&path, false).unwrap()[0].transition,
+            Some(Transition::None)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), json);
+        assert!(!dir.join(TRANSITION_MARKER).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Migration rewrites both files, then writes the marker; a failure
+    /// (unparsable file) leaves no marker so it is retried.
+    #[test]
+    fn migrate_rewrites_files_then_marker_and_retries_on_failure() {
+        let dir = std::env::temp_dir().join(format!("fresco-tr-mig-{}", make_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entries = dir.join("entries.json");
+        let linked = dir.join("linked.json");
+        fs::write(
+            &entries,
+            r#"[{"id":"1-0","name":"a","kind":"video","path":"/a.mp4","transition":"none"}]"#,
+        )
+        .unwrap();
+        fs::write(&linked, r#"{"/x.png":{"transition":"none"}}"#).unwrap();
+        fs::write(&linked, "{ broken").unwrap();
+        assert!(migrate_transition_defaults_in(&dir).is_err());
+        assert!(!dir.join(TRANSITION_MARKER).exists());
+        fs::write(&linked, r#"{"/x.png":{"transition":"none"}}"#).unwrap();
+        migrate_transition_defaults_in(&dir).unwrap();
+        assert!(dir.join(TRANSITION_MARKER).exists());
+        assert_eq!(read_entries(&entries, false).unwrap()[0].transition, None);
+        assert!(!fs::read_to_string(&linked).unwrap().contains("none"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn thumb_dims_fits_longest_side_without_upscaling() {
         assert_eq!(thumb_dims(1920, 1080, 256), (256, 144));
@@ -1722,6 +1871,22 @@ mod tests {
         assert_eq!(e.collection, None);
         assert_eq!(e.order, 0);
         assert_eq!(e.added, 0);
+    }
+
+    /// `original_path` is optional: absent from older files, left out of the
+    /// JSON while unset, and round-trips once a seamless copy records it.
+    #[test]
+    fn original_path_is_optional_and_round_trips() {
+        let old: LibraryEntry =
+            serde_json::from_str(r#"{"id":"1-0","name":"CAR","kind":"video","path":"/v/car.mp4"}"#)
+                .expect("old entry loads");
+        assert_eq!(old.original_path, None);
+
+        let mut e = LibraryEntry::new_video(PathBuf::from("/v/car.mp4"));
+        assert!(!serde_json::to_string(&e).unwrap().contains("original_path"));
+        e.original_path = Some(PathBuf::from("/home/u/car.mp4"));
+        let back: LibraryEntry = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        assert_eq!(back.original_path, Some(PathBuf::from("/home/u/car.mp4")));
     }
 
     #[test]
@@ -2093,8 +2258,9 @@ mod tests {
             mute: false,
             volume: 80,
             power_saving: Some(PowerSaving::Full),
-            transition: Transition::Blur,
+            transition: Some(Transition::Blur),
             interval_s: 15,
+            smooth_loop: false,
         }
     }
 
@@ -2112,7 +2278,46 @@ mod tests {
         assert_eq!(w.fit, Fit::Contain);
         assert!(!w.mute);
         assert_eq!(w.volume, 80);
-        assert_eq!(w.transition, Transition::Blur);
+        assert_eq!(w.transition, Some(Transition::Blur));
+    }
+
+    /// entries.json from before the Default row: `"transition": "none"` was
+    /// the "never chosen" value. The one-time migration reads it as Default;
+    /// a second pass finds nothing, so a choice made after the upgrade stays.
+    #[test]
+    fn legacy_none_entries_read_as_default() {
+        let mut entries: Vec<LibraryEntry> = serde_json::from_str(
+            r#"[{"id":"1-0","name":"a","kind":"video","path":"/a.mp4","transition":"none"},
+                {"id":"1-1","name":"b","kind":"video","path":"/b.mp4","transition":"zoom"},
+                {"id":"1-2","name":"c","kind":"image","path":"/c.png"}]"#,
+        )
+        .unwrap();
+        assert_eq!(entries[0].transition, Some(Transition::None));
+        let changed: Vec<bool> = entries
+            .iter_mut()
+            .map(|e| unset_legacy_none(&mut e.transition))
+            .collect();
+        assert_eq!(changed, [true, false, false]);
+        assert_eq!(entries[0].transition, None);
+        assert_eq!(entries[1].transition, Some(Transition::Zoom));
+        assert_eq!(entries[2].transition, None);
+
+        let mut explicit = Some(Transition::None);
+        assert!(unset_legacy_none(&mut explicit));
+        assert!(!unset_legacy_none(&mut explicit));
+    }
+
+    /// `smooth_loop` (issue #10) must survive both entry->wallpaper paths.
+    #[test]
+    fn smooth_loop_is_copied_to_the_wallpaper() {
+        let mut entry = LibraryEntry::new_video(PathBuf::from("/videos/a.mp4"));
+        entry.smooth_loop = true;
+        assert!(entry.to_wallpaper().smooth_loop);
+        let mut v = editor_values();
+        v.smooth_loop = true;
+        assert!(wallpaper_from_editor(&entry, &v).smooth_loop);
+        v.smooth_loop = false;
+        assert!(!wallpaper_from_editor(&entry, &v).smooth_loop);
     }
 
     /// A slideshow's nested `Slideshow.interval_s`/`.transition` must follow

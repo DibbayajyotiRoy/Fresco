@@ -15,15 +15,52 @@ pub fn next_wallpaper(config: &Config, current: &Wallpaper) -> Option<Wallpaper>
     if !config.auto_cycle.enabled || config.auto_cycle.interval_min == 0 {
         return None;
     }
-    match &config.auto_cycle.source {
-        CycleSource::Library => next_from_library(config, current),
-        CycleSource::Collection(id) => next_from_collection(config, current, id),
-        CycleSource::Folder(path) => next_from_folder(config, current, path),
+    let pool = pool(&config.auto_cycle.source);
+    let current = pool.iter().position(|w| w.same_media(current));
+    let slot = pick(
+        pool.len(),
+        current,
+        config.auto_cycle.shuffle,
+        random_usize(),
+    )?;
+    Some(pool[slot].clone())
+}
+
+/// Every wallpaper a source offers, in the order it cycles: the library in the
+/// gallery's display order (broken entries left out), a collection in manual
+/// order, a folder sorted by path (subfolders too when its linked section is
+/// recursive).
+pub fn pool(source: &CycleSource) -> Vec<Wallpaper> {
+    match source {
+        CycleSource::Library => library_pool(),
+        CycleSource::Collection(id) => collection_pool(id),
+        CycleSource::Folder(path) => folder_pool(path),
     }
 }
 
-fn next_from_library(config: &Config, current: &Wallpaper) -> Option<Wallpaper> {
-    let mut entries = library::load_entries().ok()?;
+/// [`pool`] narrowed to what a day/night slot can show: single image or video
+/// files (the scheduler applies a path, not a playlist or slideshow).
+pub fn slot_pool(source: &CycleSource) -> Vec<Wallpaper> {
+    pool(source)
+        .into_iter()
+        .filter(|w| matches!(w.kind, Kind::Image | Kind::Video))
+        .collect()
+}
+
+/// A random wallpaper from a day/night slot's pool, or None when it is empty.
+pub fn random_from(source: &CycleSource) -> Option<Wallpaper> {
+    let pool = slot_pool(source);
+    if pool.is_empty() {
+        return None;
+    }
+    let i = random_usize() % pool.len();
+    pool.into_iter().nth(i)
+}
+
+fn library_pool() -> Vec<Wallpaper> {
+    let Ok(mut entries) = library::load_entries() else {
+        return Vec::new();
+    };
     for e in &mut entries {
         e.check_health();
     }
@@ -35,26 +72,18 @@ fn next_from_library(config: &Config, current: &Wallpaper) -> Option<Wallpaper> 
         .enumerate()
         .map(|(i, e)| (e.id.as_str(), i))
         .collect();
-    let pool: Vec<usize> = window::display_order(&entries, &collections, library::load_view())
+    window::display_order(&entries, &collections, library::load_view())
         .iter()
         .filter_map(|id| index.get(id.as_str()).copied())
         .filter(|&i| !entries[i].broken)
-        .collect();
-
-    let current = pool
-        .iter()
-        .position(|&i| window::entry_matches_wallpaper(&entries[i], current));
-    let slot = pick(
-        pool.len(),
-        current,
-        config.auto_cycle.shuffle,
-        random_usize(),
-    )?;
-    Some(entries[pool[slot]].to_wallpaper())
+        .map(|i| entries[i].to_wallpaper())
+        .collect()
 }
 
-fn next_from_collection(config: &Config, current: &Wallpaper, id: &str) -> Option<Wallpaper> {
-    let mut entries = library::load_entries().ok()?;
+fn collection_pool(id: &str) -> Vec<Wallpaper> {
+    let Ok(mut entries) = library::load_entries() else {
+        return Vec::new();
+    };
     for e in &mut entries {
         e.check_health();
     }
@@ -62,28 +91,11 @@ fn next_from_collection(config: &Config, current: &Wallpaper, id: &str) -> Optio
         .iter()
         .filter(|e| e.collection.as_deref() == Some(id) && !e.broken)
         .collect();
-    if refs.is_empty() {
-        return None;
-    }
     library::sort_entries(&mut refs, library::SortMode::Manual);
-    let pool: Vec<usize> = refs
-        .into_iter()
-        .map(|e| entries.iter().position(|x| x.id == e.id).unwrap())
-        .collect();
-
-    let current = pool
-        .iter()
-        .position(|&i| window::entry_matches_wallpaper(&entries[i], current));
-    let slot = pick(
-        pool.len(),
-        current,
-        config.auto_cycle.shuffle,
-        random_usize(),
-    )?;
-    Some(entries[pool[slot]].to_wallpaper())
+    refs.into_iter().map(LibraryEntry::to_wallpaper).collect()
 }
 
-fn next_from_folder(config: &Config, current: &Wallpaper, folder: &Path) -> Option<Wallpaper> {
+fn folder_pool(folder: &Path) -> Vec<Wallpaper> {
     // A linked section set to "include subfolders" shows its subfolders too,
     // so the cycle pool must match. The GUI hands us the link's exact path.
     let recursive = library::load_collections()
@@ -96,20 +108,7 @@ fn next_from_folder(config: &Config, current: &Wallpaper, folder: &Path) -> Opti
         });
     let mut files = media::scan(folder, recursive, &media::is_supported);
     files.sort();
-    if files.is_empty() {
-        return None;
-    }
-    let pool: Vec<Wallpaper> = files.iter().map(|p| wallpaper_from_file(p)).collect();
-    let current = pool
-        .iter()
-        .position(|w| folder_wallpaper_matches(w, current));
-    let slot = pick(
-        pool.len(),
-        current,
-        config.auto_cycle.shuffle,
-        random_usize(),
-    )?;
-    Some(pool[slot].clone())
+    files.iter().map(|p| wallpaper_from_file(p)).collect()
 }
 
 fn wallpaper_from_file(path: &Path) -> Wallpaper {
@@ -123,10 +122,6 @@ fn wallpaper_from_file(path: &Path) -> Wallpaper {
         path: Some(path.to_path_buf()),
         ..Wallpaper::default()
     }
-}
-
-fn folder_wallpaper_matches(a: &Wallpaper, b: &Wallpaper) -> bool {
-    a.kind == b.kind && a.effective_path() == b.effective_path()
 }
 
 /// Choose the next slot. `rand` is only used in shuffle mode; passing 0 is

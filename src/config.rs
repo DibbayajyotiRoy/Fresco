@@ -467,6 +467,13 @@ pub struct Schedule {
     pub day: Option<Wallpaper>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub night: Option<Wallpaper>,
+    /// daynight/solar (#130): optional pool per slot. While the slot is active
+    /// the daemon shows a random file from it, kept until the slot changes;
+    /// `day`/`night` are the fallback when the pool is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day_source: Option<CycleSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub night_source: Option<CycleSource>,
     /// daynight: manual switch times, "HH:MM" 24h local.
     #[serde(default = "default_day_start")]
     pub day_start: String,
@@ -1761,6 +1768,14 @@ impl Wallpaper {
         self.path
             .as_deref()
             .or_else(|| self.paths.first().map(|p| p.as_path()))
+    }
+
+    /// Same kind and the same media (file, or playlist items): what the
+    /// pickers call "already playing".
+    pub fn same_media(&self, other: &Wallpaper) -> bool {
+        self.kind == other.kind
+            && self.effective_path() == other.effective_path()
+            && self.paths == other.paths
     }
 
     /// Whether anything is set to play: a media file, or a slideshow (which

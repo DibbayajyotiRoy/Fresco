@@ -2118,10 +2118,7 @@ impl Daemon {
         }
         // Keep the in-memory config coherent for status/describe. NEVER saved:
         // the on-disk config remains the user's own intent.
-        self.config.wallpaper.path = Some(path.clone());
-        self.config.wallpaper.rotation = want.rotation;
-        self.config.wallpaper.power_saving = want.power_saving;
-        self.config.wallpaper.crop = want.crop;
+        adopt_scheduled_media(&mut self.config.wallpaper, &want, &path);
         self.sched.applied = Some(path);
         overview::apply(&self.config.wallpaper);
         cosmic_bg::apply(&self.config);
@@ -2513,25 +2510,84 @@ fn proc_stats(child_pids: &[u32]) -> (f32, u64) {
     (cpu, rss_pages * 4096 / 1_048_576)
 }
 
+/// Sticky day/night pool pick (#130). One process-wide pick: the scheduler tick,
+/// the manual-Apply hold and the web mirror all ask, and must agree on the file.
+static SLOT_PICK: std::sync::Mutex<crate::schedule::SlotPick> =
+    std::sync::Mutex::new(crate::schedule::SlotPick::new());
+
+/// The pool a day/night slot draws from. Without the `gui` feature the daemon
+/// has no library, so a pool-only slot has nothing to show.
+#[cfg(feature = "gui")]
+fn schedule_pool(source: &crate::config::CycleSource) -> Vec<Wallpaper> {
+    crate::cycle::slot_pool(source)
+}
+
+#[cfg(not(feature = "gui"))]
+fn schedule_pool(_source: &crate::config::CycleSource) -> Vec<Wallpaper> {
+    Vec::new()
+}
+
 /// The full wallpaper the configured schedule wants on screen right now —
 /// rotation/crop included, so a scheduled swap can reset per-wallpaper player
 /// state instead of leaking the previous wallpaper's rotation.
 pub(crate) fn schedule_desired_wallpaper(config: &Config) -> Option<Wallpaper> {
+    resolve_schedule(config, &SLOT_PICK, schedule_pool)
+}
+
+/// [`schedule_desired_wallpaper`] with the pick state and the pool lookup
+/// passed in, so tests can drive it.
+fn resolve_schedule(
+    config: &Config,
+    pick: &std::sync::Mutex<crate::schedule::SlotPick>,
+    pool: impl Fn(&crate::config::CycleSource) -> Vec<Wallpaper>,
+) -> Option<Wallpaper> {
     use chrono::Offset as _;
-    if config.schedule_paused || !config.enabled {
-        // Paused: keep the schedule config, ignore it entirely. Desktop off:
-        // there is no desktop wallpaper for it to switch.
-        return None;
-    }
-    let sched = config.schedule.as_ref()?;
+    let mut pick = pick.lock().unwrap_or_else(|p| p.into_inner());
+    // Paused: keep the schedule config, ignore it entirely. Desktop off: there
+    // is no desktop wallpaper for it to switch.
+    let sched = config
+        .schedule
+        .as_ref()
+        .filter(|_| !config.schedule_paused && config.enabled);
     let now = chrono::Local::now();
     let off = now.offset().fix().local_minus_utc() / 60;
-    crate::schedule::desired(sched, now.naive_local(), off).cloned()
+    let Some(active) = sched.and_then(|s| crate::schedule::active(s, now.naive_local(), off))
+    else {
+        pick.clear();
+        return None;
+    };
+    if let (Some(slot), Some(source)) = (active.slot, active.source) {
+        let rand = {
+            use std::hash::BuildHasher;
+            std::collections::hash_map::RandomState::new().hash_one(0u8) as usize
+        };
+        if let Some(w) = pick.resolve(slot, source, || pool(source), rand, Some(&config.wallpaper))
+        {
+            return Some(w);
+        }
+        // Empty pool: fall back to the slot's own wallpaper, if it has one.
+    } else {
+        pick.clear();
+    }
+    active.fixed.cloned()
 }
 
 /// What the configured schedule wants on screen right now (path only).
 fn schedule_desired_path(config: &Config) -> Option<PathBuf> {
     schedule_desired_wallpaper(config).and_then(|w| w.effective_path().map(|p| p.to_path_buf()))
+}
+
+/// Copy a scheduled wallpaper's media into the daemon's in-memory default
+/// wallpaper, which status and the mirror read. Kind and playlist items come
+/// along too: a pool can mix images and videos, and a playlist slot must not
+/// keep the previous kind.
+fn adopt_scheduled_media(current: &mut Wallpaper, want: &Wallpaper, path: &std::path::Path) {
+    current.kind = want.kind;
+    current.paths = want.paths.clone();
+    current.path = Some(path.to_path_buf());
+    current.rotation = want.rotation;
+    current.power_saving = want.power_saving;
+    current.crop = want.crop;
 }
 
 /// Scheduler bookkeeping shared by both backends' loops.
@@ -3715,16 +3771,11 @@ fn run_wayland_layershell() -> Result<()> {
                                     .start(config.effective_transition(&want), path.clone(), pl)
                                     .animating();
                             }
-                            o.wallpaper.path = Some(path.clone());
-                            o.wallpaper.rotation = want.rotation;
-                            o.wallpaper.power_saving = want.power_saving;
-                            o.wallpaper.crop = want.crop;
+                            adopt_scheduled_media(&mut o.wallpaper, &want, &path);
                             o.power_saving = config.effective_power_saving(&want);
                         }
                     }
-                    config.wallpaper.path = Some(path.clone());
-                    config.wallpaper.rotation = want.rotation;
-                    config.wallpaper.crop = want.crop;
+                    adopt_scheduled_media(&mut config.wallpaper, &want, &path);
                     sched.applied = Some(path);
                     kde_desktop::apply(&config);
                 }
@@ -6426,6 +6477,8 @@ mod sched_clock_jump_tests {
             night_start: "17:16".into(),
             lat: None,
             lon: None,
+            day_source: None,
+            night_source: None,
             at: vec![],
         }
     }
@@ -6521,6 +6574,8 @@ mod sched_clock_jump_tests {
                 night_start: "19:00".into(),
                 lat: None,
                 lon: None,
+                day_source: None,
+                night_source: None,
                 at: vec![crate::config::TimeSlot {
                     time: "00:00".into(),
                     wallpaper: wp("/day.mp4"),
@@ -6598,5 +6653,96 @@ mod sched_clock_jump_tests {
             playing_media_path(&swapped),
             Some(PathBuf::from("/night.mp4"))
         );
+    }
+}
+
+/// #130: the daemon side of day/night pools.
+#[cfg(test)]
+mod schedule_pool_tests {
+    use super::*;
+    use crate::config::{CycleSource, Schedule, ScheduleMode};
+    use std::path::Path;
+
+    fn img(path: &str) -> Wallpaper {
+        Wallpaper {
+            kind: Kind::Image,
+            path: Some(PathBuf::from(path)),
+            ..Default::default()
+        }
+    }
+    /// Both slots share one fixed wallpaper and one pool, so the assertions do
+    /// not depend on which half of the day the clock is in.
+    fn config(pool: bool) -> Config {
+        let src = CycleSource::Folder(PathBuf::from("/pics"));
+        Config {
+            enabled: true,
+            schedule: Some(Schedule {
+                mode: ScheduleMode::Daynight,
+                day: Some(img("/fixed.png")),
+                night: Some(img("/fixed.png")),
+                day_source: pool.then(|| src.clone()),
+                night_source: pool.then_some(src),
+                day_start: "00:00".into(),
+                night_start: "00:00".into(),
+                lat: None,
+                lon: None,
+                at: vec![],
+            }),
+            wallpaper: img("/before.png"),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn scheduled_media_takes_the_kind_and_playlist_items_of_the_slot() {
+        let mut current = Wallpaper {
+            kind: Kind::Video,
+            path: Some(PathBuf::from("/old.mp4")),
+            paths: vec![PathBuf::from("/a.mp4"), PathBuf::from("/b.mp4")],
+            ..Default::default()
+        };
+        let want = img("/new.png");
+        adopt_scheduled_media(&mut current, &want, Path::new("/new.png"));
+        assert_eq!(current.kind, Kind::Image);
+        assert!(current.paths.is_empty());
+        assert_eq!(current.path, Some(PathBuf::from("/new.png")));
+    }
+
+    #[test]
+    fn a_pool_pick_replaces_the_slot_wallpaper_with_its_own_kind() {
+        let pick = std::sync::Mutex::new(crate::schedule::SlotPick::new());
+        let video = Wallpaper {
+            kind: Kind::Video,
+            path: Some(PathBuf::from("/pics/clip.mp4")),
+            ..Default::default()
+        };
+        let got = resolve_schedule(&config(true), &pick, |_| vec![video.clone()]).unwrap();
+        assert_eq!(got.kind, Kind::Video);
+        assert_eq!(got.effective_path(), Some(Path::new("/pics/clip.mp4")));
+    }
+
+    #[test]
+    fn an_empty_pool_falls_back_to_the_slot_wallpaper() {
+        let pick = std::sync::Mutex::new(crate::schedule::SlotPick::new());
+        let got = resolve_schedule(&config(true), &pick, |_| Vec::new()).unwrap();
+        assert_eq!(got.effective_path(), Some(Path::new("/fixed.png")));
+    }
+
+    #[test]
+    fn a_slot_without_a_pool_never_touches_the_pick() {
+        let pick = std::sync::Mutex::new(crate::schedule::SlotPick::new());
+        let got = resolve_schedule(&config(false), &pick, |_| {
+            panic!("no pool to list for a fixed slot")
+        })
+        .unwrap();
+        assert_eq!(got.effective_path(), Some(Path::new("/fixed.png")));
+    }
+
+    #[test]
+    fn a_switched_off_schedule_returns_nothing() {
+        let pick = std::sync::Mutex::new(crate::schedule::SlotPick::new());
+        let mut cfg = config(true);
+        cfg.schedule_paused = true;
+        assert!(resolve_schedule(&cfg, &pick, |_| vec![img("/x.png")]).is_none());
     }
 }

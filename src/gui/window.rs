@@ -6514,6 +6514,73 @@ fn cycle_source_for(c: &library::Collection) -> CycleSource {
     }
 }
 
+/// A "Wallpapers from" row: the pool a cycle or a day/night slot draws from.
+/// `leading` adds a first entry, `None` ("no pool"). Returns the row and, per
+/// row position, the source it stands for.
+fn source_row(
+    collections: &[library::Collection],
+    current: Option<&CycleSource>,
+    leading: Option<String>,
+) -> (adw::ComboRow, Vec<Option<CycleSource>>) {
+    let mut sources: Vec<Option<CycleSource>> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    if let Some(label) = leading {
+        sources.push(None);
+        names.push(label);
+    }
+    sources.push(Some(CycleSource::Library));
+    names.push(t!("Whole library").to_string());
+    for c in collections {
+        sources.push(Some(cycle_source_for(c)));
+        names.push(c.name.clone());
+    }
+    // A saved source that matches nothing (a deleted collection, a folder no
+    // longer linked) keeps its own entry, so the row never claims "Whole
+    // library" for it.
+    let selected = match current {
+        Some(cur) => match sources.iter().position(|s| s.as_ref() == Some(cur)) {
+            Some(i) => i,
+            None => {
+                names.push(match cur {
+                    CycleSource::Folder(p) => p.display().to_string(),
+                    _ => t!("Unavailable collection").to_string(),
+                });
+                sources.push(Some(cur.clone()));
+                sources.len() - 1
+            }
+        },
+        // No current pool: the leading "no pool" entry, when there is one.
+        None => 0,
+    };
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let row = adw::ComboRow::new();
+    row.set_title(t!("Wallpapers from"));
+    row.set_model(Some(&gtk4::StringList::new(&name_refs)));
+    row.set_selected(selected as u32);
+    (row, sources)
+}
+
+/// The source a "Wallpapers from" row currently stands for (None = no pool).
+fn selected_source(row: &adw::ComboRow, sources: &[Option<CycleSource>]) -> Option<CycleSource> {
+    sources.get(row.selected() as usize).cloned().flatten()
+}
+
+/// Short name for a pool, as the "Next switch" hint shows it.
+fn source_label(src: &CycleSource, collections: &[library::Collection]) -> String {
+    match src {
+        CycleSource::Library => t!("Whole library").to_string(),
+        CycleSource::Collection(id) => collections
+            .iter()
+            .find(|c| &c.id == id)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| t!("Unavailable collection").to_string()),
+        CycleSource::Folder(p) => p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.display().to_string()),
+    }
+}
+
 /// A preferences row with a title and a switch at the end.
 fn toggle_row(title: &str, active: bool, on_toggle: impl Fn(bool) + 'static) -> adw::ActionRow {
     let row = adw::ActionRow::new();
@@ -6589,35 +6656,11 @@ fn add_auto_cycle_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>
         }
     }));
 
-    let mut sources = vec![CycleSource::Library];
-    let mut names = vec![t!("Whole library").to_string()];
-    for c in &collections {
-        sources.push(cycle_source_for(c));
-        names.push(c.name.clone());
-    }
-    // A saved source that matches nothing (a deleted collection, a folder no
-    // longer linked) keeps its own entry, so the row never claims "Whole
-    // library" for it.
-    let selected = match sources.iter().position(|s| *s == cycle.source) {
-        Some(i) => i,
-        None => {
-            names.push(match &cycle.source {
-                CycleSource::Folder(p) => p.display().to_string(),
-                _ => t!("Unavailable collection").to_string(),
-            });
-            sources.push(cycle.source.clone());
-            sources.len() - 1
-        }
-    };
-    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    let source = adw::ComboRow::new();
-    source.set_title(t!("Wallpapers from"));
-    source.set_model(Some(&gtk4::StringList::new(&name_refs)));
-    source.set_selected(selected as u32);
+    let (source, sources) = source_row(&collections, Some(&cycle.source), None);
     {
         let state = state.clone();
         source.connect_selected_notify(move |row| {
-            let Some(src) = sources.get(row.selected() as usize) else {
+            let Some(Some(src)) = sources.get(row.selected() as usize) else {
                 return;
             };
             let mut s = state.borrow_mut();
@@ -6663,6 +6706,31 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
     let night_row = adw::ComboRow::new();
     night_row.set_title(t!("Night wallpaper"));
     night_row.set_model(Some(&gtk4::StringList::new(&names)));
+
+    // Optional pools (#130): while a slot is active, a random file from its
+    // source plays instead of the wallpaper above. The first entry means none.
+    let (collections, stored_pools) = {
+        let s = state.borrow();
+        let mut c = s.collections.clone();
+        c.sort_by_key(|c| c.position);
+        let stored = s
+            .config
+            .schedule
+            .as_ref()
+            .map(|sch| (sch.day_source.clone(), sch.night_source.clone()))
+            .unwrap_or_default();
+        (c, stored)
+    };
+    let (day_pool_row, day_sources) = source_row(
+        &collections,
+        stored_pools.0.as_ref(),
+        Some(t!("Use the wallpaper above").to_string()),
+    );
+    let (night_pool_row, night_sources) = source_row(
+        &collections,
+        stored_pools.1.as_ref(),
+        Some(t!("Use the wallpaper above").to_string()),
+    );
 
     let time_entry = |placeholder: &str| {
         let e = gtk4::Entry::new();
@@ -6754,6 +6822,10 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
         let candidates = candidates.clone();
         let service_row = service_row.clone();
         let refresh_hint = refresh_hint.clone();
+        let day_pool_row = day_pool_row.clone();
+        let night_pool_row = night_pool_row.clone();
+        let day_sources = day_sources.clone();
+        let night_sources = night_sources.clone();
         move || {
             let on = enable.selected() == 1;
             // A fresh pick replaces the "no longer in your library" note.
@@ -6811,6 +6883,8 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
                         mode: crate::config::ScheduleMode::Daynight,
                         day: Some(day),
                         night: Some(night),
+                        day_source: selected_source(&day_pool_row, &day_sources),
+                        night_source: selected_source(&night_pool_row, &night_sources),
                         day_start: dt,
                         night_start: nt,
                         lat: None,
@@ -6858,6 +6932,10 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
     let w = write.clone();
     night_row.connect_selected_notify(move |_| w());
     let w = write.clone();
+    day_pool_row.connect_selected_notify(move |_| w());
+    let w = write.clone();
+    night_pool_row.connect_selected_notify(move |_| w());
+    let w = write.clone();
     day_time.connect_changed(move |_| w());
     let w = write;
     night_time.connect_changed(move |_| w());
@@ -6865,7 +6943,9 @@ fn add_schedule_group(page: &adw::PreferencesPage, state: Rc<RefCell<AppState>>)
     group.add(&service_row.row);
     group.add(&enable);
     group.add(&day_row);
+    group.add(&day_pool_row);
     group.add(&night_row);
+    group.add(&night_pool_row);
     group.add(&day_time_row);
     group.add(&night_time_row);
     page.add(&group);
@@ -6892,20 +6972,24 @@ fn next_switch_subtitle(state: &Rc<RefCell<AppState>>, candidates: &[(usize, Str
     };
     let now = chrono::Local::now();
     let off = now.offset().fix().local_minus_utc() / 60;
-    let Some((at, w)) = crate::schedule::next_switch(sch, now.naive_local(), off) else {
+    let Some((at, act)) = crate::schedule::next_switch(sch, now.naive_local(), off) else {
         return String::new();
     };
-    let name = candidates
-        .iter()
-        .find(|(i, _)| s.entries[*i].path.as_deref() == w.path.as_deref())
-        .map(|(_, n)| n.clone())
-        .or_else(|| {
-            w.path
-                .as_ref()
-                .and_then(|p| p.file_stem())
-                .map(|n| n.to_string_lossy().into_owned())
-        })
-        .unwrap_or_default();
+    let name = match (act.source, act.fixed) {
+        (Some(src), _) => source_label(src, &s.collections),
+        (None, Some(w)) => candidates
+            .iter()
+            .find(|(i, _)| s.entries[*i].path.as_deref() == w.path.as_deref())
+            .map(|(_, n)| n.clone())
+            .or_else(|| {
+                w.path
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default(),
+        (None, None) => return String::new(),
+    };
     crate::schedule::next_switch_hint(at, &name)
 }
 
@@ -7006,8 +7090,17 @@ fn sync_wallpaper_to_schedule(cfg: &mut Config) {
     };
     let now = chrono::Local::now();
     let off = now.offset().fix().local_minus_utc() / 60;
-    if let Some(w) = crate::schedule::desired(sch, now.naive_local(), off) {
-        cfg.wallpaper = w.clone();
+    let Some(act) = crate::schedule::active(sch, now.naive_local(), off) else {
+        return;
+    };
+    // A pool slot plays a random file from its source: draw one now so the
+    // change shows at once. The daemon's own pick takes over from its next tick.
+    let w = match act.source {
+        Some(src) => crate::cycle::random_from(src).or_else(|| act.fixed.cloned()),
+        None => act.fixed.cloned(),
+    };
+    if let Some(w) = w {
+        cfg.wallpaper = w;
         // Every caller applies this right away, which replaces what the status
         // cache names: see `status::forget_playing_path`.
         status::forget_playing_path();
@@ -12128,6 +12221,8 @@ mod tests {
                 night_start: "19:00".into(),
                 lat: None,
                 lon: None,
+                day_source: None,
+                night_source: None,
                 at: vec![],
             }),
             ..Default::default()
@@ -12163,6 +12258,8 @@ mod tests {
                 night_start: "19:00".into(),
                 lat: None,
                 lon: None,
+                day_source: None,
+                night_source: None,
                 at: vec![TimeSlot {
                     time: "00:00".into(),
                     wallpaper: entry(slot).to_wallpaper(),

@@ -34,6 +34,12 @@ pub struct FrescoApplication {
 /// instance — build_ui opens the feedback dialog right after presenting.
 static PENDING_FEEDBACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set when launched with `--update` (the daemon's "Update now" notification
+/// does this, since only the GUI's session can run pkexec). build_ui opens the
+/// install dialog once the window is up, and the startup update check is skipped
+/// so it cannot be in flight and swallow this forced check.
+static PENDING_UPDATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl FrescoApplication {
     pub fn new() -> Self {
         let app = adw::Application::new(Some(APP_ID), gio::ApplicationFlags::FLAGS_NONE);
@@ -42,22 +48,29 @@ impl FrescoApplication {
     }
 
     pub fn run(&self, args: &[String]) -> i32 {
-        // `--feedback` is ours, not GLib's: strip it before GApplication sees
-        // it, and route it via the exported "open-feedback" action so it works
-        // whether we become the primary instance or one is already running.
+        // `--feedback` and `--update` are ours, not GLib's: strip them before
+        // GApplication sees them, and route them via exported actions so they
+        // work whether we become the primary instance or one is already running.
         let feedback = args.iter().any(|a| a == "--feedback");
+        let update = crate::cli::update_requested(args);
         let argv: Vec<&str> = args
             .iter()
-            .filter(|a| a.as_str() != "--feedback")
+            .filter(|a| !matches!(a.as_str(), "--feedback" | "--update"))
             .map(String::as_str)
             .collect();
-        if feedback {
-            PENDING_FEEDBACK.store(true, std::sync::atomic::Ordering::Relaxed);
+        if feedback || update {
+            PENDING_FEEDBACK.store(feedback, std::sync::atomic::Ordering::Relaxed);
+            PENDING_UPDATE.store(update, std::sync::atomic::Ordering::Relaxed);
             if self.app.register(None::<&gio::Cancellable>).is_ok() && self.app.is_remote() {
                 // A primary instance exists: raise it and forward the intent
                 // over D-Bus instead of starting a second main loop.
                 self.app.activate();
-                self.app.activate_action("open-feedback", None);
+                if feedback {
+                    self.app.activate_action("open-feedback", None);
+                }
+                if update {
+                    self.app.activate_action("open-update", None);
+                }
                 return 0;
             }
         }
@@ -536,6 +549,23 @@ fn build_ui(app: &adw::Application) {
             show_feedback_dialog(&win_fb, state_fb.clone());
         });
         app.add_action(&open_feedback);
+    }
+    // Deep link for the daemon's "Update now" notification (`fresco --update`):
+    // a forced check that goes straight to the install dialog.
+    {
+        let win_up = window.clone();
+        let state_up = state.clone();
+        let open_update = gio::SimpleAction::new("open-update", None);
+        open_update.connect_activate(move |_, _| {
+            win_up.present();
+            super::updates::check_and_install(&win_up, state_up.clone());
+        });
+        app.add_action(&open_update);
+    }
+    if PENDING_UPDATE.load(std::sync::atomic::Ordering::Relaxed) {
+        let win_up = window.clone();
+        let state_up = state.clone();
+        glib::idle_add_local_once(move || super::updates::check_and_install(&win_up, state_up));
     }
     if !state.borrow().config.telemetry_prompted
         || state.borrow().config.telemetry_consent_version < crate::telemetry::CONSENT_VERSION
@@ -10055,7 +10085,11 @@ fn run_startup_checks(window: &adw::ApplicationWindow, state: Rc<RefCell<AppStat
         show_feedback_dialog(window, state.clone());
     }
     poll_notifications(window, state.clone());
-    super::updates::check_for_updates(window, state, false);
+    // Skipped when launched with `--update`: that path runs its own forced
+    // check, and a startup check still in flight would make it bail out.
+    if !PENDING_UPDATE.load(std::sync::atomic::Ordering::Relaxed) {
+        super::updates::check_for_updates(window, state, false);
+    }
 }
 
 /// Submit a rating, and — when `allow_reply` — open a support thread so the

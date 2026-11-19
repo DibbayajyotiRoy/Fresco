@@ -1238,23 +1238,11 @@ impl Daemon {
 
     /// `_NET_CURRENT_DESKTOP` of the root window, if the WM publishes it.
     fn current_x11_desktop(&self) -> Option<Vec<u32>> {
-        use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
-        let root = self.screen().root;
-        let reply = self
-            .conn
-            .get_property(
-                false,
-                root,
-                self.atoms._NET_CURRENT_DESKTOP,
-                AtomEnum::CARDINAL,
-                0,
-                1,
-            )
-            .ok()?
-            .reply()
-            .ok()?;
-        let values: Vec<u32> = reply.value32()?.collect();
-        Some(values)
+        workspace::read_current_desktop(
+            &self.conn,
+            self.screen().root,
+            self.atoms._NET_CURRENT_DESKTOP,
+        )
     }
 
     /// Push any widget overlay whose content changed onto the renderer that

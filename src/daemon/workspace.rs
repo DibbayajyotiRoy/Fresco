@@ -140,6 +140,22 @@ pub fn x11_key(current_desktop: &[u32]) -> Option<String> {
     Some(index.to_string())
 }
 
+/// `_NET_CURRENT_DESKTOP` (a CARDINAL, 0-based) of `root`, if published.
+pub fn read_current_desktop<C: x11rb::connection::Connection>(
+    conn: &C,
+    root: u32,
+    atom: u32,
+) -> Option<Vec<u32>> {
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+    let reply = conn
+        .get_property(false, root, atom, AtomEnum::CARDINAL, 0, 1)
+        .ok()?
+        .reply()
+        .ok()?;
+    let values: Vec<u32> = reply.value32()?.collect();
+    Some(values)
+}
+
 /// What an output shows. `None` when a per-monitor override owns the output,
 /// which is then left alone. Otherwise the workspace's wallpaper when there is
 /// one, else the default (the scheduled or auto-cycled one, or the main one).
@@ -299,5 +315,31 @@ mod tests {
         let key = Source::Sway(dir.join("absent.sock")).current_key();
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(key, None);
+    }
+
+    /// Headless X: `_NET_CURRENT_DESKTOP` = 2 reads back as desktop index 2,
+    /// which `x11_key` turns into "3"; unset reads as `None`.
+    /// Run: `xvfb-run -a cargo test --lib workspace -- --ignored`
+    #[test]
+    #[ignore = "needs an X server (xvfb-run)"]
+    fn x11_current_desktop_round_trips_on_xvfb() {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+        use x11rb::wrapper::ConnectionExt as _;
+        let (conn, n) = x11rb::connect(None).unwrap();
+        let root = conn.setup().roots[n].root;
+        let atom = conn
+            .intern_atom(false, b"_NET_CURRENT_DESKTOP")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        assert_eq!(read_current_desktop(&conn, root, atom), None);
+        conn.change_property32(PropMode::REPLACE, root, atom, AtomEnum::CARDINAL, &[2])
+            .unwrap();
+        conn.flush().unwrap();
+        let got = read_current_desktop(&conn, root, atom).unwrap();
+        assert_eq!(got, vec![2]);
+        assert_eq!(x11_key(&got).as_deref(), Some("3"));
     }
 }

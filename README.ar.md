@@ -18,6 +18,7 @@
 [![رخصة GPL-3.0-or-later](https://img.shields.io/github/license/DibbayajyotiRoy/fresco?style=flat-square)](LICENSE)
 [![حالة مسار النشر (Publish workflow)](https://img.shields.io/github/actions/workflow/status/DibbayajyotiRoy/fresco/publish.yml?style=flat-square&label=publish)](https://github.com/DibbayajyotiRoy/fresco/actions/workflows/publish.yml)
 [![نجوم GitHub](https://img.shields.io/github/stars/DibbayajyotiRoy/fresco?style=flat-square)](https://github.com/DibbayajyotiRoy/fresco/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/FASUnunRXU)
 
 [الموقع](https://fresco.dibbayajyoti.com) · [التثبيت](#التثبيت) · [البيئات المدعومة](#البيئات-المدعومة) · [المقارنة](#مقارنة-fresco-مع-wallpaper-engine-وhidamari-وkomorebi-وmpvpaper) · [الأسئلة الشائعة](#الأسئلة-الشائعة) · [الأدوات](#أدوات-سطح-المكتب-ويدجتات-كلمات-الأغنية-والساعات-ومرئيات-الصوت-وغلاف-الألبوم) · [سجل التغييرات](CHANGELOG.md) · [المشكلات](https://github.com/DibbayajyotiRoy/fresco/issues)
 
@@ -505,7 +506,7 @@ echo 'FRESCO_MPVPAPER=/home/YOU/.local/bin/mpvpaper' > ~/.config/environment.d/f
 
 ## المساهمة والملاحظات
 
-تقارير الأخطاء وطلبات الميزات وطلبات الدمج (PR) مرحَّب بها — افتح [مشكلة (issue)](https://github.com/DibbayajyotiRoy/fresco/issues)، أو استخدم نافذة الملاحظات داخل التطبيق. راجع [CONTRIBUTING.md](CONTRIBUTING.md).
+تقارير الأخطاء وطلبات الميزات وطلبات الدمج (PR) مرحَّب بها — افتح [مشكلة (issue)](https://github.com/DibbayajyotiRoy/fresco/issues)، أو استخدم نافذة الملاحظات داخل التطبيق. راجع [CONTRIBUTING.md](CONTRIBUTING.md). انضم إلى مجتمع [Discord](https://discord.gg/FASUnunRXU) للدردشة مع مستخدمي Fresco الآخرين.
 
 ## الترخيص
 

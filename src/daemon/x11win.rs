@@ -203,8 +203,8 @@ impl WallpaperWindow {
 
         // Wait until the window is actually viewable before the caller embeds mpv
         // in it. On a cold boot the X server + WM are slow to process the map; if
-        // mpv brings up its display-synced video output (vo=gpu, video-sync=
-        // display-resample) on a not-yet-viewable window, it stalls on the first
+        // mpv brings up its display-synced video output (vo=gpu, display-timed
+        // presentation) on a not-yet-viewable window, it stalls on the first
         // frame and stays frozen until the next rebuild — the "wallpaper is static
         // after reboot until I reselect it" bug. Bounded poll: returns immediately
         // once mapped (the warm / reselect case) and never blocks startup for long.
